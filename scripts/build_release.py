@@ -30,6 +30,25 @@ def prepare_release_dir(path: Path):
     shutil.copytree(EXTENSION_DIR, path)
 
 
+def disable_firefox_player_ai_quick_action(release_folder: Path):
+    options_css = release_folder / "options.css"
+    if options_css.exists():
+        with options_css.open("a", encoding="utf-8") as fh:
+            fh.write(
+                "\n/* Firefox uses the built-in extension sidebar entry; hide the page-level AI quick button setting. */\n"
+                ".player-ai-quick-action-settings { display: none !important; }\n"
+            )
+
+    background_js = release_folder / "background.js"
+    if background_js.exists():
+        source = background_js.read_text(encoding="utf-8")
+        source = source.replace(
+            "function normalizeEnablePlayerAiQuickAction(value) {\n  return value === true;\n}",
+            "function normalizeEnablePlayerAiQuickAction(_value) {\n  return false;\n}",
+        )
+        background_js.write_text(source, encoding="utf-8")
+
+
 def build_variant(manifest: dict, browser: str, version: str):
     release_folder = RELEASE_DIR / f"{PACKAGE_NAME}-v{version}-{browser}"
     zip_path = RELEASE_DIR / f"{PACKAGE_NAME}-v{version}-{browser}.zip"
@@ -64,6 +83,7 @@ def build_variant(manifest: dict, browser: str, version: str):
         background = variant_manifest.setdefault("background", {})
         background.pop("service_worker", None)
         background["scripts"] = ["background.js"]
+        disable_firefox_player_ai_quick_action(release_folder)
     else:
         raise ValueError(f"Unsupported browser: {browser}")
 
