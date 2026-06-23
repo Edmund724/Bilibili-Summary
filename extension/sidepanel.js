@@ -1712,9 +1712,10 @@ function normalizeMarkdownForSectionPaste(raw, baseLevel = 2) {
       return;
     }
 
-    const headingMatch = line.match(/^(\s*)(#{1,3})(\s+.*)$/);
+    const pasteLine = unwrapTimestampInlineCode(line);
+    const headingMatch = pasteLine.match(/^(\s*)(#{1,3})(\s+.*)$/);
     if (!headingMatch) {
-      normalized.push(line);
+      normalized.push(pasteLine);
       return;
     }
 
@@ -1726,6 +1727,29 @@ function normalizeMarkdownForSectionPaste(raw, baseLevel = 2) {
 }
 
 const TIMESTAMP_PATTERN = /\b\d{1,3}:\d{2}(?::\d{2})?\b/g;
+const TIMESTAMP_INLINE_CODE_REST_PATTERN = /^[\s,，、;；:：\-–—~～至到]+$/;
+
+function unwrapTimestampInlineCode(text) {
+  return String(text || "").replace(/`([^`\n]+)`/g, (_, content) =>
+    isTimestampOnlyInlineCode(content) ? content : `\`${content}\``
+  );
+}
+
+function isTimestampOnlyInlineCode(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return false;
+  }
+  TIMESTAMP_PATTERN.lastIndex = 0;
+  const hasTimestamp = TIMESTAMP_PATTERN.test(text);
+  TIMESTAMP_PATTERN.lastIndex = 0;
+  if (!hasTimestamp) {
+    return false;
+  }
+  const rest = text.replace(TIMESTAMP_PATTERN, "").trim();
+  TIMESTAMP_PATTERN.lastIndex = 0;
+  return !rest || TIMESTAMP_INLINE_CODE_REST_PATTERN.test(rest);
+}
 
 function linkifyAssistantTimestamps(root) {
   if (!root) {
@@ -2128,7 +2152,7 @@ function renderMarkdown(text) {
 
 function renderInline(text) {
   return text
-    .replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`)
+    .replace(/`([^`]+)`/g, (_, c) => (isTimestampOnlyInlineCode(c) ? c : `<code>${c}</code>`))
     .replace(/\*\*([^*\n]+)\*\*/g, (_, c) => `<strong>${c}</strong>`)
     .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, (_, pre, c) => `${pre}<em>${c}</em>`)
     .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, u) => {

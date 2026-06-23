@@ -33,7 +33,7 @@ const DEFAULT_SETTINGS = {
 };
 const PLAYER_AI_ICON_VARIANT = "badge";
 
-const BOC_VERSION = "1.1.1";
+const BOC_VERSION = "1.1.2";
 const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
 globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
 const state = {
