@@ -2,6 +2,7 @@ import { buildSuggestedPrompts } from "./ai/context.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
+const PLAYER_AI_QUICK_ACTION_STORAGE_KEY = "boc_player_ai_quick_action_v1";
 const MAX_SAVED_CONVERSATIONS = 60;
 const NON_VIDEO_CONTEXT_MESSAGE = "当前页非 B 站视频页面，<br>无法获取当前页面信息作为对话上下文，<br>仅支持 AI 对话。";
 const DEFAULT_PRESET_PROMPTS = [
@@ -9,6 +10,7 @@ const DEFAULT_PRESET_PROMPTS = [
   "按章节整理视频内容",
   "生成带时间轴的笔记"
 ];
+const DEFAULT_PLAYER_AI_QUICK_PROMPT = "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。";
 const STREAM_SLOW_NOTICE_MS = 15000;
 
 const els = {
@@ -59,6 +61,7 @@ let liveContextSyncForceRefresh = false;
 let modelSelectMeasureCanvas = null;
 let streamSlowNoticeTimer = 0;
 let streamFirstTokenReceived = false;
+let initCompleted = false;
 
 init().catch((err) => {
   resetConversationView(`初始化失败：${escapeHtml(err?.message || err)}`);
@@ -72,6 +75,8 @@ async function init() {
   await restoreLatestConversationForCurrentContext();
   renderInitialState();
   autosizeInput();
+  initCompleted = true;
+  await consumePendingPlayerAiQuickAction();
 }
 
 function bindEvents() {
@@ -142,6 +147,9 @@ function bindEvents() {
       (areaName === "local" && changes.aiProviderKeys)
     ) {
       void refreshProvidersAndPrefsAfterExternalChange();
+    }
+    if (areaName === "local" && changes[PLAYER_AI_QUICK_ACTION_STORAGE_KEY] && initCompleted) {
+      void handlePlayerAiQuickActionRequest(changes[PLAYER_AI_QUICK_ACTION_STORAGE_KEY].newValue);
     }
   });
 }
@@ -214,6 +222,67 @@ async function refreshProvidersAndPrefsAfterExternalChange() {
   }
   renderHistoryList();
   renderInitialState();
+}
+
+async function consumePendingPlayerAiQuickAction() {
+  const data = await chrome.storage.local.get([PLAYER_AI_QUICK_ACTION_STORAGE_KEY]).catch(() => ({}));
+  const request = normalizePlayerAiQuickActionRequest(data?.[PLAYER_AI_QUICK_ACTION_STORAGE_KEY]);
+  if (!request) {
+    return false;
+  }
+  return handlePlayerAiQuickActionRequest(request, { fromStorageChange: false });
+}
+
+function normalizePlayerAiQuickActionRequest(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const id = String(value.id || "").trim();
+  const prompt = String(value.prompt || "").trim() || DEFAULT_PLAYER_AI_QUICK_PROMPT;
+  const tabId = Number(value.tabId || 0) || 0;
+  if (!id || !tabId) {
+    return null;
+  }
+  return {
+    id,
+    prompt,
+    tabId,
+    createdAt: Number(value.createdAt) || Date.now()
+  };
+}
+
+async function handlePlayerAiQuickActionRequest(value, { fromStorageChange = true } = {}) {
+  const request = normalizePlayerAiQuickActionRequest(value);
+  if (!request) {
+    return false;
+  }
+
+  const activeTab = await getActiveTab().catch(() => null);
+  if (activeTab?.id && request.tabId !== activeTab.id) {
+    return false;
+  }
+
+  if (fromStorageChange) {
+    await chrome.storage.local.remove(PLAYER_AI_QUICK_ACTION_STORAGE_KEY).catch(() => null);
+  } else {
+    const latest = await chrome.storage.local.get([PLAYER_AI_QUICK_ACTION_STORAGE_KEY]).catch(() => ({}));
+    const latestId = String(latest?.[PLAYER_AI_QUICK_ACTION_STORAGE_KEY]?.id || "").trim();
+    if (latestId && latestId !== request.id) {
+      return false;
+    }
+    await chrome.storage.local.remove(PLAYER_AI_QUICK_ACTION_STORAGE_KEY).catch(() => null);
+  }
+
+  await runPlayerAiQuickActionPrompt(request.prompt);
+  return true;
+}
+
+async function runPlayerAiQuickActionPrompt(prompt) {
+  const text = String(prompt || "").trim() || DEFAULT_PLAYER_AI_QUICK_PROMPT;
+  await startNewConversation();
+  els.input.value = text;
+  autosizeInput();
+  await sendMessage();
 }
 
 function updateModelSelectWidth() {

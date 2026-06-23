@@ -3,6 +3,7 @@ const DEFAULT_PRESET_PROMPTS = [
   "按章节整理视频内容",
   "生成带时间轴的笔记"
 ];
+const DEFAULT_PLAYER_AI_QUICK_PROMPT = "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。";
 const LEGACY_DEFAULT_AI_SYSTEM_PROMPT = [
   "你是一名专业的视频内容分析助手。基于字幕与评论提炼高价值信息，不要复述内容，不要输出思考过程或 think 标签。",
   "优先输出：主题与核心观点、关键数据与事实、逻辑链路与重要结论、可执行建议。",
@@ -28,6 +29,8 @@ const DEFAULT_SETTINGS = {
   downloadFormat: "srt",
   includeDateInFilename: true,
   includeHotCommentsInNote: false,
+  enablePlayerAiQuickAction: false,
+  playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
   includeTimestampInBody: true,
   enableDebugLogs: false,
   frontmatterFields: [
@@ -74,6 +77,8 @@ const elements = {
   downloadFormat: document.getElementById("downloadFormat"),
   includeDateInFilename: document.getElementById("includeDateInFilename"),
   includeHotCommentsInNote: document.getElementById("includeHotCommentsInNote"),
+  enablePlayerAiQuickAction: document.getElementById("enablePlayerAiQuickAction"),
+  playerAiQuickPrompt: document.getElementById("playerAiQuickPrompt"),
   includeTimestampInBody: document.getElementById("includeTimestampInBody"),
   enableDebugLogs: document.getElementById("enableDebugLogs"),
   frontmatterFields: document.querySelectorAll('input[name="frontmatterField"]'),
@@ -122,6 +127,8 @@ async function loadSettings() {
   elements.downloadFormat.value = normalizeDownloadFormat(settings.downloadFormat);
   elements.includeDateInFilename.checked = settings.includeDateInFilename !== false;
   elements.includeHotCommentsInNote.checked = Boolean(settings.includeHotCommentsInNote);
+  elements.enablePlayerAiQuickAction.checked = Boolean(settings.enablePlayerAiQuickAction);
+  elements.playerAiQuickPrompt.value = settings.playerAiQuickPrompt || DEFAULT_PLAYER_AI_QUICK_PROMPT;
   elements.includeTimestampInBody.checked = Boolean(settings.includeTimestampInBody);
   elements.enableDebugLogs.checked = Boolean(settings.enableDebugLogs);
   const selectedFields = new Set(settings.frontmatterFields || DEFAULT_SETTINGS.frontmatterFields);
@@ -222,6 +229,8 @@ function collectFormPayload() {
     downloadFormat: normalizeDownloadFormat(elements.downloadFormat.value),
     includeDateInFilename: elements.includeDateInFilename.checked,
     includeHotCommentsInNote: elements.includeHotCommentsInNote.checked,
+    enablePlayerAiQuickAction: elements.enablePlayerAiQuickAction.checked,
+    playerAiQuickPrompt: normalizePlayerAiQuickPrompt(elements.playerAiQuickPrompt.value),
     includeTimestampInBody: elements.includeTimestampInBody.checked,
     enableDebugLogs: elements.enableDebugLogs.checked,
     frontmatterFields: selectedFields,
@@ -292,6 +301,11 @@ function validateSettings(payload, { requireApiKey }) {
   }
 
   return { ok: true };
+}
+
+function normalizePlayerAiQuickPrompt(value) {
+  const normalized = String(value || "").trim();
+  return normalized || DEFAULT_PLAYER_AI_QUICK_PROMPT;
 }
 
 function applyValidationError(validation) {

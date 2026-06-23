@@ -97,6 +97,89 @@
   color: #2d2d2d;
 }
 
+.boc-player-ai-wrap {
+  align-items: center;
+  background: rgba(20, 24, 32, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  display: inline-flex;
+  flex: 0 0 var(--boc-player-ai-action-hit-size, 28px);
+  height: var(--boc-player-ai-action-hit-size, 28px);
+  justify-content: center;
+  margin: 0;
+  min-width: var(--boc-player-ai-action-hit-size, 28px);
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translate(8px, -50%);
+  transition: opacity 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
+  width: var(--boc-player-ai-action-hit-size, 28px);
+  z-index: 30;
+}
+
+.boc-player-ai-wrap.is-active,
+.boc-player-ai-wrap.is-intro-visible,
+.boc-player-ai-wrap:hover,
+.boc-player-ai-wrap:focus-within {
+  background: rgba(20, 24, 32, 0.78);
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(0, -50%);
+}
+
+#boc-player-ai-quick-action {
+  -webkit-appearance: none;
+  appearance: none;
+  align-items: center;
+  align-self: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-sizing: border-box;
+  color: var(--boc-player-ai-action-color, currentColor);
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  line-height: 0;
+  margin-bottom: 0;
+  margin-top: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+  top: 0;
+  vertical-align: top;
+  transition: transform 0.16s ease, color 0.16s ease, opacity 0.16s ease;
+}
+
+#boc-player-ai-quick-action svg {
+  width: var(--boc-player-ai-action-icon-size, 24px);
+  height: var(--boc-player-ai-action-icon-size, 24px);
+  display: block;
+  flex: 0 0 auto;
+  stroke: currentColor;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#boc-player-ai-quick-action:hover {
+  color: var(--boc-player-ai-action-hover-color, var(--boc-player-ai-action-color, currentColor));
+}
+
+#boc-player-ai-quick-action:disabled {
+  opacity: 0.62;
+  cursor: wait;
+  transform: none;
+}
+
 #boc-preview {
   width: 100%;
   flex: 1;

@@ -3,6 +3,8 @@ const DEFAULT_PRESET_PROMPTS = [
   "按章节整理视频内容",
   "生成带时间轴的笔记"
 ];
+const DEFAULT_PLAYER_AI_QUICK_PROMPT = "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。";
+const PLAYER_AI_QUICK_ACTION_STORAGE_KEY = "boc_player_ai_quick_action_v1";
 const STREAM_FIRST_TOKEN_TIMEOUT_MS = 90000;
 const LEGACY_DEFAULT_AI_SYSTEM_PROMPT = [
   "你是一名专业的视频内容分析助手。基于字幕与评论提炼高价值信息，不要复述内容，不要输出思考过程或 think 标签。",
@@ -28,6 +30,8 @@ const DEFAULT_SYNC_SETTINGS = {
   downloadFormat: "srt",
   includeDateInFilename: true,
   includeHotCommentsInNote: false,
+  enablePlayerAiQuickAction: false,
+  playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
   includeTimestampInBody: true,
   enableDebugLogs: false,
   readerTheme: "light",
@@ -263,6 +267,30 @@ async function getAiSidepanelState(tabId, { forceRefresh = false } = {}) {
     ...contextResp.payload,
     hotComments,
     isVideoContext: true
+  };
+}
+
+async function openAiSidepanelForTab(tabId) {
+  if (globalThis.browser?.sidebarAction?.open) {
+    await Promise.resolve(globalThis.browser.sidebarAction.open());
+    return;
+  }
+
+  if (chrome.sidePanel?.open) {
+    await chrome.sidePanel.open({ tabId });
+    return;
+  }
+
+  throw new Error("当前浏览器不支持扩展侧边栏");
+}
+
+function buildPlayerAiQuickActionRequest(tabId, prompt) {
+  const createdAt = Date.now();
+  return {
+    id: `player-ai-${createdAt}-${Math.random().toString(36).slice(2, 8)}`,
+    tabId: Number(tabId || 0) || 0,
+    prompt: normalizePlayerAiQuickPrompt(prompt),
+    createdAt
   };
 }
 
@@ -798,7 +826,7 @@ async function resolveAiSidepanelPageRef(contextRef) {
   };
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== "object") {
     return false;
   }
@@ -822,6 +850,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .create({ url: chrome.runtime.getURL("options.html") })
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === "player-ai-quick-action") {
+    const tabId = Number(message.tabId || sender?.tab?.id || 0) || 0;
+    if (!tabId) {
+      sendResponse({ ok: false, error: "找不到当前标签页。" });
+      return false;
+    }
+
+    const openPromise = openAiSidepanelForTab(tabId);
+    getMergedSettings()
+      .then(async (settings) => {
+        if (!settings.enablePlayerAiQuickAction) {
+          throw new Error("AI 按钮未开启");
+        }
+        await openPromise;
+        const request = buildPlayerAiQuickActionRequest(tabId, settings.playerAiQuickPrompt);
+        await chrome.storage.local.set({ [PLAYER_AI_QUICK_ACTION_STORAGE_KEY]: request });
+        sendResponse({ ok: true });
+      })
+      .catch((error) => sendResponse({ ok: false, error: error.message || "打开 AI 侧边栏失败" }));
     return true;
   }
 
@@ -944,6 +994,49 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           return;
         }
         sendResponse({ ok: true });
+      })
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+
+    return true;
+  }
+
+  if (message.type === "obsidian-note-exists") {
+    const baseUrl = String(message.baseUrl || "").trim();
+    const apiKey = String(message.apiKey || "").trim();
+    const filepath = String(message.filepath || "").trim();
+
+    if (!baseUrl || !apiKey || !filepath) {
+      sendResponse({ ok: false, error: "缺少 Local REST API 参数" });
+      return false;
+    }
+
+    const encodedPath = filepath
+      .split("/")
+      .filter(Boolean)
+      .map((segment) => encodeURIComponent(segment))
+      .join("/");
+    const endpoint = `${baseUrl.replace(/\/+$/g, "")}/vault/${encodedPath}`;
+
+    fetch(endpoint, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "text/markdown, text/plain, application/json, */*"
+      },
+      cache: "no-store"
+    })
+      .then(async (response) => {
+        if (response.status === 404) {
+          sendResponse({ ok: true, exists: false });
+          return;
+        }
+        if (!response.ok) {
+          const bodyText = await response.text().catch(() => "");
+          const detail = bodyText ? ` ${bodyText.slice(0, 200)}` : "";
+          sendResponse({ ok: false, error: `HTTP ${response.status}.${detail}` });
+          return;
+        }
+        sendResponse({ ok: true, exists: true });
       })
       .catch((error) => sendResponse({ ok: false, error: error.message }));
 
@@ -1195,6 +1288,8 @@ async function getMergedSettings() {
   const merged = { ...DEFAULT_SYNC_SETTINGS, ...syncSettings };
   merged.downloadFormat = normalizeDownloadFormat(merged.downloadFormat);
   merged.includeHotCommentsInNote = normalizeIncludeHotCommentsInNote(merged.includeHotCommentsInNote);
+  merged.enablePlayerAiQuickAction = normalizeEnablePlayerAiQuickAction(merged.enablePlayerAiQuickAction);
+  merged.playerAiQuickPrompt = normalizePlayerAiQuickPrompt(merged.playerAiQuickPrompt);
   merged.readerTheme = normalizeReaderTheme(merged.readerTheme);
   merged.readerFontScale = normalizeReaderFontScale(merged.readerFontScale);
   merged.readerLetterSpacing = normalizeReaderLetterSpacing(merged.readerLetterSpacing ?? merged.readerLineHeight);
@@ -1227,6 +1322,8 @@ async function saveSettings(settings) {
   delete syncPayload.obsidianApiKey;
   syncPayload.downloadFormat = normalizeDownloadFormat(syncPayload.downloadFormat);
   syncPayload.includeHotCommentsInNote = normalizeIncludeHotCommentsInNote(syncPayload.includeHotCommentsInNote);
+  syncPayload.enablePlayerAiQuickAction = normalizeEnablePlayerAiQuickAction(syncPayload.enablePlayerAiQuickAction);
+  syncPayload.playerAiQuickPrompt = normalizePlayerAiQuickPrompt(syncPayload.playerAiQuickPrompt);
   syncPayload.readerTheme = normalizeReaderTheme(syncPayload.readerTheme);
   syncPayload.readerFontScale = normalizeReaderFontScale(syncPayload.readerFontScale);
   syncPayload.readerLetterSpacing = normalizeReaderLetterSpacing(
@@ -1285,6 +1382,15 @@ function normalizeDownloadFormat(value) {
 
 function normalizeIncludeHotCommentsInNote(value) {
   return value === true;
+}
+
+function normalizeEnablePlayerAiQuickAction(value) {
+  return value === true;
+}
+
+function normalizePlayerAiQuickPrompt(value) {
+  const normalized = toString(value).trim();
+  return normalized || DEFAULT_PLAYER_AI_QUICK_PROMPT;
 }
 
 function normalizeReaderTheme(value) {

@@ -132,6 +132,20 @@
         <textarea id="aiSystemPrompt" class="settings-textarea" placeholder="例如：回答尽量简洁；优先总结视频观点；必要时引用字幕原话。"></textarea>
       </section>
 
+      <section class="field-group field-group-tight-bottom">
+        <h2>AI 按钮</h2>
+        <label class="checkbox">
+          <input id="enablePlayerAiQuickAction" type="checkbox" />
+          在视频播放器显示 AI 按钮，点击按照预设提示词调用 AI 对话
+        </label>
+        <label for="playerAiQuickPrompt">提示词</label>
+        <textarea
+          id="playerAiQuickPrompt"
+          class="settings-textarea"
+          placeholder="例如：整理这期视频的内容，输出结构化总结。"
+        ></textarea>
+      </section>
+
       <div class="action-row">
         <button id="saveBtn" type="button">保存设置</button>
         <button id="testConnectionBtn" class="secondary-btn" type="button">测试连接</button>
