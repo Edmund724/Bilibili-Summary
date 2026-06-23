@@ -1581,6 +1581,7 @@ function renderAssistantMessage(node, raw) {
   }
   node.innerHTML = "";
   const cleanedRaw = stripThinkBlocks(raw);
+  const pasteReadyRaw = normalizeMarkdownForSectionPaste(cleanedRaw);
 
   const content = document.createElement("div");
   content.className = "sp-msg-assistant-body";
@@ -1603,7 +1604,7 @@ function renderAssistantMessage(node, raw) {
   `;
   copyBtn.addEventListener("click", async () => {
     try {
-      await navigator.clipboard.writeText(cleanedRaw);
+      await navigator.clipboard.writeText(pasteReadyRaw);
       copyBtn.disabled = true;
       window.setTimeout(() => {
         copyBtn.disabled = false;
@@ -1617,6 +1618,37 @@ function renderAssistantMessage(node, raw) {
   });
   actions.appendChild(copyBtn);
   node.appendChild(actions);
+}
+
+function normalizeMarkdownForSectionPaste(raw, baseLevel = 2) {
+  const shift = Math.max(0, Number(baseLevel) || 0);
+  const lines = String(raw || "").split("\n");
+  const normalized = [];
+  let inFence = false;
+
+  lines.forEach((line) => {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      normalized.push(line);
+      return;
+    }
+
+    if (inFence) {
+      normalized.push(line);
+      return;
+    }
+
+    const headingMatch = line.match(/^(\s*)(#{1,3})(\s+.*)$/);
+    if (!headingMatch) {
+      normalized.push(line);
+      return;
+    }
+
+    const [, indent, hashes, suffix] = headingMatch;
+    normalized.push(`${indent}${"#".repeat(hashes.length + shift)}${suffix}`);
+  });
+
+  return normalized.join("\n");
 }
 
 const TIMESTAMP_PATTERN = /\b\d{1,3}:\d{2}(?::\d{2})?\b/g;
