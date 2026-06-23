@@ -238,7 +238,7 @@ function normalizePlayerAiQuickActionRequest(value) {
     return null;
   }
   const id = String(value.id || "").trim();
-  const prompt = String(value.prompt || "").trim() || DEFAULT_PLAYER_AI_QUICK_PROMPT;
+  const prompt = String(value.prompt || "").trim();
   const tabId = Number(value.tabId || 0) || 0;
   if (!id || !tabId) {
     return null;
@@ -278,7 +278,12 @@ async function handlePlayerAiQuickActionRequest(value, { fromStorageChange = tru
 }
 
 async function runPlayerAiQuickActionPrompt(prompt) {
-  const text = String(prompt || "").trim() || DEFAULT_PLAYER_AI_QUICK_PROMPT;
+  const text = String(prompt || "").trim();
+  if (!text) {
+    autosizeInput();
+    els.input?.focus?.();
+    return;
+  }
   await startNewConversation();
   els.input.value = text;
   autosizeInput();

@@ -1389,8 +1389,7 @@ function normalizeEnablePlayerAiQuickAction(value) {
 }
 
 function normalizePlayerAiQuickPrompt(value) {
-  const normalized = toString(value).trim();
-  return normalized || DEFAULT_PLAYER_AI_QUICK_PROMPT;
+  return toString(value).trim();
 }
 
 function normalizeReaderTheme(value) {

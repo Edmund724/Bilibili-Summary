@@ -128,7 +128,7 @@ async function loadSettings() {
   elements.includeDateInFilename.checked = settings.includeDateInFilename !== false;
   elements.includeHotCommentsInNote.checked = Boolean(settings.includeHotCommentsInNote);
   elements.enablePlayerAiQuickAction.checked = Boolean(settings.enablePlayerAiQuickAction);
-  elements.playerAiQuickPrompt.value = settings.playerAiQuickPrompt || DEFAULT_PLAYER_AI_QUICK_PROMPT;
+  elements.playerAiQuickPrompt.value = String(settings.playerAiQuickPrompt || "");
   elements.includeTimestampInBody.checked = Boolean(settings.includeTimestampInBody);
   elements.enableDebugLogs.checked = Boolean(settings.enableDebugLogs);
   const selectedFields = new Set(settings.frontmatterFields || DEFAULT_SETTINGS.frontmatterFields);
@@ -304,8 +304,7 @@ function validateSettings(payload, { requireApiKey }) {
 }
 
 function normalizePlayerAiQuickPrompt(value) {
-  const normalized = String(value || "").trim();
-  return normalized || DEFAULT_PLAYER_AI_QUICK_PROMPT;
+  return String(value || "").trim();
 }
 
 function applyValidationError(validation) {
