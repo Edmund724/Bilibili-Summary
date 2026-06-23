@@ -5,6 +5,7 @@ const DEFAULT_SETTINGS = {
   tags: "clippings,bilibili",
   downloadFormat: "srt",
   includeDateInFilename: true,
+  includeHotCommentsInNote: false,
   includeTimestampInBody: true,
   enableDebugLogs: false,
   readerTheme: "light",
@@ -54,6 +55,7 @@ const state = {
   subtitleBody: [],
   subtitleFetchState: "idle",
   chapters: [],
+  hotComments: [],
   markdown: "",
   srt: "",
   txt: "",
@@ -462,7 +464,9 @@ function bindRuntimeEvents() {
       const body = state.subtitleBody || [];
       let subtitleMarkdown = "";
       try {
-        subtitleMarkdown = body.length ? buildMarkdown(state, body, settings) : "";
+        subtitleMarkdown = body.length
+          ? buildMarkdown(state, body, { ...settings, includeHotCommentsInNote: false })
+          : "";
       } catch (e) {
         subtitleMarkdown = "";
         logWarn("[BOC] sidepanel-get-context: buildMarkdown failed", e);
@@ -499,33 +503,19 @@ function bindRuntimeEvents() {
         return false;
       }
 
-      let aid = Number(state.aid) || 0;
-      if (!aid && typeof window !== "undefined") {
-        try {
-          aid = Number(window?.__INITIAL_STATE__?.aid) || 0;
-        } catch {}
-      }
-      if (!aid) {
+      if (!getCurrentAid()) {
+        state.hotComments = [];
         sendResponse({ ok: true, comments: [], note: "无法获取视频 aid" });
         return false;
       }
 
-      const url = `https://api.bilibili.com/x/v2/reply/main?type=1&oid=${aid}&mode=3&ps=${count}&pn=1`;
-      sendRuntimeMessage({ type: "fetch-json", url })
-        .then((resp) => {
-          if (!resp?.ok) {
-            sendResponse({ ok: true, comments: [], note: resp?.error || "评论接口失败" });
-            return;
-          }
-          const replies = Array.isArray(resp?.data?.data?.replies) ? resp.data.data.replies : [];
-          const hotComments = replies.slice(0, count).map((r) => ({
-            uname: r?.member?.uname || "匿名",
-            like: r?.like || 0,
-            message: String(r?.content?.message || "").slice(0, 500)
-          }));
+      fetchHotComments(count)
+        .then((hotComments) => {
+          state.hotComments = hotComments;
           sendResponse({ ok: true, comments: hotComments });
         })
         .catch((error) => {
+          state.hotComments = [];
           sendResponse({ ok: true, comments: [], note: String(error?.message || error) });
         });
       return true;
@@ -886,6 +876,7 @@ function resetClipState() {
   state.subtitleBody = [];
   state.subtitleFetchState = "idle";
   state.chapters = [];
+  state.hotComments = [];
   state.markdown = "";
   state.srt = "";
   state.txt = "";
@@ -1184,10 +1175,7 @@ async function loadSubtitle(url, lang, runId = state.fetchRunId, subtitleId = ""
         state.selectedSubtitleLang = lang;
         state.subtitleBody = cachedBody;
         state.subtitleFetchState = "ready";
-        state.markdown = buildMarkdown(state, cachedBody, state.settings);
-        state.srt = buildSrt(cachedBody);
-        state.txt = buildTxt(cachedBody, state.settings);
-        byId(ids.preview).value = buildSubtitlePreview(cachedBody, state.settings);
+        await refreshDerivedContent();
         if (state.readingViewOpen) {
           renderReadingView();
           syncReadingViewPlayback(true);
@@ -1220,10 +1208,7 @@ async function loadSubtitle(url, lang, runId = state.fetchRunId, subtitleId = ""
   state.selectedSubtitleLang = lang;
   state.subtitleBody = body;
   state.subtitleFetchState = "ready";
-  state.markdown = buildMarkdown(state, body, state.settings);
-  state.srt = buildSrt(body);
-  state.txt = buildTxt(body, state.settings);
-  byId(ids.preview).value = buildSubtitlePreview(body, state.settings);
+  await refreshDerivedContent();
   if (state.readingViewOpen) {
     renderReadingView();
     syncReadingViewPlayback(true);
@@ -1416,6 +1401,8 @@ function getPopupPayload() {
 }
 
 async function copyMarkdown() {
+  state.settings = await getSettings();
+  await refreshDerivedContent();
   if (!state.markdown) {
     setMessage("没有可复制的内容，请先刷新抓取。");
     return;
@@ -1431,6 +1418,7 @@ async function copyMarkdown() {
 
 async function downloadSubtitle() {
   state.settings = await getSettings();
+  rebuildDerivedContent();
   const format = normalizeDownloadFormat(state.settings?.downloadFormat);
   const content = format === "txt" ? state.txt : state.srt;
   if (!content) {
@@ -1457,13 +1445,14 @@ async function downloadSubtitle() {
 
 async function sendToObsidian() {
   state.settings = await getSettings();
+  await refreshDerivedContent();
   if (!state.markdown) {
     setMessage("没有可发送内容，请先刷新抓取。");
     return;
   }
 
   const filename = buildNoteFilename(state);
-  const folder = normalizeFolder(state.settings.noteFolder || "");
+  const folder = resolveFolderTemplate(state.settings.noteFolder || "", state);
   const filepath = folder ? `${folder}/${filename}` : filename;
   const baseUrl = String(state.settings.obsidianApiBaseUrl || "").trim();
   const apiKey = String(state.settings.obsidianApiKey || "").trim();
@@ -1523,6 +1512,7 @@ function applyNoSubtitleState() {
   state.selectedSubtitleLang = "";
   state.subtitleBody = [];
   state.subtitleFetchState = "empty";
+  state.hotComments = [];
   state.markdown = "";
   state.srt = "";
   state.txt = "";
@@ -4644,6 +4634,84 @@ async function fetchJsonInBackground(url) {
   }
 }
 
+function normalizeHotComments(comments, limit = 20) {
+  if (!Array.isArray(comments)) {
+    return [];
+  }
+
+  return comments
+    .map((item) => ({
+      uname: String(item?.uname || "匿名").trim() || "匿名",
+      like: Number(item?.like || 0) || 0,
+      message: String(item?.message || "").trim().slice(0, 500)
+    }))
+    .filter((item) => item.message)
+    .slice(0, limit);
+}
+
+function getCurrentAid() {
+  let aid = Number(state.aid) || 0;
+  if (!aid && typeof window !== "undefined") {
+    try {
+      aid = Number(window?.__INITIAL_STATE__?.aid) || 0;
+    } catch {}
+  }
+  return aid;
+}
+
+async function fetchHotComments(count = 20) {
+  const safeCount = Math.max(0, Number(count) || 0);
+  if (!safeCount) {
+    return [];
+  }
+
+  const aid = getCurrentAid();
+  if (!aid) {
+    return [];
+  }
+
+  const url = `https://api.bilibili.com/x/v2/reply/main?type=1&oid=${aid}&mode=3&ps=${safeCount}&pn=1`;
+  const resp = await sendRuntimeMessage({ type: "fetch-json", url });
+  if (!resp?.ok) {
+    throw new Error(resp?.error || "评论接口失败");
+  }
+
+  const replies = Array.isArray(resp?.data?.data?.replies) ? resp.data.data.replies : [];
+  return normalizeHotComments(
+    replies.map((item) => ({
+      uname: item?.member?.uname || "匿名",
+      like: item?.like || 0,
+      message: item?.content?.message || ""
+    })),
+    safeCount
+  );
+}
+
+function rebuildDerivedContent() {
+  const body = Array.isArray(state.subtitleBody) ? state.subtitleBody : [];
+  state.markdown = body.length ? buildMarkdown(state, body, state.settings) : "";
+  state.srt = body.length ? buildSrt(body) : "";
+  state.txt = body.length ? buildTxt(body, state.settings) : "";
+  byId(ids.preview).value = body.length ? buildSubtitlePreview(body, state.settings) : "";
+}
+
+async function refreshDerivedContent({ refreshComments = false } = {}) {
+  if (state.settings?.includeHotCommentsInNote) {
+    const shouldFetchComments =
+      refreshComments || !Array.isArray(state.hotComments) || state.hotComments.length === 0;
+    if (shouldFetchComments) {
+      try {
+        state.hotComments = await fetchHotComments(20);
+      } catch (error) {
+        state.hotComments = [];
+        logWarn("[BOC] failed to fetch hot comments for note export", error);
+      }
+    }
+  }
+
+  rebuildDerivedContent();
+}
+
 function normalizeSubtitleUrl(url) {
   if (!url) {
     return "";
@@ -4723,7 +4791,27 @@ function buildMarkdown(meta, body, settings) {
   pushOptionalLines(lines, noteSections.before_subtitle);
   lines.push("## 字幕", "", ...subtitleSectionLines);
 
+  const hotCommentLines = buildHotCommentLines(
+    settings?.includeHotCommentsInNote ? meta?.hotComments || [] : []
+  );
+  if (hotCommentLines.length > 0) {
+    lines.push("", "## 评论", "", ...hotCommentLines);
+  }
+
   return lines.join("\n");
+}
+
+function buildHotCommentLines(comments) {
+  const items = normalizeHotComments(comments, 20);
+  if (items.length === 0) {
+    return [];
+  }
+
+  return items.flatMap((item, index) => [
+    `${index + 1}. ${item.uname}（赞 ${item.like}）`,
+    item.message,
+    ""
+  ]).slice(0, -1);
 }
 
 function buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml) {
@@ -4832,6 +4920,45 @@ function buildFrontmatterTemplateContext(meta, created, tagsCsv, tagsYaml) {
     tags_csv: String(tagsCsv || "").trim(),
     tags_yaml: String(tagsYaml || "").trim()
   };
+}
+
+function sanitizeFolderTemplateValue(value) {
+  return String(value || "")
+    .replace(/[\/\\:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildFolderTemplateContext(meta, created = formatLocalDate()) {
+  return {
+    created: sanitizeFolderTemplateValue(created),
+    upload_date: sanitizeFolderTemplateValue(meta?.uploadDate || ""),
+    author: sanitizeFolderTemplateValue(meta?.author || ""),
+    bvid: sanitizeFolderTemplateValue(meta?.bvid || "")
+  };
+}
+
+function resolveFolderTemplate(template, meta) {
+  const normalized = normalizeFolder(template);
+  if (!normalized) {
+    return "";
+  }
+
+  const allowedKeys = new Set(["created", "upload_date", "author", "bvid"]);
+  const context = buildFolderTemplateContext(meta);
+  const resolved = String(normalized).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, rawKey) => {
+    const key = String(rawKey || "").trim().toLowerCase();
+    if (!allowedKeys.has(key)) {
+      return "";
+    }
+    return context[key] || "";
+  });
+
+  return resolved
+    .split("/")
+    .map((segment) => sanitizeFolderTemplateValue(segment))
+    .filter(Boolean)
+    .join("/");
 }
 
 function buildNotePlaceholderTemplateContext(meta, description) {

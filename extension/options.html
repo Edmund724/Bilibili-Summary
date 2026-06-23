@@ -43,6 +43,7 @@
 
       <label for="noteFolder">笔记目录（用于自动写入）</label>
       <input id="noteFolder" type="text" placeholder="例如：Clippings/Bilibili" />
+      <p class="hint inline-hint">支持变量：{{created}} / {{upload_date}} / {{author}} / {{bvid}}，示例：Clippings/Bilibili/{{created}}</p>
 
       <label for="obsidianApiBaseUrl">Local REST API 地址</label>
       <input id="obsidianApiBaseUrl" type="text" placeholder="例如：http://127.0.0.1:27123" />
@@ -63,6 +64,11 @@
       <label class="checkbox">
         <input id="includeDateInFilename" type="checkbox" />
         文件名前包含导出日期
+      </label>
+
+      <label class="checkbox">
+        <input id="includeHotCommentsInNote" type="checkbox" />
+        导出前 20 条热门评论
       </label>
 
       <label class="checkbox">

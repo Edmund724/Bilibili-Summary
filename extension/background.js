@@ -27,6 +27,7 @@ const DEFAULT_SYNC_SETTINGS = {
   tags: "clippings,bilibili",
   downloadFormat: "srt",
   includeDateInFilename: true,
+  includeHotCommentsInNote: false,
   includeTimestampInBody: true,
   enableDebugLogs: false,
   readerTheme: "light",
@@ -1193,6 +1194,7 @@ async function getMergedSettings() {
 
   const merged = { ...DEFAULT_SYNC_SETTINGS, ...syncSettings };
   merged.downloadFormat = normalizeDownloadFormat(merged.downloadFormat);
+  merged.includeHotCommentsInNote = normalizeIncludeHotCommentsInNote(merged.includeHotCommentsInNote);
   merged.readerTheme = normalizeReaderTheme(merged.readerTheme);
   merged.readerFontScale = normalizeReaderFontScale(merged.readerFontScale);
   merged.readerLetterSpacing = normalizeReaderLetterSpacing(merged.readerLetterSpacing ?? merged.readerLineHeight);
@@ -1224,6 +1226,7 @@ async function saveSettings(settings) {
   const syncPayload = { ...payload };
   delete syncPayload.obsidianApiKey;
   syncPayload.downloadFormat = normalizeDownloadFormat(syncPayload.downloadFormat);
+  syncPayload.includeHotCommentsInNote = normalizeIncludeHotCommentsInNote(syncPayload.includeHotCommentsInNote);
   syncPayload.readerTheme = normalizeReaderTheme(syncPayload.readerTheme);
   syncPayload.readerFontScale = normalizeReaderFontScale(syncPayload.readerFontScale);
   syncPayload.readerLetterSpacing = normalizeReaderLetterSpacing(
@@ -1278,6 +1281,10 @@ function normalizeNotePlaceholderSections(items) {
 
 function normalizeDownloadFormat(value) {
   return value === "txt" ? "txt" : "srt";
+}
+
+function normalizeIncludeHotCommentsInNote(value) {
+  return value === true;
 }
 
 function normalizeReaderTheme(value) {
