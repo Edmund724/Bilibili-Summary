@@ -1583,7 +1583,7 @@ async function sendToObsidian() {
   try {
     const exists = await checkObsidianNoteExists(baseUrl, apiKey, filepath);
     if (exists) {
-      const shouldOverwrite = confirm(`该笔记已存在，继续会覆盖原内容：\n${filepath}\n\n是否继续覆盖？`);
+      const shouldOverwrite = await confirmOverwriteNote(filepath);
       if (!shouldOverwrite) {
         setMessage("已取消保存，原笔记未被覆盖。");
         return;
@@ -1624,6 +1624,53 @@ async function writeNoteByLocalApi(baseUrl, apiKey, filepath, content) {
   if (!resp?.ok) {
     throw new Error(toReadableText(resp?.error, "Local API 写入失败"));
   }
+}
+
+function confirmOverwriteNote(filepath) {
+  return new Promise((resolve) => {
+    const existing = document.querySelector(".boc-confirm-overlay");
+    if (existing) {
+      existing.remove();
+    }
+
+    const overlay = document.createElement("div");
+    overlay.className = "boc-confirm-overlay";
+    overlay.innerHTML = `
+      <div class="boc-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="bocConfirmTitle">
+        <div id="bocConfirmTitle" class="boc-confirm-title">该笔记已存在</div>
+        <div class="boc-confirm-body">继续会覆盖原内容：</div>
+        <div class="boc-confirm-path"></div>
+        <div class="boc-confirm-actions">
+          <button type="button" class="boc-confirm-cancel">取消</button>
+          <button type="button" class="boc-confirm-primary">覆盖</button>
+        </div>
+      </div>
+    `;
+    overlay.querySelector(".boc-confirm-path").textContent = String(filepath || "");
+
+    const cleanup = (value) => {
+      overlay.remove();
+      document.removeEventListener("keydown", onKeydown, true);
+      resolve(value);
+    };
+    const onKeydown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cleanup(false);
+      }
+    };
+
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        cleanup(false);
+      }
+    });
+    overlay.querySelector(".boc-confirm-cancel")?.addEventListener("click", () => cleanup(false));
+    overlay.querySelector(".boc-confirm-primary")?.addEventListener("click", () => cleanup(true));
+    document.addEventListener("keydown", onKeydown, true);
+    document.body.appendChild(overlay);
+    overlay.querySelector(".boc-confirm-primary")?.focus();
+  });
 }
 
 function setBusyState(disabled) {
@@ -3665,7 +3712,6 @@ function syncPlayerAiQuickActionButton() {
     wrap = document.createElement("div");
     wrap.className = "boc-player-ai-wrap";
     wrap.setAttribute("data-boc-extension-node", "ai-quick-action");
-    schedulePlayerAiQuickActionIntroReveal(wrap);
   }
   if (!button) {
     button = document.createElement("button");
@@ -3739,26 +3785,6 @@ function bindPlayerAiQuickActionCursorSync(wrap) {
   host.addEventListener("mouseleave", hideImmediately, { passive: true });
   host.addEventListener("pointermove", showForCursorActivity, { passive: true });
   wrap.__bocPlayerAiCursorHost = host;
-}
-
-function schedulePlayerAiQuickActionIntroReveal(wrap) {
-  if (!(wrap instanceof HTMLElement)) {
-    return;
-  }
-  if (state.playerAiQuickActionRevealTimer || state.playerAiQuickActionHideTimer) {
-    return;
-  }
-  state.playerAiQuickActionRevealTimer = window.setTimeout(() => {
-    state.playerAiQuickActionRevealTimer = 0;
-    if (!wrap.isConnected || state.readingViewOpen || isReaderMode()) {
-      return;
-    }
-    wrap.classList.add("is-intro-visible");
-    state.playerAiQuickActionHideTimer = window.setTimeout(() => {
-      state.playerAiQuickActionHideTimer = 0;
-      wrap.classList.remove("is-intro-visible");
-    }, 2600);
-  }, 1000);
 }
 
 function hasPlayerSubtitleControl() {

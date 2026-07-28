@@ -208,6 +208,7 @@ body {
 .sp-msg-actions {
   display: flex;
   justify-content: flex-start;
+  gap: 6px;
   margin-top: 8px;
 }
 
@@ -235,6 +236,86 @@ body {
 .sp-msg-copy-btn:disabled {
   cursor: default;
   color: #4b5563;
+}
+
+.sp-msg-save-btn.is-saving {
+  color: #111827;
+  border-color: #cfd6df;
+  background: #f7f8fb;
+}
+
+.sp-confirm-overlay {
+  align-items: center;
+  background: rgba(17, 24, 39, 0.28);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 18px;
+  position: fixed;
+  z-index: 9999;
+}
+
+.sp-confirm-dialog {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.22);
+  color: #111827;
+  max-width: 360px;
+  padding: 18px;
+  width: 100%;
+}
+
+.sp-confirm-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.sp-confirm-body {
+  color: #4b5563;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.sp-confirm-path {
+  background: #f7f8fb;
+  border: 1px solid #edf0f4;
+  border-radius: 10px;
+  color: #374151;
+  font-size: 12px;
+  line-height: 1.45;
+  max-height: 96px;
+  overflow: auto;
+  padding: 9px 10px;
+  word-break: break-all;
+}
+
+.sp-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.sp-confirm-actions button {
+  border: 1px solid #d9dee7;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  height: 34px;
+  padding: 0 14px;
+}
+
+.sp-confirm-cancel {
+  background: #ffffff;
+  color: #374151;
+}
+
+.sp-confirm-primary {
+  background: #111827;
+  border-color: #111827 !important;
+  color: #ffffff;
 }
 
 .sp-msg-copy-btn svg {
