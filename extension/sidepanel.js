@@ -1,5 +1,3 @@
-import { buildSuggestedPrompts } from "./ai/context.js";
-
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
 const PLAYER_AI_QUICK_ACTION_STORAGE_KEY = "boc_player_ai_quick_action_v1";
@@ -9,6 +7,12 @@ const DEFAULT_PRESET_PROMPTS = [
   "生成视频摘要和结论",
   "按章节整理视频内容",
   "生成带时间轴的笔记"
+];
+const DEFAULT_INITIAL_QUICK_PROMPTS = [
+  "用 3 句话总结这个视频",
+  "提炼这个视频的 5 个重点",
+  "按时间顺序整理这期视频的内容",
+  "根据评论总结观众的看法"
 ];
 const DEFAULT_PLAYER_AI_QUICK_PROMPT = "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。";
 const STREAM_SLOW_NOTICE_MS = 15000;
@@ -22,6 +26,7 @@ const els = {
   newChatBtn: document.getElementById("spNewChatBtn"),
   presetBtn: document.getElementById("spPresetBtn"),
   historyBtn: document.getElementById("spHistoryBtn"),
+  saveConversationBtn: document.getElementById("spSaveConversationBtn"),
   presetPopover: document.getElementById("spPresetPopover"),
   presetList: document.getElementById("spPresetList"),
   presetInput: document.getElementById("spPresetInput"),
@@ -36,6 +41,7 @@ const els = {
 
 const DEFAULT_AI_PREFS = {
   aiSystemPrompt: "",
+  aiInitialQuickPrompts: DEFAULT_INITIAL_QUICK_PROMPTS.slice(),
   aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice()
 };
 
@@ -100,6 +106,9 @@ function bindEvents() {
   els.refreshBtn.addEventListener("click", () => refreshContextManually());
   els.presetBtn.addEventListener("click", togglePresetPopover);
   els.historyBtn.addEventListener("click", toggleHistoryPopover);
+  els.saveConversationBtn?.addEventListener("click", () => {
+    void saveCurrentConversationToObsidian();
+  });
   els.historyClearBtn?.addEventListener("click", () => {
     void clearAllConversations();
   });
@@ -143,7 +152,8 @@ function bindEvents() {
   });
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (
-      (areaName === "sync" && (changes.aiProviders || changes.aiSystemPrompt || changes.aiPresetPrompts)) ||
+      (areaName === "sync" &&
+        (changes.aiProviders || changes.aiSystemPrompt || changes.aiInitialQuickPrompts || changes.aiPresetPrompts)) ||
       (areaName === "local" && changes.aiProviderKeys)
     ) {
       void refreshProvidersAndPrefsAfterExternalChange();
@@ -180,6 +190,7 @@ async function loadProvidersAndPrefs({ preferredProviderId = "" } = {}) {
     : [];
   aiPrefs = {
     aiSystemPrompt: String(settingsResp?.settings?.aiSystemPrompt || "").trim(),
+    aiInitialQuickPrompts: normalizeInitialQuickPrompts(settingsResp?.settings?.aiInitialQuickPrompts),
     aiPresetPrompts: Array.isArray(settingsResp?.settings?.aiPresetPrompts)
       ? settingsResp.settings.aiPresetPrompts.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 12)
       : []
@@ -546,7 +557,7 @@ function renderSuggestions() {
     suggestionsNode.innerHTML = "";
     return;
   }
-  const prompts = buildSuggestedPrompts(contextData);
+  const prompts = normalizeInitialQuickPrompts(aiPrefs.aiInitialQuickPrompts).filter(Boolean);
   suggestionsNode.innerHTML = prompts
     .map((prompt) => `<button type="button" class="sp-chip">${escapeHtml(prompt)}</button>`)
     .join("");
@@ -557,6 +568,13 @@ function renderSuggestions() {
       sendMessage();
     });
   });
+}
+
+function normalizeInitialQuickPrompts(value) {
+  if (!Array.isArray(value)) {
+    return DEFAULT_INITIAL_QUICK_PROMPTS.slice();
+  }
+  return value.map((item) => String(item || "").trim()).slice(0, 4);
 }
 
 function renderPresetPrompts() {
@@ -1735,27 +1753,14 @@ async function saveAssistantReplyToObsidian({ button, userPrompt, assistantMarkd
     return;
   }
 
-  const settingsResp = await sendRuntimeMessage({ type: "get-settings" }).catch((error) => ({
-    ok: false,
-    error: error?.message || String(error || "")
-  }));
-  if (!settingsResp?.ok) {
-    showConversationContextNotice(`读取设置失败：${settingsResp?.error || "未知错误"}`, 3000);
-    return;
-  }
-
-  const settings = settingsResp.settings || {};
-  const baseUrl = String(settings.obsidianApiBaseUrl || "").trim();
-  const apiKey = String(settings.obsidianApiKey || "").trim();
-  if (!baseUrl || !apiKey) {
-    showConversationContextNotice("请先在设置页填写 Obsidian Local REST API 地址和 API Key。", 3500);
-    chrome.runtime.openOptionsPage?.();
+  const settingsBundle = await loadObsidianSettings();
+  if (!settingsBundle) {
     return;
   }
 
   const context = currentConversationMeta?.resolvedContext || contextData || currentConversationMeta?.contextRef || {};
   const filename = buildAiNoteFilename(context, prompt);
-  const folder = resolveFolderTemplate(settings.noteFolder || "", context);
+  const folder = resolveFolderTemplate(settingsBundle.settings.noteFolder || "", context);
   const filepath = folder ? `${folder}/${filename}` : filename;
   const noteContent = buildAiNoteMarkdown({
     context,
@@ -1764,9 +1769,74 @@ async function saveAssistantReplyToObsidian({ button, userPrompt, assistantMarkd
     filename
   });
 
+  await saveMarkdownToObsidian({
+    button,
+    filepath,
+    content: noteContent,
+    baseUrl: settingsBundle.baseUrl,
+    apiKey: settingsBundle.apiKey
+  });
+}
+
+async function saveCurrentConversationToObsidian() {
+  const turns = buildConversationTurns(chatHistory);
+  if (!turns.length) {
+    showConversationContextNotice("当前没有可保存的历史对话。", 2200);
+    return;
+  }
+
+  const settingsBundle = await loadObsidianSettings();
+  if (!settingsBundle) {
+    return;
+  }
+
+  const context = currentConversationMeta?.resolvedContext || contextData || currentConversationMeta?.contextRef || {};
+  const filename = buildAiConversationFilename(context);
+  const folder = resolveFolderTemplate(settingsBundle.settings.noteFolder || "", context);
+  const filepath = folder ? `${folder}/${filename}` : filename;
+  const noteContent = buildAiConversationMarkdown({
+    context,
+    turns,
+    filename
+  });
+
+  await saveMarkdownToObsidian({
+    button: els.saveConversationBtn,
+    filepath,
+    content: noteContent,
+    baseUrl: settingsBundle.baseUrl,
+    apiKey: settingsBundle.apiKey
+  });
+}
+
+async function loadObsidianSettings() {
+  const settingsResp = await sendRuntimeMessage({ type: "get-settings" }).catch((error) => ({
+    ok: false,
+    error: error?.message || String(error || "")
+  }));
+  if (!settingsResp?.ok) {
+    showConversationContextNotice(`读取设置失败：${settingsResp?.error || "未知错误"}`, 3000);
+    return null;
+  }
+
+  const settings = settingsResp.settings || {};
+  const baseUrl = String(settings.obsidianApiBaseUrl || "").trim();
+  const apiKey = String(settings.obsidianApiKey || "").trim();
+  if (!baseUrl || !apiKey) {
+    showConversationContextNotice("请先在设置页填写 Obsidian Local REST API 地址和 API Key。", 3500);
+    chrome.runtime.openOptionsPage?.();
+    return null;
+  }
+
+  return { settings, baseUrl, apiKey };
+}
+
+async function saveMarkdownToObsidian({ button, filepath, content, baseUrl, apiKey }) {
   try {
-    button.disabled = true;
-    button.classList.add("is-saving");
+    if (button) {
+      button.disabled = true;
+      button.classList.add("is-saving");
+    }
     const exists = await checkObsidianNoteExists(baseUrl, apiKey, filepath);
     if (exists) {
       const shouldOverwrite = await confirmOverwriteNote(filepath);
@@ -1775,15 +1845,17 @@ async function saveAssistantReplyToObsidian({ button, userPrompt, assistantMarkd
         return;
       }
     }
-    await writeNoteByLocalApi(baseUrl, apiKey, filepath, noteContent);
+    await writeNoteByLocalApi(baseUrl, apiKey, filepath, content);
     showConversationContextNotice(`已写入 Obsidian：${filepath}`, 2600);
   } catch (error) {
     showConversationContextNotice(`写入失败：${getErrorMessage(error)}`, 4000);
   } finally {
-    button.classList.remove("is-saving");
-    window.setTimeout(() => {
-      button.disabled = false;
-    }, 500);
+    if (button) {
+      button.classList.remove("is-saving");
+      window.setTimeout(() => {
+        button.disabled = false;
+      }, 500);
+    }
   }
 }
 
@@ -1816,8 +1888,14 @@ async function writeNoteByLocalApi(baseUrl, apiKey, filepath, content) {
 function buildAiNoteFilename(context, prompt) {
   const sourceTitle = String(context?.title || currentConversationMeta?.contextTitle || "当前视频").trim() || "当前视频";
   const questionSummary = buildQuestionSummary(prompt);
-  const baseName = sanitizeFileName(["AI笔记", sourceTitle, questionSummary].filter(Boolean).join(" - "));
-  return `${baseName || "AI笔记 - 当前视频"}.md`;
+  const baseName = sanitizeFileName(`【AI笔记】${sourceTitle} - ${questionSummary}`);
+  return `${baseName || "【AI笔记】当前视频"}.md`;
+}
+
+function buildAiConversationFilename(context) {
+  const sourceTitle = String(context?.title || currentConversationMeta?.contextTitle || "当前视频").trim() || "当前视频";
+  const baseName = sanitizeFileName(`【AI笔记】${sourceTitle}`);
+  return `${baseName || "【AI笔记】当前视频"}.md`;
 }
 
 function buildQuestionSummary(prompt) {
@@ -1855,6 +1933,72 @@ function buildAiNoteMarkdown({ context, prompt, answer, filename }) {
   ].filter((line, index, arr) => line !== "" || arr[index - 1] !== "");
 
   return `${lines.join("\n").trim()}\n`;
+}
+
+function buildAiConversationMarkdown({ context, turns, filename }) {
+  const created = formatLocalDate();
+  const sourceTitle = String(context?.title || currentConversationMeta?.contextTitle || "当前视频").trim() || "当前视频";
+  const url = buildCleanBilibiliVideoUrl(context);
+  const title = filename.replace(/\.md$/i, "");
+  const frontmatter = [
+    "---",
+    `title: "${escapeYaml(title)}"`,
+    `source_title: "${escapeYaml(sourceTitle)}"`,
+    `url: "${escapeYaml(url)}"`,
+    context?.author ? `author: "${escapeYaml(context.author)}"` : "",
+    `created: "${created}"`,
+    `tags: [ai_note]`,
+    "---"
+  ].filter(Boolean);
+
+  const lines = [
+    ...frontmatter,
+    "",
+    `来源：[[${escapeWikiLinkTarget(sourceTitle)}]]`
+  ];
+
+  turns.forEach((turn) => {
+    lines.push(
+      "",
+      `## ${sanitizeMarkdownHeadingText(turn.prompt)}`,
+      "",
+      turn.answer
+    );
+  });
+
+  return `${lines.join("\n").trim()}\n`;
+}
+
+function sanitizeMarkdownHeadingText(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/^#+\s*/, "")
+    .trim() || "AI问答";
+}
+
+function buildConversationTurns(messages) {
+  const turns = [];
+  let pendingPrompt = "";
+  (Array.isArray(messages) ? messages : []).forEach((message) => {
+    if (!message || typeof message.content !== "string") {
+      return;
+    }
+    if (message.role === "user") {
+      pendingPrompt = message.content.trim();
+      return;
+    }
+    if (message.role === "assistant" && pendingPrompt) {
+      const answer = normalizeMarkdownForSectionPaste(stripThinkBlocks(message.content)).trim();
+      if (answer) {
+        turns.push({
+          prompt: pendingPrompt,
+          answer
+        });
+      }
+      pendingPrompt = "";
+    }
+  });
+  return turns;
 }
 
 function buildCleanBilibiliVideoUrl(context) {

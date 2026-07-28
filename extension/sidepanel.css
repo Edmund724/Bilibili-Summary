@@ -539,6 +539,16 @@ body {
   color: #111827;
 }
 
+.sp-toolbar-btn:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.sp-toolbar-btn.is-saving {
+  background: #f5f7fa;
+  color: #111827;
+}
+
 .sp-toolbar-btn svg {
   width: 14px;
   height: 14px;
