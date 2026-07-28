@@ -1,5 +1,3 @@
-import { buildSuggestedPrompts } from "./ai/context.js";
-
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
 const PLAYER_AI_QUICK_ACTION_STORAGE_KEY = "boc_player_ai_quick_action_v1";
@@ -9,6 +7,12 @@ const DEFAULT_PRESET_PROMPTS = [
   "生成视频摘要和结论",
   "按章节整理视频内容",
   "生成带时间轴的笔记"
+];
+const DEFAULT_INITIAL_QUICK_PROMPTS = [
+  "用 3 句话总结这个视频",
+  "提炼这个视频的 5 个重点",
+  "按时间顺序整理这期视频的内容",
+  "根据评论总结观众的看法"
 ];
 const DEFAULT_PLAYER_AI_QUICK_PROMPT = "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。";
 const STREAM_SLOW_NOTICE_MS = 15000;
@@ -22,6 +26,7 @@ const els = {
   newChatBtn: document.getElementById("spNewChatBtn"),
   presetBtn: document.getElementById("spPresetBtn"),
   historyBtn: document.getElementById("spHistoryBtn"),
+  saveConversationBtn: document.getElementById("spSaveConversationBtn"),
   presetPopover: document.getElementById("spPresetPopover"),
   presetList: document.getElementById("spPresetList"),
   presetInput: document.getElementById("spPresetInput"),
@@ -36,6 +41,7 @@ const els = {
 
 const DEFAULT_AI_PREFS = {
   aiSystemPrompt: "",
+  aiInitialQuickPrompts: DEFAULT_INITIAL_QUICK_PROMPTS.slice(),
   aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice()
 };
 
@@ -100,6 +106,9 @@ function bindEvents() {
   els.refreshBtn.addEventListener("click", () => refreshContextManually());
   els.presetBtn.addEventListener("click", togglePresetPopover);
   els.historyBtn.addEventListener("click", toggleHistoryPopover);
+  els.saveConversationBtn?.addEventListener("click", () => {
+    void saveCurrentConversationToObsidian();
+  });
   els.historyClearBtn?.addEventListener("click", () => {
     void clearAllConversations();
   });
@@ -143,7 +152,8 @@ function bindEvents() {
   });
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (
-      (areaName === "sync" && (changes.aiProviders || changes.aiSystemPrompt || changes.aiPresetPrompts)) ||
+      (areaName === "sync" &&
+        (changes.aiProviders || changes.aiSystemPrompt || changes.aiInitialQuickPrompts || changes.aiPresetPrompts)) ||
       (areaName === "local" && changes.aiProviderKeys)
     ) {
       void refreshProvidersAndPrefsAfterExternalChange();
@@ -180,6 +190,7 @@ async function loadProvidersAndPrefs({ preferredProviderId = "" } = {}) {
     : [];
   aiPrefs = {
     aiSystemPrompt: String(settingsResp?.settings?.aiSystemPrompt || "").trim(),
+    aiInitialQuickPrompts: normalizeInitialQuickPrompts(settingsResp?.settings?.aiInitialQuickPrompts),
     aiPresetPrompts: Array.isArray(settingsResp?.settings?.aiPresetPrompts)
       ? settingsResp.settings.aiPresetPrompts.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 12)
       : []
@@ -546,7 +557,7 @@ function renderSuggestions() {
     suggestionsNode.innerHTML = "";
     return;
   }
-  const prompts = buildSuggestedPrompts(contextData);
+  const prompts = normalizeInitialQuickPrompts(aiPrefs.aiInitialQuickPrompts).filter(Boolean);
   suggestionsNode.innerHTML = prompts
     .map((prompt) => `<button type="button" class="sp-chip">${escapeHtml(prompt)}</button>`)
     .join("");
@@ -557,6 +568,13 @@ function renderSuggestions() {
       sendMessage();
     });
   });
+}
+
+function normalizeInitialQuickPrompts(value) {
+  if (!Array.isArray(value)) {
+    return DEFAULT_INITIAL_QUICK_PROMPTS.slice();
+  }
+  return value.map((item) => String(item || "").trim()).slice(0, 4);
 }
 
 function renderPresetPrompts() {
@@ -1116,7 +1134,7 @@ function renderConversationMessages() {
     resetConversationView("");
     return;
   }
-  chatHistory.forEach((message) => {
+  chatHistory.forEach((message, index) => {
     if (message.role === "user") {
       appendUserMessage(message.content, false);
       return;
@@ -1124,11 +1142,23 @@ function renderConversationMessages() {
     const node = document.createElement("div");
     node.className = "sp-msg sp-msg-assistant";
     node.dataset.raw = String(message.content || "");
-    renderAssistantMessage(node, String(message.content || ""));
+    renderAssistantMessage(node, String(message.content || ""), {
+      userPrompt: findPreviousUserPrompt(index)
+    });
     els.messages.appendChild(node);
   });
   shouldAutoScrollMessages = true;
   scrollToBottom(true);
+}
+
+function findPreviousUserPrompt(index) {
+  for (let i = Number(index) - 1; i >= 0; i -= 1) {
+    const item = chatHistory[i];
+    if (item?.role === "user" && typeof item.content === "string") {
+      return item.content;
+    }
+  }
+  return "";
 }
 
 function buildConversationTitle(context) {
@@ -1527,7 +1557,7 @@ function finalizeAssistant(node) {
   }
   clearStreamRuntimeState();
   const raw = node.dataset.raw || "";
-  renderAssistantMessage(node, raw);
+  renderAssistantMessage(node, raw, { userPrompt: activeUserPrompt });
   if (activeUserPrompt && raw) {
     chatHistory.push({ role: "user", content: activeUserPrompt });
     chatHistory.push({ role: "assistant", content: raw });
@@ -1574,7 +1604,7 @@ function handleAssistantStopped(node, reason) {
   clearStreamRuntimeState();
   const raw = String(node.dataset.raw || "");
   if (raw.trim()) {
-    renderAssistantMessage(node, raw);
+    renderAssistantMessage(node, raw, { userPrompt: activeUserPrompt });
     const stopped = document.createElement("div");
     stopped.className = "sp-msg-stopped";
     stopped.textContent = reason || "已停止生成";
@@ -1649,7 +1679,7 @@ function clearStreamRuntimeState() {
   removeConversationContextNotice();
 }
 
-function renderAssistantMessage(node, raw) {
+function renderAssistantMessage(node, raw, { userPrompt = "" } = {}) {
   if (!node) {
     return;
   }
@@ -1691,7 +1721,423 @@ function renderAssistantMessage(node, raw) {
     }
   });
   actions.appendChild(copyBtn);
+
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.className = "sp-msg-copy-btn sp-msg-save-btn";
+  saveBtn.setAttribute("aria-label", "保存到 Obsidian");
+  saveBtn.setAttribute("title", "保存到 Obsidian");
+  saveBtn.innerHTML = `
+    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+      <path d="M5 4h11l3 3v13H5z"></path>
+      <path d="M8 4v6h8"></path>
+      <path d="M8 17h8"></path>
+    </svg>
+  `;
+  saveBtn.addEventListener("click", () => {
+    void saveAssistantReplyToObsidian({
+      button: saveBtn,
+      userPrompt,
+      assistantMarkdown: pasteReadyRaw
+    });
+  });
+  actions.appendChild(saveBtn);
   node.appendChild(actions);
+}
+
+async function saveAssistantReplyToObsidian({ button, userPrompt, assistantMarkdown }) {
+  const prompt = String(userPrompt || "").trim();
+  const answer = String(assistantMarkdown || "").trim();
+  if (!prompt || !answer) {
+    showConversationContextNotice("没有可保存的单轮问答。", 2200);
+    return;
+  }
+
+  const settingsBundle = await loadObsidianSettings();
+  if (!settingsBundle) {
+    return;
+  }
+
+  const context = currentConversationMeta?.resolvedContext || contextData || currentConversationMeta?.contextRef || {};
+  const filename = buildAiNoteFilename(context, prompt);
+  const folder = resolveFolderTemplate(settingsBundle.settings.noteFolder || "", context);
+  const filepath = folder ? `${folder}/${filename}` : filename;
+  const noteContent = buildAiNoteMarkdown({
+    context,
+    prompt,
+    answer,
+    filename
+  });
+
+  await saveMarkdownToObsidian({
+    button,
+    filepath,
+    content: noteContent,
+    baseUrl: settingsBundle.baseUrl,
+    apiKey: settingsBundle.apiKey
+  });
+}
+
+async function saveCurrentConversationToObsidian() {
+  const turns = buildConversationTurns(chatHistory);
+  if (!turns.length) {
+    showConversationContextNotice("当前没有可保存的历史对话。", 2200);
+    return;
+  }
+
+  const settingsBundle = await loadObsidianSettings();
+  if (!settingsBundle) {
+    return;
+  }
+
+  const context = currentConversationMeta?.resolvedContext || contextData || currentConversationMeta?.contextRef || {};
+  const filename = buildAiConversationFilename(context);
+  const folder = resolveFolderTemplate(settingsBundle.settings.noteFolder || "", context);
+  const filepath = folder ? `${folder}/${filename}` : filename;
+  const noteContent = buildAiConversationMarkdown({
+    context,
+    turns,
+    filename
+  });
+
+  await saveMarkdownToObsidian({
+    button: els.saveConversationBtn,
+    filepath,
+    content: noteContent,
+    baseUrl: settingsBundle.baseUrl,
+    apiKey: settingsBundle.apiKey
+  });
+}
+
+async function loadObsidianSettings() {
+  const settingsResp = await sendRuntimeMessage({ type: "get-settings" }).catch((error) => ({
+    ok: false,
+    error: error?.message || String(error || "")
+  }));
+  if (!settingsResp?.ok) {
+    showConversationContextNotice(`读取设置失败：${settingsResp?.error || "未知错误"}`, 3000);
+    return null;
+  }
+
+  const settings = settingsResp.settings || {};
+  const baseUrl = String(settings.obsidianApiBaseUrl || "").trim();
+  const apiKey = String(settings.obsidianApiKey || "").trim();
+  if (!baseUrl || !apiKey) {
+    showConversationContextNotice("请先在设置页填写 Obsidian Local REST API 地址和 API Key。", 3500);
+    chrome.runtime.openOptionsPage?.();
+    return null;
+  }
+
+  return { settings, baseUrl, apiKey };
+}
+
+async function saveMarkdownToObsidian({ button, filepath, content, baseUrl, apiKey }) {
+  try {
+    if (button) {
+      button.disabled = true;
+      button.classList.add("is-saving");
+    }
+    const exists = await checkObsidianNoteExists(baseUrl, apiKey, filepath);
+    if (exists) {
+      const shouldOverwrite = await confirmOverwriteNote(filepath);
+      if (!shouldOverwrite) {
+        showConversationContextNotice("已取消保存，原笔记未被覆盖。", 2200);
+        return;
+      }
+    }
+    await writeNoteByLocalApi(baseUrl, apiKey, filepath, content);
+    showConversationContextNotice(`已写入 Obsidian：${filepath}`, 2600);
+  } catch (error) {
+    showConversationContextNotice(`写入失败：${getErrorMessage(error)}`, 4000);
+  } finally {
+    if (button) {
+      button.classList.remove("is-saving");
+      window.setTimeout(() => {
+        button.disabled = false;
+      }, 500);
+    }
+  }
+}
+
+async function checkObsidianNoteExists(baseUrl, apiKey, filepath) {
+  const resp = await sendRuntimeMessage({
+    type: "obsidian-note-exists",
+    baseUrl,
+    apiKey,
+    filepath
+  });
+  if (!resp?.ok) {
+    throw new Error(getReadableText(resp?.error, "Local API 检查失败"));
+  }
+  return Boolean(resp.exists);
+}
+
+async function writeNoteByLocalApi(baseUrl, apiKey, filepath, content) {
+  const resp = await sendRuntimeMessage({
+    type: "write-obsidian-note",
+    baseUrl,
+    apiKey,
+    filepath,
+    content
+  });
+  if (!resp?.ok) {
+    throw new Error(getReadableText(resp?.error, "Local API 写入失败"));
+  }
+}
+
+function buildAiNoteFilename(context, prompt) {
+  const sourceTitle = String(context?.title || currentConversationMeta?.contextTitle || "当前视频").trim() || "当前视频";
+  const questionSummary = buildQuestionSummary(prompt);
+  const baseName = sanitizeFileName(`【AI笔记】${sourceTitle} - ${questionSummary}`);
+  return `${baseName || "【AI笔记】当前视频"}.md`;
+}
+
+function buildAiConversationFilename(context) {
+  const sourceTitle = String(context?.title || currentConversationMeta?.contextTitle || "当前视频").trim() || "当前视频";
+  const baseName = sanitizeFileName(`【AI笔记】${sourceTitle}`);
+  return `${baseName || "【AI笔记】当前视频"}.md`;
+}
+
+function buildQuestionSummary(prompt) {
+  const text = String(prompt || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 30);
+  return text || "AI问答";
+}
+
+function buildAiNoteMarkdown({ context, prompt, answer, filename }) {
+  const created = formatLocalDate();
+  const sourceTitle = String(context?.title || currentConversationMeta?.contextTitle || "当前视频").trim() || "当前视频";
+  const url = buildCleanBilibiliVideoUrl(context);
+  const title = filename.replace(/\.md$/i, "");
+  const frontmatter = [
+    "---",
+    `title: "${escapeYaml(title)}"`,
+    `source_title: "${escapeYaml(sourceTitle)}"`,
+    `url: "${escapeYaml(url)}"`,
+    context?.author ? `author: "${escapeYaml(context.author)}"` : "",
+    `created: "${created}"`,
+    `tags: [ai_note]`,
+    "---"
+  ].filter(Boolean);
+
+  const lines = [
+    ...frontmatter,
+    "",
+    `问题：${String(prompt || "").trim()}`,
+    `来源：[[${escapeWikiLinkTarget(sourceTitle)}]]`,
+    "",
+    String(answer || "").trim(),
+    ""
+  ].filter((line, index, arr) => line !== "" || arr[index - 1] !== "");
+
+  return `${lines.join("\n").trim()}\n`;
+}
+
+function buildAiConversationMarkdown({ context, turns, filename }) {
+  const created = formatLocalDate();
+  const sourceTitle = String(context?.title || currentConversationMeta?.contextTitle || "当前视频").trim() || "当前视频";
+  const url = buildCleanBilibiliVideoUrl(context);
+  const title = filename.replace(/\.md$/i, "");
+  const frontmatter = [
+    "---",
+    `title: "${escapeYaml(title)}"`,
+    `source_title: "${escapeYaml(sourceTitle)}"`,
+    `url: "${escapeYaml(url)}"`,
+    context?.author ? `author: "${escapeYaml(context.author)}"` : "",
+    `created: "${created}"`,
+    `tags: [ai_note]`,
+    "---"
+  ].filter(Boolean);
+
+  const lines = [
+    ...frontmatter,
+    "",
+    `来源：[[${escapeWikiLinkTarget(sourceTitle)}]]`
+  ];
+
+  turns.forEach((turn) => {
+    lines.push(
+      "",
+      `## ${sanitizeMarkdownHeadingText(turn.prompt)}`,
+      "",
+      turn.answer
+    );
+  });
+
+  return `${lines.join("\n").trim()}\n`;
+}
+
+function sanitizeMarkdownHeadingText(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/^#+\s*/, "")
+    .trim() || "AI问答";
+}
+
+function buildConversationTurns(messages) {
+  const turns = [];
+  let pendingPrompt = "";
+  (Array.isArray(messages) ? messages : []).forEach((message) => {
+    if (!message || typeof message.content !== "string") {
+      return;
+    }
+    if (message.role === "user") {
+      pendingPrompt = message.content.trim();
+      return;
+    }
+    if (message.role === "assistant" && pendingPrompt) {
+      const answer = normalizeMarkdownForSectionPaste(stripThinkBlocks(message.content)).trim();
+      if (answer) {
+        turns.push({
+          prompt: pendingPrompt,
+          answer
+        });
+      }
+      pendingPrompt = "";
+    }
+  });
+  return turns;
+}
+
+function buildCleanBilibiliVideoUrl(context) {
+  const bvid = String(context?.bvid || extractBvidFromUrl(context?.url) || extractBvidFromUrl(currentConversationMeta?.contextUrl) || "").trim();
+  if (bvid) {
+    return `https://www.bilibili.com/video/${bvid}/`;
+  }
+  return String(context?.url || currentConversationMeta?.contextUrl || "").trim();
+}
+
+function extractBvidFromUrl(url) {
+  const text = String(url || "").trim();
+  const match = text.match(/\/video\/(BV[0-9A-Za-z]+)/i) || text.match(/[?&]bvid=(BV[0-9A-Za-z]+)/i);
+  return match?.[1] || "";
+}
+
+function resolveFolderTemplate(template, context) {
+  const normalized = normalizeFolder(template);
+  if (!normalized) {
+    return "";
+  }
+
+  const allowedKeys = new Set(["created", "upload_date", "author", "bvid"]);
+  const values = {
+    created: sanitizeFolderTemplateValue(formatLocalDate()),
+    upload_date: sanitizeFolderTemplateValue(context?.uploadDate || ""),
+    author: sanitizeFolderTemplateValue(context?.author || ""),
+    bvid: sanitizeFolderTemplateValue(context?.bvid || "")
+  };
+  const resolved = normalized.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, rawKey) => {
+    const key = String(rawKey || "").trim().toLowerCase();
+    if (!allowedKeys.has(key)) {
+      return "";
+    }
+    return values[key] || "";
+  });
+
+  return resolved
+    .split("/")
+    .map((segment) => sanitizeFolderTemplateValue(segment))
+    .filter(Boolean)
+    .join("/");
+}
+
+function normalizeFolder(input) {
+  return String(input || "").trim().replace(/^\/+|\/+$/g, "");
+}
+
+function sanitizeFolderTemplateValue(value) {
+  return String(value || "")
+    .replace(/[\/\\:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sanitizeFileName(value) {
+  return String(value || "")
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
+}
+
+function escapeYaml(value) {
+  return String(value || "").replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+function escapeWikiLinkTarget(value) {
+  return String(value || "").replace(/\]/g, "\\]");
+}
+
+function formatLocalDate(value = Date.now()) {
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getReadableText(value, fallback = "") {
+  if (typeof value === "string") {
+    return value.trim() || fallback;
+  }
+  if (value == null) {
+    return fallback;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value || fallback);
+  }
+}
+
+function getErrorMessage(error, fallback = "未知错误") {
+  return getReadableText(error?.message || error, fallback);
+}
+
+function confirmOverwriteNote(filepath) {
+  return new Promise((resolve) => {
+    const existing = document.querySelector(".sp-confirm-overlay");
+    if (existing) {
+      existing.remove();
+    }
+
+    const overlay = document.createElement("div");
+    overlay.className = "sp-confirm-overlay";
+    overlay.innerHTML = `
+      <div class="sp-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="spConfirmTitle">
+        <div id="spConfirmTitle" class="sp-confirm-title">该笔记已存在</div>
+        <div class="sp-confirm-body">继续会覆盖原内容：</div>
+        <div class="sp-confirm-path"></div>
+        <div class="sp-confirm-actions">
+          <button type="button" class="sp-confirm-cancel">取消</button>
+          <button type="button" class="sp-confirm-primary">覆盖</button>
+        </div>
+      </div>
+    `;
+    overlay.querySelector(".sp-confirm-path").textContent = String(filepath || "");
+
+    const cleanup = (value) => {
+      overlay.remove();
+      document.removeEventListener("keydown", onKeydown, true);
+      resolve(value);
+    };
+    const onKeydown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cleanup(false);
+      }
+    };
+
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        cleanup(false);
+      }
+    });
+    overlay.querySelector(".sp-confirm-cancel")?.addEventListener("click", () => cleanup(false));
+    overlay.querySelector(".sp-confirm-primary")?.addEventListener("click", () => cleanup(true));
+    document.addEventListener("keydown", onKeydown, true);
+    document.body.appendChild(overlay);
+    overlay.querySelector(".sp-confirm-primary")?.focus();
+  });
 }
 
 function normalizeMarkdownForSectionPaste(raw, baseLevel = 2) {

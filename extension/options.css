@@ -116,6 +116,15 @@ textarea.settings-textarea.settings-textarea-compact {
   min-height: 84px;
 }
 
+.quick-prompts-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.quick-prompts-grid input {
+  margin: 0;
+}
+
 .field-group-tight-bottom {
   padding-bottom: 8px;
 }

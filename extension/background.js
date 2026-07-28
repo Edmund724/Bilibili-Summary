@@ -3,6 +3,12 @@ const DEFAULT_PRESET_PROMPTS = [
   "按章节整理视频内容",
   "生成带时间轴的笔记"
 ];
+const DEFAULT_INITIAL_QUICK_PROMPTS = [
+  "用 3 句话总结这个视频",
+  "提炼这个视频的 5 个重点",
+  "按时间顺序整理这期视频的内容",
+  "根据评论总结观众的看法"
+];
 const DEFAULT_PLAYER_AI_QUICK_PROMPT = "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。";
 const PLAYER_AI_QUICK_ACTION_STORAGE_KEY = "boc_player_ai_quick_action_v1";
 const STREAM_FIRST_TOKEN_TIMEOUT_MS = 90000;
@@ -55,6 +61,7 @@ const DEFAULT_SYNC_SETTINGS = {
   fixedFrontmatterProperties: [],
   notePlaceholderSections: [],
   aiSystemPrompt: DEFAULT_AI_SYSTEM_PROMPT,
+  aiInitialQuickPrompts: DEFAULT_INITIAL_QUICK_PROMPTS.slice(),
   aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice()
 };
 
@@ -1300,6 +1307,7 @@ async function getMergedSettings() {
   merged.fixedFrontmatterProperties = normalizeFixedFrontmatterProperties(merged.fixedFrontmatterProperties);
   merged.notePlaceholderSections = normalizeNotePlaceholderSections(merged.notePlaceholderSections);
   merged.aiSystemPrompt = normalizeAiSystemPrompt(merged.aiSystemPrompt);
+  merged.aiInitialQuickPrompts = normalizeAiInitialQuickPrompts(merged.aiInitialQuickPrompts);
   merged.aiPresetPrompts = normalizeAiPresetPrompts(merged.aiPresetPrompts);
   let apiKey = normalizeApiKey(localSettings.obsidianApiKey);
   const legacySyncApiKey = normalizeApiKey(syncSettings.obsidianApiKey);
@@ -1336,6 +1344,7 @@ async function saveSettings(settings) {
   syncPayload.fixedFrontmatterProperties = normalizeFixedFrontmatterProperties(syncPayload.fixedFrontmatterProperties);
   syncPayload.notePlaceholderSections = normalizeNotePlaceholderSections(syncPayload.notePlaceholderSections);
   syncPayload.aiSystemPrompt = normalizeAiSystemPrompt(syncPayload.aiSystemPrompt);
+  syncPayload.aiInitialQuickPrompts = normalizeAiInitialQuickPrompts(syncPayload.aiInitialQuickPrompts);
   syncPayload.aiPresetPrompts = normalizeAiPresetPrompts(syncPayload.aiPresetPrompts);
 
   await Promise.all([
@@ -1450,6 +1459,15 @@ function normalizeAiPresetPrompts(value) {
     .map((item) => toString(item).trim())
     .filter(Boolean)
     .slice(0, 12);
+}
+
+function normalizeAiInitialQuickPrompts(value) {
+  if (!Array.isArray(value)) {
+    return DEFAULT_INITIAL_QUICK_PROMPTS.slice();
+  }
+  return value
+    .map((item) => toString(item).trim())
+    .slice(0, 4);
 }
 
 function normalizeFixedPropertyType(value) {
