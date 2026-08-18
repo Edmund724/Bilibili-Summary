@@ -11,7 +11,8 @@ const DEFAULT_INITIAL_QUICK_PROMPTS = [
 ];
 const DEFAULT_PLAYER_AI_QUICK_PROMPT = "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。";
 const PLAYER_AI_QUICK_ACTION_STORAGE_KEY = "boc_player_ai_quick_action_v1";
-const STREAM_FIRST_TOKEN_TIMEOUT_MS = 90000;
+// 流式响应空闲看门狗：超过该时长没有任何数据（思考/正文）即视为卡死并中断。
+const STREAM_IDLE_TIMEOUT_MS = 90000;
 const LEGACY_DEFAULT_AI_SYSTEM_PROMPT = [
   "你是一名专业的视频内容分析助手。基于字幕与评论提炼高价值信息，不要复述内容，不要输出思考过程或 think 标签。",
   "优先输出：主题与核心观点、关键数据与事实、逻辑链路与重要结论、可执行建议。",
@@ -1211,6 +1212,18 @@ chrome.runtime.onConnect.addListener((port) => {
     }
   };
 
+  // 空闲看门狗：STREAM_IDLE_TIMEOUT_MS 内没有任何数据（思考/正文都算）就中断。
+  // 每次有数据到达都重新武装，因此思考模型长思考不会被误杀，真正卡死也不会无限等待。
+  const armFirstDataTimeout = () => {
+    if (firstTokenTimeoutId) {
+      clearTimeout(firstTokenTimeoutId);
+      firstTokenTimeoutId = 0;
+    }
+    firstTokenTimeoutId = setTimeout(() => {
+      abortActiveRequest({ type: "timeout", reason: "请求超时（90 秒未返回任何数据），已自动中断" });
+    }, STREAM_IDLE_TIMEOUT_MS);
+  };
+
   port.onDisconnect.addListener(() => {
     abortActiveRequest({ type: "silent" });
     clearActiveRequestState();
@@ -1228,9 +1241,7 @@ chrome.runtime.onConnect.addListener((port) => {
       abortActiveRequest({ type: "silent" });
       clearActiveRequestState();
       activeAbortController = new AbortController();
-      firstTokenTimeoutId = setTimeout(() => {
-        abortActiveRequest({ type: "timeout", reason: "请求超时（90 秒未返回），已自动中断" });
-      }, STREAM_FIRST_TOKEN_TIMEOUT_MS);
+      armFirstDataTimeout();
       const providers = await loadAiProviders();
       const provider = providers.find((p) => p.id === msg.providerId);
       if (!provider) {
@@ -1253,12 +1264,7 @@ chrome.runtime.onConnect.addListener((port) => {
         port,
         signal: activeAbortController.signal,
         getAbortMeta: () => activeAbortMeta,
-        onFirstToken: () => {
-          if (firstTokenTimeoutId) {
-            clearTimeout(firstTokenTimeoutId);
-            firstTokenTimeoutId = 0;
-          }
-        }
+        onActivity: () => armFirstDataTimeout()
       });
     } catch (e) {
       port.postMessage({ type: "error", error: String(e?.message || e) });
@@ -1643,14 +1649,20 @@ async function* parseOpenAISSE(response) {
       if (!data) continue;
       try {
         const json = JSON.parse(data);
-        const delta = json?.choices?.[0]?.delta?.content;
-        if (delta) yield String(delta);
+        const delta = json?.choices?.[0]?.delta || {};
+        // 思考模型（如 Kimi k2.x / DeepSeek R1）在正式回答前会先输出 reasoning_content，
+        // 这段时间 content 为空——必须单独转发，否则界面会长时间无任何反馈。
+        const reasoning = delta.reasoning_content;
+        if (reasoning) yield { type: "reasoning", data: String(reasoning) };
+        const content = delta.content;
+        if (content) yield { type: "content", data: String(content) };
       } catch {}
     }
   }
 }
 
-async function streamChat({ provider, context, userPrompt, history, port, signal, getAbortMeta, onFirstToken }) {
+// onActivity：每当流式响应有任何数据（思考或正文）到达时回调，用于重新武装空闲看门狗。
+async function streamChat({ provider, context, userPrompt, history, port, signal, getAbortMeta, onActivity }) {
   if (!port) return;
   const baseUrl = String(provider?.baseUrl || "").trim().replace(/\/+$/, "");
   if (!baseUrl) {
@@ -1700,13 +1712,14 @@ async function streamChat({ provider, context, userPrompt, history, port, signal
   }
 
   try {
-    let hasSentFirstToken = false;
-    for await (const token of parseOpenAISSE(response)) {
-      if (!hasSentFirstToken) {
-        hasSentFirstToken = true;
-        onFirstToken?.();
+    // 首个数据块（无论思考还是正文）到达即视为“服务端已响应”
+    for await (const chunk of parseOpenAISSE(response)) {
+      onActivity?.();
+      if (chunk.type === "reasoning") {
+        port.postMessage({ type: "reasoning", data: chunk.data });
+      } else {
+        port.postMessage({ type: "token", data: chunk.data });
       }
-      port.postMessage({ type: "token", data: token });
     }
     port.postMessage({ type: "done" });
   } catch (e) {

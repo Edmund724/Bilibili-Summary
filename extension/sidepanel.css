@@ -205,6 +205,32 @@ body {
   min-width: 0;
 }
 
+/* 思考模型（Kimi k2.x / DeepSeek R1 等）的思考过程展示：正式回答前先显示思考进度 */
+.sp-thinking {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-left: 3px solid #9aa5b1;
+  background: #f6f7f9;
+  border-radius: 8px;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.sp-thinking-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #9aa5b1;
+}
+
+.sp-thinking-text {
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
 .sp-msg-actions {
   display: flex;
   justify-content: flex-start;

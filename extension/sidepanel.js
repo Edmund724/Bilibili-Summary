@@ -1484,12 +1484,21 @@ async function sendMessage() {
   streamFirstTokenReceived = false;
 
   activePort = chrome.runtime.connect({ name: "sidepanel-chat" });
+  let thinkingNode = null;
   activePort.onMessage.addListener((msg) => {
     if (!msg) {
       return;
     }
-    if (msg.type === "token") {
+    if (msg.type === "reasoning") {
       handleFirstStreamToken();
+      if (!thinkingNode) {
+        thinkingNode = createThinkingNode(activeAssistantNode);
+      }
+      appendThinkingText(thinkingNode, msg.data);
+    } else if (msg.type === "token") {
+      handleFirstStreamToken();
+      // 首个正文 token 到来时，appendToken 的 innerHTML 重绘会自然移除思考块
+      thinkingNode = null;
       appendToken(activeAssistantNode, msg.data);
     } else if (msg.type === "done") {
       finalizeAssistant(activeAssistantNode);
@@ -1539,6 +1548,42 @@ function appendAssistantPlaceholder() {
   shouldAutoScrollMessages = true;
   scrollToBottom(true);
   return node;
+}
+
+function createThinkingNode(assistantNode) {
+  if (!assistantNode) {
+    return null;
+  }
+  const node = document.createElement("div");
+  node.className = "sp-thinking";
+  const label = document.createElement("span");
+  label.className = "sp-thinking-label";
+  label.textContent = "思考中…";
+  const text = document.createElement("div");
+  text.className = "sp-thinking-text";
+  node.appendChild(label);
+  node.appendChild(text);
+  assistantNode.prepend(node);
+  return node;
+}
+
+function appendThinkingText(node, text) {
+  if (!node) {
+    return;
+  }
+  const textNode = node.querySelector(".sp-thinking-text");
+  if (!textNode) {
+    return;
+  }
+  const MAX_DISPLAY_CHARS = 4000;
+  const acc = (textNode.dataset.acc || "") + String(text || "");
+  textNode.dataset.acc = acc;
+  if (acc.length > MAX_DISPLAY_CHARS) {
+    textNode.textContent = acc.slice(0, MAX_DISPLAY_CHARS) + "\n…（思考内容过长，已截断显示）";
+  } else {
+    textNode.textContent = acc;
+  }
+  textNode.scrollTop = textNode.scrollHeight;
 }
 
 function appendToken(node, token) {
@@ -1658,7 +1703,7 @@ function startStreamSlowNoticeTimer() {
     if (!activePort || streamFirstTokenReceived) {
       return;
     }
-    showConversationContextNotice("模型响应较慢，仍在等待服务器返回...", 0);
+    showConversationContextNotice("模型响应较慢，可能正在思考，请稍候…", 0);
   }, STREAM_SLOW_NOTICE_MS);
 }
 
