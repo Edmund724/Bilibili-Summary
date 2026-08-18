@@ -655,7 +655,7 @@ ol {
 .ai-provider-row {
   display: grid;
   width: 100%;
-  grid-template-columns: 102px minmax(0, 1.58fr) minmax(0, 0.96fr) minmax(0, 0.63fr) 56px 30px;
+  grid-template-columns: 102px minmax(0, 1.58fr) minmax(0, 0.96fr) 70px minmax(0, 0.63fr) 56px 30px;
   gap: 6px;
   align-items: center;
   padding: 0;
@@ -667,6 +667,7 @@ ol {
 
 .ai-provider-row select,
 .ai-provider-row input[type="text"],
+.ai-provider-row input[type="number"],
 .ai-provider-row input[type="password"] {
   height: var(--fixed-property-control-size);
   padding: 4px 8px;

@@ -1132,6 +1132,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const baseUrl = String(message.baseUrl || "").trim();
     const providerId = String(message.providerId || "").trim();
     const model = String(message.model || "").trim();
+    const temperatureRaw = String(message.temperature ?? "").trim();
+    const temperature = temperatureRaw === "" ? 0.7 : Number(temperatureRaw);
     if (!baseUrl) {
       sendResponse({ ok: false, error: "请填写 baseUrl" });
       return false;
@@ -1148,7 +1150,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const keys = await loadAiProviderKeys();
         return String(keys[providerId] || "").trim();
       })
-      .then((apiKey) => testAiConnection({ baseUrl, apiKey, model }))
+      .then((apiKey) => testAiConnection({ baseUrl, apiKey, model, temperature }))
       .then((resp) => sendResponse(resp))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
@@ -1724,9 +1726,10 @@ async function streamChat({ provider, context, userPrompt, history, port, signal
   }
 }
 
-async function testAiConnection({ baseUrl, apiKey, model }) {
+async function testAiConnection({ baseUrl, apiKey, model, temperature }) {
   const normalizedBaseUrl = String(baseUrl || "").trim().replace(/\/+$/, "");
   const normalizedModel = String(model || "").trim();
+  const normalizedTemperature = typeof temperature === "number" && Number.isFinite(temperature) ? temperature : 0.7;
   if (!normalizedBaseUrl) {
     return { ok: false, error: "请填写 baseUrl" };
   }
@@ -1743,17 +1746,19 @@ async function testAiConnection({ baseUrl, apiKey, model }) {
     baseUrl: normalizedBaseUrl,
     apiKey,
     model: normalizedModel,
-    headers
+    headers,
+    temperature: normalizedTemperature
   });
 }
 
-async function probeAiChatCompletion({ baseUrl, apiKey, model, headers }) {
+async function probeAiChatCompletion({ baseUrl, apiKey, model, headers, temperature }) {
   const requestHeaders = headers || { Accept: "application/json" };
   if (apiKey && !requestHeaders.Authorization) {
     requestHeaders.Authorization = `Bearer ${apiKey}`;
   }
   requestHeaders["Content-Type"] = "application/json";
 
+  const normalizedTemperature = typeof temperature === "number" && Number.isFinite(temperature) ? temperature : 0.7;
   let response;
   try {
     response = await fetch(`${baseUrl}/chat/completions`, {
@@ -1762,7 +1767,7 @@ async function probeAiChatCompletion({ baseUrl, apiKey, model, headers }) {
       body: JSON.stringify({
         model,
         stream: false,
-        temperature: 0,
+        temperature: normalizedTemperature,
         max_tokens: 1,
         messages: [{ role: "user", content: "ping" }]
       })

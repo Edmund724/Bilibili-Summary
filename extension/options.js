@@ -950,6 +950,7 @@ function addAiProviderRow(item = {}) {
   const preset = AI_PRESETS.find((p) => p.id === presetId) || AI_PRESETS[AI_PRESETS.length - 1];
   const baseUrl = String(item.baseUrl ?? preset.baseUrl ?? "");
   const model = String(item.model || "");
+  const temperature = typeof item.temperature === "number" && Number.isFinite(item.temperature) ? item.temperature : "";
   const requiresKey = item.requiresKey !== false && preset.requiresKey !== false;
   const hasSavedKey = Boolean(item.hasSavedKey);
 
@@ -964,6 +965,7 @@ function addAiProviderRow(item = {}) {
     </select>
     <input class="ai-provider-baseurl" type="text" placeholder="baseUrl（如 https://api.openai.com/v1）" value="${escapeAttribute(baseUrl)}" />
     <input class="ai-provider-model" type="text" placeholder="模型名（如 gpt-4o-mini）" value="${escapeAttribute(model)}" />
+    <input class="ai-provider-temperature" type="number" min="0" max="2" step="0.1" placeholder="温度" title="temperature，留空默认 0.7" aria-label="temperature" value="${escapeAttribute(String(temperature))}" />
     <input class="ai-provider-apikey" type="password" placeholder="${hasSavedKey ? "已保存" : (requiresKey ? "API Key" : "API Key（可选）")}" autocomplete="off" />
     <button type="button" class="secondary-btn ai-provider-test">测试</button>
     <button type="button" class="ai-provider-remove" aria-label="删除" title="删除">
@@ -1010,6 +1012,7 @@ function addAiProviderRow(item = {}) {
     const baseUrl = row.querySelector(".ai-provider-baseurl").value.trim();
     const apiKey = row.querySelector(".ai-provider-apikey").value.trim();
     const model = row.querySelector(".ai-provider-model").value.trim();
+    const temperature = row.querySelector(".ai-provider-temperature").value.trim();
     if (!baseUrl) {
       showAiProviderStatus(statusNode, "请填写 baseUrl", true);
       return;
@@ -1024,7 +1027,8 @@ function addAiProviderRow(item = {}) {
       providerId: row.dataset.providerId || "",
       baseUrl,
       apiKey,
-      model
+      model,
+      temperature
     });
     if (resp?.ok) {
       showAiProviderStatus(statusNode, "连接成功");
@@ -1050,13 +1054,15 @@ function collectAiProviders() {
     const preset = AI_PRESETS.find((p) => p.id === presetSelect.value) || AI_PRESETS[AI_PRESETS.length - 1];
     const apiKey = row.querySelector(".ai-provider-apikey").value.trim();
     const baseUrl = row.querySelector(".ai-provider-baseurl").value.trim().replace(/\/+$/, "");
+    const temperatureRaw = row.querySelector(".ai-provider-temperature").value.trim();
+    const temperature = temperatureRaw === "" ? 0.7 : Number(temperatureRaw);
     return {
       id: row.dataset.providerId || generateAiProviderId(),
       presetId: preset.id,
       name: preset.name,
       baseUrl,
       model: row.querySelector(".ai-provider-model").value.trim(),
-      temperature: 0.7,
+      temperature,
       requiresKey: preset.requiresKey,
       enabled: true,
       apiKey,
@@ -1084,6 +1090,9 @@ function validateAiProviders(items) {
     }
     if (!item.model) {
       return { ok: false, message: `平台「${item.name}」需要填写模型名` };
+    }
+    if (typeof item.temperature !== "number" || !Number.isFinite(item.temperature) || item.temperature < 0 || item.temperature > 2) {
+      return { ok: false, message: `平台「${item.name}」的 temperature 需为 0-2 之间的数字` };
     }
     if (seenIds.has(item.id)) {
       return { ok: false, message: "平台 id 重复，请刷新页面后重试" };
