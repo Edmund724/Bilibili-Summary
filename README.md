@@ -1,14 +1,8 @@
-# Bilibili Obsidian Clipper｜一键保存B站字幕
-
-[![GitHub all releases downloads](https://img.shields.io/github/downloads/haixiong1997/Bilibili-Obsidian-Clipper/total?style=flat-square&logo=github&label=downloads)](https://github.com/haixiong1997/Bilibili-Obsidian-Clipper/releases)
-[![Chrome Web Store users](https://img.shields.io/chrome-web-store/users/jokophbofiphenlplmohabdcmalcbenl?style=flat-square&logo=google-chrome&logoColor=white&label=chrome)](https://chromewebstore.google.com/detail/jokophbofiphenlplmohabdcmalcbenl)
-[![GitHub release](https://img.shields.io/github/v/release/haixiong1997/Bilibili-Obsidian-Clipper?style=flat-square&label=version)](https://github.com/haixiong1997/Bilibili-Obsidian-Clipper/releases)
-
-推荐官方插件市场下载：[Chrome](https://chromewebstore.google.com/detail/jokophbofiphenlplmohabdcmalcbenl?utm_source=item-share-cb) · [Edge](https://microsoftedge.microsoft.com/addons/detail/fbeeapnjdjgacilaobonekidbfjcmdjo) · [Firefox](https://addons.mozilla.org/addon/bilibili-obsidian-clipper/)
-
-在 B 站视频页抓取字幕，预览后可复制 Markdown、下载字幕文件，并一键写入 Obsidian（Local REST API）。
+# Bilibili-Summary｜一键保存B站字幕
 
 > **本仓库说明**：本仓库（Bilibili-Summary）是在上游源仓库 [haixiong1997/Bilibili-Obsidian-Clipper](https://github.com/haixiong1997/Bilibili-Obsidian-Clipper) 的基础上由本人进行二次修改（fork）的版本，保留了上游的 MIT License 与版权归属。
+
+在 B 站视频页抓取字幕，预览后可复制 Markdown、下载字幕文件，并一键写入 Obsidian（Local REST API）。
 
 > 注意：仅支持获取“有字幕轨”的 B 站视频字幕（播放器里有「字幕」选项，通常表示作者上传了外挂字幕或平台提供了 AI 字幕）；没有字幕轨的视频无法获取字幕。
 
@@ -33,16 +27,11 @@
 
 ## 功能图片演示
 
-![Bilibili Obsidian Clipper 功能演示](docs/images/feature-demo-v2.png)
+![Bilibili-Summary 功能演示](docs/images/feature-demo-v2.png)
 
-![Bilibili Obsidian Clipper AI 侧边栏演示](docs/images/33.png)
+![Bilibili-Summary AI 侧边栏演示](docs/images/33.png)
 
 ## 安装方式
-
-### 升级说明
-
-- Chrome / Edge：如果是从 GitHub 手动下载安装包升级，建议直接替换原扩展目录中的文件，并在扩展管理页点击“重新加载”；不要先移除旧扩展，否则本地设置、AI 历史对话和已保存的 Key 可能会丢失。
-- Firefox：当前为“临时加载附加组件”方式，更适合开发调试使用；重新移除并加载新版本后，本地设置和 AI 历史对话可能不会保留。
 
 ### Chrome / Edge
 
@@ -86,13 +75,6 @@
 
 建议先在本地测试确认无误，再替换日常使用的扩展版本。修改源码前也建议保留一份原始版本，方便出现问题时回退。
 
-## Obsidian 配置
-
-1. 在 Obsidian 社区插件市场安装并启用 `Local REST API with MCP`
-2. 在插件设置中勾选 `Enable Non-encrypted (HTTP) Server`
-3. 复制插件页面里的 API Key
-4. 在扩展设置页填写 `Local REST API 地址`、`API Key`、`笔记目录`
-
 ## 使用方式
 
 1. 打开任意 B 站视频页并点击扩展图标
@@ -102,12 +84,6 @@
 ## 视频教程
 
 - [B 站教程](https://www.bilibili.com/video/BV15qQwB4EZ9/?spm_id_from=333.1387.homepage.video_card.click&vd_source=040bc5ea7866b419558ec2682a2ccb59)
-
-## 支持开发者
-
-如果这个项目对您有帮助，欢迎微信打赏支持我的开发工作。您的支持是我持续改进和维护这个项目的动力。
-
-<img src="docs/images/weixin.jpg" alt="微信扫码支持开发者" width="264" />
 
 ## 免责声明
 
