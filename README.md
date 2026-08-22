@@ -1,8 +1,8 @@
-# Bilibili-Summary｜一键保存B站字幕
+# Bilibili-Summary｜一键总结B站视频
 
 > **本仓库说明**：本仓库（Bilibili-Summary）是在上游源仓库 [haixiong1997/Bilibili-Obsidian-Clipper](https://github.com/haixiong1997/Bilibili-Obsidian-Clipper) 的基础上由本人进行二次修改（fork）的版本，保留了上游的 MIT License 与版权归属。
 
-在 B 站视频页抓取字幕，预览后可复制 Markdown、下载字幕文件，并一键写入 Obsidian（Local REST API）。
+在 B 站视频页抓取字幕，预览后可复制 Markdown、下载字幕文件，并一键总结视频。
 
 > 注意：仅支持获取“有字幕轨”的 B 站视频字幕（播放器里有「字幕」选项，通常表示作者上传了外挂字幕或平台提供了 AI 字幕）；没有字幕轨的视频无法获取字幕。
 
@@ -11,15 +11,15 @@
 - B 站视频字幕抓取（自动识别当前分 P）
 - 字幕预览、复制 Markdown
 - 下载字幕文件（`srt/txt`）
-- 保存到 Obsidian（Local REST API）
+- 一键总结视频
 
-### 阅读视图（v1.0.18+）
+### 阅读视图
 
 沉浸式布局，支持排版调整、主题切换、字幕同步等。
 
 > 稍后再看页面的阅读视图体验尚不完善，推荐在普通视频页使用。
 
-### AI 侧边栏（v1.1.0+）
+### AI 侧边栏
 
 支持围绕当前视频字幕进行轻量对话，也可在普通网页中作为通用 AI 对话侧边栏使用。
 
@@ -35,8 +35,8 @@
 
 ### Chrome / Edge
 
-1. 在 GitHub 的 `Releases` 页面下载最新的 `*-chrome.zip` 包
-2. 解压到任意本地目录
+1. 使用 `git clone` 下载源码（例如 `git clone https://github.com/Edmund724/Bilibili-Summary.git`）
+2. 进入克隆后的源码目录 `Bilibili-Summary`
 3. 打开扩展管理页：
    - Chrome：`chrome://extensions/`
    - Edge：`edge://extensions/`
@@ -46,8 +46,8 @@
 
 ### Firefox
 
-1. 在 GitHub 的 `Releases` 页面下载最新的 `*-firefox.zip` 包
-2. 解压到任意本地目录
+1. 使用 `git clone` 下载源码（例如 `git clone https://github.com/Edmund724/Bilibili-Summary.git`）
+2. 进入克隆后的源码目录 `Bilibili-Summary`
 3. 打开 Firefox 附加组件管理页：`about:addons`
 4. 点击右上角齿轮图标 → "调试附加组件"
 5. 点击"临时加载附加组件..."
@@ -79,7 +79,7 @@
 
 1. 打开任意 B 站视频页并点击扩展图标
 2. 面板会自动抓取并展示字幕
-3. 按需点击 `刷新 / 复制 / 下载 / 保存到 Obsidian`
+3. 按需点击 `刷新 / 复制 / 下载 / 一键总结视频`
 
 ## 视频教程
 
