@@ -311,6 +311,10 @@ function installReaderDebugHelpers() {
     ...(globalThis.__BOC_DEBUG__ || {}),
     snapshotReader
   };
+  globalThis.__BOC_FORCE_SYNC_PLAYER_AI__ = () => {
+    playerAiQuickActionRetryCount = 0;
+    schedulePlayerAiQuickActionSync(0);
+  };
 }
 
 const ids = {
@@ -355,8 +359,33 @@ const ids = {
 
 init();
 
+function isSupportedUrl() {
+  if (isReaderMode()) return true;
+  if (isWatchlaterPage()) return true;
+  if (/\/video\//.test(location.pathname)) return true;
+  return false;
+}
+
 function init() {
   logInfo(`[BOC] content script loaded, version=${BOC_VERSION}`);
+  try {
+    sessionStorage.setItem("__BOC_URL_DIAG__", JSON.stringify({
+      href: location.href,
+      origin: location.origin,
+      pathname: location.pathname,
+      search: location.search,
+      hash: location.hash,
+      version: BOC_VERSION,
+      timestamp: Date.now()
+    }));
+  } catch {
+    // ignore
+  }
+
+  if (!isSupportedUrl()) {
+    return;
+  }
+
   ensureUiReady({ forceRecreate: true });
   installReaderDebugHelpers();
 
@@ -949,6 +978,7 @@ function startUrlWatcher() {
     enforceNormalPageStateIfNeeded(nextUrl);
     ensureUiReady();
     resetClipState();
+    schedulePlayerAiQuickActionSync();
     const shouldEnterReaderMode = isReaderMode(nextUrl);
     if (!state.readingViewOpen && shouldEnterReaderMode) {
       document.documentElement.setAttribute("data-boc-reader-mode", "1");
@@ -3653,7 +3683,9 @@ function startPlayerAiQuickActionObserver() {
   });
   observer.observe(document.body, {
     childList: true,
-    subtree: true
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["style", "class"]
   });
   state.playerAiQuickActionObserver = observer;
 }
@@ -3672,6 +3704,8 @@ function bindPlayerAiQuickActionLayoutEvents() {
   state.playerAiQuickActionLayoutBound = true;
 }
 
+let playerAiQuickActionRetryCount = 0;
+
 function schedulePlayerAiQuickActionSync(delayMs = 120) {
   if (state.playerAiQuickActionSyncTimer) {
     window.clearTimeout(state.playerAiQuickActionSyncTimer);
@@ -3680,6 +3714,12 @@ function schedulePlayerAiQuickActionSync(delayMs = 120) {
     state.playerAiQuickActionSyncTimer = 0;
     syncPlayerAiQuickActionButton();
   }, delayMs);
+}
+
+function schedulePlayerAiQuickActionRetry() {
+  const delay = Math.min(260 * (playerAiQuickActionRetryCount + 1), 2500);
+  playerAiQuickActionRetryCount += 1;
+  schedulePlayerAiQuickActionSync(delay);
 }
 
 function syncPlayerAiQuickActionButton() {
@@ -3692,17 +3732,15 @@ function syncPlayerAiQuickActionButton() {
 
   if (!hasPlayerSubtitleControl()) {
     removePlayerAiQuickActionButton();
+    schedulePlayerAiQuickActionRetry();
     return;
   }
 
   const playerHost = findPlayerAiQuickActionHost();
   if (!playerHost) {
-    if (!existingWrap?.isConnected) {
-      existingWrap?.remove();
-      existing?.remove();
-    } else {
-      schedulePlayerAiQuickActionSync(260);
-    }
+    existingWrap?.remove();
+    existing?.remove();
+    schedulePlayerAiQuickActionRetry();
     return;
   }
 
@@ -3732,6 +3770,7 @@ function syncPlayerAiQuickActionButton() {
   }
   bindPlayerAiQuickActionCursorSync(wrap);
   syncPlayerAiQuickActionVisuals(button);
+  playerAiQuickActionRetryCount = 0;
 }
 
 function removePlayerAiQuickActionButton() {
@@ -3794,7 +3833,7 @@ function hasPlayerSubtitleControl() {
 function findPlayerSubtitleControlNode() {
   const controlRoots = Array.from(
     document.querySelectorAll(
-      "#bilibili-player .bpx-player-control-wrap, #playerWrap .bpx-player-control-wrap, .bpx-player-container .bpx-player-control-wrap, #bilibili-player, #playerWrap, .bpx-player-container"
+      "#bilibili-player .bpx-player-control-wrap, #playerWrap .bpx-player-control-wrap, .bpx-player-container .bpx-player-control-wrap, #bilibili-player, #playerWrap, .bpx-player-container, .player-wrap"
     )
   );
 
@@ -3834,9 +3873,31 @@ function findPlayerAiQuickActionHost() {
     document.querySelector(".bpx-player-container"),
     document.querySelector(".bpx-player-video-area"),
     document.getElementById("bilibili-player"),
-    document.getElementById("playerWrap")
+    document.getElementById("playerWrap"),
+    document.querySelector(".player-wrap")
   ];
-  return candidates.find((node) => node instanceof HTMLElement && isVisibleReaderControl(node)) || null;
+  const direct = candidates.find((node) => node instanceof HTMLElement && isVisibleReaderControl(node)) || null;
+  if (direct) {
+    return direct;
+  }
+
+  const video = getRuntimeVideoElement();
+  if (!video) {
+    return null;
+  }
+
+  const host =
+    video.closest(".bpx-player-container") ||
+    video.closest(".bpx-player-video-area") ||
+    video.closest("#bilibili-player") ||
+    video.closest("#playerWrap") ||
+    video.closest(".player-wrap") ||
+    video.parentElement;
+  if (host instanceof HTMLElement && isVisibleReaderControl(host)) {
+    return host;
+  }
+
+  return null;
 }
 
 function buildPlayerAiQuickActionIconSvg() {

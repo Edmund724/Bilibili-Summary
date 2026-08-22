@@ -75,6 +75,21 @@ chrome.runtime.onInstalled.addListener(async () => {
   await initializeSettingsStorage();
 });
 
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "complete") return;
+  if (!tab.url) return;
+  if (!isSupportedAiTabUrl(tab.url)) return;
+
+  try {
+    const loadedVersion = await probeContentScriptVersion(tabId);
+    if (loadedVersion !== EXPECTED_CONTENT_SCRIPT_VERSION) {
+      await injectReaderContent(tabId);
+    }
+  } catch (error) {
+    // ignore injection failure; user may need a hard refresh
+  }
+});
+
 async function ensureReaderContentReady(tabId) {
   if (!chrome.scripting || !tabId) {
     return;
