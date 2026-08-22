@@ -19,29 +19,13 @@ body {
   min-height: 100vh;
 }
 
-.sp-header-wrapper {
-  flex-shrink: 0;
-  border-bottom: 1px solid #eef2f7;
-  background: #ffffff;
-}
-
-.sp-brand {
-  padding: 9px 12px 4px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #111827;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.35;
-}
-
 .sp-header {
   display: flex;
   align-items: center;
   gap: 5px;
-  min-height: 40px;
-  padding: 4px 12px 8px;
+  min-height: 46px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid #eef2f7;
   background: #ffffff;
   flex-shrink: 0;
 }

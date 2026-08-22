@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "Bilibili Obsidian Clipper｜一键保存B站字幕",
+  "name": "Bilibili-Summary｜一键总结B站视频",
   "version": "1.1.3",
-  "description": "在 B 站视频页抓取字幕，预览后一键保存到 Obsidian。",
+  "description": "在 B 站视频页抓取字幕，预览后复制或下载。",
   
   "browser_specific_settings": {
     "gecko": {
-      "id": "bilibili-obsidian-clipper@github.com",
+      "id": "bilibili-summary@github.com",
       "strict_min_version": "109.0"
     }
   },
@@ -16,10 +16,6 @@
     "https://www.bilibili.com/*",
     "https://api.bilibili.com/*",
     "https://*.hdslb.com/*",
-    "http://127.0.0.1/*",
-    "https://127.0.0.1/*",
-    "http://localhost/*",
-    "https://localhost/*",
     "http://*/*",
     "https://*/*"
   ],
@@ -49,7 +45,7 @@
     }
   ],
   "action": {
-    "default_title": "Bilibili Obsidian Clipper",
+    "default_title": "Bilibili-Summary｜一键总结B站视频",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png"

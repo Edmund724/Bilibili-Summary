@@ -7,9 +7,7 @@
     <link rel="stylesheet" href="./sidepanel.css" />
   </head>
   <body>
-    <div class="sp-header-wrapper">
-      <div class="sp-brand" title="Bilibili-Summary｜一键总结B站视频">Bilibili-Summary｜一键总结B站视频</div>
-      <header class="sp-header">
+    <header class="sp-header">
         <button type="button" class="sp-context-chip" id="spContextChip" title="">加载中...</button>
         <select id="spModelSelect" class="sp-model-select" aria-label="选择模型平台"></select>
         <button id="spRefreshBtn" type="button" class="sp-icon-btn" title="刷新当前视频上下文" aria-label="刷新上下文">
@@ -27,7 +25,6 @@
           </svg>
         </button>
       </header>
-    </div>
     <main class="sp-messages" id="spMessages">
       <div class="sp-suggestions" id="spSuggestions"></div>
     </main>
