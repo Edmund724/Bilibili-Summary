@@ -67,6 +67,23 @@
 - `README.md` / `LICENSE`：项目说明与许可证
 - `extension/`：插件源码（manifest、js、css、icons）
 
+## 用自己的 Agent 二次修改
+
+这个项目是开源浏览器扩展，您可以下载源码，让自己的 AI 编程 Agent 按个人工作流修改功能。
+
+推荐步骤：
+
+1. 在 GitHub 页面点击 `Code` → `Download ZIP`，或使用 `git clone` 下载源码
+2. 用 Cursor、Codex、Claude Code 等 AI 编程工具打开项目文件夹
+3. 把想修改的功能描述清楚，例如：
+   - “把默认保存目录改成我的 Obsidian 目录结构”
+   - “新增一个 frontmatter 属性”
+   - “调整 AI 初始问题和保存笔记格式”
+4. 修改完成后，在浏览器扩展管理页选择 `extension/` 文件夹进行本地加载
+5. 打开 B 站视频页测试字幕抓取、AI 对话和 Obsidian 写入是否正常
+
+建议先在本地测试确认无误，再替换日常使用的扩展版本。修改源码前也建议保留一份原始版本，方便出现问题时回退。
+
 ## Obsidian 配置
 
 1. 在 Obsidian 社区插件市场安装并启用 `Local REST API with MCP`
