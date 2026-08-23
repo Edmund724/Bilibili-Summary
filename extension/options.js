@@ -51,7 +51,8 @@ const DEFAULT_SETTINGS = {
   notePlaceholderSections: [],
   aiSystemPrompt: DEFAULT_AI_SYSTEM_PROMPT,
   aiInitialQuickPrompts: DEFAULT_INITIAL_QUICK_PROMPTS.slice(),
-  aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice()
+  aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice(),
+  defaultModel: ""
 };
 
 const SYSTEM_FRONTMATTER_FIELDS = new Set(DEFAULT_SETTINGS.frontmatterFields.map((field) => String(field).toLowerCase()));
@@ -97,6 +98,7 @@ const elements = {
   aiProvidersList: document.getElementById("aiProvidersList"),
   aiProvidersEmpty: document.getElementById("aiProvidersEmpty"),
   addAiProviderBtn: document.getElementById("addAiProviderBtn"),
+  defaultModel: document.getElementById("defaultModel"),
   aiSystemPrompt: document.getElementById("aiSystemPrompt"),
   aiInitialQuickPrompts: document.querySelectorAll(".ai-initial-quick-prompt"),
   saveBtn: document.getElementById("saveBtn"),
@@ -134,6 +136,23 @@ function init() {
   [elements.tags].forEach((input) => {
     input?.addEventListener("input", () => input.classList.remove("input-error"));
   });
+  elements.defaultModel?.addEventListener("change", async () => {
+    const payload = collectFormPayload();
+    await sendRuntimeMessage({ type: "save-settings", settings: payload });
+    const providers = await loadAiProviders();
+    renderAiProviders(providers, payload.defaultModel);
+  });
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === "sync" && "defaultModel" in changes) {
+      const next = String(changes.defaultModel.newValue || "").trim();
+      if (next !== (elements.defaultModel?.value || "").trim()) {
+        elements.defaultModel.value = next;
+        loadAiProviders().then((providers) => {
+          renderAiProviders(providers, next);
+        });
+      }
+    }
+  });
 }
 
 async function loadSettings() {
@@ -158,7 +177,7 @@ async function loadSettings() {
 
   // AI 配置
   const providers = await loadAiProviders();
-  renderAiProviders(providers);
+  renderAiProviders(providers, settings.defaultModel);
 }
 
 async function saveSettings() {
@@ -193,7 +212,7 @@ async function saveSettings() {
       return;
     }
     // 用最新列表（含 hasSavedKey）重新渲染，避免误以为 Key 丢了
-    renderAiProviders(aiResp.providers || []);
+    renderAiProviders(aiResp.providers || [], payload.defaultModel);
     setStatus("保存成功");
   } catch (error) {
     setStatus(error.message || "保存失败", true);
@@ -242,7 +261,8 @@ function collectFormPayload() {
     notePlaceholderSections: normalizeNotePlaceholderSections(collectNoteSectionRows()),
     aiSystemPrompt: String(elements.aiSystemPrompt?.value || "").trim(),
     aiInitialQuickPrompts: collectInitialQuickPrompts(),
-    aiPresetPrompts: Array.isArray(savedAiPresetPrompts) ? savedAiPresetPrompts.slice(0, 12) : []
+    aiPresetPrompts: Array.isArray(savedAiPresetPrompts) ? savedAiPresetPrompts.slice(0, 12) : [],
+    defaultModel: String(elements.defaultModel?.value || "").trim()
   };
 }
 
@@ -845,16 +865,32 @@ async function loadAiProviders() {
   }
 }
 
-function renderAiProviders(items) {
+function renderAiProviders(items, defaultModel = "") {
   elements.aiProvidersList.innerHTML = "";
   const list = Array.isArray(items) ? items : [];
   list.forEach((item) => addAiProviderRow(item));
   updateAiProvidersEmptyState();
+  renderDefaultModelSelect(list, defaultModel);
 }
 
 function updateAiProvidersEmptyState() {
   const hasRows = elements.aiProvidersList.children.length > 0;
   elements.aiProvidersEmpty.hidden = hasRows;
+}
+
+function renderDefaultModelSelect(items, defaultModel = "") {
+  const list = Array.isArray(items) ? items : [];
+  elements.defaultModel.innerHTML = '<option value="">未设置</option>' + list
+    .map((item) => {
+      const label = String(item.model || item.name || "").trim();
+      return `<option value="${escapeAttribute(item.id)}">${escapeAttribute(label)}</option>`;
+    })
+    .join("");
+  if (defaultModel && list.some((item) => item.id === defaultModel)) {
+    elements.defaultModel.value = defaultModel;
+  } else {
+    elements.defaultModel.value = "";
+  }
 }
 
 function generateAiProviderId() {

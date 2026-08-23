@@ -61,7 +61,8 @@ const DEFAULT_SYNC_SETTINGS = {
   notePlaceholderSections: [],
   aiSystemPrompt: DEFAULT_AI_SYSTEM_PROMPT,
   aiInitialQuickPrompts: DEFAULT_INITIAL_QUICK_PROMPTS.slice(),
-  aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice()
+  aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice(),
+  defaultModel: ""
 };
 
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
@@ -1262,6 +1263,7 @@ async function getMergedSettings() {
   merged.aiSystemPrompt = normalizeAiSystemPrompt(merged.aiSystemPrompt);
   merged.aiInitialQuickPrompts = normalizeAiInitialQuickPrompts(merged.aiInitialQuickPrompts);
   merged.aiPresetPrompts = normalizeAiPresetPrompts(merged.aiPresetPrompts);
+  merged.defaultModel = normalizeDefaultModel(merged.defaultModel);
 
   return merged;
 }
@@ -1287,6 +1289,7 @@ async function saveSettings(settings) {
   syncPayload.aiSystemPrompt = normalizeAiSystemPrompt(syncPayload.aiSystemPrompt);
   syncPayload.aiInitialQuickPrompts = normalizeAiInitialQuickPrompts(syncPayload.aiInitialQuickPrompts);
   syncPayload.aiPresetPrompts = normalizeAiPresetPrompts(syncPayload.aiPresetPrompts);
+  syncPayload.defaultModel = normalizeDefaultModel(syncPayload.defaultModel);
 
   await chrome.storage.sync.set(syncPayload);
 }
@@ -1400,6 +1403,10 @@ function normalizeAiInitialQuickPrompts(value) {
   return value
     .map((item) => toString(item).trim())
     .slice(0, 4);
+}
+
+function normalizeDefaultModel(value) {
+  return toString(value).trim();
 }
 
 function normalizeFixedPropertyType(value) {

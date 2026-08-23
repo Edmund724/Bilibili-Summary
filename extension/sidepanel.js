@@ -119,8 +119,14 @@ function bindEvents() {
     }
   });
   els.modelSelect.addEventListener("change", () => {
-    if (els.modelSelect.value) {
-      localStorage.setItem(SELECTED_PROVIDER_KEY, els.modelSelect.value);
+    const providerId = els.modelSelect.value;
+    if (providerId) {
+      localStorage.setItem(SELECTED_PROVIDER_KEY, providerId);
+      aiPrefs.defaultModel = providerId;
+      chrome.storage.sync.set({ defaultModel: providerId }).catch(() => {});
+    } else {
+      aiPrefs.defaultModel = "";
+      chrome.storage.sync.set({ defaultModel: "" }).catch(() => {});
     }
     updateModelSelectWidth();
   });
@@ -149,7 +155,7 @@ function bindEvents() {
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (
       (areaName === "sync" &&
-        (changes.aiProviders || changes.aiSystemPrompt || changes.aiInitialQuickPrompts || changes.aiPresetPrompts)) ||
+        (changes.aiProviders || changes.aiSystemPrompt || changes.aiInitialQuickPrompts || changes.aiPresetPrompts || changes.defaultModel)) ||
       (areaName === "local" && changes.aiProviderKeys)
     ) {
       void refreshProvidersAndPrefsAfterExternalChange();
@@ -189,7 +195,8 @@ async function loadProvidersAndPrefs({ preferredProviderId = "" } = {}) {
     aiInitialQuickPrompts: normalizeInitialQuickPrompts(settingsResp?.settings?.aiInitialQuickPrompts),
     aiPresetPrompts: Array.isArray(settingsResp?.settings?.aiPresetPrompts)
       ? settingsResp.settings.aiPresetPrompts.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 12)
-      : []
+      : [],
+    defaultModel: String(settingsResp?.settings?.defaultModel || "").trim()
   };
   if (!aiPrefs.aiPresetPrompts.length) {
     aiPrefs.aiPresetPrompts = DEFAULT_PRESET_PROMPTS.slice();
@@ -214,7 +221,7 @@ function renderModelSelect(preferredProviderId = "") {
     })
     .join("");
 
-  const savedProviderId = String(preferredProviderId || localStorage.getItem(SELECTED_PROVIDER_KEY) || "").trim();
+  const savedProviderId = String(preferredProviderId || aiPrefs.defaultModel || localStorage.getItem(SELECTED_PROVIDER_KEY) || "").trim();
   const matchedProvider = providers.find((item) => item.id === savedProviderId) || providers[0];
   els.modelSelect.value = matchedProvider?.id || "";
   els.modelSelect.disabled = false;
