@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Bilibili Obsidian Clipper 设置</title>
+    <title>Bilibili-Summary｜一键总结B站视频 设置</title>
     <link rel="stylesheet" href="./options.css" />
   </head>
   <body>
     <main class="container">
-      <h1>Bilibili Obsidian Clipper</h1>
+      <h1>Bilibili-Summary｜一键总结B站视频</h1>
 
       <section class="quick-start">
         <div class="quick-start-head">
@@ -23,7 +23,7 @@
             </a>
             <span>·</span>
             <a
-              href="https://github.com/haixiong1997/Bilibili-Obsidian-Clipper"
+              href="https://github.com/Edmund724/Bilibili-Summary"
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -32,25 +32,14 @@
           </p>
         </div>
         <ol>
-          <li>在 Obsidian 社区插件市场安装并启用 <strong>Local REST API with MCP</strong>。</li>
+          <li>在本页下方的“AI 模型平台”区域，点击 <strong>+ 添加平台</strong>。</li>
           <li>
-            在插件设置中勾选 <strong>Enable Non-encrypted (HTTP) Server</strong>，地址通常为
-            <code>http://127.0.0.1:27123</code>。
+            填写平台名称、API Base URL、API Key 与模型名称。支持 OpenAI 兼容协议，例如
+            <code>OpenAI / DeepSeek / 智谱 / MiniMax / Moonshot / OpenRouter / Ollama</code> 等。
           </li>
-          <li>复制 API Key，回到本页填写“Local REST API 地址”和“Local REST API Key”。</li>
+          <li>填写完成后，点击页面底部“保存设置”即可使用 AI 总结与对话功能。</li>
         </ol>
       </section>
-
-      <label for="noteFolder">笔记目录（用于自动写入）</label>
-      <input id="noteFolder" type="text" placeholder="例如：Clippings/Bilibili" />
-      <p class="hint inline-hint">支持变量：{{created}} / {{upload_date}} / {{author}} / {{bvid}}，示例：Clippings/Bilibili/{{created}}</p>
-
-      <label for="obsidianApiBaseUrl">Local REST API 地址</label>
-      <input id="obsidianApiBaseUrl" type="text" placeholder="例如：http://127.0.0.1:27123" />
-
-      <label for="obsidianApiKey">Local REST API Key</label>
-      <input id="obsidianApiKey" type="password" placeholder="填入 Obsidian Local REST API 的 Key" />
-      <p class="hint inline-hint">填写完成后建议先点击下方“测试连接”。</p>
 
       <label for="tags">默认标签（逗号分隔）</label>
       <input id="tags" type="text" placeholder="例如：clippings,bilibili,subtitle" />
@@ -83,7 +72,7 @@
 
       <section class="field-group">
         <h2>笔记属性（Frontmatter）</h2>
-        <p class="hint">勾选需要写入到 Obsidian 属性区的字段。</p>
+        <p class="hint">勾选需要写入到笔记属性区（Frontmatter）的字段。</p>
         <div class="field-grid">
           <label class="mini-checkbox"><input type="checkbox" name="frontmatterField" value="title" /> title</label>
           <label class="mini-checkbox"><input type="checkbox" name="frontmatterField" value="url" /> url</label>
@@ -159,7 +148,6 @@
 
       <div class="action-row">
         <button id="saveBtn" type="button">保存设置</button>
-        <button id="testConnectionBtn" class="secondary-btn" type="button">测试连接</button>
       </div>
       <p id="status" class="status"></p>
 
@@ -169,11 +157,11 @@
           <p class="about-row">
             <span class="about-label">项目地址</span>
             <a
-              href="https://github.com/haixiong1997/Bilibili-Obsidian-Clipper"
+              href="https://github.com/Edmund724/Bilibili-Summary"
               target="_blank"
               rel="noopener noreferrer"
             >
-              github.com/haixiong1997/Bilibili-Obsidian-Clipper
+              github.com/Edmund724/Bilibili-Summary
             </a>
           </p>
           <p class="about-row">

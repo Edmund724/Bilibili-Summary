@@ -10,7 +10,6 @@ const el = {
   refreshBtn: document.getElementById("refreshBtn"),
   copyBtn: document.getElementById("copyBtn"),
   downloadBtn: document.getElementById("downloadBtn"),
-  sendBtn: document.getElementById("sendBtn"),
   readingViewBtn: document.getElementById("readingViewBtn"),
   aiBtn: document.getElementById("aiBtn"),
   settingsBtn: document.getElementById("settingsBtn")
@@ -76,16 +75,6 @@ function bindEvents() {
     a.remove();
     URL.revokeObjectURL(url);
     setMessage(`已下载 ${format.toUpperCase()}。`);
-  });
-
-  el.sendBtn.addEventListener("click", async () => {
-    setStatus("正在发送到 Obsidian...");
-    const resp = await sendToContent({ type: "popup-send-obsidian" });
-    if (!resp?.ok) {
-      setStatus(`发送失败：${resp?.error || "未知错误"}`, true);
-      setMessage(`发送失败：${resp?.error || "未知错误"}`);
-    }
-    render(resp?.payload || latestPayload);
   });
 
   el.readingViewBtn?.addEventListener("click", async () => {

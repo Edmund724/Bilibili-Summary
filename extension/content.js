@@ -1,7 +1,4 @@
 const DEFAULT_SETTINGS = {
-  noteFolder: "Clippings/Bilibili",
-  obsidianApiBaseUrl: "http://127.0.0.1:27123",
-  obsidianApiKey: "",
   tags: "clippings,bilibili",
   downloadFormat: "srt",
   includeDateInFilename: true,
@@ -327,7 +324,6 @@ const ids = {
   message: "boc-message",
   copyBtn: "boc-copy-btn",
   downloadBtn: "boc-download-btn",
-  sendBtn: "boc-send-btn",
   refreshBtn: "boc-refresh-btn",
   closeBtn: "boc-close-btn",
   settingsBtn: "boc-settings-btn",
@@ -540,15 +536,6 @@ function bindRuntimeEvents() {
       return true;
     }
 
-    if (message.type === "popup-send-obsidian") {
-      sendToObsidian()
-        .then(() => sendResponse({ ok: true, payload: getPopupPayload() }))
-        .catch((error) =>
-          sendResponse({ ok: false, error: getErrorMessage(error), payload: getPopupPayload() })
-        );
-      return true;
-    }
-
     if (message.type === "popup-trigger-reading-view") {
       state.playerAiQuickActionSuppressedUntil = Date.now() + 2500;
       removePlayerAiQuickActionButton();
@@ -721,7 +708,6 @@ function buildUiHtml() {
         <button id="${ids.refreshBtn}" type="button">刷新抓取</button>
         <button id="${ids.copyBtn}" type="button">复制完整 Markdown</button>
         <button id="${ids.downloadBtn}" type="button">下载字幕</button>
-        <button id="${ids.sendBtn}" type="button">发送到 Obsidian</button>
       </div>
       <p id="${ids.message}" class="boc-message"></p>
     </aside>
@@ -836,7 +822,6 @@ function bindUiEvents() {
   const select = byId(ids.subtitleSelect);
   const copyBtn = byId(ids.copyBtn);
   const downloadBtn = byId(ids.downloadBtn);
-  const sendBtn = byId(ids.sendBtn);
   const settingsBtn = byId(ids.settingsBtn);
   const readingView = byId(ids.readingView);
   const readingCloseBtn = byId(ids.readingCloseBtn);
@@ -857,7 +842,6 @@ function bindUiEvents() {
   select.addEventListener("change", onSubtitleChange);
   copyBtn.addEventListener("click", copyMarkdown);
   downloadBtn.addEventListener("click", downloadSubtitle);
-  sendBtn.addEventListener("click", sendToObsidian);
   settingsBtn.addEventListener("click", requestOpenOptions);
   readingCloseBtn.addEventListener("click", () => {
     if (isReaderMode()) {
@@ -1243,7 +1227,7 @@ async function refreshClip() {
       startReaderPlayerObserver();
       syncReadingViewPlayback(true);
     }
-    setStatus("抓取完成，可以复制、下载或发送到 Obsidian。");
+    setStatus("抓取完成，可以复制或下载字幕。");
   } catch (error) {
     if (isStaleRunError(error)) {
       return;
@@ -1591,122 +1575,9 @@ async function downloadSubtitle() {
   setMessage(`已下载：${filename}`);
 }
 
-async function sendToObsidian() {
-  state.settings = await getSettings();
-  await refreshDerivedContent();
-  if (!state.markdown) {
-    setMessage("没有可发送内容，请先刷新抓取。");
-    return;
-  }
-
-  const filename = buildNoteFilename(state);
-  const folder = resolveFolderTemplate(state.settings.noteFolder || "", state);
-  const filepath = folder ? `${folder}/${filename}` : filename;
-  const baseUrl = String(state.settings.obsidianApiBaseUrl || "").trim();
-  const apiKey = String(state.settings.obsidianApiKey || "").trim();
-  if (!baseUrl || !apiKey) {
-    setMessage("请先在设置中填写 Obsidian Local REST API 地址和 API Key。");
-    requestOpenOptions();
-    return;
-  }
-
-  try {
-    const exists = await checkObsidianNoteExists(baseUrl, apiKey, filepath);
-    if (exists) {
-      const shouldOverwrite = await confirmOverwriteNote(filepath);
-      if (!shouldOverwrite) {
-        setMessage("已取消保存，原笔记未被覆盖。");
-        return;
-      }
-    }
-    await writeNoteByLocalApi(baseUrl, apiKey, filepath, state.markdown);
-    setMessage(`已写入 Obsidian：${filepath}`);
-  } catch (error) {
-    if (isExtensionContextInvalidated(error)) {
-      setMessage("扩展刚刚更新，请刷新当前页面后重试。");
-      return;
-    }
-    setMessage(`写入失败：${getErrorMessage(error)}`);
-  }
-}
-
-async function checkObsidianNoteExists(baseUrl, apiKey, filepath) {
-  const resp = await sendRuntimeMessage({
-    type: "obsidian-note-exists",
-    baseUrl,
-    apiKey,
-    filepath
-  });
-  if (!resp?.ok) {
-    throw new Error(toReadableText(resp?.error, "Local API 检查失败"));
-  }
-  return Boolean(resp.exists);
-}
-
-async function writeNoteByLocalApi(baseUrl, apiKey, filepath, content) {
-  const resp = await sendRuntimeMessage({
-    type: "write-obsidian-note",
-    baseUrl,
-    apiKey,
-    filepath,
-    content
-  });
-  if (!resp?.ok) {
-    throw new Error(toReadableText(resp?.error, "Local API 写入失败"));
-  }
-}
-
-function confirmOverwriteNote(filepath) {
-  return new Promise((resolve) => {
-    const existing = document.querySelector(".boc-confirm-overlay");
-    if (existing) {
-      existing.remove();
-    }
-
-    const overlay = document.createElement("div");
-    overlay.className = "boc-confirm-overlay";
-    overlay.innerHTML = `
-      <div class="boc-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="bocConfirmTitle">
-        <div id="bocConfirmTitle" class="boc-confirm-title">该笔记已存在</div>
-        <div class="boc-confirm-body">继续会覆盖原内容：</div>
-        <div class="boc-confirm-path"></div>
-        <div class="boc-confirm-actions">
-          <button type="button" class="boc-confirm-cancel">取消</button>
-          <button type="button" class="boc-confirm-primary">覆盖</button>
-        </div>
-      </div>
-    `;
-    overlay.querySelector(".boc-confirm-path").textContent = String(filepath || "");
-
-    const cleanup = (value) => {
-      overlay.remove();
-      document.removeEventListener("keydown", onKeydown, true);
-      resolve(value);
-    };
-    const onKeydown = (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        cleanup(false);
-      }
-    };
-
-    overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) {
-        cleanup(false);
-      }
-    });
-    overlay.querySelector(".boc-confirm-cancel")?.addEventListener("click", () => cleanup(false));
-    overlay.querySelector(".boc-confirm-primary")?.addEventListener("click", () => cleanup(true));
-    document.addEventListener("keydown", onKeydown, true);
-    document.body.appendChild(overlay);
-    overlay.querySelector(".boc-confirm-primary")?.focus();
-  });
-}
-
 function setBusyState(disabled) {
   byId(ids.copyBtn).disabled = disabled;
   byId(ids.downloadBtn).disabled = disabled;
-  byId(ids.sendBtn).disabled = disabled;
   byId(ids.refreshBtn).disabled = disabled;
   byId(ids.settingsBtn).disabled = disabled;
   byId(ids.subtitleSelect).disabled = disabled || state.subtitles.length === 0;

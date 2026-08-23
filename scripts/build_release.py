@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 EXTENSION_DIR = ROOT / "extension"
 RELEASE_DIR = ROOT / "release"
 MANIFEST_PATH = EXTENSION_DIR / "manifest.json"
-PACKAGE_NAME = "bilibili-obsidian-clipper"
+PACKAGE_NAME = "bilibili-summary"
 
 
 def load_manifest():
@@ -64,14 +64,14 @@ def build_variant(manifest: dict, browser: str, version: str):
         background["service_worker"] = "background.js"
     elif browser == "firefox":
         gecko = variant_manifest.setdefault("browser_specific_settings", {}).setdefault("gecko", {})
-        gecko.setdefault("id", "bilibili-obsidian-clipper@github.com")
+        gecko.setdefault("id", "bilibili-summary@github.com")
         gecko.setdefault("strict_min_version", "109.0")
         permissions = variant_manifest.get("permissions", [])
         if isinstance(permissions, list):
             variant_manifest["permissions"] = [item for item in permissions if item != "sidePanel"]
         variant_manifest.pop("side_panel", None)
         variant_manifest["sidebar_action"] = {
-            "default_title": "Bilibili Obsidian Clipper",
+            "default_title": "Bilibili-Summary｜一键总结B站视频",
             "default_icon": {
                 "16": "icons/icon16.png",
                 "32": "icons/icon32.png",

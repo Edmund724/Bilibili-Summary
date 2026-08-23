@@ -31,8 +31,6 @@ const DEFAULT_AI_SYSTEM_PROMPT = [
 ].join("\n");
 
 const DEFAULT_SYNC_SETTINGS = {
-  noteFolder: "Clippings/Bilibili",
-  obsidianApiBaseUrl: "http://127.0.0.1:27123",
   tags: "clippings,bilibili",
   downloadFormat: "srt",
   includeDateInFilename: true,
@@ -66,9 +64,6 @@ const DEFAULT_SYNC_SETTINGS = {
   aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice()
 };
 
-const DEFAULT_LOCAL_SETTINGS = {
-  obsidianApiKey: ""
-};
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -983,139 +978,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === "write-obsidian-note") {
-    const baseUrl = String(message.baseUrl || "").trim();
-    const apiKey = String(message.apiKey || "").trim();
-    const filepath = String(message.filepath || "").trim();
-    const content = typeof message.content === "string" ? message.content : "";
-
-    if (!baseUrl || !apiKey || !filepath) {
-      sendResponse({ ok: false, error: "缺少 Local REST API 参数" });
-      return false;
-    }
-
-    const encodedPath = filepath
-      .split("/")
-      .filter(Boolean)
-      .map((segment) => encodeURIComponent(segment))
-      .join("/");
-    const endpoint = `${baseUrl.replace(/\/+$/g, "")}/vault/${encodedPath}`;
-
-    fetch(endpoint, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "text/markdown; charset=utf-8"
-      },
-      body: content
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          const bodyText = await response.text().catch(() => "");
-          const detail = bodyText ? ` ${bodyText.slice(0, 200)}` : "";
-          sendResponse({ ok: false, error: `HTTP ${response.status}.${detail}` });
-          return;
-        }
-        sendResponse({ ok: true });
-      })
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-
-    return true;
-  }
-
-  if (message.type === "obsidian-note-exists") {
-    const baseUrl = String(message.baseUrl || "").trim();
-    const apiKey = String(message.apiKey || "").trim();
-    const filepath = String(message.filepath || "").trim();
-
-    if (!baseUrl || !apiKey || !filepath) {
-      sendResponse({ ok: false, error: "缺少 Local REST API 参数" });
-      return false;
-    }
-
-    const encodedPath = filepath
-      .split("/")
-      .filter(Boolean)
-      .map((segment) => encodeURIComponent(segment))
-      .join("/");
-    const endpoint = `${baseUrl.replace(/\/+$/g, "")}/vault/${encodedPath}`;
-
-    fetch(endpoint, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "text/markdown, text/plain, application/json, */*"
-      },
-      cache: "no-store"
-    })
-      .then(async (response) => {
-        if (response.status === 404) {
-          sendResponse({ ok: true, exists: false });
-          return;
-        }
-        if (!response.ok) {
-          const bodyText = await response.text().catch(() => "");
-          const detail = bodyText ? ` ${bodyText.slice(0, 200)}` : "";
-          sendResponse({ ok: false, error: `HTTP ${response.status}.${detail}` });
-          return;
-        }
-        sendResponse({ ok: true, exists: true });
-      })
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-
-    return true;
-  }
-
-  if (message.type === "test-obsidian-connection") {
-    const baseUrl = String(message.baseUrl || "").trim();
-    const apiKey = String(message.apiKey || "").trim();
-
-    if (!baseUrl || !apiKey) {
-      sendResponse({ ok: false, error: "缺少 Local REST API 参数" });
-      return false;
-    }
-
-    const endpoint = `${baseUrl.replace(/\/+$/g, "")}/`;
-    fetch(endpoint, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json, text/plain, */*"
-      },
-      cache: "no-store"
-    })
-      .then(async (response) => {
-        const bodyText = await response.text().catch(() => "");
-        let data = null;
-        try {
-          data = bodyText ? JSON.parse(bodyText) : null;
-        } catch {
-          data = null;
-        }
-
-        if (!response.ok) {
-          const detail = bodyText ? ` ${bodyText.slice(0, 200)}` : "";
-          sendResponse({ ok: false, error: `HTTP ${response.status}.${detail}` });
-          return;
-        }
-
-        if (data && data.authenticated === false) {
-          sendResponse({ ok: false, error: "API Key 无效或未授权" });
-          return;
-        }
-
-        sendResponse({
-          ok: true,
-          service: typeof data?.service === "string" ? data.service : "Obsidian Local REST API"
-        });
-      })
-      .catch((error) => {
-        sendResponse({ ok: false, error: formatConnectionError(error) });
-      });
-
-    return true;
-  }
-
   if (message.type === "ai-providers-list") {
     loadAiProviders()
       .then((items) => sendResponse({ ok: true, providers: items }))
@@ -1291,29 +1153,11 @@ chrome.runtime.onConnect.addListener((port) => {
 
 async function initializeSettingsStorage() {
   const syncCurrent = await chrome.storage.sync.get(DEFAULT_SYNC_SETTINGS);
-  const localCurrent = await chrome.storage.local.get(DEFAULT_LOCAL_SETTINGS);
-
   await chrome.storage.sync.set({ ...DEFAULT_SYNC_SETTINGS, ...syncCurrent });
-  await chrome.storage.local.set({
-    obsidianApiKey: normalizeApiKey(localCurrent.obsidianApiKey)
-  });
-
-  const legacySyncApiKey = normalizeApiKey(syncCurrent.obsidianApiKey);
-  const localApiKey = normalizeApiKey(localCurrent.obsidianApiKey);
-  if (!localApiKey && legacySyncApiKey) {
-    await chrome.storage.local.set({ obsidianApiKey: legacySyncApiKey });
-  }
-
-  if ("obsidianApiKey" in syncCurrent) {
-    await chrome.storage.sync.remove("obsidianApiKey");
-  }
 }
 
 async function getMergedSettings() {
-  const [syncSettings, localSettings] = await Promise.all([
-    chrome.storage.sync.get(DEFAULT_SYNC_SETTINGS),
-    chrome.storage.local.get(DEFAULT_LOCAL_SETTINGS)
-  ]);
+  const syncSettings = await chrome.storage.sync.get(DEFAULT_SYNC_SETTINGS);
 
   const merged = { ...DEFAULT_SYNC_SETTINGS, ...syncSettings };
   merged.downloadFormat = normalizeDownloadFormat(merged.downloadFormat);
@@ -1332,25 +1176,13 @@ async function getMergedSettings() {
   merged.aiSystemPrompt = normalizeAiSystemPrompt(merged.aiSystemPrompt);
   merged.aiInitialQuickPrompts = normalizeAiInitialQuickPrompts(merged.aiInitialQuickPrompts);
   merged.aiPresetPrompts = normalizeAiPresetPrompts(merged.aiPresetPrompts);
-  let apiKey = normalizeApiKey(localSettings.obsidianApiKey);
-  const legacySyncApiKey = normalizeApiKey(syncSettings.obsidianApiKey);
 
-  if (!apiKey && legacySyncApiKey) {
-    apiKey = legacySyncApiKey;
-    await chrome.storage.local.set({ obsidianApiKey: apiKey });
-    await chrome.storage.sync.remove("obsidianApiKey");
-  }
-
-  return {
-    ...merged,
-    obsidianApiKey: apiKey
-  };
+  return merged;
 }
 
 async function saveSettings(settings) {
   const payload = settings && typeof settings === "object" ? settings : {};
   const syncPayload = { ...payload };
-  delete syncPayload.obsidianApiKey;
   syncPayload.downloadFormat = normalizeDownloadFormat(syncPayload.downloadFormat);
   syncPayload.includeHotCommentsInNote = normalizeIncludeHotCommentsInNote(syncPayload.includeHotCommentsInNote);
   syncPayload.enablePlayerAiQuickAction = normalizeEnablePlayerAiQuickAction(syncPayload.enablePlayerAiQuickAction);
@@ -1370,20 +1202,11 @@ async function saveSettings(settings) {
   syncPayload.aiInitialQuickPrompts = normalizeAiInitialQuickPrompts(syncPayload.aiInitialQuickPrompts);
   syncPayload.aiPresetPrompts = normalizeAiPresetPrompts(syncPayload.aiPresetPrompts);
 
-  await Promise.all([
-    chrome.storage.sync.set(syncPayload),
-    chrome.storage.local.set({
-      obsidianApiKey: normalizeApiKey(payload.obsidianApiKey)
-    })
-  ]);
+  await chrome.storage.sync.set(syncPayload);
 }
 
 function toString(value) {
   return typeof value === "string" ? value : "";
-}
-
-function normalizeApiKey(value) {
-  return toString(value).trim().replace(/^Bearer\s+/i, "").trim();
 }
 
 function normalizeNotePlaceholderSections(items) {
@@ -1508,17 +1331,6 @@ function normalizeFixedPropertyValue(type, value) {
 
 function isFixedPropertyRowEffectivelyEmpty(type, value) {
   return !toString(value).trim();
-}
-
-function formatConnectionError(error) {
-  const message = String(error?.message || "").trim();
-  if (!message) {
-    return "连接失败：未知错误";
-  }
-  if (message.includes("Failed to fetch")) {
-    return "无法连接 Local REST API。请检查地址、HTTP/HTTPS 模式和证书信任。";
-  }
-  return message;
 }
 
 // ===== AI 模型平台存储 =====
