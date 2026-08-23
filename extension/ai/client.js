@@ -35,8 +35,7 @@ export async function streamChat({ provider, context, userPrompt, port }) {
       body: JSON.stringify({
         model: provider.model,
         messages,
-        stream: true,
-        temperature: typeof provider.temperature === "number" ? provider.temperature : 0.7
+        stream: true
       })
     });
   } catch (e) {
