@@ -65,11 +65,15 @@ const MAX_NOTE_PLACEHOLDER_SECTIONS = 5;
 const AI_PRESETS = [
   { id: "openai_compat", name: "OpenAI 兼容", baseUrl: "https://api.openai.com/v1", requiresKey: true },
   { id: "deepseek",      name: "DeepSeek",    baseUrl: "https://api.deepseek.com/v1", requiresKey: true },
-  { id: "zhipu",         name: "智谱 GLM",    baseUrl: "https://open.bigmodel.cn/api/paas/v4", requiresKey: true },
-  { id: "minimax",       name: "MiniMax",     baseUrl: "https://api.minimaxi.com/v1", requiresKey: true },
+  { id: "qwen",          name: "Qwen",        baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", requiresKey: true },
+  { id: "zhipu",         name: "GLM",         baseUrl: "https://open.bigmodel.cn/api/paas/v4", requiresKey: true },
   { id: "moonshot",      name: "Kimi",        baseUrl: "https://api.kimi.com/coding/v1", requiresKey: true },
+  { id: "minimax",       name: "MiniMax",     baseUrl: "https://api.minimaxi.com/v1", requiresKey: true },
+  { id: "mimo",          name: "Mimo",        baseUrl: "https://api.mimo.ai/v1", requiresKey: true },
+  { id: "opencodego",    name: "Opencode Go", baseUrl: "https://api.doubao.com/v1", requiresKey: true },
   { id: "openrouter",    name: "OpenRouter",  baseUrl: "https://openrouter.ai/api/v1", requiresKey: true },
-  { id: "stepfun",       name: "阶跃星辰",    baseUrl: "https://api.stepfun.com/step_plan/v1", requiresKey: true },
+  { id: "stepfun",       name: "Stepfun",     baseUrl: "https://api.stepfun.com/step_plan/v1", requiresKey: true },
+  { id: "modelscope",    name: "ModelScope",  baseUrl: "https://api-inference.modelscope.cn/v1", requiresKey: true },
   { id: "ollama",        name: "Ollama (本地)", baseUrl: "http://localhost:11434/v1", requiresKey: false },
   { id: "custom",        name: "自定义",      baseUrl: "", requiresKey: true }
 ];
@@ -100,6 +104,14 @@ const elements = {
 };
 
 let savedAiPresetPrompts = [];
+
+const AI_PROVIDER_STATUS_SUCCESS_MIN_MS = 2000;
+
+function closeAllModelDropdowns() {
+  document.querySelectorAll(".ai-provider-model-dropdown").forEach((dropdown) => {
+    dropdown.hidden = true;
+  });
+}
 
 init();
 
@@ -940,7 +952,15 @@ function addAiProviderRow(item = {}) {
       model
     });
     if (resp?.ok) {
-      showAiProviderStatus(statusNode, "连接成功");
+      const providerId = row.dataset.providerId || "";
+      try {
+        await saveSettings();
+        const newRow = elements.aiProvidersList.querySelector(`.ai-provider-row[data-provider-id="${CSS.escape(providerId)}"]`);
+        const newStatusNode = newRow?.querySelector(".ai-provider-status");
+        showAiProviderStatus(newStatusNode, "连接成功");
+      } catch (error) {
+        showAiProviderStatus(statusNode, `连接成功，但保存失败：${error.message || "未知错误"}`, true);
+      }
     } else {
       showAiProviderStatus(statusNode, `失败：${resp?.error || "未知错误"}`, true);
     }
@@ -956,6 +976,13 @@ function addAiProviderRow(item = {}) {
 
     if (!baseUrl) {
       showAiProviderStatus(statusNode, "请先填写 baseUrl", true);
+      return;
+    }
+
+    const isAlreadyOpen = !dropdown.hidden;
+    closeAllModelDropdowns();
+
+    if (isAlreadyOpen) {
       return;
     }
 
@@ -993,6 +1020,10 @@ function addAiProviderRow(item = {}) {
           }
           dropdown.appendChild(li);
         });
+        const countLi = document.createElement("li");
+        countLi.className = "ai-provider-model-count";
+        countLi.textContent = `已加载 ${resp.models.length} 个模型`;
+        dropdown.appendChild(countLi);
       } else if (resp?.ok) {
         const li = document.createElement("li");
         li.className = "ai-provider-model-message";
@@ -1046,6 +1077,24 @@ function showAiProviderStatus(node, text, isError = false) {
   node.hidden = false;
   node.textContent = text;
   node.dataset.error = isError ? "true" : "false";
+
+  if (!isError && AI_PROVIDER_STATUS_SUCCESS_MIN_MS > 0) {
+    const row = node.closest(".ai-provider-row");
+    if (!row) return;
+
+    if (row._aiProviderStatusTimer) clearTimeout(row._aiProviderStatusTimer);
+
+    const inputs = row.querySelectorAll("input, button");
+    const previouslyDisabled = Array.from(inputs).map((el) => el.disabled);
+    inputs.forEach((el) => (el.disabled = true));
+
+    row._aiProviderStatusTimer = setTimeout(() => {
+      row._aiProviderStatusTimer = null;
+      inputs.forEach((el, index) => {
+        if (previouslyDisabled[index] !== undefined) el.disabled = previouslyDisabled[index];
+      });
+    }, AI_PROVIDER_STATUS_SUCCESS_MIN_MS);
+  }
 }
 
 function collectAiProviders() {

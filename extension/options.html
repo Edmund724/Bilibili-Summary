@@ -35,15 +35,17 @@
           <li>在本页上方的“AI 模型平台”区域，点击 <strong>+ 添加平台</strong>。</li>
           <li>
             填写平台名称、API Base URL、API Key 与模型名称。支持 OpenAI 兼容协议，例如
-            <code>OpenAI / DeepSeek / 智谱 / MiniMax / Moonshot / OpenRouter / Ollama</code> 等。
+            <code>OpenAI / DeepSeek / Qwen / GLM / Kimi / MiniMax / Mimo / Opencode Go / OpenRouter / Stepfun / ModelScope / Ollama</code> 等。
           </li>
-          <li>填写完成后，点击页面底部“保存设置”即可使用 AI 总结与对话功能。</li>
+          <li>
+            填写完成后，点击平台条目右侧的 <strong>测试</strong> 按钮验证配置；<strong>连接成功后会自动保存</strong>，无需再点击底部“保存设置”。若需手动保存全部设置，仍可使用底部按钮。
+          </li>
         </ol>
       </section>
 
       <section class="field-group">
         <h2>AI 模型平台</h2>
-        <p class="hint">支持 OpenAI 兼容协议（OpenAI / DeepSeek / 智谱 / MiniMax / Moonshot / OpenRouter / Ollama 等）。</p>
+        <p class="hint">支持 OpenAI 兼容协议（OpenAI / DeepSeek / Qwen / GLM / Kimi / MiniMax / Mimo / Opencode Go / OpenRouter / Stepfun / ModelScope / Ollama 等）。</p>
         <div id="aiProvidersList" class="ai-providers-list"></div>
         <p id="aiProvidersEmpty" class="ai-providers-empty">还没有配置平台，点击下方按钮添加。</p>
         <button id="addAiProviderBtn" class="add-property-btn" type="button">+ 添加平台</button>
