@@ -32,13 +32,50 @@
           </p>
         </div>
         <ol>
-          <li>在本页下方的“AI 模型平台”区域，点击 <strong>+ 添加平台</strong>。</li>
+          <li>在本页上方的“AI 模型平台”区域，点击 <strong>+ 添加平台</strong>。</li>
           <li>
             填写平台名称、API Base URL、API Key 与模型名称。支持 OpenAI 兼容协议，例如
             <code>OpenAI / DeepSeek / 智谱 / MiniMax / Moonshot / OpenRouter / Ollama</code> 等。
           </li>
           <li>填写完成后，点击页面底部“保存设置”即可使用 AI 总结与对话功能。</li>
         </ol>
+      </section>
+
+      <section class="field-group">
+        <h2>AI 模型平台</h2>
+        <p class="hint">支持 OpenAI 兼容协议（OpenAI / DeepSeek / 智谱 / MiniMax / Moonshot / OpenRouter / Ollama 等）。</p>
+        <div id="aiProvidersList" class="ai-providers-list"></div>
+        <p id="aiProvidersEmpty" class="ai-providers-empty">还没有配置平台，点击下方按钮添加。</p>
+        <button id="addAiProviderBtn" class="add-property-btn" type="button">+ 添加平台</button>
+      </section>
+
+      <section class="field-group field-group-tight-bottom player-ai-quick-action-settings">
+        <h2>AI 按钮</h2>
+        <label class="checkbox">
+          <input id="enablePlayerAiQuickAction" type="checkbox" />
+          在视频播放器显示 AI 按钮，点击按照预设提示词调用 AI 对话，提示词可为空
+        </label>
+        <textarea
+          id="playerAiQuickPrompt"
+          class="settings-textarea"
+          placeholder="例如：整理这期视频的内容，输出结构化总结。"
+        ></textarea>
+      </section>
+
+      <section class="field-group field-group-tight-bottom">
+        <h2>AI 对话 - 系统提示词</h2>
+        <textarea id="aiSystemPrompt" class="settings-textarea" placeholder="例如：回答尽量简洁；优先总结视频观点；必要时引用字幕原话。"></textarea>
+      </section>
+
+      <section class="field-group field-group-tight-bottom">
+        <h2>AI 对话 - 初始问题</h2>
+        <p class="hint">新视频没有历史对话时显示，最多 4 条，留空则不显示。</p>
+        <div class="quick-prompts-grid">
+          <input class="ai-initial-quick-prompt" type="text" placeholder="快捷问题 1" />
+          <input class="ai-initial-quick-prompt" type="text" placeholder="快捷问题 2" />
+          <input class="ai-initial-quick-prompt" type="text" placeholder="快捷问题 3" />
+          <input class="ai-initial-quick-prompt" type="text" placeholder="快捷问题 4" />
+        </div>
       </section>
 
       <label for="tags">默认标签（逗号分隔）</label>
@@ -108,80 +145,10 @@
         <button id="addNoteSectionBtn" class="add-property-btn" type="button">+ 添加段落</button>
       </section>
 
-      <section class="field-group">
-        <h2>AI 模型平台</h2>
-        <p class="hint">支持 OpenAI 兼容协议（OpenAI / DeepSeek / 智谱 / MiniMax / Moonshot / OpenRouter / Ollama 等）。</p>
-        <p class="hint">每个平台可单独设置 temperature，留空默认 0.7。</p>
-        <div id="aiProvidersList" class="ai-providers-list"></div>
-        <p id="aiProvidersEmpty" class="ai-providers-empty">还没有配置平台，点击下方按钮添加。</p>
-        <button id="addAiProviderBtn" class="add-property-btn" type="button">+ 添加平台</button>
-      </section>
-
-      <section class="field-group field-group-tight-bottom">
-        <h2>AI 对话 - 系统提示词</h2>
-        <textarea id="aiSystemPrompt" class="settings-textarea" placeholder="例如：回答尽量简洁；优先总结视频观点；必要时引用字幕原话。"></textarea>
-      </section>
-
-      <section class="field-group field-group-tight-bottom">
-        <h2>AI 对话 - 初始问题</h2>
-        <p class="hint">新视频没有历史对话时显示，最多 4 条，留空则不显示。</p>
-        <div class="quick-prompts-grid">
-          <input class="ai-initial-quick-prompt" type="text" placeholder="快捷问题 1" />
-          <input class="ai-initial-quick-prompt" type="text" placeholder="快捷问题 2" />
-          <input class="ai-initial-quick-prompt" type="text" placeholder="快捷问题 3" />
-          <input class="ai-initial-quick-prompt" type="text" placeholder="快捷问题 4" />
-        </div>
-      </section>
-
-      <section class="field-group field-group-tight-bottom player-ai-quick-action-settings">
-        <h2>AI 按钮</h2>
-        <label class="checkbox">
-          <input id="enablePlayerAiQuickAction" type="checkbox" />
-          在视频播放器显示 AI 按钮，点击按照预设提示词调用 AI 对话，提示词可为空
-        </label>
-        <textarea
-          id="playerAiQuickPrompt"
-          class="settings-textarea"
-          placeholder="例如：整理这期视频的内容，输出结构化总结。"
-        ></textarea>
-      </section>
-
       <div class="action-row">
         <button id="saveBtn" type="button">保存设置</button>
       </div>
       <p id="status" class="status"></p>
-
-      <section class="about">
-        <h2>关注作者</h2>
-        <div class="about-card">
-          <p class="about-row">
-            <span class="about-label">项目地址</span>
-            <a
-              href="https://github.com/Edmund724/Bilibili-Summary"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              github.com/Edmund724/Bilibili-Summary
-            </a>
-          </p>
-          <p class="about-row">
-            <span class="about-label">bilibili</span>
-            <a
-              href="https://space.bilibili.com/243917657?spm_id_from=333.1387.0.0"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              space.bilibili.com/243917657
-            </a>
-          </p>
-          <p class="about-row">
-            <span class="about-label">YouTube</span>
-            <a href="https://www.youtube.com/@chen-r2l" target="_blank" rel="noopener noreferrer">
-              youtube.com/@chen-r2l
-            </a>
-          </p>
-        </div>
-      </section>
     </main>
 
     <script src="./options.js"></script>

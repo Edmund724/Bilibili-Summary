@@ -1010,8 +1010,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const baseUrl = String(message.baseUrl || "").trim();
     const providerId = String(message.providerId || "").trim();
     const model = String(message.model || "").trim();
-    const temperatureRaw = String(message.temperature ?? "").trim();
-    const temperature = temperatureRaw === "" ? 0.7 : Number(temperatureRaw);
     if (!baseUrl) {
       sendResponse({ ok: false, error: "请填写 baseUrl" });
       return false;
@@ -1028,9 +1026,97 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const keys = await loadAiProviderKeys();
         return String(keys[providerId] || "").trim();
       })
-      .then((apiKey) => testAiConnection({ baseUrl, apiKey, model, temperature }))
+      .then((apiKey) => testAiConnection({ baseUrl, apiKey, model }))
       .then((resp) => sendResponse(resp))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === "ai-providers-models") {
+    try {
+      const baseUrl = String(message.baseUrl || "").trim();
+      const apiKey = String(message.apiKey || "").trim();
+      const providerId = String(message.providerId || "").trim();
+      if (!baseUrl) {
+        sendResponse({ ok: false, error: "请填写 baseUrl" });
+        return true;
+      }
+      const normalizedBaseUrl = baseUrl.replace(/\/+$/, "").replace(/\/v1$/i, "");
+      const headers = { Accept: "application/json" };
+      let timer = null;
+      let responded = false;
+
+      const respond = (payload) => {
+        try {
+          if (responded) {
+            console.warn("[ai-providers-models] duplicate respond ignored");
+            return;
+          }
+          responded = true;
+          if (timer) { clearTimeout(timer); timer = null; }
+          console.log("[ai-providers-models] responding", payload);
+          sendResponse(payload);
+        } catch (err) {
+          console.error("[ai-providers-models] sendResponse failed", err);
+        }
+      };
+
+      console.log("[ai-providers-models] fetching", normalizedBaseUrl, "providerId", providerId, "hasApiKey", Boolean(apiKey));
+
+      Promise.resolve()
+        .then(async () => {
+          if (apiKey) return apiKey;
+          if (!providerId) return "";
+          const keys = await loadAiProviderKeys();
+          return String(keys[providerId] || "").trim();
+        })
+        .then((resolvedKey) => {
+          if (resolvedKey) headers["Authorization"] = `Bearer ${resolvedKey}`;
+          const controller = new AbortController();
+          timer = setTimeout(() => controller.abort(), 15000);
+          console.log("[ai-providers-models] requesting", `${normalizedBaseUrl}/v1/models`);
+          return fetch(`${normalizedBaseUrl}/v1/models`, { headers, method: "GET", signal: controller.signal })
+            .then((resp) => {
+              console.log("[ai-providers-models] response status", resp.status, resp.statusText);
+              if (!resp.ok) {
+                return resp.text().then((text) => {
+                  throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`);
+                });
+              }
+              return resp.json().then((data) => ({ ok: true, data })).catch((err) => {
+                throw new Error(`无法解析模型列表：${err?.message || String(err)}`);
+              });
+            })
+            .then(({ data }) => {
+              const models = [];
+              if (Array.isArray(data?.data)) {
+                for (const item of data.data) {
+                  if (item?.id) models.push(String(item.id));
+                }
+              }
+              console.log("[ai-providers-models] parsed models", models.length);
+              return models;
+            });
+        })
+        .then((models) => respond({ ok: true, models }))
+        .catch((error) => {
+          console.error("[ai-providers-models] fetch error", error);
+          if (error?.name === "AbortError") {
+            respond({ ok: false, error: "请求超时，请检查 baseUrl 或稍后重试" });
+          } else {
+            respond({ ok: false, error: error?.message || String(error) });
+          }
+        });
+
+      // Safety net: ensure we always respond within the timeout window.
+      timer = setTimeout(() => {
+        console.warn("[ai-providers-models] safety net triggered");
+        respond({ ok: false, error: "请求超时，请检查 baseUrl 或稍后重试" });
+      }, 16000);
+    } catch (error) {
+      console.error("[ai-providers-models] handler error", error);
+      sendResponse({ ok: false, error: error?.message || String(error) });
+    }
     return true;
   }
 
@@ -1347,7 +1433,6 @@ function normalizeAiProvider(item) {
     name: String(item.name || "自定义").trim() || "自定义",
     baseUrl: String(item.baseUrl || "").trim().replace(/\/+$/, ""),
     model: String(item.model || "").trim(),
-    temperature: typeof item.temperature === "number" ? item.temperature : 0.7,
     requiresKey: item.requiresKey !== false,
     enabled: item.enabled !== false
   };
@@ -1522,8 +1607,7 @@ async function streamChat({ provider, context, userPrompt, history, port, signal
       body: JSON.stringify({
         model: provider.model,
         messages,
-        stream: true,
-        temperature: typeof provider.temperature === "number" ? provider.temperature : 0.7
+        stream: true
       })
     });
   } catch (e) {
@@ -1566,10 +1650,9 @@ async function streamChat({ provider, context, userPrompt, history, port, signal
   }
 }
 
-async function testAiConnection({ baseUrl, apiKey, model, temperature }) {
+async function testAiConnection({ baseUrl, apiKey, model }) {
   const normalizedBaseUrl = String(baseUrl || "").trim().replace(/\/+$/, "");
   const normalizedModel = String(model || "").trim();
-  const normalizedTemperature = typeof temperature === "number" && Number.isFinite(temperature) ? temperature : 0.7;
   if (!normalizedBaseUrl) {
     return { ok: false, error: "请填写 baseUrl" };
   }
@@ -1586,19 +1669,17 @@ async function testAiConnection({ baseUrl, apiKey, model, temperature }) {
     baseUrl: normalizedBaseUrl,
     apiKey,
     model: normalizedModel,
-    headers,
-    temperature: normalizedTemperature
+    headers
   });
 }
 
-async function probeAiChatCompletion({ baseUrl, apiKey, model, headers, temperature }) {
+async function probeAiChatCompletion({ baseUrl, apiKey, model, headers }) {
   const requestHeaders = headers || { Accept: "application/json" };
   if (apiKey && !requestHeaders.Authorization) {
     requestHeaders.Authorization = `Bearer ${apiKey}`;
   }
   requestHeaders["Content-Type"] = "application/json";
 
-  const normalizedTemperature = typeof temperature === "number" && Number.isFinite(temperature) ? temperature : 0.7;
   let response;
   try {
     response = await fetch(`${baseUrl}/chat/completions`, {
@@ -1607,7 +1688,6 @@ async function probeAiChatCompletion({ baseUrl, apiKey, model, headers, temperat
       body: JSON.stringify({
         model,
         stream: false,
-        temperature: normalizedTemperature,
         max_tokens: 1,
         messages: [{ role: "user", content: "ping" }]
       })
