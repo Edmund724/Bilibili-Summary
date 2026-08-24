@@ -6015,6 +6015,22 @@ function validateSubtitleByDuration(body, videoDuration) {
 }
 
 
+function normalizeSubtitleUrl(url) {
+  if (!url) {
+    return "";
+  }
+
+  if (url.startsWith("//")) {
+    return `https:${url}`;
+  }
+
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+
+  return `https://${url.replace(/^\/+/, "")}`;
+}
+
 function normalizeSubtitleUrlForCache(url) {
   const text = String(url || "").trim();
   if (!text) {
