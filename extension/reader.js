@@ -78,7 +78,7 @@ import {
 } from "./player-ai.js";
 import {
   refreshClip
-} from "./panel.js";
+} from "./subtitle-fetcher.js";
 
 
 export function getReaderContentMaxPx() {
