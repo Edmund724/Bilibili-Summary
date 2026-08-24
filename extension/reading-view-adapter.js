@@ -41,8 +41,6 @@ import {
   waitForVideoMetadata
 } from "./reader.js";
 
-export { ids };
-
 export {
   buildReaderStepperControl,
   bindReaderStepperControl,

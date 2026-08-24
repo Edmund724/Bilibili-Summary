@@ -14,8 +14,8 @@ import {
   isAiSubtitle
 } from "./formatters.js";
 import { DEFAULT_SETTINGS } from "./shared-defaults.js";
+import { ids } from "./reader.js";
 import {
-  ids,
   buildReaderStepperControl,
   bindReaderStepperControl,
   updateReaderPreferences,

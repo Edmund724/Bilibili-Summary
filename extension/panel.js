@@ -29,8 +29,8 @@ import {
   setMessage
 } from "./ui-renderer.js";
 
+import { ids } from "./reader.js";
 import {
-  ids,
   buildReaderStepperControl,
   bindReaderStepperControl,
   updateReaderPreferences,

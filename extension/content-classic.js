@@ -1971,8 +1971,6 @@ function isVisibleReaderControl(node) {
 }
 
 // === reading-view-adapter.js ===
-{ ids };
-
 {
   buildReaderStepperControl,
   bindReaderStepperControl,
