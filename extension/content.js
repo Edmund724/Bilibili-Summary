@@ -1,3 +1,61 @@
+// Safety net: if defaults.js hasn't loaded yet, provide minimal fallbacks
+// so that content.js can still initialize and set __BOC_CONTENT_SCRIPT_LOADED__.
+(function() {
+  try {
+    if (typeof DEFAULT_PLAYER_AI_QUICK_PROMPT === "undefined") {
+      globalThis.DEFAULT_PLAYER_AI_QUICK_PROMPT = "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。";
+    }
+    if (typeof formatLocalDate === "undefined") {
+      globalThis.formatLocalDate = function formatLocalDate(value = Date.now()) {
+        const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      };
+    }
+    if (typeof normalizeDownloadFormat === "undefined") {
+      globalThis.normalizeDownloadFormat = function normalizeDownloadFormat(value) {
+        return value === "txt" ? "txt" : "srt";
+      };
+    }
+    if (typeof normalizeReaderTheme === "undefined") {
+      globalThis.normalizeReaderTheme = function normalizeReaderTheme(value) {
+        return value === "dark" || value === "paper" ? value : "light";
+      };
+    }
+    if (typeof normalizeReaderFontScale === "undefined") {
+      globalThis.normalizeReaderFontScale = function normalizeReaderFontScale(value) {
+        return ["xs", "s", "m", "l", "xl"].includes(value) ? value : "m";
+      };
+    }
+    if (typeof normalizeReaderLetterSpacing === "undefined") {
+      globalThis.normalizeReaderLetterSpacing = function normalizeReaderLetterSpacing(value) {
+        return ["tighter", "tight", "normal", "relaxed", "loose"].includes(value) ? value : "normal";
+      };
+    }
+    if (typeof normalizeReaderLineHeight === "undefined") {
+      globalThis.normalizeReaderLineHeight = function normalizeReaderLineHeight(value) {
+        return ["compact", "tight", "normal", "relaxed", "loose"].includes(value) ? value : "tight";
+      };
+    }
+    if (typeof normalizeReaderContentWidth === "undefined") {
+      globalThis.normalizeReaderContentWidth = function normalizeReaderContentWidth(value) {
+        return ["compact", "narrow", "medium", "wide", "full"].includes(value) ? value : "medium";
+      };
+    }
+    if (typeof normalizeReaderChapterVisibility === "undefined") {
+      globalThis.normalizeReaderChapterVisibility = function normalizeReaderChapterVisibility(value) {
+        return value === "hide" || value === "auto" ? value : "show";
+      };
+    }
+    if (typeof normalizeReaderTranscriptVisible === "undefined") {
+      globalThis.normalizeReaderTranscriptVisible = function normalizeReaderTranscriptVisible(value) {
+        return value !== false;
+      };
+    }
+  } catch (e) {
+    // ignore safety net failures
+  }
+})();
+
 const DEFAULT_SETTINGS = {
   tags: "clippings,bilibili",
   downloadFormat: "srt",
@@ -1040,7 +1098,10 @@ async function refreshClip() {
     state.currentClipSignature = computeCurrentClipSignature();
     let resolvedPageIndex = pageIndex;
     if ((meta.pages || []).length > 1 && !hasPageParam) {
-      const pageIndexFromOid = pickPageIndexFromOid(meta.pages, oid);
+      const pageIndexFromOid = pickPageIndexFromOid(meta.pages, oid, {
+        aid: meta.aid,
+        defaultCid: meta.defaultCid
+      });
       if (pageIndexFromOid > 0) {
         resolvedPageIndex = pageIndexFromOid;
         logInfo("[BOC] resolved page index from oid", {
@@ -4508,7 +4569,7 @@ function pickCidFromPages(pages, pageIndex, fallbackCid = "") {
   throw new Error("没有找到当前分P的 CID。");
 }
 
-function pickPageIndexFromOid(pages, oid) {
+function pickPageIndexFromOid(pages, oid, options = {}) {
   const safeOid = String(oid || "").trim();
   if (!safeOid) {
     return 0;
@@ -4518,6 +4579,163 @@ function pickPageIndexFromOid(pages, oid) {
   const pageByCid = safePages.find((item) => String(item?.cid || "") === safeOid);
   if (pageByCid?.page) {
     return Number(pageByCid.page) || 0;
+  }
+
+  // watchlater 等页面的 oid 通常是 aid 而非 cid；
+  // 若 oid 与视频 aid 一致，尝试从页面状态读取当前播放分P。
+  const safeAid = String(options?.aid || "").trim();
+  if (safeAid && safeOid === safeAid) {
+    return readCurrentPageFromPageState(safePages, options?.defaultCid);
+  }
+
+  return 0;
+}
+
+function readCurrentPageFromPageState(pages, fallbackCid = "") {
+  const safePages = Array.isArray(pages) ? pages : [];
+
+  // 1. 优先使用 URL 中的 ?p= 参数
+  try {
+    const pageFromUrl = Number(new URL(location.href).searchParams.get("p") || "0");
+    if (Number.isFinite(pageFromUrl) && pageFromUrl > 0) {
+      return pageFromUrl;
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2. 其次尝试页面全局状态（watchlater 等页面通常携带播放器状态）
+  try {
+    const rootState = window?.__INITIAL_STATE__ || {};
+    const playerState = rootState.player || window?.__PLAYER_STATE__ || window?.__BILI_PLAYER__;
+    if (playerState) {
+      const candidates = [
+        playerState.page,
+        playerState.pageIndex,
+        playerState.currentPage,
+        playerState.data?.page,
+        playerState.data?.pageIndex
+      ];
+      for (const value of candidates) {
+        const pageFromState = Number(value || "0");
+        if (Number.isFinite(pageFromState) && pageFromState > 0) {
+          return pageFromState;
+        }
+      }
+    }
+
+    const videoData = rootState.videoData || rootState.playletInfo;
+    if (videoData) {
+      const pageFromVideoData = Number(
+        videoData.page || videoData.pageIndex || videoData.currentPage || videoData.data?.page || "0"
+      );
+      if (Number.isFinite(pageFromVideoData) && pageFromVideoData > 0) {
+        return pageFromVideoData;
+      }
+      const cidFromVideoData = String(videoData.cid || videoData.data?.cid || "");
+      if (cidFromVideoData) {
+        const matched = safePages.find((item) => String(item?.cid || "") === cidFromVideoData);
+        if (matched?.page) {
+          return Number(matched.page) || 0;
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3. 从播放器 DOM / video currentSrc / iframe src 读取当前分P
+  const pageFromDom = readPageFromPlayerDom(safePages);
+  if (Number.isFinite(pageFromDom) && pageFromDom > 0) {
+    return pageFromDom;
+  }
+
+  // 4. 最后按 defaultCid / 首页索引兜底
+  if (fallbackCid) {
+    const pageByCid = safePages.find((item) => String(item?.cid || "") === String(fallbackCid));
+    if (pageByCid?.page) {
+      return Number(pageByCid.page) || 1;
+    }
+  }
+
+  return safePages.length > 0 ? 1 : 0;
+}
+
+function readPageFromPlayerDom(pages) {
+  const safePages = Array.isArray(pages) ? pages : [];
+
+  // 3a. 从 video currentSrc / src 提取 cid / page
+  try {
+    const video = getRuntimeVideoElement();
+    if (video) {
+      const src = String(video.currentSrc || video.src || "").trim();
+      if (src) {
+        const cidMatch = src.match(/[?&]cid=(\d+)/i);
+        if (cidMatch) {
+          const matched = safePages.find((item) => String(item?.cid || "") === cidMatch[1]);
+          if (matched?.page) {
+            return Number(matched.page) || 0;
+          }
+        }
+        const pageMatch = src.match(/[?&]page=(\d+)/i);
+        if (pageMatch) {
+          const page = Number(pageMatch[1]);
+          if (Number.isFinite(page) && page > 0) {
+            return page;
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3b. 从播放器 iframe src 提取 page / cid
+  try {
+    const iframe =
+      document.querySelector(
+        "#bilibili-player iframe, .bpx-player-container iframe, iframe[src*='player.bilibili.com']"
+      ) ||
+      document.querySelector("iframe[src*='bilibili.com/player']");
+    if (iframe?.src) {
+      const pageMatch = iframe.src.match(/[?&]page=(\d+)/i);
+      if (pageMatch) {
+        const page = Number(pageMatch[1]);
+        if (Number.isFinite(page) && page > 0) {
+          return page;
+        }
+      }
+      const cidMatch = iframe.src.match(/[?&]cid=(\d+)/i);
+      if (cidMatch) {
+        const matched = safePages.find((item) => String(item?.cid || "") === cidMatch[1]);
+        if (matched?.page) {
+          return Number(matched.page) || 0;
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3c. 从播放器控制栏/DOM 文本中推断当前分P
+  try {
+    const playerRoot =
+      document.querySelector(".bpx-player-control-wrap") ||
+      document.querySelector("#bilibili-player .bpx-player-control-wrap") ||
+      document.querySelector(".player-wrap");
+    if (playerRoot) {
+      const text = playerRoot.textContent || "";
+      // 匹配类似 "P2"、"第2集"、"第02话" 等文本
+      const pageMatch = text.match(/(?:^|\s|第)\s*(\d+)\s*(?:集|话|P|part)/i);
+      if (pageMatch) {
+        const page = Number(pageMatch[1]);
+        if (Number.isFinite(page) && page > 0) {
+          return page;
+        }
+      }
+    }
+  } catch {
+    // ignore
   }
 
   return 0;

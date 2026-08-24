@@ -335,22 +335,39 @@ async function ensureContentScriptReady(tabId) {
     }
   }
 
-  const reinjectedVersion = await probeContentScriptVersion(tabId);
-  if (reinjectedVersion !== EXPECTED_CONTENT_SCRIPT_VERSION) {
-    throw new Error("扩展刚更新，请刷新当前页面后重试。");
+  // content.js can take a moment to finish executing; probe a few times.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (attempt > 0) {
+      await sleep(150);
+    }
+    const reinjectedVersion = await probeContentScriptVersion(tabId);
+    if (reinjectedVersion === EXPECTED_CONTENT_SCRIPT_VERSION) {
+      return;
+    }
   }
+
+  throw new Error("扩展刚更新，请刷新当前页面后重试。");
 }
 
 async function probeContentScriptVersion(tabId) {
-  try {
-    const probe = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => globalThis.__BOC_CONTENT_SCRIPT_LOADED__ || ""
-    });
-    return String(probe?.[0]?.result || "");
-  } catch {
-    return "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const probe = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => globalThis.__BOC_CONTENT_SCRIPT_LOADED__ || ""
+      });
+      const version = String(probe?.[0]?.result || "");
+      if (version) {
+        return version;
+      }
+    } catch {
+      // ignore probe failures
+    }
+    if (attempt < 2) {
+      await sleep(100);
+    }
   }
+  return "";
 }
 
 async function sendMessageToTab(tabId, message) {

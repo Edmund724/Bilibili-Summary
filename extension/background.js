@@ -403,9 +403,14 @@ async function ensureReaderContentReady(tabId) {
   }
 
   await injectReaderContent(tabId);
-  const reinjectedVersion = await probeContentScriptVersion(tabId);
-  if (reinjectedVersion === EXPECTED_CONTENT_SCRIPT_VERSION) {
-    return;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (attempt > 0) {
+      await sleep(150);
+    }
+    const reinjectedVersion = await probeContentScriptVersion(tabId);
+    if (reinjectedVersion === EXPECTED_CONTENT_SCRIPT_VERSION) {
+      return;
+    }
   }
 
   if (loadedVersion && loadedVersion !== EXPECTED_CONTENT_SCRIPT_VERSION) {
@@ -416,9 +421,14 @@ async function ensureReaderContentReady(tabId) {
     }
     await sleep(120);
     await injectReaderContent(tabId);
-    const reloadedVersion = await probeContentScriptVersion(tabId);
-    if (reloadedVersion === EXPECTED_CONTENT_SCRIPT_VERSION) {
-      return;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (attempt > 0) {
+        await sleep(150);
+      }
+      const reloadedVersion = await probeContentScriptVersion(tabId);
+      if (reloadedVersion === EXPECTED_CONTENT_SCRIPT_VERSION) {
+        return;
+      }
     }
   }
 
@@ -430,15 +440,24 @@ async function sleep(ms) {
 }
 
 async function probeContentScriptVersion(tabId) {
-  try {
-    const probe = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => globalThis.__BOC_CONTENT_SCRIPT_LOADED__ || ""
-    });
-    return String(probe?.[0]?.result || "");
-  } catch {
-    return "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const probe = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => globalThis.__BOC_CONTENT_SCRIPT_LOADED__ || ""
+      });
+      const version = String(probe?.[0]?.result || "");
+      if (version) {
+        return version;
+      }
+    } catch {
+      // ignore probe failures
+    }
+    if (attempt < 2) {
+      await sleep(100);
+    }
   }
+  return "";
 }
 
 async function injectReaderContent(tabId) {
