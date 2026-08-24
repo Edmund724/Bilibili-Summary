@@ -6031,6 +6031,27 @@ function normalizeSubtitleUrl(url) {
   return `https://${url.replace(/^\/+/, "")}`;
 }
 
+function buildSubtitleSourceKey(subtitleId, subtitleUrl, lang) {
+  const id = String(subtitleId || "").trim();
+  if (id) {
+    return `id_${id}`;
+  }
+
+  const normalizedUrl = normalizeSubtitleUrlForCache(subtitleUrl);
+  if (normalizedUrl) {
+    return `url_${normalizedUrl}`;
+  }
+
+  return `lang_${String(lang || "").trim().toLowerCase() || "unknown"}`;
+}
+
+function sanitizeFolderTemplateValue(value) {
+  return String(value || "")
+    .replace(/[\/\\:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function normalizeSubtitleUrlForCache(url) {
   const text = String(url || "").trim();
   if (!text) {
