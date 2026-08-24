@@ -986,6 +986,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "get-ai-provider-key") {
+    const providerId = String(message.providerId || "").trim();
+    if (!providerId) {
+      sendResponse({ ok: false, error: "缺少 providerId" });
+      return false;
+    }
+    loadAiProviderKeys()
+      .then((keys) => {
+        const apiKey = String(keys[providerId] || "").trim();
+        sendResponse({ ok: true, apiKey });
+      })
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
   if (message.type === "ai-providers-save") {
     saveAiProviders(message.providers || [])
       .then((items) => sendResponse({ ok: true, providers: items }))

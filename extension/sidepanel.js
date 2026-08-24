@@ -50,6 +50,7 @@ let providers = [];
 let activePort = null;
 let activeAssistantNode = null;
 let activeUserPrompt = "";
+let thinkingNode = null;
 let chatHistory = [];
 let suggestionsNode = null;
 let aiPrefs = { ...DEFAULT_AI_PREFS };
@@ -73,6 +74,22 @@ init().catch((err) => {
 });
 
 async function init() {
+  // Chrome 114+：让 Side Panel 不随标签页关闭而销毁，切换网站时保持对话
+  try {
+    await chrome.sidePanel.setPanelBehavior({ panelBehavior: "separate" });
+  } catch {}
+
+  // 创建 Offscreen Document，把 SSE 流式请求移到隐藏页面，避免 Side Panel 被冻结
+  try {
+    await chrome.offscreen.createDocument({
+      url: chrome.runtime.getURL("offscreen.html"),
+      reasons: ["DOM_SCRAPING"],
+      justification: "Run AI stream fetch in background to avoid Side Panel freeze when tab is hidden."
+    });
+  } catch (e) {
+    // 已经创建过或浏览器不支持时静默降级
+  }
+
   bindEvents();
   await loadProvidersAndPrefs();
   await loadSavedConversations();
@@ -402,6 +419,12 @@ async function loadContextState({ forceRefresh = false, silent = false } = {}) {
     return true;
   }
 
+  if (activePort || activeUserPrompt) {
+    renderHistoryList();
+    updateContextChip();
+    return true;
+  }
+
   const contextChanged = applyContextPayload(resp.payload);
   renderHistoryList();
   if (contextChanged) {
@@ -420,7 +443,7 @@ function applyContextPayload(payload) {
   currentContextKey = nextKey;
   updateContextChip();
 
-  if (contextChanged) {
+  if (contextChanged && !activePort && !activeUserPrompt) {
     restartChat({ keepContext: true });
   } else {
     renderSuggestions();
@@ -1466,13 +1489,6 @@ async function sendMessage() {
     currentConversationMeta = null;
   }
 
-  if (activePort) {
-    try {
-      activePort.disconnect();
-    } catch {}
-    activePort = null;
-  }
-
   suggestionsNode?.remove();
   suggestionsNode = null;
   removeCenteredState();
@@ -1486,21 +1502,17 @@ async function sendMessage() {
   startStreamSlowNoticeTimer();
   streamFirstTokenReceived = false;
 
-  activePort = chrome.runtime.connect({ name: "sidepanel-chat" });
-  let thinkingNode = null;
-  activePort.onMessage.addListener((msg) => {
-    if (!msg) {
-      return;
-    }
+  const port = chrome.runtime.connect({ name: "offscreen-chat" });
+  activePort = port;
+
+  port.onMessage.addListener((msg) => {
+    if (!msg) return;
     if (msg.type === "reasoning") {
       handleFirstStreamToken();
-      if (!thinkingNode) {
-        thinkingNode = createThinkingNode(activeAssistantNode);
-      }
+      if (!thinkingNode) thinkingNode = createThinkingNode(activeAssistantNode);
       appendThinkingText(thinkingNode, msg.data);
     } else if (msg.type === "token") {
       handleFirstStreamToken();
-      // 首个正文 token 到来时，appendToken 的 innerHTML 重绘会自然移除思考块
       thinkingNode = null;
       appendToken(activeAssistantNode, msg.data);
     } else if (msg.type === "done") {
@@ -1509,20 +1521,24 @@ async function sendMessage() {
       handleAssistantStopped(activeAssistantNode, msg.reason || "已停止生成");
     } else if (msg.type === "error") {
       showAssistantError(activeAssistantNode, msg.error || "未知错误");
+    } else if (msg.type === "notice") {
+      showConversationContextNotice(msg.data, 4000);
     }
   });
-  activePort.onDisconnect.addListener(() => {
+
+  port.onDisconnect.addListener(() => {
+    activePort = null;
     clearStreamRuntimeState();
     setStreamingUiState(false);
-    activePort = null;
   });
 
-  activePort.postMessage({
+  port.postMessage({
     action: "chat",
     providerId,
     context: {
       ...contextData,
-      aiSystemPrompt: aiPrefs.aiSystemPrompt
+      aiSystemPrompt: aiPrefs.aiSystemPrompt,
+      chatHistory
     },
     prompt: text,
     history: chatHistory
@@ -1613,9 +1629,7 @@ function finalizeAssistant(node) {
     void persistCurrentConversation();
   }
   if (activePort) {
-    try {
-      activePort.disconnect();
-    } catch {}
+    try { activePort.disconnect(); } catch {}
     activePort = null;
   }
   setStreamingUiState(false);
@@ -1635,9 +1649,7 @@ function showAssistantError(node, error) {
   node.appendChild(err);
   activeUserPrompt = "";
   if (activePort) {
-    try {
-      activePort.disconnect();
-    } catch {}
+    try { activePort.disconnect(); } catch {}
     activePort = null;
   }
   setStreamingUiState(false);
@@ -1672,9 +1684,7 @@ function handleAssistantStopped(node, reason) {
     activeUserPrompt = "";
   }
   if (activePort) {
-    try {
-      activePort.disconnect();
-    } catch {}
+    try { activePort.disconnect(); } catch {}
     activePort = null;
   }
   setStreamingUiState(false);
@@ -1693,9 +1703,8 @@ function stopActiveStream() {
   try {
     activePort.postMessage({ action: "stop" });
   } catch {
-    try {
-      activePort.disconnect();
-    } catch {}
+    try { activePort.disconnect(); } catch {}
+    activePort = null;
   }
 }
 
@@ -2187,14 +2196,13 @@ function formatSecondsAsTimestamp(seconds) {
 function restartChat({ keepContext = false } = {}) {
   clearStreamRuntimeState();
   if (activePort) {
-    try {
-      activePort.disconnect();
-    } catch {}
+    try { activePort.disconnect(); } catch {}
     activePort = null;
   }
 
   activeAssistantNode = null;
   activeUserPrompt = "";
+  thinkingNode = null;
   chatHistory = [];
   currentConversationId = "";
   currentConversationMeta = null;
@@ -2432,9 +2440,18 @@ async function getActiveTab() {
   return tab || null;
 }
 
-function sendRuntimeMessage(message) {
+function sendRuntimeMessage(message, { timeoutMs = 15000 } = {}) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("消息响应超时，请检查扩展是否正常运行"));
+    }, timeoutMs);
     chrome.runtime.sendMessage(message, (resp) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
         return;
