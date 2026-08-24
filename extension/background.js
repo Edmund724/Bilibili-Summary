@@ -29,6 +29,19 @@ import {
   isSupportedBilibiliPage,
   sleep
 } from "./shared-defaults.js";
+import {
+  normalizeChapters,
+  subtitlePriority,
+  formatCompactTimestamp,
+  mapSubtitleTracks,
+  normalizeSubtitleUrl,
+  buildSubtitleInfoRequests,
+  normalizeSubtitleUrlForCache,
+  pickPreferredSubtitle as pickPreferredSubtitleTrack,
+  mapChaptersFromPlayerData,
+  normalizeChapterTime,
+  normalizeSubtitleTracks
+} from "./formatters.js";
 
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 
@@ -736,172 +749,6 @@ function pickPageForAiContext(pages, ref) {
   if (byPage) {
     return byPage;
   }
-
-  return safePages[0] || null;
-}
-
-function buildSubtitleInfoRequests({ bvid, cid, aid }) {
-  const safeBvid = encodeURIComponent(String(bvid || ""));
-  const safeCid = encodeURIComponent(String(cid || ""));
-  const safeAid = encodeURIComponent(String(aid || ""));
-  const requests = [];
-
-  if (aid) {
-    requests.push({
-      source: "player-wbi-v2",
-      url:
-        "https://api.bilibili.com/x/player/wbi/v2" +
-        `?aid=${safeAid}` +
-        `&cid=${safeCid}` +
-        (bvid ? `&bvid=${safeBvid}` : "")
-    });
-  }
-
-  requests.push({
-    source: "player-v2",
-    url:
-      "https://api.bilibili.com/x/player/v2" +
-      (bvid ? `?bvid=${safeBvid}` : "?") +
-      `${bvid ? "&" : ""}cid=${safeCid}` +
-      (aid ? `&aid=${safeAid}` : "")
-  });
-
-  return requests;
-}
-
-function mapSubtitleTracks(subtitles, source = "unknown") {
-  return (subtitles || []).map((item) => ({
-    id: item?.id === undefined || item?.id === null ? "" : String(item.id),
-    lan: item?.lan || "",
-    lanDoc: item?.lan_doc || "",
-    subtitleUrl: normalizeSubtitleUrl(item?.subtitle_url || ""),
-    source
-  }));
-}
-
-function normalizeSubtitleUrl(url) {
-  const text = String(url || "").trim();
-  if (!text) {
-    return "";
-  }
-  if (text.startsWith("//")) {
-    return `https:${text}`;
-  }
-  return text;
-}
-
-function mapChaptersFromPlayerData(data) {
-  const raw = Array.isArray(data?.view_points) ? data.view_points : [];
-  return normalizeChapters(
-    raw.map((item) => ({
-      title: String(item?.content || item?.title || item?.label || "").trim(),
-      from: normalizeChapterTime(item?.from ?? item?.start ?? item?.start_time),
-      to: normalizeChapterTime(item?.to ?? item?.end ?? item?.end_time)
-    }))
-  );
-}
-
-function normalizeChapterTime(value) {
-  if (value === undefined || value === null || value === "") {
-    return 0;
-  }
-  const num = Number(value);
-  if (!Number.isFinite(num) || num < 0) {
-    return 0;
-  }
-  return num > 60 * 60 * 24 ? num / 1000 : num;
-}
-
-function normalizeChapters(chapters) {
-  const normalized = (chapters || [])
-    .map((item) => ({
-      title: String(item?.title || "").trim(),
-      from: Number(item?.from || 0) || 0,
-      to: Number(item?.to || 0) || 0
-    }))
-    .filter((item) => item.title && item.from >= 0)
-    .sort((a, b) => a.from - b.from);
-
-  const unique = [];
-  const seen = new Set();
-  normalized.forEach((item) => {
-    const key = `${Math.floor(item.from * 10)}|${item.title.toLowerCase()}`;
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    unique.push(item);
-  });
-  return unique;
-}
-
-function normalizeSubtitleTracks(subtitles) {
-  return [...(subtitles || [])].sort((a, b) => {
-    const priorityGap = subtitlePriority(a) - subtitlePriority(b);
-    if (priorityGap !== 0) {
-      return priorityGap;
-    }
-    return String(a.subtitleUrl || "").localeCompare(String(b.subtitleUrl || ""));
-  });
-}
-
-function subtitlePriority(item) {
-  const lan = String(item?.lan || "").toLowerCase();
-  const label = String(item?.lanDoc || "").toLowerCase();
-  if (lan === "zh-cn" || lan === "zh-hans") return 0;
-  if (lan === "zh") return 1;
-  if (lan.includes("zh")) return 2;
-  if (label.includes("中文")) return 3;
-  if (lan === "en" || lan === "en-us" || lan === "en-gb") return 10;
-  if (lan.includes("en")) return 11;
-  if (label.includes("英文") || label.includes("英语") || label.includes("english")) return 12;
-  return 50;
-}
-
-function normalizeSubtitleUrlForCache(url) {
-  const text = String(url || "").trim();
-  if (!text) {
-    return "";
-  }
-  try {
-    const parsed = new URL(text);
-    const path = parsed.pathname.replace(/[^\w/.-]+/g, "_");
-    return `${parsed.hostname}${path}`;
-  } catch {
-    return text.replace(/[^\w/.-]+/g, "_");
-  }
-}
-
-function pickPreferredSubtitleTrack(subtitles, { previousId = "", previousUrl = "", previousLang = "" } = {}) {
-  const tracks = subtitles || [];
-  if (!tracks.length) {
-    return null;
-  }
-
-  if (previousId) {
-    const byId = tracks.find((item) => String(item.id || "") === String(previousId));
-    if (byId) {
-      return byId;
-    }
-  }
-
-  const normalizedUrl = normalizeSubtitleUrlForCache(previousUrl);
-  if (normalizedUrl) {
-    const byUrl = tracks.find((item) => normalizeSubtitleUrlForCache(item.subtitleUrl) === normalizedUrl);
-    if (byUrl) {
-      return byUrl;
-    }
-  }
-
-  const normalizedLang = String(previousLang || "").trim().toLowerCase();
-  if (normalizedLang) {
-    const byLang = tracks.find((item) => String(item.lanDoc || item.lan || "").trim().toLowerCase() === normalizedLang);
-    if (byLang) {
-      return byLang;
-    }
-  }
-
-  return tracks[0];
 }
 
 async function fetchBiliSubtitleBundle({ bvid, cid, aid }) {
@@ -950,18 +797,6 @@ function shouldShowHoursInAiNote(meta, body) {
   const chapterMaxTo = (meta?.chapters || []).reduce((max, item) => Math.max(max, Number(item?.from || 0) || 0, Number(item?.to || 0) || 0), 0);
   const duration = Number(meta?.videoDuration || 0) || 0;
   return Math.max(subtitleMaxTo, chapterMaxTo, duration) >= 3600;
-}
-
-function formatCompactTimestamp(seconds, withHours) {
-  const safe = Math.max(0, Math.floor(Number(seconds) || 0));
-  const hour = Math.floor(safe / 3600);
-  const minute = Math.floor((safe % 3600) / 60);
-  const second = safe % 60;
-  if (withHours) {
-    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
-  }
-  const totalMinutes = Math.floor(safe / 60);
-  return `${String(totalMinutes).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
 }
 
 function buildAiSubtitleLine(item, includeTimestampInBody, withHours) {

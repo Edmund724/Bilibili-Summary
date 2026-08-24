@@ -148,6 +148,8 @@ npm run build:content-classic
 - 自动内联依赖并移除 `import` / `export` 语法
 - 输出为兼容 `chrome.scripting.executeScript` 的经典脚本
 
+> `extension/content-classic.js` 是生成产物，已加入 `.gitignore`，请勿手动编辑。
+
 `extension/content-classic.js` 是生成文件，不要手动编辑。
 
 ## 使用方式

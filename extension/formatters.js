@@ -1039,7 +1039,7 @@ export async function fetchJsonInBackground(url) {
 
 
 export function getCurrentAid() {
-  let aid = Number(state.aid) || 0;
+  let aid = Number(state.clip.aid) || 0;
   if (!aid && typeof window !== "undefined") {
     try {
       aid = Number(window?.__INITIAL_STATE__?.aid) || 0;

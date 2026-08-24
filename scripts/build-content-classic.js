@@ -41,7 +41,7 @@ for (const entry of entries) {
   walk(entry);
 }
 
-const declared = new Set();
+const duplicateDeclared = new Set();
 
 function stripExports(code) {
   return code.replace(/^export /gm, "");
@@ -51,162 +51,43 @@ function stripImports(code) {
   return code.replace(/import\s+[\s\S]*?from\s+['"][^'"]+['"];?/g, "");
 }
 
-function isDeclarationLine(line) {
-  return /^\s*(?:const|let|var|function|class)\s+[A-Za-z_$]/.test(line);
-}
-
-function scanBraceDepth(lines, startIdx) {
-  let depth = 0;
-  for (let i = startIdx; i < lines.length; i++) {
-    const line = lines[i];
-    let inStr = false, strCh = "";
-    let inLineComment = false, inBlockComment = false;
-    for (let k = 0; k < line.length; k++) {
-      const ch = line[k];
-      if (inLineComment) { if (ch === "\n") inLineComment = false; continue; }
-      if (inBlockComment) { if (ch === "*" && line[k + 1] === "/") { inBlockComment = false; k++; } continue; }
-      if (inStr) { if (ch === "\\") k++; else if (ch === strCh) inStr = false; continue; }
-      if (ch === "/" && line[k + 1] === "/") { inLineComment = true; k++; continue; }
-      if (ch === "/" && line[k + 1] === "*") { inBlockComment = true; k++; continue; }
-      if (ch === '"' || ch === "'" || ch === "`") { inStr = true; strCh = ch; continue; }
+function removeFunction(source, name) {
+  const regex = new RegExp(`^function\\s+${name}\\s*\\(`, "gm");
+  let match;
+  while ((match = regex.exec(source)) !== null) {
+    const startIdx = match.index;
+    const braceIdx = source.indexOf("{", startIdx);
+    if (braceIdx === -1) break;
+    let depth = 1;
+    let i = braceIdx + 1;
+    const len = source.length;
+    while (i < len && depth > 0) {
+      const ch = source[i];
       if (ch === "{") depth++;
       else if (ch === "}") depth--;
+      i++;
     }
-    if (depth <= 0) break;
-  }
-  return depth;
-}
-
-function extractTopLevelNames(source) {
-  const names = new Set();
-  const lines = source.split("\n");
-  let braceDepth = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (braceDepth === 0 && isDeclarationLine(line)) {
-      const match = line.match(/^\s*(?:const|let|var|function|class)\s+([A-Za-z_$][A-Za-z0-9_$]*)/);
-      if (match) names.add(match[1]);
-    }
-    let inStr = false, strCh = "";
-    let inLineComment = false, inBlockComment = false;
-    for (let k = 0; k < line.length; k++) {
-      const ch = line[k];
-      if (inLineComment) { if (ch === "\n") inLineComment = false; continue; }
-      if (inBlockComment) { if (ch === "*" && line[k + 1] === "/") { inBlockComment = false; k++; } continue; }
-      if (inStr) { if (ch === "\\") k++; else if (ch === strCh) inStr = false; continue; }
-      if (ch === "/" && line[k + 1] === "/") { inLineComment = true; k++; continue; }
-      if (ch === "/" && line[k + 1] === "*") { inBlockComment = true; k++; continue; }
-      if (ch === '"' || ch === "'" || ch === "`") { inStr = true; strCh = ch; continue; }
-      if (ch === "{") braceDepth++;
-      else if (ch === "}") braceDepth--;
+    if (depth === 0) {
+      source = source.slice(0, startIdx) + source.slice(i);
+      regex.lastIndex = 0;
+    } else {
+      break;
     }
   }
-  return names;
-}
-
-function skipBlock(lines, startIdx, startDepth) {
-  let depth = startDepth;
-  let foundBrace = false;
-  let i = startIdx;
-  while (i < lines.length) {
-    const line = lines[i];
-    let inStr = false, strCh = "";
-    let inLineComment = false, inBlockComment = false;
-    for (let k = 0; k < line.length; k++) {
-      const ch = line[k];
-      if (inLineComment) { if (ch === "\n") inLineComment = false; continue; }
-      if (inBlockComment) { if (ch === "*" && line[k + 1] === "/") { inBlockComment = false; k++; } continue; }
-      if (inStr) { if (ch === "\\") k++; else if (ch === strCh) inStr = false; continue; }
-      if (ch === "/" && line[k + 1] === "/") { inLineComment = true; k++; continue; }
-      if (ch === "/" && line[k + 1] === "*") { inBlockComment = true; k++; continue; }
-      if (ch === '"' || ch === "'" || ch === "`") { inStr = true; strCh = ch; continue; }
-      if (ch === "{") { depth++; foundBrace = true; }
-      else if (ch === "}") {
-        depth--;
-        if (depth < startDepth) {
-          return i + 1;
-        }
-      }
-    }
-    i++;
-  }
-  return i;
-}
-
-function skipConstBlock(lines, startIdx, startDepth) {
-  let depth = startDepth;
-  let i = startIdx;
-  while (i < lines.length) {
-    const line = lines[i];
-    let inStr = false, strCh = "";
-    let inLineComment = false, inBlockComment = false;
-    for (let k = 0; k < line.length; k++) {
-      const ch = line[k];
-      if (inLineComment) { if (ch === "\n") inLineComment = false; continue; }
-      if (inBlockComment) { if (ch === "*" && line[k + 1] === "/") { inBlockComment = false; k++; } continue; }
-      if (inStr) { if (ch === "\\") k++; else if (ch === strCh) inStr = false; continue; }
-      if (ch === "/" && line[k + 1] === "/") { inLineComment = true; k++; continue; }
-      if (ch === "/" && line[k + 1] === "*") { inBlockComment = true; k++; continue; }
-      if (ch === '"' || ch === "'" || ch === "`") { inStr = true; strCh = ch; continue; }
-      if (ch === "{") depth++;
-      else if (ch === "}") depth--;
-      else if (ch === ";" && depth === startDepth) {
-        return i + 1;
-      }
-    }
-    i++;
-  }
-  return i;
-}
-
-function removeTopLevelBlocks(source, names) {
-  if (!names.size) return source;
-  const lines = source.split("\n");
-  const result = [];
-  let braceDepth = 0;
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (braceDepth === 0 && isDeclarationLine(line)) {
-      const match = line.match(/^\s*(?:const|let|var|function|class)\s+([A-Za-z_$][A-Za-z0-9_$]*)/);
-      if (match && names.has(match[1])) {
-        if (/^\s*(?:function|class)\b/.test(line)) {
-          i = skipBlock(lines, i, braceDepth);
-        } else {
-          i = skipConstBlock(lines, i, braceDepth);
-        }
-        continue;
-      }
-    }
-    result.push(line);
-    let inStr = false, strCh = "";
-    let inLineComment = false, inBlockComment = false;
-    for (let k = 0; k < line.length; k++) {
-      const ch = line[k];
-      if (inLineComment) { if (ch === "\n") inLineComment = false; continue; }
-      if (inBlockComment) { if (ch === "*" && line[k + 1] === "/") { inBlockComment = false; k++; } continue; }
-      if (inStr) { if (ch === "\\") k++; else if (ch === strCh) inStr = false; continue; }
-      if (ch === "/" && line[k + 1] === "/") { inLineComment = true; k++; continue; }
-      if (ch === "/" && line[k + 1] === "*") { inBlockComment = true; k++; continue; }
-      if (ch === '"' || ch === "'" || ch === "`") { inStr = true; strCh = ch; continue; }
-      if (ch === "{") braceDepth++;
-      else if (ch === "}") braceDepth--;
-    }
-    i++;
-  }
-  return result.join("\n");
+  return source;
 }
 
 function processSource(source) {
   let processed = stripExports(stripImports(source));
-  const topLevelNames = extractTopLevelNames(processed);
-  const duplicates = new Set([...topLevelNames].filter((n) => declared.has(n)));
-  if (duplicates.size) {
-    processed = removeTopLevelBlocks(processed, duplicates);
+  if (duplicateDeclared.has("BOC_VERSION")) {
+    processed = processed.replace(/^const BOC_VERSION = "1\.1\.4";?$/gm, "");
+  } else if (processed.match(/^const BOC_VERSION = "1\.1\.4";?$/m)) {
+    duplicateDeclared.add("BOC_VERSION");
   }
-  const newNames = extractTopLevelNames(processed);
-  for (const name of newNames) {
-    declared.add(name);
+  if (duplicateDeclared.has("normalizeNotePlaceholderSections")) {
+    processed = removeFunction(processed, "normalizeNotePlaceholderSections");
+  } else if (processed.match(/^function normalizeNotePlaceholderSections\(/m)) {
+    duplicateDeclared.add("normalizeNotePlaceholderSections");
   }
   return processed;
 }

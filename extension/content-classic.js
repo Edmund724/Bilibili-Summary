@@ -1308,27 +1308,7 @@ function parseFrontmatterArrayItems(value) {
 }
 
 
-function normalizeNotePlaceholderSections(items) {
-  const allowedPositions = new Set(["before_intro", "before_chapters", "before_subtitle"]);
-  if (!Array.isArray(items)) {
-    return [];
-  }
-  return items
-    .map((item) => {
-      const title = String(item?.title || "").trim();
-      const position = allowedPositions.has(String(item?.position || "").trim())
-        ? String(item?.position || "").trim()
-        : "before_intro";
-      const content = String(item?.content || "").trim();
-      return {
-        title,
-        position,
-        content
-      };
-    })
-    .filter((item) => item.title)
-    .slice(0, 5);
-}
+
 
 
 function shouldShowHoursInSubtitle(body) {
@@ -1498,7 +1478,7 @@ async function fetchJsonInBackground(url) {
 
 
 function getCurrentAid() {
-  let aid = Number(state.aid) || 0;
+  let aid = Number(state.clip.aid) || 0;
   if (!aid && typeof window !== "undefined") {
     try {
       aid = Number(window?.__INITIAL_STATE__?.aid) || 0;
@@ -5791,6 +5771,189 @@ async function getSettings() {
   } catch (error) {
     return { ...DEFAULT_SETTINGS };
   }
+}
+
+function byId(id) {
+  const node = document.getElementById(id);
+  if (!node) {
+    throw new Error(`Missing node: ${id}`);
+  }
+  return node;
+}
+
+function extractBvid(url) {
+  const match = url.match(/\/video\/(BV[0-9A-Za-z]+)/);
+  if (match?.[1]) {
+    return match[1];
+  }
+
+  try {
+    const parsed = new URL(url);
+    const fromQuery = String(parsed.searchParams.get("bvid") || "").trim();
+    if (/^BV[0-9A-Za-z]+$/.test(fromQuery)) {
+      return fromQuery;
+    }
+  } catch {
+    // ignore invalid URL
+  }
+
+  return "";
+}
+
+function cleanVideoUrl(href = location.href) {
+  try {
+    const parsed = new URL(href);
+    if (parsed.hostname !== "www.bilibili.com") {
+      return href;
+    }
+
+    if (parsed.pathname === "/list/watchlater" || parsed.pathname === "/list/watchlater/") {
+      const bvid = extractBvid(href);
+      if (bvid) {
+        return `https://www.bilibili.com/video/${bvid}/`;
+      }
+      return href;
+    }
+
+    const bvid = extractBvid(href);
+    if (!bvid) {
+      return href;
+    }
+    const p = parsed.searchParams.get("p");
+    const qs = p ? `?p=${encodeURIComponent(p)}` : "";
+    return `https://www.bilibili.com/video/${bvid}/${qs}`;
+  } catch {
+    return href;
+  }
+}
+
+function extractPageIndex(url) {
+  try {
+    const page = Number(new URL(url).searchParams.get("p") || "1");
+    if (!Number.isFinite(page) || page <= 0) {
+      return 1;
+    }
+    return page;
+  } catch {
+    return 1;
+  }
+}
+
+function ensureRunActive(runId) {
+  if (runId !== state.clip.fetchRunId) {
+    const error = new Error("Stale refresh run");
+    error.code = "STALE_RUN";
+    throw error;
+  }
+}
+
+function isStaleRunError(error) {
+  return error?.code === "STALE_RUN";
+}
+
+function isRetryableNetworkError(error) {
+  const message = getErrorMessage(error, "").toLowerCase();
+  if (!message) {
+    return false;
+  }
+
+  if (message.includes("http ")) {
+    return true;
+  }
+
+  return (
+    message.includes("请求失败") ||
+    message.includes("failed to fetch") ||
+    message.includes("fetch failed") ||
+    message.includes("networkerror") ||
+    message.includes("net::") ||
+    message.includes("background fetch failed") ||
+    message.includes("timeout") ||
+    message.includes("timed out")
+  );
+}
+
+function findReaderPlayerHost(video) {
+  if (!video) {
+    return null;
+  }
+
+  return (
+    video.closest(".bpx-player-container") ||
+    video.closest(".bpx-player-video-area") ||
+    video.closest("#bilibili-player") ||
+    video.parentElement
+  );
+}
+
+function isIgnoredReaderVideoCandidate(video) {
+  if (!video) {
+    return true;
+  }
+  const host = findReaderPlayerHost(video);
+  const blockedSelector = [
+    "[data-boc-reader-hidden='1']",
+    ".bpx-player-mini-warp",
+    ".bpx-player-mini-close",
+    ".bpx-player-ending-panel",
+    ".bpx-player-ending-related",
+    "[class*='mini-player']",
+    "[class*='picture-in-picture']",
+    "[class*='adcard']",
+    ".ad-report",
+    "[class*='ad-report']",
+    ".video-page-card-small",
+    ".video-page-special-card-small",
+    ".feed-card",
+    ".bili-video-card"
+  ].join(", ");
+  return Boolean(video.closest(blockedSelector) || host?.closest?.(blockedSelector));
+}
+
+function getRuntimeVideoElement() {
+  if (state.reader.readingVideoEl?.isConnected) {
+    const currentHost = findReaderPlayerHost(state.reader.readingVideoEl);
+    const currentRect = state.reader.readingVideoEl.getBoundingClientRect();
+    if (
+      currentHost?.isConnected &&
+      currentRect.width > 120 &&
+      currentRect.height > 68 &&
+      !isIgnoredReaderVideoCandidate(state.reader.readingVideoEl)
+    ) {
+      return state.reader.readingVideoEl;
+    }
+  }
+
+  const candidates = Array.from(document.querySelectorAll("video")).filter(
+    (item) => item.isConnected && !isIgnoredReaderVideoCandidate(item)
+  );
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const visible = candidates
+    .map((item) => {
+      const rect = item.getBoundingClientRect();
+      const host = findReaderPlayerHost(item);
+      const inPlayer = Boolean(
+        host &&
+          (host.matches?.("#bilibili-player, .bpx-player-container, .bpx-player-video-area") ||
+            host.querySelector?.(".bpx-player-video-area"))
+      );
+      const area = Math.max(0, rect.width) * Math.max(0, rect.height);
+      const score =
+        area +
+        (inPlayer ? 1000000 : 0) +
+        (!item.paused ? 20000 : 0) +
+        Number(item.readyState || 0) * 2000 +
+        (item.currentSrc ? 10000 : 0) +
+        (item === state.reader.readingVideoEl ? 500 : 0);
+      return { item, rect, score };
+    })
+    .filter(({ rect }) => rect.width > 240 && rect.height > 120)
+    .sort((a, b) => b.score - a.score)[0];
+
+  return visible?.item || candidates[0] || null;
 }
 
 // === messages.js ===
