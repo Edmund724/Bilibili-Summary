@@ -108,6 +108,17 @@
   - `options.html` / `options.js` / `options.css`：设置页
   - `manifest.json`：扩展清单
 
+### Content script 架构说明
+
+`content.js` 现在是 ES module，并在 `manifest.json` 里以 `content_scripts` 静态加载。  
+但 Chrome 的 `chrome.scripting.executeScript` 只能注入经典脚本，不能直接注入 ES module；扩展里的刷新/恢复流程又必须走这条动态注入路径。所以当前架构是：
+
+- 静态加载：`manifest.json` -> `content.js`（module）
+- 动态注入：`background.js` / `popup.js` -> `content-classic.js`（classic bundle）
+- `content-classic.js` 是把 `shared-defaults.js` 和 `content.js` 合并后的经典脚本，专门用于 `executeScript` 注入
+
+这个限制是 Chrome Extension API 层面的，不是暂时 bug。后续拆分模块时，content 主入口仍需保持一个经典脚本注入路径。
+
 ## 使用方式
 
 1. 打开任意 B 站视频页并点击扩展图标

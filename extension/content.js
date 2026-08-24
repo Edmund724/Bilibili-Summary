@@ -14,55 +14,114 @@ import {
 import { state, readerState, clipState, playerAiState, uiState } from "./state.js";
 const PLAYER_AI_ICON_VARIANT = "badge";
 
+import {
+  isReaderMode,
+  stripReaderModeUrl,
+  replaceReaderModeUrl,
+  isWatchlaterPage,
+  startUrlWatcher,
+  computeCurrentClipSignature,
+  toReadableText,
+  getErrorMessage,
+  sendRuntimeMessage,
+  isExtensionContextInvalidated,
+  requestOpenOptions,
+  getSettings,
+  byId,
+  extractBvid,
+  cleanVideoUrl,
+  extractPageIndex,
+  ensureRunActive,
+  isStaleRunError,
+  isRetryableNetworkError
+} from "./router.js";
+
 const BOC_VERSION = "1.1.4";
 const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
-globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
-
-function isReaderMode(url = location.href) {
-  try {
-    return new URL(url).searchParams.get("boc_reader") === "1";
-  } catch {
-    return false;
-  }
-}
-
-function stripReaderModeUrl(url = location.href) {
-  try {
-    const parsed = new URL(url);
-    parsed.searchParams.delete("boc_reader");
-    return parsed.toString();
-  } catch {
-    return url;
-  }
-}
-
-function replaceReaderModeUrl(nextUrl) {
-  const targetUrl = String(nextUrl || "").trim();
-  if (!targetUrl || targetUrl === location.href) {
-    return;
-  }
-
-  try {
-    history.replaceState(history.state, "", targetUrl);
-    state.currentUrl = location.href;
-    state.currentClipSignature = computeCurrentClipSignature(location.href);
-  } catch (error) {
-    logWarn("[BOC] failed to replace reader mode url", error);
-  }
-}
-
-function isWatchlaterPage(url = location.href) {
-  try {
-    return new URL(url).pathname.replace(/\/+$/, "") === "/list/watchlater";
-  } catch {
-    return false;
-  }
-}
-
-function getReaderContentMaxPx() {
-  if (state.readingContentWidth === "compact") {
-    return 680;
-  }
+import {
+  buildSubtitlePreview,
+  buildMarkdown,
+  buildSrt,
+  buildTxt,
+  buildFrontMatter,
+  formatTimestamp,
+  formatCompactTimestamp,
+  escapeHtml,
+  escapeYaml,
+  sanitizeFileName,
+  buildNoteFilename,
+  buildSubtitleSectionLines,
+  formatSubtitleLine,
+  buildChapterLines,
+  buildBilibiliEmbedIframe,
+  buildHotCommentLines,
+  getEnabledFrontmatterFields,
+  getFixedFrontmatterPropertyLines,
+  buildFrontmatterTemplateContext,
+  resolveFolderTemplate,
+  buildNotePlaceholderLines,
+  pushOptionalLines,
+  shouldShowHoursInSubtitle,
+  shouldShowHoursInNote,
+  normalizeFolder,
+  buildNotePlaceholderTemplateContext,
+  groupNotePlaceholderSections,
+  normalizeNotePlaceholderSections,
+  normalizeChapters,
+  normalizeSubtitleTracks,
+  pickPreferredSubtitle,
+  buildSubtitleCandidates,
+  isAiSubtitle,
+  subtitlePriority,
+  validateSubtitleByDuration,
+  normalizeSubtitleUrl
+import {
+  buildBilibiliEmbedIframe,
+  buildChapterLines,
+  buildFolderTemplateContext,
+  buildFrontMatter,
+  buildFrontmatterTemplateContext,
+  buildHotCommentLines,
+  buildMarkdown,
+  buildNoteFilename,
+  buildNotePlaceholderLines,
+  buildNotePlaceholderTemplateContext,
+  buildSrt,
+  buildSubtitleCandidates,
+  buildSubtitlePreview,
+  buildSubtitleSectionLines,
+  buildSubtitleSourceKey,
+  buildTxt,
+  escapeHtml,
+  escapeYaml,
+  formatCompactTimestamp,
+  formatFixedPropertyYamlLine,
+  formatSubtitleLine,
+  formatTimestamp,
+  getEnabledFrontmatterFields,
+  getFixedFrontmatterPropertyLines,
+  groupNotePlaceholderSections,
+  isAiSubtitle,
+  isYamlDateValue,
+  normalizeChapters,
+  normalizeFolder,
+  normalizeHotComments,
+  normalizeNotePlaceholderSections,
+  normalizeSubtitleTracks,
+  normalizeSubtitleUrl,
+  normalizeSubtitleUrlForCache,
+  parseFrontmatterArrayItems,
+  pickPreferredSubtitle,
+  pushOptionalLines,
+  resolveFolderTemplate,
+  resolveFrontmatterTemplateValue,
+  sanitizeFileName,
+  sanitizeFolderTemplateValue,
+  shouldShowHoursInNote,
+  shouldShowHoursInSubtitle,
+  subtitlePriority,
+  validateSubtitleByDuration
+} from "./formatters.js";
   if (state.readingContentWidth === "narrow") {
     return 760;
   }
@@ -151,7 +210,6 @@ function hasNativeReaderPlayerLayoutIssue(playerHost = state.readingPlayerHost) 
   const wrapRect = wrapNode.getBoundingClientRect();
   return wrapRect.height <= 8 && playerRect.height > 120;
 }
-
 
 
 function shouldDebugLog() {
@@ -817,49 +875,6 @@ function bindUiEvents() {
   });
 }
 
-function startUrlWatcher() {
-  if (state.urlWatcherStarted) {
-    return;
-  }
-  state.urlWatcherStarted = true;
-
-  window.setInterval(() => {
-    const nextUrl = location.href;
-    const nextSignature = computeCurrentClipSignature();
-    if (nextSignature === state.currentClipSignature) {
-      return;
-    }
-
-    state.currentUrl = nextUrl;
-    state.currentClipSignature = nextSignature;
-    enforceNormalPageStateIfNeeded(nextUrl);
-    ensureUiReady();
-    resetClipState();
-    schedulePlayerAiQuickActionSync();
-    const shouldEnterReaderMode = isReaderMode(nextUrl);
-    if (!state.readingViewOpen && shouldEnterReaderMode) {
-      document.documentElement.setAttribute("data-boc-reader-mode", "1");
-      document.body.setAttribute("data-boc-reader-mode", "1");
-      renderReadingStatus("检测到阅读视图跳转，正在打开阅读模式...");
-      enterReaderMode().catch((error) => {
-        renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
-      });
-      return;
-    }
-    if (state.readingViewOpen || shouldEnterReaderMode) {
-      renderReadingStatus("检测到视频变化，正在自动刷新字幕...");
-      waitForVideoMetadata().then(() => {
-        refreshClip().catch((error) => {
-          if (!isStaleRunError(error)) {
-            renderReadingStatus(`自动刷新失败：${getErrorMessage(error)}`);
-          }
-        });
-      });
-      return;
-    }
-    setStatus("检测到页面变化，请点击“刷新抓取”加载当前视频字幕。");
-  }, 1200);
-}
 
 function resetClipState() {
   state.bvid = "";
@@ -1229,34 +1244,6 @@ function getSubtitleCacheKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lan
   return `${CACHE_KEY_PREFIX}${bvid}_${cid}_${sourceKey}`;
 }
 
-function buildSubtitleSourceKey(subtitleId, subtitleUrl, lang) {
-  const id = String(subtitleId || "").trim();
-  if (id) {
-    return `id_${id}`;
-  }
-
-  const normalizedUrl = normalizeSubtitleUrlForCache(subtitleUrl);
-  if (normalizedUrl) {
-    return `url_${normalizedUrl}`;
-  }
-
-  return `lang_${String(lang || "").trim().toLowerCase() || "unknown"}`;
-}
-
-function normalizeSubtitleUrlForCache(url) {
-  const text = String(url || "").trim();
-  if (!text) {
-    return "";
-  }
-
-  try {
-    const parsed = new URL(text);
-    const path = parsed.pathname.replace(/[^\w/.-]+/g, "_");
-    return `${parsed.hostname}${path}`;
-  } catch {
-    return text.replace(/[^\w/.-]+/g, "_");
-  }
-}
 
 async function loadSubtitleFromCache(cacheKey) {
   try {
@@ -4106,167 +4093,6 @@ function updateReaderFollowState() {
   readingView.setAttribute("data-boc-reader-follow", mode);
 }
 
-function computeCurrentClipSignature(url = location.href) {
-  const bvid = extractBvid(url);
-  const page = extractPageIndex(url);
-  return [bvid, page].map((item) => String(item || "").trim()).join("|");
-}
-
-function toReadableText(value, fallback = "") {
-  if (value === undefined || value === null) {
-    return fallback;
-  }
-  if (typeof value === "string") {
-    const text = value.trim();
-    if (!text || text === "[object Object]") {
-      return fallback;
-    }
-    return text;
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  try {
-    const json = JSON.stringify(value);
-    if (json && json !== "{}") {
-      return json;
-    }
-  } catch {
-    // ignore
-  }
-  const text = String(value);
-  if (!text || text === "[object Object]") {
-    return fallback;
-  }
-  return text;
-}
-
-function getErrorMessage(error, fallback = "未知错误") {
-  const code = toReadableText(error?.code, "");
-  const message = toReadableText(error?.message, "");
-  if (message) {
-    return code ? `${message} (code: ${code})` : message;
-  }
-  if (code) {
-    return `code: ${code}`;
-  }
-  return toReadableText(error, fallback);
-}
-
-function sendRuntimeMessage(message) {
-  return new Promise((resolve, reject) => {
-    try {
-      chrome.runtime.sendMessage(message, (resp) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        resolve(resp);
-      });
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-function isExtensionContextInvalidated(error) {
-  const msg = String(error?.message || "");
-  return msg.includes("Extension context invalidated");
-}
-
-function requestOpenOptions() {
-  sendRuntimeMessage({ type: "open-options" })
-    .then((resp) => {
-      if (!resp?.ok) {
-        setMessage(`打开设置失败：${toReadableText(resp?.error, "未知错误")}`);
-      }
-    })
-    .catch((error) => {
-      if (isExtensionContextInvalidated(error)) {
-        setMessage("扩展刚刚更新，请刷新当前页面后重试。");
-        return;
-      }
-      setMessage(`打开设置失败：${getErrorMessage(error)}`);
-    });
-}
-
-async function getSettings() {
-  try {
-    const response = await sendRuntimeMessage({ type: "get-settings" });
-    if (!response?.ok) {
-      return { ...DEFAULT_SETTINGS };
-    }
-    return { ...DEFAULT_SETTINGS, ...(response.settings || {}) };
-  } catch (error) {
-    return { ...DEFAULT_SETTINGS };
-  }
-}
-
-function byId(id) {
-  const node = document.getElementById(id);
-  if (!node) {
-    throw new Error(`Missing node: ${id}`);
-  }
-  return node;
-}
-
-function extractBvid(url) {
-  const match = url.match(/\/video\/(BV[0-9A-Za-z]+)/);
-  if (match?.[1]) {
-    return match[1];
-  }
-
-  try {
-    const parsed = new URL(url);
-    const fromQuery = String(parsed.searchParams.get("bvid") || "").trim();
-    if (/^BV[0-9A-Za-z]+$/.test(fromQuery)) {
-      return fromQuery;
-    }
-  } catch {
-    // ignore invalid URL
-  }
-
-  return "";
-}
-
-function cleanVideoUrl(href = location.href) {
-  try {
-    const parsed = new URL(href);
-    if (parsed.hostname !== "www.bilibili.com") {
-      return href;
-    }
-
-    if (parsed.pathname === "/list/watchlater" || parsed.pathname === "/list/watchlater/") {
-      const bvid = extractBvid(href);
-      if (bvid) {
-        return `https://www.bilibili.com/video/${bvid}/`;
-      }
-      return href;
-    }
-
-    const bvid = extractBvid(href);
-    if (!bvid) {
-      return href;
-    }
-    const p = parsed.searchParams.get("p");
-    const qs = p ? `?p=${encodeURIComponent(p)}` : "";
-    return `https://www.bilibili.com/video/${bvid}/${qs}`;
-  } catch {
-    return href;
-  }
-}
-
-function extractPageIndex(url) {
-  try {
-    const page = Number(new URL(url).searchParams.get("p") || "1");
-    if (!Number.isFinite(page) || page <= 0) {
-      return 1;
-    }
-    return page;
-  } catch {
-    return 1;
-  }
-}
 
 function hasExplicitPageParam(url) {
   try {
@@ -4284,17 +4110,6 @@ function extractOid(url) {
   }
 }
 
-function ensureRunActive(runId) {
-  if (runId !== state.fetchRunId) {
-    const error = new Error("Stale refresh run");
-    error.code = "STALE_RUN";
-    throw error;
-  }
-}
-
-function isStaleRunError(error) {
-  return error?.code === "STALE_RUN";
-}
 
 async function retryAsync(task, retries = 1, delayMs = 180) {
   let lastError = null;
@@ -4324,27 +4139,6 @@ async function retryAsync(task, retries = 1, delayMs = 180) {
   throw lastError || new Error("Unknown retry error");
 }
 
-function isRetryableNetworkError(error) {
-  const message = getErrorMessage(error, "").toLowerCase();
-  if (!message) {
-    return false;
-  }
-
-  if (message.includes("http ")) {
-    return true;
-  }
-
-  return (
-    message.includes("请求失败") ||
-    message.includes("failed to fetch") ||
-    message.includes("fetch failed") ||
-    message.includes("networkerror") ||
-    message.includes("net::") ||
-    message.includes("background fetch failed") ||
-    message.includes("timeout") ||
-    message.includes("timed out")
-  );
-}
 
 async function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -4711,142 +4505,9 @@ async function fetchSubtitleBundle(bvid, cid, aid = "") {
     throw primaryError;
   }
 }
+) {
 
-function buildSubtitleInfoRequests({ bvid, cid, aid }) {
-  const safeBvid = encodeURIComponent(String(bvid || ""));
-  const safeCid = encodeURIComponent(String(cid || ""));
-  const safeAid = encodeURIComponent(String(aid || ""));
-  const requests = [];
 
-  // 参考 SubBatch：优先用 aid+cid 的 wbi 接口作为主来源。
-  if (aid) {
-    requests.push({
-      source: "player-wbi-v2",
-      url:
-        "https://api.bilibili.com/x/player/wbi/v2" +
-        `?aid=${safeAid}` +
-        `&cid=${safeCid}` +
-        (bvid ? `&bvid=${safeBvid}` : "")
-    });
-  }
-
-  // 仅在主来源不可用时再回退到 player-v2。
-  requests.push({
-    source: "player-v2",
-    url:
-      "https://api.bilibili.com/x/player/v2" +
-      (bvid ? `?bvid=${safeBvid}` : "?") +
-      `${bvid ? "&" : ""}cid=${safeCid}` +
-      (aid ? `&aid=${safeAid}` : "")
-  });
-
-  return requests;
-}
-
-function buildBiliApiError(payload, fallbackMessage) {
-  const msg = toReadableText(payload?.message, fallbackMessage);
-  const error = new Error(msg);
-  error.code = payload?.code;
-  error.retryable = isRetryableError(payload?.code);
-  return error;
-}
-
-function mapSubtitleTracks(subtitles, source = "unknown") {
-  return (subtitles || []).map((item) => ({
-    id: item?.id === undefined || item?.id === null ? "" : String(item.id),
-    lan: item?.lan || "",
-    lanDoc: item?.lan_doc || "",
-    subtitleUrl: normalizeSubtitleUrl(item?.subtitle_url || ""),
-    source
-  }));
-}
-
-function mapChaptersFromPlayerData(data) {
-  const raw = Array.isArray(data?.view_points) ? data.view_points : [];
-  return normalizeChapters(
-    raw.map((item) => ({
-      title: String(item?.content || item?.title || item?.label || "").trim(),
-      from: normalizeChapterTime(item?.from ?? item?.start ?? item?.start_time),
-      to: normalizeChapterTime(item?.to ?? item?.end ?? item?.end_time),
-      source: "player-view-points"
-    }))
-  );
-}
-
-function normalizeChapterTime(value) {
-  if (value === undefined || value === null || value === "") {
-    return 0;
-  }
-
-  const num = Number(value);
-  if (!Number.isFinite(num) || num < 0) {
-    return 0;
-  }
-
-  // 某些接口会返回毫秒级时间戳，这里统一转换成秒。
-  return num > 60 * 60 * 24 ? num / 1000 : num;
-}
-
-function normalizeChapters(chapters) {
-  const normalized = (chapters || [])
-    .map((item) => ({
-      title: String(item?.title || "").trim(),
-      from: Number(item?.from || 0) || 0,
-      to: Number(item?.to || 0) || 0,
-      source: String(item?.source || "")
-    }))
-    .filter((item) => item.title && item.from >= 0)
-    .sort((a, b) => a.from - b.from);
-
-  const unique = [];
-  const seen = new Set();
-  normalized.forEach((item) => {
-    const key = `${Math.floor(item.from * 10)}|${item.title.toLowerCase()}`;
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    unique.push(item);
-  });
-
-  return unique;
-}
-
-function isRetryableError(code) {
-  // -509: 请求过于频繁
-  // -3: 参数错误（可能是临时性的）
-  // 其他负数错误码也可能是临时性的
-  return code === -509 || code === -3 || code < 0;
-}
-
-function normalizeSubtitleTracks(subtitles) {
-  return [...(subtitles || [])].sort((a, b) => {
-    const p = subtitlePriority(a) - subtitlePriority(b);
-    if (p !== 0) {
-      return p;
-    }
-
-    const lanA = String(a.lanDoc || a.lan || "").toLowerCase();
-    const lanB = String(b.lanDoc || b.lan || "").toLowerCase();
-    if (lanA < lanB) {
-      return -1;
-    }
-    if (lanA > lanB) {
-      return 1;
-    }
-
-    const idA = Number.parseInt(String(a.id || "0"), 10);
-    const idB = Number.parseInt(String(b.id || "0"), 10);
-    if (Number.isFinite(idA) && Number.isFinite(idB) && idA !== idB) {
-      return idA - idB;
-    }
-
-    return String(a.subtitleUrl).localeCompare(String(b.subtitleUrl));
-  });
-}
-
-function pickPreferredSubtitle(
-  subtitles,
   { previousId = "", previousUrl = "", previousLang = "" } = {}
 ) {
   const tracks = subtitles || [];
@@ -4888,32 +4549,6 @@ function pickPreferredSubtitle(
   return tracks[0];
 }
 
-function buildSubtitleCandidates(subtitles, preferred) {
-  const tracks = subtitles || [];
-  const seen = new Set();
-  const list = [];
-
-  const pushUnique = (item) => {
-    if (!item) {
-      return;
-    }
-    const key =
-      `${String(item.id || "").trim()}|` +
-      `${normalizeSubtitleUrlForCache(item.subtitleUrl)}|` +
-      `${String(item.lan || "").trim().toLowerCase()}`;
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    list.push(item);
-  };
-
-  pushUnique(preferred);
-  for (const item of tracks) {
-    pushUnique(item);
-  }
-  return list;
-}
 
 async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh) {
   let lastError = null;
@@ -4959,94 +4594,6 @@ async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh) {
   throw new Error("这个视频暂时没有可用字幕。");
 }
 
-function isAiSubtitle(item) {
-  const lan = String(item?.lan || "").toLowerCase();
-  // B站 AI 自动字幕的 lan 以 "ai-" 开头
-  return lan.startsWith("ai-");
-}
-
-function subtitlePriority(item) {
-  const lan = String(item?.lan || "").toLowerCase();
-  const label = String(item?.lanDoc || "").toLowerCase();
-
-  // 优先级：中文（包含 AI 中文）-> 英文 -> 其他
-  if (lan === "zh-cn" || lan === "zh-hans") {
-    return 0;
-  }
-  if (lan === "zh") {
-    return 1;
-  }
-  if (lan.includes("zh")) {
-    return 2;
-  }
-  if (label.includes("中文")) {
-    return 3;
-  }
-
-  if (lan === "en" || lan === "en-us" || lan === "en-gb") {
-    return 10;
-  }
-  if (lan.includes("en")) {
-    return 11;
-  }
-  if (label.includes("英文") || label.includes("英语") || label.includes("english")) {
-    return 12;
-  }
-
-  return 50;
-}
-
-function validateSubtitleByDuration(body, videoDuration) {
-  const duration = Number(videoDuration || 0);
-  if (!Array.isArray(body) || body.length === 0) {
-    return { ok: false, reason: "empty", videoDuration: duration, maxTo: 0 };
-  }
-
-  let maxTo = 0;
-  for (const item of body) {
-    const to = Number(item?.to);
-    const from = Number(item?.from);
-    if (Number.isFinite(to) && to > maxTo) {
-      maxTo = to;
-    }
-    if (Number.isFinite(from) && from > maxTo) {
-      maxTo = from;
-    }
-  }
-
-  if (!(duration > 0)) {
-    return { ok: true, reason: "skip-no-video-duration", videoDuration: duration, maxTo };
-  }
-
-  const upperTolerance = Math.max(12, duration * 0.15);
-  if (maxTo > duration + upperTolerance) {
-    return { ok: false, reason: "too-long", videoDuration: duration, maxTo };
-  }
-
-  let minCoverageRatio = 0;
-  if (duration >= 600) {
-    minCoverageRatio = 0.18;
-  } else if (duration >= 300) {
-    minCoverageRatio = 0.22;
-  } else if (duration >= 180) {
-    minCoverageRatio = 0.25;
-  }
-
-  if (minCoverageRatio > 0 && maxTo < duration * minCoverageRatio) {
-    return { ok: false, reason: "too-short", videoDuration: duration, maxTo };
-  }
-
-  return { ok: true, reason: "ok", videoDuration: duration, maxTo };
-}
-
-function readRuntimeVideoDuration() {
-  const video = getRuntimeVideoElement();
-  const duration = Number(video?.duration);
-  if (Number.isFinite(duration) && duration > 0) {
-    return duration;
-  }
-  return 0;
-}
 
 async function fetchSubtitleBody(url) {
   logInfo("[BOC] fetch subtitle body", { url });
@@ -5085,30 +4632,6 @@ async function fetchJsonInBackground(url) {
   }
 }
 
-function normalizeHotComments(comments, limit = 20) {
-  if (!Array.isArray(comments)) {
-    return [];
-  }
-
-  return comments
-    .map((item) => ({
-      uname: String(item?.uname || "匿名").trim() || "匿名",
-      like: Number(item?.like || 0) || 0,
-      message: String(item?.message || "").trim().slice(0, 500)
-    }))
-    .filter((item) => item.message)
-    .slice(0, limit);
-}
-
-function getCurrentAid() {
-  let aid = Number(state.aid) || 0;
-  if (!aid && typeof window !== "undefined") {
-    try {
-      aid = Number(window?.__INITIAL_STATE__?.aid) || 0;
-    } catch {}
-  }
-  return aid;
-}
 
 async function fetchHotComments(count = 20) {
   const safeCount = Math.max(0, Number(count) || 0);
@@ -5163,607 +4686,178 @@ async function refreshDerivedContent({ refreshComments = false } = {}) {
   rebuildDerivedContent();
 }
 
-function normalizeSubtitleUrl(url) {
-  if (!url) {
-    return "";
-  }
 
-  if (url.startsWith("//")) {
-    return `https:${url}`;
-  }
 
-  if (url.startsWith("http://") || url.startsWith("https://")) {
-    return url;
-  }
 
-  return `https://${url.replace(/^\/+/, "")}`;
-}
-
-function buildSubtitlePreview(body, settings) {
-  const compactWithHours = shouldShowHoursInSubtitle(body);
-  return (body || [])
-    .map((item) => {
-      const text = String(item?.content || "").trim();
-      if (!text) {
-        return "";
-      }
-      if (settings.includeTimestampInBody) {
-        return `\`${formatCompactTimestamp(item.from, compactWithHours)}\` ${text}`;
-      }
-      return text;
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
-function buildMarkdown(meta, body, settings) {
-  const created = formatLocalDate();
-  const tags = (settings.tags || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const tagsCsv = tags.join(", ");
-  const tagsYaml =
-    tags.length === 0 ? "[]" : `[${tags.map((tag) => `"${tag.replace(/"/g, '\\"')}"`).join(", ")}]`;
-
-  const compactWithHours = shouldShowHoursInNote(meta, body);
-  const chapterLines = buildChapterLines(meta.chapters || [], compactWithHours);
-  const subtitleSectionLines = buildSubtitleSectionLines(
-    body,
-    meta.chapters || [],
-    settings,
-    compactWithHours
-  );
-  const frontMatter = buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml);
-
-  const page = extractPageIndex(location.href);
-  const embedIframe = buildBilibiliEmbedIframe(meta, page);
-  const intro = String(meta.description || "").trim();
-  const noteSectionContext = buildNotePlaceholderTemplateContext(meta, intro);
-  const noteSections = groupNotePlaceholderSections(settings, noteSectionContext);
-
-  const lines = [];
-  if (frontMatter) {
-    lines.push(frontMatter, "");
-  }
-  lines.push(embedIframe, "");
-  pushOptionalLines(lines, noteSections.before_intro);
-
-  if (intro) {
-    lines.push("## 简介", "", intro, "");
-  }
-
-  pushOptionalLines(lines, noteSections.before_chapters);
-
-  if (chapterLines.length > 0) {
-    lines.push("## 章节", "", ...chapterLines, "");
-  }
-
-  pushOptionalLines(lines, noteSections.before_subtitle);
-  lines.push("## 字幕", "", ...subtitleSectionLines);
-
-  const hotCommentLines = buildHotCommentLines(
-    settings?.includeHotCommentsInNote ? meta?.hotComments || [] : []
-  );
-  if (hotCommentLines.length > 0) {
-    lines.push("", "## 评论", "", ...hotCommentLines);
-  }
-
-  return lines.join("\n");
-}
-
-function buildHotCommentLines(comments) {
-  const items = normalizeHotComments(comments, 20);
-  if (items.length === 0) {
-    return [];
-  }
-
-  return items.flatMap((item, index) => [
-    `${index + 1}. ${item.uname}（赞 ${item.like}）`,
-    item.message,
-    ""
-  ]).slice(0, -1);
-}
-
-function buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml) {
-  const enabled = getEnabledFrontmatterFields(settings);
-  const fixedPropertyLines = getFixedFrontmatterPropertyLines(
-    settings,
-    buildFrontmatterTemplateContext(meta, created, tagsCsv, tagsYaml)
-  );
-  if (enabled.length === 0 && fixedPropertyLines.length === 0) {
-    return "";
-  }
-
-  const fieldLines = {
-    title: `title: "${escapeYaml(meta.title)}"`,
-    url: `url: "${escapeYaml(cleanVideoUrl())}"`,
-    bvid: `bvid: "${escapeYaml(meta.bvid)}"`,
-    cid: `cid: "${escapeYaml(meta.cid)}"`,
-    author: `author: "${escapeYaml(meta.author || "unknown")}"`,
-    upload_date: `upload_date: "${escapeYaml(meta.uploadDate || "unknown")}"`,
-    subtitle_lang: `subtitle_lang: "${escapeYaml(meta.selectedSubtitleLang || "unknown")}"`,
-    created: `created: "${created}"`,
-    tags: `tags: ${tagsYaml}`
-  };
-
-  const lines = enabled.map((field) => fieldLines[field]).filter(Boolean);
-  lines.push(...fixedPropertyLines);
-  if (lines.length === 0) {
-    return "";
-  }
-
-  return ["---", ...lines, "---"].join("\n");
-}
-
-function getEnabledFrontmatterFields(settings) {
-  const defaultFields = Array.isArray(DEFAULT_SETTINGS.frontmatterFields)
-    ? DEFAULT_SETTINGS.frontmatterFields
-    : [];
-  const raw = Array.isArray(settings?.frontmatterFields) ? settings.frontmatterFields : defaultFields;
-  const allowed = new Set(defaultFields);
-  const unique = [];
-  raw.forEach((item) => {
-    const key = String(item || "").trim();
-    if (!key || !allowed.has(key) || unique.includes(key)) {
-      return;
-    }
-    unique.push(key);
-  });
-  return unique;
-}
-
-function getFixedFrontmatterPropertyLines(settings, templateContext = {}) {
-  const customPropertyKeyPattern = /^[\p{L}\p{N}_\-\s]+$/u;
-  const systemFields = new Set(
-    (Array.isArray(DEFAULT_SETTINGS.frontmatterFields) ? DEFAULT_SETTINGS.frontmatterFields : []).map((field) =>
-      String(field).toLowerCase()
-    )
-  );
-  const rows = Array.isArray(settings?.fixedFrontmatterProperties) ? settings.fixedFrontmatterProperties : [];
-  const seenKeys = new Set();
-  const lines = [];
-
-  rows.forEach((item) => {
-    const key = String(item?.key || "").trim();
-    const type = normalizeFixedPropertyType(item?.type);
-    const value = item?.value;
-    const lowerKey = key.toLowerCase();
-    if (!key || isFixedPropertyRowEffectivelyEmpty(type, value)) {
-      return;
-    }
-    if (!customPropertyKeyPattern.test(key)) {
-      return;
-    }
-    if (systemFields.has(lowerKey) || seenKeys.has(lowerKey)) {
-      return;
-    }
-    seenKeys.add(lowerKey);
-    const yamlLine = formatFixedPropertyYamlLine(key, type, value, templateContext);
-    if (yamlLine) {
-      lines.push(yamlLine);
-    }
-  });
-
-  return lines;
+function mapSubtitleTracks(subtitles, source = "unknown") {
+  return (subtitles || []).map((item) => ({
+    id: item?.id === undefined || item?.id === null ? "" : String(item.id),
+    lan: item?.lan || "",
+    lanDoc: item?.lan_doc || "",
+    subtitleUrl: normalizeSubtitleUrl(item?.subtitle_url || ""),
+    source
+  }));
 }
 
 
-
-function buildFrontmatterTemplateContext(meta, created, tagsCsv, tagsYaml) {
-  return {
-    title: String(meta?.title || "").trim(),
-    url: String(cleanVideoUrl() || "").trim(),
-    bvid: String(meta?.bvid || "").trim(),
-    cid: String(meta?.cid || "").trim(),
-    author: String(meta?.author || "unknown").trim(),
-    upload_date: String(meta?.uploadDate || "unknown").trim(),
-    subtitle_lang: String(meta?.selectedSubtitleLang || "unknown").trim(),
-    created: String(created || "").trim(),
-    tags: String(tagsCsv || "").trim(),
-    tags_csv: String(tagsCsv || "").trim(),
-    tags_yaml: String(tagsYaml || "").trim()
-  };
-}
-
-function sanitizeFolderTemplateValue(value) {
-  return String(value || "")
-    .replace(/[\/\\:*?"<>|]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function buildFolderTemplateContext(meta, created = formatLocalDate()) {
-  return {
-    created: sanitizeFolderTemplateValue(created),
-    upload_date: sanitizeFolderTemplateValue(meta?.uploadDate || ""),
-    author: sanitizeFolderTemplateValue(meta?.author || ""),
-    bvid: sanitizeFolderTemplateValue(meta?.bvid || "")
-  };
-}
-
-function resolveFolderTemplate(template, meta) {
-  const normalized = normalizeFolder(template);
-  if (!normalized) {
-    return "";
-  }
-
-  const allowedKeys = new Set(["created", "upload_date", "author", "bvid"]);
-  const context = buildFolderTemplateContext(meta);
-  const resolved = String(normalized).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, rawKey) => {
-    const key = String(rawKey || "").trim().toLowerCase();
-    if (!allowedKeys.has(key)) {
-      return "";
-    }
-    return context[key] || "";
-  });
-
-  return resolved
-    .split("/")
-    .map((segment) => sanitizeFolderTemplateValue(segment))
-    .filter(Boolean)
-    .join("/");
-}
-
-function buildNotePlaceholderTemplateContext(meta, description) {
-  return {
-    title: String(meta?.title || "").trim(),
-    author: String(meta?.author || "").trim(),
-    url: String(cleanVideoUrl() || "").trim(),
-    upload_date: String(meta?.uploadDate || "").trim(),
-    description: String(description || "").trim()
-  };
-}
-
-function groupNotePlaceholderSections(settings, templateContext = {}) {
-  const groups = {
-    before_intro: [],
-    before_chapters: [],
-    before_subtitle: []
-  };
-  const rows = normalizeNotePlaceholderSections(settings?.notePlaceholderSections);
-  rows.forEach((item) => {
-    const renderedLines = buildNotePlaceholderLines(item, templateContext);
-    if (!renderedLines.length) {
-      return;
-    }
-    groups[item.position].push(...renderedLines);
-  });
-  return groups;
-}
-
-function buildNotePlaceholderLines(item, templateContext = {}) {
-  const title = String(item?.title || "").trim();
-  if (!title) {
-    return [];
-  }
-  const content = resolveFrontmatterTemplateValue(item?.content, templateContext).trim();
-  const lines = [`## ${title}`, ""];
-  if (content) {
-    lines.push(content, "");
-  }
-  return lines;
-}
-
-function pushOptionalLines(targetLines, extraLines) {
-  if (!Array.isArray(extraLines) || !extraLines.length) {
-    return;
-  }
-  targetLines.push(...extraLines);
-}
-
-function resolveFrontmatterTemplateValue(value, templateContext = {}) {
-  return String(value || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, rawKey) => {
-    const key = String(rawKey || "").trim().toLowerCase();
-    if (!key) {
-      return "";
-    }
-    const resolved = templateContext[key];
-    return resolved == null ? "" : String(resolved);
-  });
-}
-
-function isYamlDateValue(value) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
-}
-
-function parseFrontmatterArrayItems(value) {
-  return String(value || "")
-    .split(/[，,]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function formatFixedPropertyYamlLine(key, type, value, templateContext = {}) {
-  const normalizedType = normalizeFixedPropertyType(type);
-  const resolvedValue = resolveFrontmatterTemplateValue(value, templateContext).trim();
-
-  if (!resolvedValue) {
-    return "";
-  }
-
-  if (normalizedType === "number") {
-    const num = Number(resolvedValue);
-    if (!Number.isFinite(num)) {
-      return "";
-    }
-    return `${key}: ${resolvedValue}`;
-  }
-
-  if (normalizedType === "checkbox") {
-    const normalizedValue = resolvedValue.toLowerCase();
-    if (normalizedValue !== "true" && normalizedValue !== "false") {
-      return "";
-    }
-    return `${key}: ${normalizedValue}`;
-  }
-
-  if (normalizedType === "list") {
-    const items = parseFrontmatterArrayItems(resolvedValue);
-    return `${key}: [${items.map((item) => `"${escapeYaml(item)}"`).join(", ")}]`;
-  }
-
-  if (normalizedType === "date") {
-    if (!isYamlDateValue(resolvedValue)) {
-      return "";
-    }
-    return `${key}: ${resolvedValue}`;
-  }
-
-  return `${key}: "${escapeYaml(resolvedValue)}"`;
-}
-
-function normalizeNotePlaceholderSections(items) {
-  const allowedPositions = new Set(["before_intro", "before_chapters", "before_subtitle"]);
-  if (!Array.isArray(items)) {
-    return [];
-  }
-  return items
-    .map((item) => {
-      const title = String(item?.title || "").trim();
-      const position = allowedPositions.has(String(item?.position || "").trim())
-        ? String(item?.position || "").trim()
-        : "before_intro";
-      const content = String(item?.content || "").trim();
-      return {
-        title,
-        position,
-        content
-      };
-    })
-    .filter((item) => item.title)
-    .slice(0, 5);
-}
-
-function buildSubtitleSectionLines(body, chapters, settings, withHours) {
-  const subtitleItems = (body || [])
-    .map((item, index) => ({
-      ...item,
-      _index: index,
-      text: String(item?.content || "").trim()
+function mapChaptersFromPlayerData(data) {
+  const raw = Array.isArray(data?.view_points) ? data.view_points : [];
+  return normalizeChapters(
+    raw.map((item) => ({
+      title: String(item?.content || item?.title || item?.label || "").trim(),
+      from: normalizeChapterTime(item?.from ?? item?.start ?? item?.start_time),
+      to: normalizeChapterTime(item?.to ?? item?.end ?? item?.end_time),
+      source: "player-view-points"
     }))
-    .filter((item) => item.text);
-  if (subtitleItems.length === 0) {
-    return ["（暂无字幕）"];
+  );
+}
+
+
+function normalizeChapterTime(value) {
+  if (value === undefined || value === null || value === "") {
+    return 0;
   }
 
-  const chapterItems = normalizeChapters(chapters);
-  if (chapterItems.length === 0) {
-    return subtitleItems.map((item) => formatSubtitleLine(item, settings, withHours));
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) {
+    return 0;
   }
 
-  const lines = [];
-  const usedIndexes = new Set();
+  // 某些接口会返回毫秒级时间戳，这里统一转换成秒。
+  return num > 60 * 60 * 24 ? num / 1000 : num;
+}
 
-  chapterItems.forEach((chapter, idx) => {
-    const start = Number(chapter.from || 0) || 0;
-    const next = chapterItems[idx + 1];
-    const chapterTo = Number(chapter.to || 0) || 0;
-    let end = Infinity;
-    if (next && Number(next.from) > start) {
-      end = Number(next.from);
-    } else if (chapterTo > start) {
-      end = chapterTo;
-    }
 
-    const sectionItems = subtitleItems.filter((item) => {
-      const from = Number(item.from || 0) || 0;
-      const inStart = from + 0.001 >= start;
-      const inEnd = end === Infinity ? true : from < end;
-      return inStart && inEnd;
+function buildSubtitleInfoRequests({ bvid, cid, aid }) {
+  const safeBvid = encodeURIComponent(String(bvid || ""));
+  const safeCid = encodeURIComponent(String(cid || ""));
+  const safeAid = encodeURIComponent(String(aid || ""));
+  const requests = [];
+
+  // 参考 SubBatch：优先用 aid+cid 的 wbi 接口作为主来源。
+  if (aid) {
+    requests.push({
+      source: "player-wbi-v2",
+      url:
+        "https://api.bilibili.com/x/player/wbi/v2" +
+        `?aid=${safeAid}` +
+        `&cid=${safeCid}` +
+        (bvid ? `&bvid=${safeBvid}` : "")
     });
+  }
 
-    if (sectionItems.length === 0) {
-      return;
-    }
-
-    const chapterStamp = settings.includeTimestampInBody
-      ? ` \`${formatCompactTimestamp(start, withHours)}\``
-      : "";
-    lines.push(`### ${chapter.title}${chapterStamp}`, "");
-    sectionItems.forEach((item) => {
-      usedIndexes.add(item._index);
-      lines.push(formatSubtitleLine(item, settings, withHours));
-    });
-    lines.push("");
+  // 仅在主来源不可用时再回退到 player-v2。
+  requests.push({
+    source: "player-v2",
+    url:
+      "https://api.bilibili.com/x/player/v2" +
+      (bvid ? `?bvid=${safeBvid}` : "?") +
+      `${bvid ? "&" : ""}cid=${safeCid}` +
+      (aid ? `&aid=${safeAid}` : "")
   });
 
-  const remaining = subtitleItems.filter((item) => !usedIndexes.has(item._index));
-  if (remaining.length > 0) {
-    lines.push("### 其他片段", "");
-    remaining.forEach((item) => {
-      lines.push(formatSubtitleLine(item, settings, withHours));
-    });
-    lines.push("");
-  }
-
-  if (lines.length === 0) {
-    return subtitleItems.map((item) => formatSubtitleLine(item, settings, withHours));
-  }
-
-  while (lines.length > 0 && !lines[lines.length - 1]) {
-    lines.pop();
-  }
-  return lines;
+  return requests;
 }
 
-function formatSubtitleLine(item, settings, withHours) {
-  const text = String(item?.content || "").trim();
-  if (!text) {
-    return "";
-  }
-  if (!settings.includeTimestampInBody) {
-    return text;
-  }
-  return `\`${formatCompactTimestamp(item.from, withHours)}\` ${text}`;
+
+function buildBiliApiError(payload, fallbackMessage) {
+  const msg = toReadableText(payload?.message, fallbackMessage);
+  const error = new Error(msg);
+  error.code = payload?.code;
+  error.retryable = isRetryableError(payload?.code);
+  return error;
 }
 
-function buildChapterLines(chapters, withHours = false) {
-  const chapterItems = normalizeChapters(chapters);
-  if (chapterItems.length === 0) {
+
+function isRetryableError(code) {
+  // -509: 请求过于频繁
+  // -3: 参数错误（可能是临时性的）
+  // 其他负数错误码也可能是临时性的
+  return code === -509 || code === -3 || code < 0;
+}
+
+
+function readRuntimeVideoDuration() {
+  const video = getRuntimeVideoElement();
+  const duration = Number(video?.duration);
+  if (Number.isFinite(duration) && duration > 0) {
+    return duration;
+  }
+  return 0;
+}
+
+async function fetchSubtitleBody(url) {
+  logInfo("[BOC] fetch subtitle body", { url });
+  return fetchJsonInBackground(url);
+}
+
+async function fetchJson(url) {
+  if (typeof url === "string" && url.startsWith("https://api.bilibili.com/")) {
+    return fetchJsonInBackground(url);
+  }
+
+  const response = await fetch(url, {
+    credentials: "include",
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`请求失败：${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function fetchJsonInBackground(url) {
+  try {
+    const resp = await sendRuntimeMessage({ type: "fetch-json", url });
+    if (!resp?.ok) {
+      throw new Error(toReadableText(resp?.error, "Background fetch failed"));
+    }
+    return resp.data;
+  } catch (error) {
+    if (isExtensionContextInvalidated(error)) {
+      throw new Error("扩展刚刚更新，请刷新当前页面后重试。");
+    }
+    throw error;
+  }
+}
+
+
+function getCurrentAid() {
+  let aid = Number(state.aid) || 0;
+  if (!aid && typeof window !== "undefined") {
+    try {
+      aid = Number(window?.__INITIAL_STATE__?.aid) || 0;
+    } catch {}
+  }
+  return aid;
+}
+
+async function fetchHotComments(count = 20) {
+  const safeCount = Math.max(0, Number(count) || 0);
+  if (!safeCount) {
     return [];
   }
 
-  return chapterItems.map((item) => {
-    const fromText = formatCompactTimestamp(item.from, withHours);
-    return `- \`${fromText}\` ${item.title}`;
-  });
-}
-
-function buildBilibiliEmbedIframe(meta, page = 1) {
-  const safeAid = encodeURIComponent(String(meta?.aid || "").trim());
-  const safeBvid = encodeURIComponent(String(meta?.bvid || "").trim());
-  const safeCid = encodeURIComponent(String(meta?.cid || "").trim());
-  const safePage = Number(page) > 0 ? Number(page) : 1;
-
-  return `<iframe src="https://player.bilibili.com/player.html?aid=${safeAid}&bvid=${safeBvid}&cid=${safeCid}&page=${safePage}&autoplay=0" scrolling="no" border="0" frameborder="no" framespacing="0" allow="fullscreen; picture-in-picture" allowfullscreen="true" style="height:100%;width:100%; aspect-ratio: 16 / 9;"> </iframe>`;
-}
-
-function buildSrt(body) {
-  return body
-    .map((item, index) => {
-      const from = formatTimestamp(item.from, true);
-      const to = formatTimestamp(item.to, true);
-      const text = (item.content || "").trim();
-      return `${index + 1}\n${from} --> ${to}\n${text}`;
-    })
-    .join("\n\n");
-}
-
-function buildTxt(body, settings) {
-  const withHours = shouldShowHoursInSubtitle(body);
-  return (body || [])
-    .map((item) => {
-      const text = String(item?.content || "").trim();
-      if (!text) {
-        return "";
-      }
-      if (!settings?.includeTimestampInBody) {
-        return text;
-      }
-      return `${formatCompactTimestamp(item.from, withHours)} ${text}`;
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
-function shouldShowHoursInSubtitle(body) {
-  const maxTo = (body || []).reduce((max, item) => {
-    const to = Number(item?.to || 0);
-    return Number.isFinite(to) && to > max ? to : max;
-  }, 0);
-  return maxTo >= 3600;
-}
-
-function shouldShowHoursInNote(meta, body) {
-  const subtitleMaxTo = (body || []).reduce((max, item) => {
-    const to = Number(item?.to || 0);
-    return Number.isFinite(to) && to > max ? to : max;
-  }, 0);
-  const chapterMaxTo = normalizeChapters(meta?.chapters || []).reduce((max, item) => {
-    const from = Number(item?.from || 0) || 0;
-    const to = Number(item?.to || 0) || 0;
-    return Math.max(max, from, to);
-  }, 0);
-  const duration = Number(meta?.videoDuration || 0) || 0;
-  return Math.max(subtitleMaxTo, chapterMaxTo, duration) >= 3600;
-}
-
-function formatCompactTimestamp(seconds, withHours) {
-  const safe = Math.max(0, Math.floor(Number(seconds) || 0));
-  const hour = Math.floor(safe / 3600);
-  const minute = Math.floor((safe % 3600) / 60);
-  const second = safe % 60;
-
-  if (withHours) {
-    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(
-      second
-    ).padStart(2, "0")}`;
+  const aid = getCurrentAid();
+  if (!aid) {
+    return [];
   }
 
-  const totalMinutes = Math.floor(safe / 60);
-  return `${String(totalMinutes).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
-}
-
-function formatTimestamp(seconds, forSrt = false) {
-  const safe = Number(seconds) || 0;
-  const msTotal = Math.max(0, Math.floor(safe * 1000));
-  const hour = Math.floor(msTotal / 3600000);
-  const minute = Math.floor((msTotal % 3600000) / 60000);
-  const second = Math.floor((msTotal % 60000) / 1000);
-  const ms = msTotal % 1000;
-
-  const hh = String(hour).padStart(2, "0");
-  const mm = String(minute).padStart(2, "0");
-  const ss = String(second).padStart(2, "0");
-  if (!forSrt) {
-    return `${hh}:${mm}:${ss}.${String(ms).padStart(3, "0")}`;
+  const url = `https://api.bilibili.com/x/v2/reply/main?type=1&oid=${aid}&mode=3&ps=${safeCount}&pn=1`;
+  const resp = await sendRuntimeMessage({ type: "fetch-json", url });
+  if (!resp?.ok) {
+    throw new Error(resp?.error || "评论接口失败");
   }
 
-  return `${hh}:${mm}:${ss},${String(ms).padStart(3, "0")}`;
-}
-
-function sanitizeFileName(value) {
-  return value.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim().slice(0, 120);
-}
-
-
-
-function buildNoteFilename(meta) {
-  const includeDate = state.settings?.includeDateInFilename !== false;
-  const baseParts = [];
-
-  if (includeDate) {
-    baseParts.push(formatLocalDate());
-  }
-
-  baseParts.push(meta.title || meta.bvid || "bilibili-subtitle");
-
-  if (Number(meta.pageCount) > 1) {
-    baseParts.push(`P${Number(meta.pageIndex) > 0 ? Number(meta.pageIndex) : 1}`);
-    const pageTitle = String(meta.pageTitle || "").trim();
-    if (pageTitle) {
-      baseParts.push(pageTitle);
-    }
-  }
-
-  const baseName = sanitizeFileName(baseParts.filter(Boolean).join("-"));
-  return `${baseName || "bilibili-subtitle"}.md`;
-}
-
-function normalizeFolder(input) {
-  return String(input || "").trim().replace(/^\/+|\/+$/g, "");
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function escapeYaml(value) {
-  return String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+  const replies = Array.isArray(resp?.data?.data?.replies) ? resp.data.data.replies : [];
+  return normalizeHotComments(
+    replies.map((item) => ({
+      uname: item?.member?.uname || "匿名",
+      like: item?.like || 0,
+      message: item?.content?.message || ""
+    })),
+    safeCount
+  );
 }
