@@ -21,10 +21,7 @@ const DEFAULT_SETTINGS = {
   downloadFormat: "srt"
 };
 
-function formatLocalDate(value = Date.now()) {
-  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
+
 
 init().catch((error) => {
   setStatus(`初始化失败：${error.message}`, true);
@@ -79,7 +76,7 @@ function bindEvents() {
 
   el.readingViewBtn?.addEventListener("click", async () => {
     const tab = await getActiveTab();
-    if (!isSupportedSubtitlePage(tab?.url || "")) {
+    if (!isSupportedBilibiliPage(tab?.url || "")) {
       setMessage("请先打开一个 B 站视频页。");
       return;
     }
@@ -248,9 +245,7 @@ function sanitizeFileName(value) {
     .slice(0, 120);
 }
 
-function normalizeDownloadFormat(value) {
-  return value === "txt" ? "txt" : "srt";
-}
+
 
 function escapeHtml(value) {
   return String(value)
@@ -281,7 +276,7 @@ async function sendToContent(message) {
   try {
     return await sendMessageToTab(tabId, message);
   } catch (error) {
-    if (shouldRetryAfterInjection(error) && isSupportedSubtitlePage(tab?.url || "")) {
+    if (shouldRetryAfterInjection(error) && isSupportedBilibiliPage(tab?.url || "")) {
       try {
         await ensureContentScriptReady(tabId);
         await sleep(80);
@@ -311,19 +306,7 @@ function shouldRetryAfterInjection(error) {
   return message.includes("Could not establish connection. Receiving end does not exist.");
 }
 
-function isSupportedSubtitlePage(url) {
-  try {
-    const parsed = new URL(String(url || ""));
-    if (parsed.hostname !== "www.bilibili.com") {
-      return false;
-    }
-    return parsed.pathname === "/list/watchlater" ||
-      parsed.pathname === "/list/watchlater/" ||
-      parsed.pathname.startsWith("/video/");
-  } catch {
-    return false;
-  }
-}
+
 
 async function ensureContentScriptReady(tabId) {
   if (!chrome.scripting) {

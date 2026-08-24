@@ -4,7 +4,7 @@ const DEFAULT_SETTINGS = {
   includeDateInFilename: true,
   includeHotCommentsInNote: false,
   enablePlayerAiQuickAction: false,
-  playerAiQuickPrompt: "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。",
+  playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
   includeTimestampInBody: true,
   enableDebugLogs: false,
   readerTheme: "light",
@@ -118,10 +118,7 @@ const state = {
   settings: { ...DEFAULT_SETTINGS }
 };
 
-function formatLocalDate(value = Date.now()) {
-  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
+
 
 function isReaderMode(url = location.href) {
   try {
@@ -257,33 +254,7 @@ function hasNativeReaderPlayerLayoutIssue(playerHost = state.readingPlayerHost) 
   return wrapRect.height <= 8 && playerRect.height > 120;
 }
 
-function normalizeReaderTheme(value) {
-  return value === "dark" || value === "paper" ? value : "light";
-}
 
-function normalizeReaderFontScale(value) {
-  return ["xs", "s", "m", "l", "xl"].includes(value) ? value : "m";
-}
-
-function normalizeReaderLetterSpacing(value) {
-  return ["tighter", "tight", "normal", "relaxed", "loose"].includes(value) ? value : "normal";
-}
-
-function normalizeReaderLineHeight(value) {
-  return ["compact", "tight", "normal", "relaxed", "loose"].includes(value) ? value : "tight";
-}
-
-function normalizeReaderContentWidth(value) {
-  return ["compact", "narrow", "medium", "wide", "full"].includes(value) ? value : "medium";
-}
-
-function normalizeReaderChapterVisibility(value) {
-  return value === "hide" || value === "auto" ? value : "show";
-}
-
-function normalizeReaderTranscriptVisible(value) {
-  return value !== false;
-}
 
 function shouldDebugLog() {
   return Boolean(state.settings?.enableDebugLogs);
@@ -5314,14 +5285,7 @@ function getFixedFrontmatterPropertyLines(settings, templateContext = {}) {
   return lines;
 }
 
-function normalizeFixedPropertyType(value) {
-  const type = String(value || "").trim().toLowerCase();
-  return type === "number" || type === "checkbox" || type === "list" || type === "date" ? type : "text";
-}
 
-function isFixedPropertyRowEffectivelyEmpty(type, value) {
-  return !String(value || "").trim();
-}
 
 function buildFrontmatterTemplateContext(meta, created, tagsCsv, tagsYaml) {
   return {
@@ -5700,9 +5664,7 @@ function sanitizeFileName(value) {
   return value.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
-function normalizeDownloadFormat(value) {
-  return value === "txt" ? "txt" : "srt";
-}
+
 
 function buildNoteFilename(meta) {
   const includeDate = state.settings?.includeDateInFilename !== false;

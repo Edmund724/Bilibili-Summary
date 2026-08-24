@@ -1,32 +1,3 @@
-const DEFAULT_PRESET_PROMPTS = [
-  "生成视频摘要和结论",
-  "按章节整理视频内容",
-  "生成带时间轴的笔记"
-];
-const DEFAULT_INITIAL_QUICK_PROMPTS = [
-  "用 3 句话总结这个视频",
-  "提炼这个视频的 5 个重点",
-  "按时间顺序整理这期视频的内容",
-  "根据评论总结观众的看法"
-];
-const DEFAULT_PLAYER_AI_QUICK_PROMPT = "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。";
-const LEGACY_DEFAULT_AI_SYSTEM_PROMPT = [
-  "你是一名专业的视频内容分析助手。基于字幕与评论提炼高价值信息，不要复述内容，不要输出思考过程或 think 标签。",
-  "优先输出：主题与核心观点、关键数据与事实、逻辑链路与重要结论、可执行建议。",
-  "回答应结构化、信息密度高、便于收藏和复习；自动过滤广告、废话和重复表达。",
-  "信息不足时明确说明，不得猜测或编造；涉及专业内容时，区分事实、数据、推测与作者观点。",
-  "输出时间戳时请使用普通正文格式，如 09:15、01:09:15，不要使用反引号、代码块或表格代码格式包裹时间戳。"
-].join("\n");
-const DEFAULT_AI_SYSTEM_PROMPT = [
-  "你是一名专业的视频内容分析助手。",
-  "基于字幕与评论提炼高价值信息，不要复述内容，不要输出思考过程或 think 标签。",
-  "优先输出：主题与核心观点、关键数据与事实、逻辑链路与重要结论、可执行建议。",
-  "回答应结构化、信息密度高、便于收藏和复习，可适当使用 Emoji、列表和表格。",
-  "自动过滤广告、废话和重复表达。",
-  "信息不足时明确说明，不得猜测或编造；涉及专业内容时，区分事实、数据、推测与作者观点。",
-  "输出时间戳时请使用普通正文格式，如 09:15、01:09:15，不要使用反引号、代码块或表格代码格式包裹时间戳。"
-].join("\n");
-
 const DEFAULT_SETTINGS = {
   tags: "clippings,bilibili",
   downloadFormat: "srt",
@@ -238,9 +209,7 @@ function setStatus(text, isError = false) {
   elements.status.dataset.error = isError ? "true" : "false";
 }
 
-function normalizeDownloadFormat(value) {
-  return value === "txt" ? "txt" : "srt";
-}
+
 
 function collectFormPayload() {
   const selectedFields = Array.from(elements.frontmatterFields)
@@ -297,9 +266,7 @@ function validateSettings(payload, { requireApiKey }) {
   return { ok: true };
 }
 
-function normalizePlayerAiQuickPrompt(value) {
-  return String(value || "").trim();
-}
+
 
 function applyValidationError(validation) {
   clearInputErrors();
@@ -688,36 +655,13 @@ function clearNoteSectionErrors() {
   });
 }
 
-function normalizeFixedFrontmatterProperties(items) {
-  if (!Array.isArray(items)) {
-    return [];
-  }
 
-  return items
-    .map((item) => ({
-      key: String(item?.key || "").trim(),
-      type: normalizeFixedPropertyType(item?.type),
-      value: normalizeFixedPropertyValue(item?.type, item?.value)
-    }))
-    .filter((item) => item.key && !isFixedPropertyRowEffectivelyEmpty(item.type, item.value));
-}
 
-function normalizeFixedPropertyType(value) {
-  const type = String(value || "").trim().toLowerCase();
-  return FIXED_PROPERTY_TYPES.has(type) ? type : "text";
-}
 
-function normalizeFixedPropertyValue(type, value) {
-  const normalizedType = normalizeFixedPropertyType(type);
-  if (normalizedType === "checkbox") {
-    return String(value || "").trim().toLowerCase();
-  }
-  return String(value || "").trim();
-}
 
-function isFixedPropertyRowEffectivelyEmpty(type, value) {
-  return !String(value || "").trim();
-}
+
+
+
 
 function containsFrontmatterTemplateToken(value) {
   return FRONTMATTER_TEMPLATE_TOKEN_RE.test(String(value || "").trim());

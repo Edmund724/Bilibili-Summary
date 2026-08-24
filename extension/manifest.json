@@ -44,7 +44,7 @@
         "https://www.bilibili.com/list/watchlater/",
         "https://www.bilibili.com/list/watchlater/*"
       ],
-      "js": ["content.js"],
+      "js": ["defaults.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle",
       "all_frames": true
