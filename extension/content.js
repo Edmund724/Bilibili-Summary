@@ -38,6 +38,8 @@ import {
 
 const BOC_VERSION = "1.1.4";
 const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
+globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
+
 import {
   buildSubtitlePreview,
   buildMarkdown,
@@ -75,53 +77,12 @@ import {
   subtitlePriority,
   validateSubtitleByDuration,
   normalizeSubtitleUrl
-import {
-  buildBilibiliEmbedIframe,
-  buildChapterLines,
-  buildFolderTemplateContext,
-  buildFrontMatter,
-  buildFrontmatterTemplateContext,
-  buildHotCommentLines,
-  buildMarkdown,
-  buildNoteFilename,
-  buildNotePlaceholderLines,
-  buildNotePlaceholderTemplateContext,
-  buildSrt,
-  buildSubtitleCandidates,
-  buildSubtitlePreview,
-  buildSubtitleSectionLines,
-  buildSubtitleSourceKey,
-  buildTxt,
-  escapeHtml,
-  escapeYaml,
-  formatCompactTimestamp,
-  formatFixedPropertyYamlLine,
-  formatSubtitleLine,
-  formatTimestamp,
-  getEnabledFrontmatterFields,
-  getFixedFrontmatterPropertyLines,
-  groupNotePlaceholderSections,
-  isAiSubtitle,
-  isYamlDateValue,
-  normalizeChapters,
-  normalizeFolder,
-  normalizeHotComments,
-  normalizeNotePlaceholderSections,
-  normalizeSubtitleTracks,
-  normalizeSubtitleUrl,
-  normalizeSubtitleUrlForCache,
-  parseFrontmatterArrayItems,
-  pickPreferredSubtitle,
-  pushOptionalLines,
-  resolveFolderTemplate,
-  resolveFrontmatterTemplateValue,
-  sanitizeFileName,
-  sanitizeFolderTemplateValue,
-  shouldShowHoursInNote,
-  shouldShowHoursInSubtitle,
-  subtitlePriority,
-  validateSubtitleByDuration
 } from "./formatters.js";
+
+function getReaderContentMaxPx() {
+  if (state.readingContentWidth === "compact") {
+    return 680;
+  }
   if (state.readingContentWidth === "narrow") {
     return 760;
   }
@@ -210,6 +171,7 @@ function hasNativeReaderPlayerLayoutIssue(playerHost = state.readingPlayerHost) 
   const wrapRect = wrapNode.getBoundingClientRect();
   return wrapRect.height <= 8 && playerRect.height > 120;
 }
+
 
 
 function shouldDebugLog() {
@@ -875,7 +837,6 @@ function bindUiEvents() {
   });
 }
 
-
 function resetClipState() {
   state.bvid = "";
   state.aid = "";
@@ -1244,45 +1205,18 @@ function getSubtitleCacheKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lan
   return `${CACHE_KEY_PREFIX}${bvid}_${cid}_${sourceKey}`;
 }
 
-
-async function loadSubtitleFromCache(cacheKey) {
-  try {
-    const result = await chrome.storage.local.get(cacheKey);
-    return result[cacheKey]?.body || null;
-  } catch {
-    return null;
+function buildSubtitleSourceKey(subtitleId, subtitleUrl, lang) {
+  const id = String(subtitleId || "").trim();
+  if (id) {
+    return `id_${id}`;
   }
-}
 
-async function saveSubtitleToCache(cacheKey, body) {
-  try {
-    await chrome.storage.local.set({
-      [cacheKey]: {
-        body,
-        timestamp: Date.now()
-      }
-    });
-  } catch (error) {
-    logWarn("[BOC] failed to save subtitle cache", error);
+  const normalizedUrl = normalizeSubtitleUrlForCache(subtitleUrl);
+  if (normalizedUrl) {
+    return `url_${normalizedUrl}`;
   }
-}
 
-async function clearSubtitleCacheByKey(cacheKey) {
-  try {
-    await chrome.storage.local.remove(cacheKey);
-  } catch (error) {
-    logWarn("[BOC] failed to clear subtitle cache by key", { cacheKey, error });
-  }
-}
-
-async function clearSubtitleCache(bvid, cid, lang) {
-  const cacheKey = getSubtitleCacheKey({ bvid, cid, lang });
-  try {
-    await chrome.storage.local.remove(cacheKey);
-    logInfo("[BOC] cleared subtitle cache", { cacheKey });
-  } catch (error) {
-    logWarn("[BOC] failed to clear subtitle cache", error);
-  }
+  return `lang_${String(lang || "").trim().toLowerCase() || "unknown"}`;
 }
 
 function renderMeta() {
@@ -4093,7 +4027,6 @@ function updateReaderFollowState() {
   readingView.setAttribute("data-boc-reader-follow", mode);
 }
 
-
 function hasExplicitPageParam(url) {
   try {
     return new URL(url).searchParams.has("p");
@@ -4108,70 +4041,6 @@ function extractOid(url) {
   } catch {
     return "";
   }
-}
-
-
-async function retryAsync(task, retries = 1, delayMs = 180) {
-  let lastError = null;
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    try {
-      return await task();
-    } catch (error) {
-      lastError = error;
-      // 如果不是网络错误也不是可重试的业务错误，立即抛出
-      const isNetworkError = isRetryableNetworkError(error);
-      const isRetryable = error?.retryable === true;
-      if (!isNetworkError && !isRetryable) {
-        throw error;
-      }
-      if (attempt >= retries) {
-        throw error;
-      }
-      // 指数退避：delayMs * 2^(attempt-1)，最多等待 5 秒
-      const backoffDelay = Math.min(delayMs * Math.pow(2, attempt - 1), 5000);
-      logInfo(`[BOC] retrying after ${backoffDelay}ms, attempt ${attempt + 1}/${retries}`, {
-        error: getErrorMessage(error),
-        code: error.code
-      });
-      await sleep(backoffDelay);
-    }
-  }
-  throw lastError || new Error("Unknown retry error");
-}
-
-
-async function sleep(ms) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-async function fetchVideoMeta(bvid) {
-  const url = `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`;
-  logInfo("[BOC] fetch video meta", { url, bvid });
-  const payload = await fetchJson(url);
-  if (payload.code !== 0) {
-    throw new Error(toReadableText(payload?.message, "无法获取视频信息"));
-  }
-
-  const data = payload.data || {};
-  const pubdate = Number(data.pubdate || 0);
-  const uploadDate = pubdate > 0 ? formatLocalDate(pubdate * 1000) : "";
-  const pages = Array.isArray(data.pages) ? data.pages : [];
-
-  return {
-    aid: data.aid ? String(data.aid) : "",
-    title: String(data.title || ""),
-    author: String(data.owner?.name || ""),
-    description: String(data.desc || ""),
-    uploadDate,
-    defaultCid: data.cid ? String(data.cid) : "",
-    defaultDuration: Number(data.duration || 0) || 0,
-    pages: pages.map((item) => ({
-      cid: String(item.cid || ""),
-      page: Number(item.page || 0) || 0,
-      part: String(item.part || "").trim(),
-      duration: Number(item.duration || 0) || 0
-    }))
-  };
 }
 
 function pickPageFromPages(pages, pageIndex) {
@@ -4505,161 +4374,6 @@ async function fetchSubtitleBundle(bvid, cid, aid = "") {
     throw primaryError;
   }
 }
-) {
-
-
-  { previousId = "", previousUrl = "", previousLang = "" } = {}
-) {
-  const tracks = subtitles || [];
-  if (tracks.length === 0) {
-    return null;
-  }
-
-  // 先按轨道 id 复用，最稳定
-  if (previousId) {
-    const byId = tracks.find((item) => String(item.id || "") === String(previousId));
-    if (byId) {
-      return byId;
-    }
-  }
-
-  // 其次按 URL 路径复用（忽略 auth_key 等动态参数）
-  const prevUrlKey = normalizeSubtitleUrlForCache(previousUrl);
-  if (prevUrlKey) {
-    const byUrl = tracks.find(
-      (item) => normalizeSubtitleUrlForCache(item.subtitleUrl) === prevUrlKey
-    );
-    if (byUrl) {
-      return byUrl;
-    }
-  }
-
-  const normalizedPrevLang = String(previousLang || "").trim().toLowerCase();
-  if (normalizedPrevLang) {
-    const byLang = tracks.find((item) => {
-      const label = String(item.lanDoc || item.lan || "").trim().toLowerCase();
-      return label === normalizedPrevLang;
-    });
-    if (byLang) {
-      return byLang;
-    }
-  }
-
-  // 默认直接拿排序后的第一条：中文优先，其次英文。
-  return tracks[0];
-}
-
-
-async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh) {
-  let lastError = null;
-  for (const item of candidates || []) {
-    try {
-      logInfo("[BOC] try subtitle track", {
-        id: item.id,
-        lan: item.lan,
-        lanDoc: item.lanDoc,
-        url: item.subtitleUrl
-      });
-      await loadSubtitle(
-        item.subtitleUrl,
-        item.lanDoc || item.lan || "unknown",
-        runId,
-        item.id,
-        forceRefresh
-      );
-      return item;
-    } catch (error) {
-      lastError = error;
-      const reasonCode = toReadableText(error?.code, "");
-      const reasonMessage = getErrorMessage(error, "unknown");
-      const meta = {
-        id: item.id,
-        lan: item.lan,
-        lanDoc: item.lanDoc,
-        reason: reasonCode || reasonMessage
-      };
-      if (reasonCode === "SUBTITLE_DURATION_MISMATCH") {
-        logInfo(`[BOC] subtitle track skipped ${JSON.stringify(meta)}`);
-      } else {
-        logWarn(`[BOC] subtitle track rejected ${JSON.stringify(meta)}`);
-      }
-      ensureRunActive(runId);
-      continue;
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
-  }
-  throw new Error("这个视频暂时没有可用字幕。");
-}
-
-
-async function fetchSubtitleBody(url) {
-  logInfo("[BOC] fetch subtitle body", { url });
-  return fetchJsonInBackground(url);
-}
-
-async function fetchJson(url) {
-  if (typeof url === "string" && url.startsWith("https://api.bilibili.com/")) {
-    return fetchJsonInBackground(url);
-  }
-
-  const response = await fetch(url, {
-    credentials: "include",
-    cache: "no-store"
-  });
-
-  if (!response.ok) {
-    throw new Error(`请求失败：${response.status}`);
-  }
-
-  return response.json();
-}
-
-async function fetchJsonInBackground(url) {
-  try {
-    const resp = await sendRuntimeMessage({ type: "fetch-json", url });
-    if (!resp?.ok) {
-      throw new Error(toReadableText(resp?.error, "Background fetch failed"));
-    }
-    return resp.data;
-  } catch (error) {
-    if (isExtensionContextInvalidated(error)) {
-      throw new Error("扩展刚刚更新，请刷新当前页面后重试。");
-    }
-    throw error;
-  }
-}
-
-
-async function fetchHotComments(count = 20) {
-  const safeCount = Math.max(0, Number(count) || 0);
-  if (!safeCount) {
-    return [];
-  }
-
-  const aid = getCurrentAid();
-  if (!aid) {
-    return [];
-  }
-
-  const url = `https://api.bilibili.com/x/v2/reply/main?type=1&oid=${aid}&mode=3&ps=${safeCount}&pn=1`;
-  const resp = await sendRuntimeMessage({ type: "fetch-json", url });
-  if (!resp?.ok) {
-    throw new Error(resp?.error || "评论接口失败");
-  }
-
-  const replies = Array.isArray(resp?.data?.data?.replies) ? resp.data.data.replies : [];
-  return normalizeHotComments(
-    replies.map((item) => ({
-      uname: item?.member?.uname || "匿名",
-      like: item?.like || 0,
-      message: item?.content?.message || ""
-    })),
-    safeCount
-  );
-}
 
 function rebuildDerivedContent() {
   const body = Array.isArray(state.subtitleBody) ? state.subtitleBody : [];
@@ -4686,178 +4400,9 @@ async function refreshDerivedContent({ refreshComments = false } = {}) {
   rebuildDerivedContent();
 }
 
-
-
-
-function mapSubtitleTracks(subtitles, source = "unknown") {
-  return (subtitles || []).map((item) => ({
-    id: item?.id === undefined || item?.id === null ? "" : String(item.id),
-    lan: item?.lan || "",
-    lanDoc: item?.lan_doc || "",
-    subtitleUrl: normalizeSubtitleUrl(item?.subtitle_url || ""),
-    source
-  }));
-}
-
-
-function mapChaptersFromPlayerData(data) {
-  const raw = Array.isArray(data?.view_points) ? data.view_points : [];
-  return normalizeChapters(
-    raw.map((item) => ({
-      title: String(item?.content || item?.title || item?.label || "").trim(),
-      from: normalizeChapterTime(item?.from ?? item?.start ?? item?.start_time),
-      to: normalizeChapterTime(item?.to ?? item?.end ?? item?.end_time),
-      source: "player-view-points"
-    }))
-  );
-}
-
-
-function normalizeChapterTime(value) {
-  if (value === undefined || value === null || value === "") {
-    return 0;
-  }
-
-  const num = Number(value);
-  if (!Number.isFinite(num) || num < 0) {
-    return 0;
-  }
-
-  // 某些接口会返回毫秒级时间戳，这里统一转换成秒。
-  return num > 60 * 60 * 24 ? num / 1000 : num;
-}
-
-
-function buildSubtitleInfoRequests({ bvid, cid, aid }) {
-  const safeBvid = encodeURIComponent(String(bvid || ""));
-  const safeCid = encodeURIComponent(String(cid || ""));
-  const safeAid = encodeURIComponent(String(aid || ""));
-  const requests = [];
-
-  // 参考 SubBatch：优先用 aid+cid 的 wbi 接口作为主来源。
-  if (aid) {
-    requests.push({
-      source: "player-wbi-v2",
-      url:
-        "https://api.bilibili.com/x/player/wbi/v2" +
-        `?aid=${safeAid}` +
-        `&cid=${safeCid}` +
-        (bvid ? `&bvid=${safeBvid}` : "")
-    });
-  }
-
-  // 仅在主来源不可用时再回退到 player-v2。
-  requests.push({
-    source: "player-v2",
-    url:
-      "https://api.bilibili.com/x/player/v2" +
-      (bvid ? `?bvid=${safeBvid}` : "?") +
-      `${bvid ? "&" : ""}cid=${safeCid}` +
-      (aid ? `&aid=${safeAid}` : "")
-  });
-
-  return requests;
-}
-
-
-function buildBiliApiError(payload, fallbackMessage) {
-  const msg = toReadableText(payload?.message, fallbackMessage);
-  const error = new Error(msg);
-  error.code = payload?.code;
-  error.retryable = isRetryableError(payload?.code);
-  return error;
-}
-
-
-function isRetryableError(code) {
-  // -509: 请求过于频繁
-  // -3: 参数错误（可能是临时性的）
-  // 其他负数错误码也可能是临时性的
-  return code === -509 || code === -3 || code < 0;
-}
-
-
-function readRuntimeVideoDuration() {
-  const video = getRuntimeVideoElement();
-  const duration = Number(video?.duration);
-  if (Number.isFinite(duration) && duration > 0) {
-    return duration;
-  }
-  return 0;
-}
-
-async function fetchSubtitleBody(url) {
-  logInfo("[BOC] fetch subtitle body", { url });
-  return fetchJsonInBackground(url);
-}
-
-async function fetchJson(url) {
-  if (typeof url === "string" && url.startsWith("https://api.bilibili.com/")) {
-    return fetchJsonInBackground(url);
-  }
-
-  const response = await fetch(url, {
-    credentials: "include",
-    cache: "no-store"
-  });
-
-  if (!response.ok) {
-    throw new Error(`请求失败：${response.status}`);
-  }
-
-  return response.json();
-}
-
-async function fetchJsonInBackground(url) {
-  try {
-    const resp = await sendRuntimeMessage({ type: "fetch-json", url });
-    if (!resp?.ok) {
-      throw new Error(toReadableText(resp?.error, "Background fetch failed"));
-    }
-    return resp.data;
-  } catch (error) {
-    if (isExtensionContextInvalidated(error)) {
-      throw new Error("扩展刚刚更新，请刷新当前页面后重试。");
-    }
-    throw error;
-  }
-}
-
-
-function getCurrentAid() {
-  let aid = Number(state.aid) || 0;
-  if (!aid && typeof window !== "undefined") {
-    try {
-      aid = Number(window?.__INITIAL_STATE__?.aid) || 0;
-    } catch {}
-  }
-  return aid;
-}
-
-async function fetchHotComments(count = 20) {
-  const safeCount = Math.max(0, Number(count) || 0);
-  if (!safeCount) {
-    return [];
-  }
-
-  const aid = getCurrentAid();
-  if (!aid) {
-    return [];
-  }
-
-  const url = `https://api.bilibili.com/x/v2/reply/main?type=1&oid=${aid}&mode=3&ps=${safeCount}&pn=1`;
-  const resp = await sendRuntimeMessage({ type: "fetch-json", url });
-  if (!resp?.ok) {
-    throw new Error(resp?.error || "评论接口失败");
-  }
-
-  const replies = Array.isArray(resp?.data?.data?.replies) ? resp.data.data.replies : [];
-  return normalizeHotComments(
-    replies.map((item) => ({
-      uname: item?.member?.uname || "匿名",
-      like: item?.like || 0,
-      message: item?.content?.message || ""
-    })),
-    safeCount
-  );
+function sanitizeFolderTemplateValue(value) {
+  return String(value || "")
+    .replace(/[\/\\:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
