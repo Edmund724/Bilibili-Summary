@@ -77,8 +77,8 @@ import {
   schedulePlayerAiQuickActionSync
 } from "./player-ai.js";
 import {
-  refreshClip
-} from "./subtitle-fetcher.js";
+  maybeRefreshReaderSubtitleInBackground
+} from "./reading-view-adapter.js";
 
 
 export function getReaderContentMaxPx() {
@@ -455,19 +455,6 @@ export function openReaderViewShell(readingView = byId(ids.readingView)) {
   readingView.setAttribute("aria-hidden", "false");
   setReadingViewReady(false);
   renderReadingStatus("正在准备播放器和字幕...");
-}
-
-export function maybeRefreshReaderSubtitleInBackground() {
-  if (state.clip.subtitleBody.length) {
-    return;
-  }
-  waitForVideoMetadata().then(() => {
-    refreshClip().catch((error) => {
-      if (!isStaleRunError(error)) {
-        renderReadingStatus(`字幕加载失败：${getErrorMessage(error)}`);
-      }
-    });
-  });
 }
 
 export function waitForVideoMetadata(timeoutMs = 5000) {

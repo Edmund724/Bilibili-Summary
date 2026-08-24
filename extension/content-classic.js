@@ -1970,6 +1970,58 @@ function isVisibleReaderControl(node) {
   return style.display !== "none" && style.visibility !== "hidden" && style.pointerEvents !== "none";
 }
 
+// === reading-view-adapter.js ===
+{ ids };
+
+{
+  buildReaderStepperControl,
+  bindReaderStepperControl,
+  updateReaderPreferences,
+  renderReaderPanels,
+  renderReadingInfoPanel,
+  updateReaderFollowState,
+  syncReadingViewPlayback,
+  closeReadingView,
+  renderReadingView,
+  stopReadingViewSync,
+  noteManualReaderInteraction,
+  logWarn,
+  onReadingChapterClick,
+  onReadingTranscriptClick
+};
+
+{
+  hydrateReaderStateFromSettings,
+  applyReadingViewPresentation,
+  renderReadingStatus,
+  syncReaderModeAfterMount,
+  settleReaderModePresentation,
+  bindReaderHeaderActionsHover,
+  startReadingViewSync,
+  startReaderPlayerObserver,
+  stopReaderPlayerObserver,
+  moveReadingMainInline,
+  alignReaderViewportToPlayer,
+  scheduleReaderMiniPlayerDismiss,
+  openReaderViewShell,
+  applyReaderPageFocus,
+  ensureReaderPlayerMounted,
+  layoutReaderPlayerHost
+};
+
+function maybeRefreshReaderSubtitleInBackground() {
+  if (state.clip.subtitleBody.length) {
+    return;
+  }
+  waitForVideoMetadata().then(() => {
+    refreshClip().catch((error) => {
+      if (!isStaleRunError(error)) {
+        renderReadingStatus(`字幕加载失败：${getErrorMessage(error)}`);
+      }
+    });
+  });
+}
+
 // === reader.js ===
 function getReaderContentMaxPx() {
   if (state.reader.readingContentWidth === "compact") {
@@ -2345,19 +2397,6 @@ function openReaderViewShell(readingView = byId(ids.readingView)) {
   readingView.setAttribute("aria-hidden", "false");
   setReadingViewReady(false);
   renderReadingStatus("正在准备播放器和字幕...");
-}
-
-function maybeRefreshReaderSubtitleInBackground() {
-  if (state.clip.subtitleBody.length) {
-    return;
-  }
-  waitForVideoMetadata().then(() => {
-    refreshClip().catch((error) => {
-      if (!isStaleRunError(error)) {
-        renderReadingStatus(`字幕加载失败：${getErrorMessage(error)}`);
-      }
-    });
-  });
 }
 
 function waitForVideoMetadata(timeoutMs = 5000) {
@@ -5665,7 +5704,39 @@ async function refreshDerivedContent({ refreshComments = false } = {}) {
   setStatus,
   renderMeta,
   renderSubtitleSelect,
-  setMessage
+  setMessage,
+  ids,
+  buildReaderStepperControl,
+  bindReaderStepperControl,
+  updateReaderPreferences,
+  renderReaderPanels,
+  renderReadingInfoPanel,
+  updateReaderFollowState,
+  syncReadingViewPlayback,
+  closeReadingView,
+  renderReadingView,
+  stopReadingViewSync,
+  noteManualReaderInteraction,
+  logWarn,
+  onReadingChapterClick,
+  onReadingTranscriptClick,
+  hydrateReaderStateFromSettings,
+  applyReadingViewPresentation,
+  renderReadingStatus,
+  syncReaderModeAfterMount,
+  settleReaderModePresentation,
+  bindReaderHeaderActionsHover,
+  startReadingViewSync,
+  startReaderPlayerObserver,
+  stopReaderPlayerObserver,
+  moveReadingMainInline,
+  alignReaderViewportToPlayer,
+  scheduleReaderMiniPlayerDismiss,
+  openReaderViewShell,
+  applyReaderPageFocus,
+  ensureReaderPlayerMounted,
+  layoutReaderPlayerHost,
+  maybeRefreshReaderSubtitleInBackground
 };
 
 // === router.js ===

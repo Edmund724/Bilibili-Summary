@@ -88,6 +88,18 @@ import {
   schedulePlayerAiQuickActionSync
 } from "./player-ai.js";
 import {
+  logInfo,
+  logWarn,
+  shouldDebugLog,
+  extractOid,
+  hasExplicitPageParam,
+  pickPageFromPages,
+  pickCidFromPages,
+  pickDurationFromPages,
+  pickPageIndexFromOid
+} from "./reader.js";
+
+import {
   hydrateReaderStateFromSettings,
   applyReadingViewPresentation,
   renderReadingView,
@@ -98,22 +110,14 @@ import {
   renderReadingInfoPanel,
   updateReaderFollowState,
   bindReaderStepperControl,
-  logInfo,
-  logWarn,
-  shouldDebugLog,
   ids,
   stopReadingViewSync,
   stopReaderPlayerObserver,
-  extractOid,
-  hasExplicitPageParam,
-  pickPageFromPages,
-  pickCidFromPages,
-  pickDurationFromPages,
-  pickPageIndexFromOid,
   startReadingViewSync,
   startReaderPlayerObserver,
-  moveReadingMainInline
-} from "./reader.js";
+  moveReadingMainInline,
+  renderReadingStatus
+} from "./reading-view-adapter.js";
 
 import {
   renderMeta,

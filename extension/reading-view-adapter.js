@@ -1,34 +1,11 @@
+import { state } from "./state.js";
 import {
-  BOC_VERSION,
-  CACHE_KEY_PREFIX,
-  retryAsync,
-  fetchVideoMeta,
-  tryLoadSubtitleCandidates,
-  getSubtitleCacheKey,
-  resetClipState,
-  refreshClip,
-  onSubtitleChange,
-  loadSubtitle,
-  getPopupPayload,
-  applyNoSubtitleState,
-  readVideoDescription,
-  fetchSubtitleBundle,
-  refreshDerivedContent,
-  copyMarkdown,
-  downloadSubtitle
+  isStaleRunError,
+  getErrorMessage
+} from "./router.js";
+import {
+  refreshClip
 } from "./subtitle-fetcher.js";
-
-import {
-  buildUiHtml,
-  bindUiEvents,
-  ensureUiReady,
-  setBusyState,
-  setStatus,
-  renderMeta,
-  renderSubtitleSelect,
-  setMessage
-} from "./ui-renderer.js";
-
 import {
   ids,
   buildReaderStepperControl,
@@ -61,36 +38,12 @@ import {
   applyReaderPageFocus,
   ensureReaderPlayerMounted,
   layoutReaderPlayerHost,
-  maybeRefreshReaderSubtitleInBackground
-} from "./reading-view-adapter.js";
+  waitForVideoMetadata
+} from "./reader.js";
+
+export { ids };
 
 export {
-  BOC_VERSION,
-  CACHE_KEY_PREFIX,
-  retryAsync,
-  fetchVideoMeta,
-  tryLoadSubtitleCandidates,
-  getSubtitleCacheKey,
-  resetClipState,
-  refreshClip,
-  onSubtitleChange,
-  loadSubtitle,
-  getPopupPayload,
-  applyNoSubtitleState,
-  readVideoDescription,
-  fetchSubtitleBundle,
-  refreshDerivedContent,
-  copyMarkdown,
-  downloadSubtitle,
-  buildUiHtml,
-  bindUiEvents,
-  ensureUiReady,
-  setBusyState,
-  setStatus,
-  renderMeta,
-  renderSubtitleSelect,
-  setMessage,
-  ids,
   buildReaderStepperControl,
   bindReaderStepperControl,
   updateReaderPreferences,
@@ -104,7 +57,10 @@ export {
   noteManualReaderInteraction,
   logWarn,
   onReadingChapterClick,
-  onReadingTranscriptClick,
+  onReadingTranscriptClick
+};
+
+export {
   hydrateReaderStateFromSettings,
   applyReadingViewPresentation,
   renderReadingStatus,
@@ -120,6 +76,18 @@ export {
   openReaderViewShell,
   applyReaderPageFocus,
   ensureReaderPlayerMounted,
-  layoutReaderPlayerHost,
-  maybeRefreshReaderSubtitleInBackground
+  layoutReaderPlayerHost
 };
+
+export function maybeRefreshReaderSubtitleInBackground() {
+  if (state.clip.subtitleBody.length) {
+    return;
+  }
+  waitForVideoMetadata().then(() => {
+    refreshClip().catch((error) => {
+      if (!isStaleRunError(error)) {
+        renderReadingStatus(`字幕加载失败：${getErrorMessage(error)}`);
+      }
+    });
+  });
+}

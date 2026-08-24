@@ -30,7 +30,7 @@ import {
   logWarn,
   onReadingChapterClick,
   onReadingTranscriptClick
-} from "./reader.js";
+} from "./reading-view-adapter.js";
 import {
   refreshClip,
   onSubtitleChange,
