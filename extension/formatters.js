@@ -1069,3 +1069,44 @@ async function fetchHotComments(count = 20) {
     safeCount
   );
 }
+
+
+export function normalizeSubtitleUrl(url) {
+  if (!url) {
+    return "";
+  }
+
+  if (url.startsWith("//")) {
+    return `https:${url}`;
+  }
+
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+
+  return `https://${url.replace(/^\/+/, "")}`;
+}
+
+
+export function buildSubtitleSourceKey(subtitleId, subtitleUrl, lang) {
+  const id = String(subtitleId || "").trim();
+  if (id) {
+    return `id_${id}`;
+  }
+
+  const normalizedUrl = normalizeSubtitleUrlForCache(subtitleUrl);
+  if (normalizedUrl) {
+    return `url_${normalizedUrl}`;
+  }
+
+  return `lang_${String(lang || "").trim().toLowerCase() || "unknown"}`;
+}
+
+
+export function sanitizeFolderTemplateValue(value) {
+  return String(value || "")
+    .replace(/[\/\\:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+

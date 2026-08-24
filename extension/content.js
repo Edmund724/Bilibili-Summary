@@ -41,43 +41,61 @@ const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
 globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
 
 import {
-  buildSubtitlePreview,
-  buildMarkdown,
-  buildSrt,
-  buildTxt,
+  buildBiliApiError,
+  buildBilibiliEmbedIframe,
+  buildChapterLines,
+  buildFolderTemplateContext,
   buildFrontMatter,
-  formatTimestamp,
-  formatCompactTimestamp,
+  buildFrontmatterTemplateContext,
+  buildHotCommentLines,
+  buildMarkdown,
+  buildNoteFilename,
+  buildNotePlaceholderLines,
+  buildNotePlaceholderTemplateContext,
+  buildSrt,
+  buildSubtitleCandidates,
+  buildSubtitleInfoRequests,
+  buildSubtitlePreview,
+  buildSubtitleSectionLines,
+  buildSubtitleSourceKey,
+  buildTxt,
   escapeHtml,
   escapeYaml,
-  sanitizeFileName,
-  buildNoteFilename,
-  buildSubtitleSectionLines,
+  formatCompactTimestamp,
+  formatFixedPropertyYamlLine,
   formatSubtitleLine,
-  buildChapterLines,
-  buildBilibiliEmbedIframe,
-  buildHotCommentLines,
+  formatTimestamp,
+  getCurrentAid,
   getEnabledFrontmatterFields,
   getFixedFrontmatterPropertyLines,
-  buildFrontmatterTemplateContext,
-  resolveFolderTemplate,
-  buildNotePlaceholderLines,
-  pushOptionalLines,
-  shouldShowHoursInSubtitle,
-  shouldShowHoursInNote,
-  normalizeFolder,
-  buildNotePlaceholderTemplateContext,
   groupNotePlaceholderSections,
-  normalizeNotePlaceholderSections,
-  normalizeChapters,
-  normalizeSubtitleTracks,
-  pickPreferredSubtitle,
-  buildSubtitleCandidates,
   isAiSubtitle,
+  isRetryableError,
+  isYamlDateValue,
+  mapChaptersFromPlayerData,
+  mapSubtitleTracks,
+  normalizeChapterTime,
+  normalizeChapters,
+  normalizeFolder,
+  normalizeHotComments,
+  normalizeNotePlaceholderSections,
+  normalizeSubtitleTracks,
+  normalizeSubtitleUrl,
+  normalizeSubtitleUrlForCache,
+  parseFrontmatterArrayItems,
+  pickPreferredSubtitle,
+  pushOptionalLines,
+  readRuntimeVideoDuration,
+  resolveFolderTemplate,
+  resolveFrontmatterTemplateValue,
+  sanitizeFileName,
+  sanitizeFolderTemplateValue,
+  shouldShowHoursInNote,
+  shouldShowHoursInSubtitle,
   subtitlePriority,
-  validateSubtitleByDuration,
-  normalizeSubtitleUrl
+  validateSubtitleByDuration
 } from "./formatters.js";
+
 
 function getReaderContentMaxPx() {
   if (state.readingContentWidth === "compact") {
@@ -171,7 +189,6 @@ function hasNativeReaderPlayerLayoutIssue(playerHost = state.readingPlayerHost) 
   const wrapRect = wrapNode.getBoundingClientRect();
   return wrapRect.height <= 8 && playerRect.height > 120;
 }
-
 
 
 function shouldDebugLog() {
@@ -1205,19 +1222,6 @@ function getSubtitleCacheKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lan
   return `${CACHE_KEY_PREFIX}${bvid}_${cid}_${sourceKey}`;
 }
 
-function buildSubtitleSourceKey(subtitleId, subtitleUrl, lang) {
-  const id = String(subtitleId || "").trim();
-  if (id) {
-    return `id_${id}`;
-  }
-
-  const normalizedUrl = normalizeSubtitleUrlForCache(subtitleUrl);
-  if (normalizedUrl) {
-    return `url_${normalizedUrl}`;
-  }
-
-  return `lang_${String(lang || "").trim().toLowerCase() || "unknown"}`;
-}
 
 function renderMeta() {
   const meta = byId(ids.meta);
@@ -4400,9 +4404,4 @@ async function refreshDerivedContent({ refreshComments = false } = {}) {
   rebuildDerivedContent();
 }
 
-function sanitizeFolderTemplateValue(value) {
-  return String(value || "")
-    .replace(/[\/\\:*?"<>|]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+
