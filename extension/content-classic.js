@@ -5631,6 +5631,14 @@ function buildTxt(body, settings) {
     .join("\n");
 }
 
+function rebuildDerivedContent() {
+  const body = Array.isArray(state.subtitleBody) ? state.subtitleBody : [];
+  state.markdown = body.length ? buildMarkdown(state, body, state.settings) : "";
+  state.srt = body.length ? buildSrt(body) : "";
+  state.txt = body.length ? buildTxt(body, state.settings) : "";
+  byId("boc-preview").value = body.length ? buildSubtitlePreview(body, state.settings) : "";
+}
+
 
 function escapeHtml(value) {
   return String(value)
@@ -6385,5 +6393,22 @@ async function fetchHotComments(count = 20) {
     })),
     safeCount
   );
+}
+
+async function refreshDerivedContent({ refreshComments = false } = {}) {
+  if (state.settings?.includeHotCommentsInNote) {
+    const shouldFetchComments =
+      refreshComments || !Array.isArray(state.hotComments) || state.hotComments.length === 0;
+    if (shouldFetchComments) {
+      try {
+        state.hotComments = await fetchHotComments(20);
+      } catch (error) {
+        state.hotComments = [];
+        logWarn("[BOC] failed to fetch hot comments for note export", error);
+      }
+    }
+  }
+
+  rebuildDerivedContent();
 }
 
