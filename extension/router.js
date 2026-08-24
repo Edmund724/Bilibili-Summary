@@ -5,7 +5,8 @@ import { enforceNormalPageStateIfNeeded } from "./reader.js";
 import {
   resetClipState,
   refreshClip,
-  setStatus
+  setStatus,
+  setMessage
 } from "./panel.js";
 import {
   enterReaderMode,
