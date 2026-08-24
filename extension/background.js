@@ -1,5 +1,18 @@
 importScripts("defaults.js");
 
+var _parseSsePayload = null;
+async function ensureSseParser() {
+  if (!_parseSsePayload) {
+    try {
+      var mod = await import("./ai/sse-parser.js");
+      _parseSsePayload = mod.parseSsePayload;
+    } catch (e) {
+      _parseSsePayload = function () { return []; };
+    }
+  }
+  return _parseSsePayload;
+}
+
 const DEFAULT_SYNC_SETTINGS = {
   tags: "clippings,bilibili",
   downloadFormat: "srt",
@@ -1166,97 +1179,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return handler(message, sender, sendResponse);
 });
 
-chrome.runtime.onConnect.addListener((port) => {
-  if (!port || port.name !== "sidepanel-chat") {
-    return;
-  }
-
-  let activeAbortController = null;
-  let activeAbortMeta = null;
-  let firstTokenTimeoutId = 0;
-
-  const clearActiveRequestState = () => {
-    if (firstTokenTimeoutId) {
-      clearTimeout(firstTokenTimeoutId);
-      firstTokenTimeoutId = 0;
-    }
-    activeAbortController = null;
-    activeAbortMeta = null;
-  };
-
-  const abortActiveRequest = (meta = null) => {
-    activeAbortMeta = meta;
-    if (firstTokenTimeoutId) {
-      clearTimeout(firstTokenTimeoutId);
-      firstTokenTimeoutId = 0;
-    }
-    if (activeAbortController && !activeAbortController.signal.aborted) {
-      activeAbortController.abort();
-    }
-  };
-
-  // 空闲看门狗：STREAM_IDLE_TIMEOUT_MS 内没有任何数据（思考/正文都算）就中断。
-  // 每次有数据到达都重新武装，因此思考模型长思考不会被误杀，真正卡死也不会无限等待。
-  const armFirstDataTimeout = () => {
-    if (firstTokenTimeoutId) {
-      clearTimeout(firstTokenTimeoutId);
-      firstTokenTimeoutId = 0;
-    }
-    firstTokenTimeoutId = setTimeout(() => {
-      abortActiveRequest({ type: "timeout", reason: "请求超时（90 秒未返回任何数据），已自动中断" });
-    }, STREAM_IDLE_TIMEOUT_MS);
-  };
-
-  port.onDisconnect.addListener(() => {
-    abortActiveRequest({ type: "silent" });
-    clearActiveRequestState();
-  });
-
-  port.onMessage.addListener(async (msg) => {
-    if (!msg) return;
-    if (msg.action === "stop") {
-      abortActiveRequest({ type: "stopped", reason: "已停止生成" });
-      return;
-    }
-    if (msg.action !== "chat") return;
-
-    try {
-      abortActiveRequest({ type: "silent" });
-      clearActiveRequestState();
-      activeAbortController = new AbortController();
-      armFirstDataTimeout();
-      const providers = await loadAiProviders();
-      const provider = providers.find((p) => p.id === msg.providerId);
-      if (!provider) {
-        port.postMessage({ type: "error", error: "未找到选中的平台" });
-        clearActiveRequestState();
-        return;
-      }
-      const keys = await loadAiProviderKeys();
-      const apiKey = keys[provider.id] || "";
-      if (provider.requiresKey !== false && !apiKey) {
-        port.postMessage({ type: "error", error: "该平台 API Key 未配置" });
-        clearActiveRequestState();
-        return;
-      }
-      await streamChat({
-        provider: { ...provider, apiKey },
-        context: msg.context || {},
-        userPrompt: msg.prompt || "",
-        history: Array.isArray(msg.history) ? msg.history : [],
-        port,
-        signal: activeAbortController.signal,
-        getAbortMeta: () => activeAbortMeta,
-        onActivity: () => armFirstDataTimeout()
-      });
-    } catch (e) {
-      port.postMessage({ type: "error", error: String(e?.message || e) });
-    } finally {
-      clearActiveRequestState();
-    }
-  });
-});
-
 async function initializeSettingsStorage() {
   const syncCurrent = await chrome.storage.sync.get(DEFAULT_SYNC_SETTINGS);
   await chrome.storage.sync.set({ ...DEFAULT_SYNC_SETTINGS, ...syncCurrent });
@@ -1460,11 +1382,13 @@ function clipAiSubtitle(markdown) {
   return String(markdown || "");
 }
 
+/** @deprecated 将由 offscreen.js + ai/client.js 统一处理，下个大版本删除 */
 async function* parseOpenAISSE(response) {
   if (!response || !response.body) return;
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  var parseSsePayload = await ensureSseParser();
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -1477,21 +1401,20 @@ async function* parseOpenAISSE(response) {
       const data = line.slice(5).trim();
       if (data === "[DONE]") return;
       if (!data) continue;
-      try {
-        const json = JSON.parse(data);
-        const delta = json?.choices?.[0]?.delta || {};
-        // 思考模型（如 Kimi k2.x / DeepSeek R1）在正式回答前会先输出 reasoning_content，
-        // 这段时间 content 为空——必须单独转发，否则界面会长时间无任何反馈。
-        const reasoning = delta.reasoning_content;
-        if (reasoning) yield { type: "reasoning", data: String(reasoning) };
-        const content = delta.content;
-        if (content) yield { type: "content", data: String(content) };
-      } catch {}
+      var events = parseSsePayload(data);
+      for (var i = 0; i < events.length; i++) {
+        if (events[i].type === "reasoning") {
+          yield { type: "reasoning", data: events[i].data };
+        } else if (events[i].type === "content") {
+          yield { type: "content", data: events[i].data };
+        }
+      }
     }
   }
 }
 
 // onActivity：每当流式响应有任何数据（思考或正文）到达时回调，用于重新武装空闲看门狗。
+/** @deprecated 将由 offscreen.js + ai/client.js 统一处理，下个大版本删除 */
 async function streamChat({ provider, context, userPrompt, history, port, signal, getAbortMeta, onActivity }) {
   if (!port) return;
   const baseUrl = String(provider?.baseUrl || "").trim().replace(/\/+$/, "");

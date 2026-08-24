@@ -2,6 +2,7 @@
 
 import { OPENAI_COMPAT } from "./providers.js";
 import { buildMessages, clipSubtitleForContext } from "./context.js";
+import { parseSsePayload } from "./sse-parser.js";
 
 const MAX_STREAM_RETRIES = 2;
 
@@ -21,7 +22,7 @@ function postSseMessage(port, json) {
 /**
  * 读取并解析单个 SSE 响应。
  */
-async function drainSseStream({ response, port, signal }) {
+async function drainSseStream({ response, port, signal, onActivity }) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -45,18 +46,21 @@ async function drainSseStream({ response, port, signal }) {
       const data = line.slice(5).trim();
       if (!data || data === "[DONE]") continue;
 
-      try {
-        const json = JSON.parse(data);
-        postSseMessage(port, json);
-      } catch {
-        // 忽略单条坏数据，避免中断整段流
+      var events = parseSsePayload(data);
+      for (var i = 0; i < events.length; i++) {
+        onActivity?.();
+        if (events[i].type === "reasoning") {
+          port.postMessage({ type: "reasoning", data: events[i].data });
+        } else {
+          port.postMessage({ type: "token", data: events[i].data });
+        }
       }
     }
   }
   return "done";
 }
 
-export async function streamChat({ provider, context, userPrompt, port, signal }) {
+export async function streamChat({ provider, context, userPrompt, history, port, signal, onActivity }) {
   if (!port) return;
 
   const baseUrl = String(provider?.baseUrl || "").trim().replace(/\/+$/, "");
@@ -71,7 +75,9 @@ export async function streamChat({ provider, context, userPrompt, port, signal }
 
   const messages = buildMessages({
     context: { ...context, subtitleMarkdown: clipSubtitleForContext(context?.subtitleMarkdown) },
-    userPrompt
+    userPrompt,
+    history,
+    systemPrompt: context?.aiSystemPrompt
   });
 
   const headers = { "Content-Type": "application/json" };
@@ -127,7 +133,8 @@ export async function streamChat({ provider, context, userPrompt, port, signal }
       const result = await drainSseStream({
         response,
         port,
-        signal
+        signal,
+        onActivity
       });
       if (result === "stopped") return;
       port.postMessage({ type: "done" });

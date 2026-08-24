@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Bilibili-Summary 架构评审报告</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans SC", sans-serif; }
+    .card { break-inside: avoid; }
+    .mermaid { display: flex; justify-content: center; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+  <div class="max-w-6xl mx-auto px-4 py-8">
+    <header class="mb-8">
+      <h1 class="text-3xl font-bold">Bilibili-Summary 架构评审报告</h1>
+      <p class="mt-2 text-slate-600">聚焦“深模块 / 真实接缝 / 局部性 / 可测试性”，用 /codebase-design 术语描述候选重构。</p>
+      <p class="text-sm text-slate-500">生成时间：<span id="ts"></span></p>
+    </header>
+
+    <section id="candidates" class="space-y-6">
+      <h2 class="text-2xl font-semibold">候选 Deepening Opportunities</h2>
+
+      <article class="card bg-white shadow rounded-2xl p-6">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">Strong</span>
+          <h3 class="text-xl font-semibold">默认值与提示词的单一真实来源</h3>
+        </div>
+        <p class="text-sm text-slate-600 mb-2"><span class="mono">Files: background.js · sidepanel.js · options.js · content.js</span></p>
+        <p class="mb-2"><strong>Problem：</strong>同一组默认常量在 4 个文件中复制粘贴（提示词、系统提示、默认设置）。这违反了 deletion test：删除副本后复杂度会“集中”，而非扩散。</p>
+        <p class="mb-2"><strong>Solution：</strong>抽取一个无 ES module 依赖的共享默认模块（如 <span class="mono">extension/defaults.js</span>），所有页面统一读取。</p>
+        <p class="mb-2"><strong>Benefits：</strong>改动只需触达一个 seam；后续 Candidates 2/3/4 的共享也会更自然。</p>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <p class="text-sm font-medium mb-1">Before</p>
+            <div class="mermaid">graph TD
+              A1["background.js"] --> D1["DEFAULT_* 常量"]
+              A2["sidepanel.js"] --> D2["DEFAULT_* 常量"]
+              A3["options.js"] --> D3["DEFAULT_* 常量"]
+              A4["content.js"] --> D4["DEFAULT_* 常量"]
+              style D1 fill:#fca5a5,stroke:#b91c1c
+              style D2 fill:#fca5a5,stroke:#b91c1c
+              style D3 fill:#fca5a5,stroke:#b91c1c
+              style D4 fill:#fca5a5,stroke:#b91c1c
+            </div>
+          </div>
+          <div>
+            <p class="text-sm font-medium mb-1">After</p>
+            <div class="mermaid">graph TD
+              S["defaults.js (单一来源)"] --> A1["background.js"]
+              S --> A2["sidepanel.js"]
+              S --> A3["options.js"]
+              S --> A4["content.js"]
+              style S fill:#4ade80,stroke:#15803d
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card bg-white shadow rounded-2xl p-6">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">Strong</span>
+          <h3 class="text-xl font-semibold">AI 平台预设的单一读取路径</h3>
+        </div>
+        <p class="text-sm text-slate-600 mb-2"><span class="mono">Files: ai/providers.js · options.js · background.js (runtime handler)</span></p>
+        <p class="mb-2"><strong>Problem：</strong><span class="mono">ai/providers.js</span> 是唯一“真实来源”，但 <span class="mono">options.js</span> 又维护一份相同数组（2 个副本 = 真实 seam 已存在）。</p>
+        <p class="mb-2"><strong>Solution：</strong>让 <span class="mono">options.js</span> 通过运行时消息读取预设列表，或改为由 <span class="mono">background.js</span> 注入到 options 页面。</p>
+        <p class="mb-2"><strong>Benefits：</strong>平台增减只需维护一处；选项页与 AI 客户端行为一致。</p>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <p class="text-sm font-medium mb-1">Before</p>
+            <div class="mermaid">graph LR
+              P1["ai/providers.js (PRESETS)"] --> C1["ai/client.js"]
+              P2["options.js (AI_PRESETS)"] --> O1["options page render"]
+              style P2 fill:#fca5a5,stroke:#b91c1c
+            </div>
+          </div>
+          <div>
+            <p class="text-sm font-medium mb-1">After</p>
+            <div class="mermaid">graph LR
+              P["providers.js (PRESETS)"] --> C["ai/client.js"]
+              P --> BG["background.js handler"]
+              BG --> O["options page render"]
+              style P fill:#4ade80,stroke:#15803d
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card bg-white shadow rounded-2xl p-6">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700">Worth exploring</span>
+          <h3 class="text-xl font-semibold">SSE 解析逻辑共享</h3>
+        </div>
+        <p class="text-sm text-slate-600 mb-2"><span class="mono">Files: background.js (parseOpenAISSE) · ai/client.js (drainSseStream + postSseMessage)</span></p>
+        <p class="mb-2"><strong>Problem：</strong>同一协议有两套解析实现；一套是 generator，一套是 callback，逻辑重复且维护负担翻倍。</p>
+        <p class="mb-2"><strong>Solution：</strong>把 chunk 解析提取为纯函数：输入原始文本流，输出结构化事件；再由不同调用方决定迭代方式。</p>
+        <p class="mb-2"><strong>Benefits：</strong>解析规则只在一处更新；双方都能受益于更完善的错误处理。</p>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <p class="text-sm font-medium mb-1">Before</p>
+            <div class="mermaid">graph TD
+              B["background.js parseOpenAISSE"] --> P1["port postMessage"]
+              C["ai/client.js drainSseStream"] --> P2["port postMessage"]
+              style B fill:#fca5a5,stroke:#b91c1c
+              style C fill:#fca5a5,stroke:#b91c1c
+            </div>
+          </div>
+          <div>
+            <p class="text-sm font-medium mb-1">After</p>
+            <div class="mermaid">graph TD
+              S["shared parser"] --> W1["background wrapper"]
+              S --> W2["offscreen wrapper"]
+              style S fill:#4ade80,stroke:#15803d
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card bg-white shadow rounded-2xl p-6">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700">Worth exploring</span>
+          <h3 class="text-xl font-semibold">统一 streamChat</h3>
+        </div>
+        <p class="text-sm text-slate-600 mb-2"><span class="mono">Files: background.js · ai/client.js</span></p>
+        <p class="mb-2"><strong>Problem：</strong>两处分别实现了请求、重试、流式消费与错误处理，但都不完整；想要 watchdog 又想要 retry 就必须合并。</p>
+        <p class="mb-2"><strong>Solution：</strong>以 <span class="mono">ai/client.js</span> 的版本为基础，加入 watchdog 与 abort meta；service worker 通过 offscreen document 复用同一实现。</p>
+        <p class="mb-2"><strong>Benefits：</strong>网络不稳定时两侧体验一致；测试只需覆盖一个函数。</p>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <p class="text-sm font-medium mb-1">Before</p>
+            <div class="mermaid">graph TD
+              B["background.js streamChat"] -->|watchdog| P1["port"]
+              O["ai/client.js streamChat"] -->|retry| P2["offscreen port"]
+              style B fill:#fca5a5,stroke:#b91c1c
+              style O fill:#fca5a5,stroke:#b91c1c
+            </div>
+          </div>
+          <div>
+            <p class="text-sm font-medium mb-1">After</p>
+            <div class="mermaid">graph TD
+              S["shared streamChat"] --> BG["background via offscreen"]
+              S --> OF["offscreen direct"]
+              style S fill:#4ade80,stroke:#15803d
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card bg-white shadow rounded-2xl p-6">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">Strong</span>
+          <h3 class="text-xl font-semibold">规范化函数与日期/URL 工具集中化</h3>
+        </div>
+        <p class="text-sm text-slate-600 mb-2"><span class="mono">Files: background.js · content.js · options.js · popup.js</span></p>
+        <p class="mb-2"><strong>Problem：</strong><span class="mono">normalizeReader*</span>、<span class="mono">normalizeDownloadFormat</span>、<span class="mono">formatLocalDate</span>、<span class="mono">isSupportedAiTabUrl/isSupportedSubtitlePage</span> 多处重复。</p>
+        <p class="mb-2"><strong>Solution：</strong>并入共享默认模块或独立的 <span class="mono">extension/common.js</span>。</p>
+        <p class="mb-2"><strong>Benefits：</strong>输入验证规则统一；行为边界更清晰。</p>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <p class="text-sm font-medium mb-1">Before</p>
+            <div class="mermaid">graph TD
+              B["background.js"] --> N1["normalizeReader*"]
+              C["content.js"] --> N2["normalizeReader*"]
+              P["popup.js"] --> N3["normalizeDownloadFormat"]
+              O["options.js"] --> N4["normalizeDownloadFormat"]
+              style N1 fill:#fca5a5,stroke:#b91c1c
+              style N2 fill:#fca5a5,stroke:#b91c1c
+              style N3 fill:#fca5a5,stroke:#b91c1c
+              style N4 fill:#fca5a5,stroke:#b91c1c
+            </div>
+          </div>
+          <div>
+            <p class="text-sm font-medium mb-1">After</p>
+            <div class="mermaid">graph TD
+              S["common.js"] --> B
+              S --> C
+              S --> P
+              S --> O
+              style S fill:#4ade80,stroke:#15803d
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card bg-white shadow rounded-2xl p-6">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700">Worth exploring</span>
+          <h3 class="text-xl font-semibold">content.js 深度拆分</h3>
+        </div>
+        <p class="text-sm text-slate-600 mb-2"><span class="mono">Files: content.js</span></p>
+        <p class="mb-2"><strong>Problem：</strong>约 5700 行的单体脚本，混入状态管理、字幕抓取、Markdown/SRT/TXT 生成、阅读视图、播放器 AI 按钮与消息路由。</p>
+        <p class="mb-2"><strong>Solution：</strong>拆分为 <span class="mono">state.js</span>、<span class="mono">subtitle.js</span>、<span class="mono">formatters.js</span>、<span class="mono">reader.js</span>、<span class="mono">player-ai.js</span>、<span class="mono">router.js</span>。保持公开接口稳定，页面其余脚本按需引用。</p>
+        <p class="mb-2"><strong>Benefits：</strong>每个模块都可以单独阅读与测试；界面与数据之间有更清晰的 seam。</p>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <p class="text-sm font-medium mb-1">Before</p>
+            <div class="mermaid">graph TD
+              M["content.js (monolith)"] --> S1["state + fetch + format + reader + ai + router"]
+              style M fill:#fca5a5,stroke:#b91c1c
+            </div>
+          </div>
+          <div>
+            <p class="text-sm font-medium mb-1">After</p>
+            <div class="mermaid">graph TD
+              subgraph Modules
+                ST["state.js"]
+                SUB["subtitle.js"]
+                F["formatters.js"]
+                R["reader.js"]
+                P["player-ai.js"]
+                RT["router.js"]
+              end
+              IDX["index.js"] --> ST & SUB & F & R & P & RT
+              style IDX fill:#4ade80,stroke:#15803d
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card bg-white shadow rounded-2xl p-6">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700">Worth exploring</span>
+          <h3 class="text-xl font-semibold">sidepanel.js 对话与上下文管理外置</h3>
+        </div>
+        <p class="text-sm text-slate-600 mb-2"><span class="mono">Files: sidepanel.js</span></p>
+        <p class="mb-2"><strong>Problem：</strong>UI 绑定、provider 加载、上下文同步、会话持久化、消息渲染、流式 UI 全在同一作用域，导致理解任何一部分都需要先通读大量无关代码。</p>
+        <p class="mb-2"><strong>Solution：</strong>先把“会话生命周期 + 上下文 key 计算”抽出为独立模块，UI 只关心当前会话。</p>
+        <p class="mb-2"><strong>Benefits：</strong>UI 与状态分层；会话逻辑可被侧边栏与播放器 AI 按钮共享。</p>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <p class="text-sm font-medium mb-1">Before</p>
+            <div class="mermaid">graph TD
+              S["sidepanel.js"] --> U["UI + State + IO"]
+              style S fill:#fca5a5,stroke:#b91c1c
+            </div>
+          </div>
+          <div>
+            <p class="text-sm font-medium mb-1">After</p>
+            <div class="mermaid">graph TD
+              subgraph Extracted
+                CM["conversation.js"]
+              end
+              UI["sidepanel UI"] --> CM
+              style CM fill:#4ade80,stroke:#15803d
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card bg-white shadow rounded-2xl p-6">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700">Worth exploring</span>
+          <h3 class="text-xl font-semibold">background.js 消息路由表驱化</h3>
+        </div>
+        <p class="text-sm text-slate-600 mb-2"><span class="mono">Files: background.js (onMessage handler ~315 lines)</span></p>
+        <p class="mb-2"><strong>Problem：</strong>15+ message type 用 if-else 串接，新增 handler 需要翻找长链。</p>
+        <p class="mb-2"><strong>Solution：</strong>改为 <span class="mono">Map&lt;type, handler&gt;</span> 分发；保留参数校验与异步生命周期不变。</p>
+        <p class="mb-2"><strong>Benefits：</strong>新增能力变成局部改动；阅读器更容易知道“支持哪些消息”。</p>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <p class="text-sm font-medium mb-1">Before</p>
+            <div class="mermaid">graph TD
+              M["onMessage"] --> I1["if type === A"]
+              M --> I2["if type === B"]
+              M --> I3["..."]
+              M --> I4["if type === N"]
+              style M fill:#fca5a5,stroke:#b91c1c
+            </div>
+          </div>
+          <div>
+            <p class="text-sm font-medium mb-1">After</p>
+            <div class="mermaid">graph TD
+              R["router Map<type, handler>"] --> H1["handler A"]
+              R --> H2["handler B"]
+              R --> H3["handler N"]
+              style R fill:#4ade80,stroke:#15803d
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section id="top" class="mt-10 bg-white shadow rounded-2xl p-6">
+      <h2 class="text-2xl font-semibold mb-2">Top recommendation</h2>
+      <p class="mb-2">优先推进 <strong>Candidates 1 + 5</strong>：建立共享默认值/规范化 seam。风险低、收益高，也能为后续 Candidates 2/3/4 建立一致的依赖路径。</p>
+      <p>随后依次推进：Candidate 2（预设来源唯一化）、Candidate 8（消息路由表驱化）。</p>
+    </section>
+
+    <footer class="mt-10 text-sm text-slate-500">
+      <p>术语遵循 /codebase-design：module / interface / depth / seam / adapter / leverage / locality。</p>
+    </footer>
+  </div>
+
+  <script>
+    const el = document.getElementById('ts');
+    if (el) el.textContent = new Date().toLocaleString('zh-CN', { hour12: false });
+    mermaid.initialize({ startOnLoad: true, theme: 'default' });
+  </script>
+</body>
+</html>

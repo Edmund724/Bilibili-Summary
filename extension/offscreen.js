@@ -2,6 +2,28 @@
 import { streamChat } from "./ai/client.js";
 
 let activeAbortController = null;
+let idleTimeoutId = null;
+var STREAM_IDLE_TIMEOUT_MS = 90000;
+
+function armIdleTimeout(abortController, port) {
+  clearIdleTimeout();
+  idleTimeoutId = setTimeout(function () {
+    if (abortController && !abortController.signal.aborted) {
+      abortController.abort();
+      port.postMessage({
+        type: "error",
+        error: "请求超时（90 秒未返回任何数据），已自动中断"
+      });
+    }
+  }, STREAM_IDLE_TIMEOUT_MS);
+}
+
+function clearIdleTimeout() {
+  if (idleTimeoutId) {
+    clearTimeout(idleTimeoutId);
+    idleTimeoutId = null;
+  }
+}
 
 chrome.runtime.onConnect.addListener((port) => {
   if (!port || port.name !== "offscreen-chat") {
@@ -42,23 +64,28 @@ chrome.runtime.onConnect.addListener((port) => {
         return;
       }
 
+      armIdleTimeout(activeAbortController, port);
+
       await streamChat({
         provider: { ...provider, apiKey },
         context: msg.context || {},
         userPrompt: msg.prompt || "",
         history: Array.isArray(msg.history) ? msg.history : [],
         port,
-        signal: activeAbortController.signal
+        signal: activeAbortController.signal,
+        onActivity: function () { armIdleTimeout(activeAbortController, port); }
       });
     } catch (e) {
       port.postMessage({ type: "error", error: String(e?.message || e) });
     } finally {
+      clearIdleTimeout();
       clearActiveRequestState();
     }
   });
 
   port.onDisconnect.addListener(() => {
     abortActiveRequest();
+    clearIdleTimeout();
     clearActiveRequestState();
   });
 });
