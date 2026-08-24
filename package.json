@@ -1,0 +1,25 @@
+{
+  "name": "bilibili-summary",
+  "version": "1.0.0",
+  "description": "> **本仓库说明**：本仓库（Bilibili-Summary）是在上游源仓库 [haixiong1997/Bilibili-Obsidian-Clipper](https://github.com/haixiong1997/Bilibili-Obsidian-Clipper) 的基础上由本人进行二次修改（fork）的版本，保留了上游的 MIT License 与版权归属。",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "build:content-classic": "node scripts/build-content-classic.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Edmund724/Bilibili-Summary.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Edmund724/Bilibili-Summary/issues"
+  },
+  "homepage": "https://github.com/Edmund724/Bilibili-Summary#readme"
+}

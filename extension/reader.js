@@ -82,16 +82,16 @@ import {
 
 
 export function getReaderContentMaxPx() {
-  if (state.readingContentWidth === "compact") {
+  if (state.reader.readingContentWidth === "compact") {
     return 680;
   }
-  if (state.readingContentWidth === "narrow") {
+  if (state.reader.readingContentWidth === "narrow") {
     return 760;
   }
-  if (state.readingContentWidth === "wide") {
+  if (state.reader.readingContentWidth === "wide") {
     return 980;
   }
-  if (state.readingContentWidth === "full") {
+  if (state.reader.readingContentWidth === "full") {
     return 1100;
   }
   return 860;
@@ -105,8 +105,8 @@ export function getReaderMainWidthLimit() {
   return Math.max(320, Math.min(getReaderContentMaxPx(), window.innerWidth - getReaderPagePaddingPx() * 2));
 }
 
-export function clearNativeReaderFloatingStyles(playerHost = state.readingPlayerHost) {
-  if (!state.readingNativePageMode || !playerHost) {
+export function clearNativeReaderFloatingStyles(playerHost = state.reader.readingPlayerHost) {
+  if (!state.reader.readingNativePageMode || !playerHost) {
     return;
   }
 
@@ -145,7 +145,7 @@ export function clearNativeReaderFloatingStyles(playerHost = state.readingPlayer
   });
 }
 
-export function getReaderPlayerWrapNode(playerHost = state.readingPlayerHost) {
+export function getReaderPlayerWrapNode(playerHost = state.reader.readingPlayerHost) {
   return (
     playerHost?.closest?.("#playerWrap") ||
     playerHost?.closest?.(".player-wrap") ||
@@ -154,8 +154,8 @@ export function getReaderPlayerWrapNode(playerHost = state.readingPlayerHost) {
   );
 }
 
-export function hasNativeReaderPlayerLayoutIssue(playerHost = state.readingPlayerHost) {
-  if (!state.readingNativePageMode || !playerHost) {
+export function hasNativeReaderPlayerLayoutIssue(playerHost = state.reader.readingPlayerHost) {
+  if (!state.reader.readingNativePageMode || !playerHost) {
     return false;
   }
 
@@ -220,7 +220,7 @@ export function clearReaderModePageState() {
 }
 
 export function shouldForceNormalPageState(url = location.href) {
-  return !isReaderMode(url) && !state.readingViewOpen;
+  return !isReaderMode(url) && !state.reader.readingViewOpen;
 }
 
 export function enforceNormalPageStateIfNeeded(url = location.href) {
@@ -231,10 +231,10 @@ export function enforceNormalPageStateIfNeeded(url = location.href) {
 }
 
 export function bindNormalPageStateGuard() {
-  if (state.normalPageStateGuardBound) {
+  if (state.ui.normalPageStateGuardBound) {
     return;
   }
-  state.normalPageStateGuardBound = true;
+  state.ui.normalPageStateGuardBound = true;
 
   const observer = new MutationObserver(() => {
     enforceNormalPageStateIfNeeded();
@@ -301,10 +301,10 @@ export const ids = {
 };
 
 export function bindSettingsWatcher() {
-  if (state.settingsWatcherBound || !chrome.storage?.onChanged) {
+  if (state.ui.settingsWatcherBound || !chrome.storage?.onChanged) {
     return;
   }
-  state.settingsWatcherBound = true;
+  state.ui.settingsWatcherBound = true;
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "sync" && areaName !== "local") {
@@ -338,7 +338,7 @@ export function bindSettingsWatcher() {
 }
 export function renderReadingSubtitleSelect() {
   const select = byId(ids.readingSubtitleSelect);
-  const subtitles = state.subtitles || [];
+  const subtitles = state.clip.subtitles || [];
 
   if (subtitles.length === 0) {
     select.innerHTML = '<option value="">暂无字幕</option>';
@@ -349,8 +349,8 @@ export function renderReadingSubtitleSelect() {
   select.innerHTML = subtitles
     .map((item) => {
       const selectedById =
-        state.selectedSubtitleId && String(item.id) === String(state.selectedSubtitleId);
-      const selectedByUrl = item.subtitleUrl === state.selectedSubtitleUrl;
+        state.clip.selectedSubtitleId && String(item.id) === String(state.clip.selectedSubtitleId);
+      const selectedByUrl = item.subtitleUrl === state.clip.selectedSubtitleUrl;
       const selected = selectedById || selectedByUrl ? "selected" : "";
       const label = item.lanDoc || item.lan || "unknown";
       const isAi = isAiSubtitle(item);
@@ -365,7 +365,7 @@ export function renderReadingSubtitleSelect() {
     .join("");
   select.disabled = false;
 }
-export function cleanupReaderFloatingArtifacts(playerHost = state.readingPlayerHost) {
+export function cleanupReaderFloatingArtifacts(playerHost = state.reader.readingPlayerHost) {
   if (document.pictureInPictureElement) {
     document.exitPictureInPicture().catch(() => {});
   }
@@ -378,8 +378,8 @@ export function cleanupReaderFloatingArtifacts(playerHost = state.readingPlayerH
 
 export async function enterReaderMode() {
   const readingView = byId(ids.readingView);
-  state.readingViewOpen = true;
-  state.readingNativePageMode = true;
+  state.reader.readingViewOpen = true;
+  state.reader.readingNativePageMode = true;
   document.body.setAttribute("data-boc-reading-active", "1");
   hydrateReaderStateFromSettings(state.settings);
   applyReadingViewPresentation();
@@ -398,7 +398,7 @@ export async function enterReaderMode() {
 
   // Try to mount player, with more retries for slower pages (like watch later)
   const mounted = await ensureReaderPlayerMounted({ retries: 50, delayMs: 150, forceLayout: true });
-  const mountedPlayerHost = state.readingPlayerHost || earlyPlayerHost;
+  const mountedPlayerHost = state.reader.readingPlayerHost || earlyPlayerHost;
   if (mountedPlayerHost) {
     mountedPlayerHost.removeAttribute("data-boc-reader-fading");
   }
@@ -413,30 +413,30 @@ export async function enterReaderMode() {
 }
 
 export function scheduleReaderPlayerRetry() {
-  if (state.readingPlayerRetryTimer) {
-    window.clearTimeout(state.readingPlayerRetryTimer);
-    state.readingPlayerRetryTimer = 0;
+  if (state.reader.readingPlayerRetryTimer) {
+    window.clearTimeout(state.reader.readingPlayerRetryTimer);
+    state.reader.readingPlayerRetryTimer = 0;
   }
   // Keep trying to mount player in background
   const tryMount = async () => {
-    state.readingPlayerRetryTimer = 0;
-    if (!state.readingViewOpen || !isReaderMode()) return;
+    state.reader.readingPlayerRetryTimer = 0;
+    if (!state.reader.readingViewOpen || !isReaderMode()) return;
     const mounted = await ensureReaderPlayerMounted({ retries: 10, delayMs: 200, forceLayout: true });
-    const retryHost = state.readingPlayerHost;
+    const retryHost = state.reader.readingPlayerHost;
     if (retryHost) {
       retryHost.removeAttribute("data-boc-reader-fading");
     }
     if (mounted) {
       finishEnterReaderMode();
-    } else if (state.readingViewOpen) {
-      state.readingPlayerRetryTimer = window.setTimeout(tryMount, 500);
+    } else if (state.reader.readingViewOpen) {
+      state.reader.readingPlayerRetryTimer = window.setTimeout(tryMount, 500);
     }
   };
-  state.readingPlayerRetryTimer = window.setTimeout(tryMount, 500);
+  state.reader.readingPlayerRetryTimer = window.setTimeout(tryMount, 500);
 }
 
 export function finishEnterReaderMode() {
-  if (!state.readingViewOpen || !isReaderMode()) return;
+  if (!state.reader.readingViewOpen || !isReaderMode()) return;
 
   alignReaderViewportToPlayer();
   moveReadingMainInline();
@@ -458,7 +458,7 @@ export function openReaderViewShell(readingView = byId(ids.readingView)) {
 }
 
 export function maybeRefreshReaderSubtitleInBackground() {
-  if (state.subtitleBody.length) {
+  if (state.clip.subtitleBody.length) {
     return;
   }
   waitForVideoMetadata().then(() => {
@@ -512,22 +512,22 @@ export async function ensureReaderPlayerMounted({ retries = 1, delayMs = 100, fo
     const video = getRuntimeVideoElement();
     const playerHost = findReaderPlayerHost(video);
     if (video && playerHost) {
-      const previousHost = state.readingPlayerHost;
-      const previousVideo = state.readingVideoEl;
+      const previousHost = state.reader.readingPlayerHost;
+      const previousVideo = state.reader.readingVideoEl;
       video.controls = false;
       video.removeAttribute("controls");
       video.disablePictureInPicture = true;
       video.setAttribute("disablepictureinpicture", "");
       video.removeAttribute("autopictureinpicture");
-      state.readingPlayerHost = playerHost;
+      state.reader.readingPlayerHost = playerHost;
       const miniPlayerClosed = dismissReaderMiniPlayer(playerHost);
       if (miniPlayerClosed) {
         await sleep(120);
       }
       const activeHost = findReaderPlayerHost(video) || playerHost;
-      state.readingPlayerHost = activeHost;
+      state.reader.readingPlayerHost = activeHost;
       normalizeReaderPlayerContainer(activeHost);
-      if (state.readingNativePageMode) {
+      if (state.reader.readingNativePageMode) {
         clearNativeReaderFloatingStyles(activeHost);
         if (hasNativeReaderPlayerLayoutIssue(activeHost)) {
           normalizeReaderPlayerContainer(activeHost);
@@ -539,7 +539,7 @@ export async function ensureReaderPlayerMounted({ retries = 1, delayMs = 100, fo
         cleanupReaderPlayerHostNode(previousHost);
       }
       if (previousVideo !== video) {
-        state.readingVideoEventsBound = false;
+        state.reader.readingVideoEventsBound = false;
       }
       activeHost.classList.add("boc-reader-player-host");
       bindReadingViewVideo(video);
@@ -550,16 +550,16 @@ export async function ensureReaderPlayerMounted({ retries = 1, delayMs = 100, fo
         previousHost !== activeHost ||
         attempt > 0 ||
         miniPlayerClosed ||
-        (state.readingNativePageMode && hasNativeReaderPlayerLayoutIssue(activeHost))
+        (state.reader.readingNativePageMode && hasNativeReaderPlayerLayoutIssue(activeHost))
       ) {
         layoutReaderPlayerHost();
-        if (state.readingNativePageMode && hasNativeReaderPlayerLayoutIssue(activeHost)) {
+        if (state.reader.readingNativePageMode && hasNativeReaderPlayerLayoutIssue(activeHost)) {
           normalizeReaderPlayerContainer(activeHost);
           clearNativeReaderFloatingStyles(activeHost);
           layoutReaderPlayerHost();
         }
       }
-      if (state.readingNativePageMode && !isWatchlaterPage()) {
+      if (state.reader.readingNativePageMode && !isWatchlaterPage()) {
         await ensureReaderPlayerControlsRecovered(activeHost, {
           reason: attempt > 0 ? "mount-retry" : "mount"
         });
@@ -580,11 +580,11 @@ export async function ensureReaderPlayerMounted({ retries = 1, delayMs = 100, fo
 }
 
 export function queueEnsureReaderPlayerMounted() {
-  if (!state.readingViewOpen || !isReaderMode() || state.readingPlayerMountTimer) {
+  if (!state.reader.readingViewOpen || !isReaderMode() || state.reader.readingPlayerMountTimer) {
     return;
   }
-  state.readingPlayerMountTimer = window.setTimeout(() => {
-    state.readingPlayerMountTimer = 0;
+  state.reader.readingPlayerMountTimer = window.setTimeout(() => {
+    state.reader.readingPlayerMountTimer = 0;
     ensureReaderPlayerMounted({ retries: 12, delayMs: 120, forceLayout: true }).catch((error) => {
       logWarn("[BOC] ensure reader player mounted failed", error);
     });
@@ -593,16 +593,16 @@ export function queueEnsureReaderPlayerMounted() {
 
 export function closeReadingView() {
   cleanupReaderFloatingArtifacts();
-  state.readingViewOpen = false;
-  state.readingNativePageMode = false;
-  state.readingViewReady = false;
-  state.readingSettingsExpanded = false;
-  state.readingManualScrollPauseUntil = 0;
-  state.readingProgrammaticScrollUntil = 0;
-  state.readingNextScrollBehavior = "smooth";
-  if (state.readingPlayerRetryTimer) {
-    window.clearTimeout(state.readingPlayerRetryTimer);
-    state.readingPlayerRetryTimer = 0;
+  state.reader.readingViewOpen = false;
+  state.reader.readingNativePageMode = false;
+  state.reader.readingViewReady = false;
+  state.reader.readingSettingsExpanded = false;
+  state.reader.readingManualScrollPauseUntil = 0;
+  state.reader.readingProgrammaticScrollUntil = 0;
+  state.reader.readingNextScrollBehavior = "smooth";
+  if (state.reader.readingPlayerRetryTimer) {
+    window.clearTimeout(state.reader.readingPlayerRetryTimer);
+    state.reader.readingPlayerRetryTimer = 0;
   }
   const readingView = byId(ids.readingView);
   readingView.classList.remove("open", "reader-page");
@@ -649,14 +649,14 @@ export function renderReadingView() {
   const metaNode = byId(ids.readingMeta);
   const chapterList = byId(ids.readingChapterList);
   const transcriptList = byId(ids.readingTranscriptList);
-  const chapters = normalizeChapters(state.chapters || []);
-  const body = Array.isArray(state.subtitleBody) ? state.subtitleBody : [];
+  const chapters = normalizeChapters(state.clip.chapters || []);
+  const body = Array.isArray(state.clip.subtitleBody) ? state.clip.subtitleBody : [];
   const transcriptItems = getReadingTranscriptItems();
   const withHours = shouldShowHoursInNote(state, body);
   const hasChapters = chapters.length > 0;
 
   if (titleNode) {
-    titleNode.textContent = state.title || "B站字幕阅读";
+    titleNode.textContent = state.clip.title || "B站字幕阅读";
   }
   if (metaNode) {
     metaNode.textContent = buildReadingMetaLine();
@@ -718,8 +718,8 @@ export function renderReadingView() {
   renderReaderPanels();
   applyReadingViewPresentation();
   updateReadingTranscriptTailSpacer();
-  state.readingActiveSubtitleIndex = -1;
-  state.readingActiveChapterIndex = -1;
+  state.reader.readingActiveSubtitleIndex = -1;
+  state.reader.readingActiveChapterIndex = -1;
 }
 
 export function updateReadingTranscriptTailSpacer() {
@@ -735,51 +735,51 @@ export function updateReadingTranscriptTailSpacer() {
 }
 
 export function hydrateReaderStateFromSettings(settings = state.settings) {
-  state.readingTheme = normalizeReaderTheme(settings?.readerTheme);
-  state.readingFontScale = normalizeReaderFontScale(settings?.readerFontScale);
-  state.readingLetterSpacing = normalizeReaderLetterSpacing(settings?.readerLetterSpacing ?? settings?.readerLineHeight);
-  state.readingLineHeight = normalizeReaderLineHeight(settings?.readerLineHeight);
-  state.readingContentWidth = normalizeReaderContentWidth(settings?.readerContentWidth);
-  state.readingChapterVisible = settings?.readerChapterVisible !== undefined ? Boolean(settings.readerChapterVisible) : true;
-  state.readingTranscriptVisible = normalizeReaderTranscriptVisible(settings?.readerTranscriptVisible);
+  state.reader.readingTheme = normalizeReaderTheme(settings?.readerTheme);
+  state.reader.readingFontScale = normalizeReaderFontScale(settings?.readerFontScale);
+  state.reader.readingLetterSpacing = normalizeReaderLetterSpacing(settings?.readerLetterSpacing ?? settings?.readerLineHeight);
+  state.reader.readingLineHeight = normalizeReaderLineHeight(settings?.readerLineHeight);
+  state.reader.readingContentWidth = normalizeReaderContentWidth(settings?.readerContentWidth);
+  state.reader.readingChapterVisible = settings?.readerChapterVisible !== undefined ? Boolean(settings.readerChapterVisible) : true;
+  state.reader.readingTranscriptVisible = normalizeReaderTranscriptVisible(settings?.readerTranscriptVisible);
 }
 
 export function applyReadingViewPresentation() {
   const readingView = byId(ids.readingView);
-  readingView.dataset.theme = state.readingTheme;
-  readingView.dataset.fontScale = state.readingFontScale;
-  readingView.dataset.letterSpacing = state.readingLetterSpacing;
-  readingView.dataset.lineHeight = state.readingLineHeight;
-  readingView.dataset.contentWidth = state.readingContentWidth;
-  readingView.dataset.chapterVisibility = state.readingChapterVisible ? "auto" : "hide";
-  readingView.dataset.transcriptVisible = state.readingTranscriptVisible ? "1" : "0";
-  document.documentElement.dataset.bocReaderTheme = state.readingTheme;
-  document.documentElement.dataset.bocReaderFontScale = state.readingFontScale;
-  document.documentElement.dataset.bocReaderLetterSpacing = state.readingLetterSpacing;
-  document.documentElement.dataset.bocReaderLineHeight = state.readingLineHeight;
-  document.documentElement.dataset.bocReaderContentWidth = state.readingContentWidth;
-  document.documentElement.dataset.bocReaderChapterVisibility = state.readingChapterVisible ? "auto" : "hide";
-  document.documentElement.dataset.bocReaderTranscriptVisible = state.readingTranscriptVisible ? "1" : "0";
-  document.body.dataset.bocReaderTheme = state.readingTheme;
-  document.body.dataset.bocReaderFontScale = state.readingFontScale;
-  document.body.dataset.bocReaderLetterSpacing = state.readingLetterSpacing;
-  document.body.dataset.bocReaderLineHeight = state.readingLineHeight;
-  document.body.dataset.bocReaderContentWidth = state.readingContentWidth;
-  document.body.dataset.bocReaderChapterVisibility = state.readingChapterVisible ? "auto" : "hide";
-  document.body.dataset.bocReaderTranscriptVisible = state.readingTranscriptVisible ? "1" : "0";
+  readingView.dataset.theme = state.reader.readingTheme;
+  readingView.dataset.fontScale = state.reader.readingFontScale;
+  readingView.dataset.letterSpacing = state.reader.readingLetterSpacing;
+  readingView.dataset.lineHeight = state.reader.readingLineHeight;
+  readingView.dataset.contentWidth = state.reader.readingContentWidth;
+  readingView.dataset.chapterVisibility = state.reader.readingChapterVisible ? "auto" : "hide";
+  readingView.dataset.transcriptVisible = state.reader.readingTranscriptVisible ? "1" : "0";
+  document.documentElement.dataset.bocReaderTheme = state.reader.readingTheme;
+  document.documentElement.dataset.bocReaderFontScale = state.reader.readingFontScale;
+  document.documentElement.dataset.bocReaderLetterSpacing = state.reader.readingLetterSpacing;
+  document.documentElement.dataset.bocReaderLineHeight = state.reader.readingLineHeight;
+  document.documentElement.dataset.bocReaderContentWidth = state.reader.readingContentWidth;
+  document.documentElement.dataset.bocReaderChapterVisibility = state.reader.readingChapterVisible ? "auto" : "hide";
+  document.documentElement.dataset.bocReaderTranscriptVisible = state.reader.readingTranscriptVisible ? "1" : "0";
+  document.body.dataset.bocReaderTheme = state.reader.readingTheme;
+  document.body.dataset.bocReaderFontScale = state.reader.readingFontScale;
+  document.body.dataset.bocReaderLetterSpacing = state.reader.readingLetterSpacing;
+  document.body.dataset.bocReaderLineHeight = state.reader.readingLineHeight;
+  document.body.dataset.bocReaderContentWidth = state.reader.readingContentWidth;
+  document.body.dataset.bocReaderChapterVisibility = state.reader.readingChapterVisible ? "auto" : "hide";
+  document.body.dataset.bocReaderTranscriptVisible = state.reader.readingTranscriptVisible ? "1" : "0";
   const readingChapterVisibleEl = byId(ids.readingChapterVisible);
   if (readingChapterVisibleEl) {
-    readingChapterVisibleEl.checked = state.readingChapterVisible;
+    readingChapterVisibleEl.checked = state.reader.readingChapterVisible;
   }
   const main = document.querySelector(".boc-reading-main");
   if (main) {
-    main.style.display = state.readingTranscriptVisible ? "" : "none";
+    main.style.display = state.reader.readingTranscriptVisible ? "" : "none";
   }
   const inlineHost = document.getElementById("boc-reading-inline-host");
   if (inlineHost) {
     const leftContainer = document.querySelector(".left-container");
     const bgColor = leftContainer ? getComputedStyle(leftContainer).backgroundColor : "";
-    if (state.readingTranscriptVisible) {
+    if (state.reader.readingTranscriptVisible) {
       inlineHost.style.border = "";
       inlineHost.style.background = "";
       inlineHost.style.marginTop = "";
@@ -818,25 +818,25 @@ export function getReaderStepperConfig(settingKey) {
     readerFontScale: {
       options: ["xs", "s", "m", "l", "xl"],
       labelKey: "fontScale",
-      getCurrent: () => state.readingFontScale,
+      getCurrent: () => state.reader.readingFontScale,
       buildPayload: (value) => ({ readerFontScale: value })
     },
     readerLetterSpacing: {
       options: ["tighter", "tight", "normal", "relaxed", "loose"],
       labelKey: "letterSpacing",
-      getCurrent: () => state.readingLetterSpacing,
+      getCurrent: () => state.reader.readingLetterSpacing,
       buildPayload: (value) => ({ readerLetterSpacing: value })
     },
     readerLineHeight: {
       options: ["compact", "tight", "normal", "relaxed", "loose"],
       labelKey: "lineHeight",
-      getCurrent: () => state.readingLineHeight,
+      getCurrent: () => state.reader.readingLineHeight,
       buildPayload: (value) => ({ readerLineHeight: value })
     },
     readerContentWidth: {
       options: ["compact", "narrow", "medium", "wide", "full"],
       labelKey: "contentWidth",
-      getCurrent: () => state.readingContentWidth,
+      getCurrent: () => state.reader.readingContentWidth,
       buildPayload: (value) => ({ readerContentWidth: value })
     }
   };
@@ -919,10 +919,10 @@ export function renderReaderStepperState(node, settingKey) {
 export function renderReaderPanels() {
   const settingsPanel = byId(ids.readingSettingsPanel);
   const settingsBtn = byId(ids.readingSettingsBtn);
-  settingsPanel.hidden = !state.readingSettingsExpanded;
-  settingsBtn.classList.toggle("is-active", state.readingSettingsExpanded);
-  byId(ids.readingAutoScroll).checked = state.readingAutoScroll;
-  byId(ids.readingTranscriptVisible).checked = state.readingTranscriptVisible;
+  settingsPanel.hidden = !state.reader.readingSettingsExpanded;
+  settingsBtn.classList.toggle("is-active", state.reader.readingSettingsExpanded);
+  byId(ids.readingAutoScroll).checked = state.reader.readingAutoScroll;
+  byId(ids.readingTranscriptVisible).checked = state.reader.readingTranscriptVisible;
   renderReaderStepperState(byId(ids.readingFontScaleSelect), "readerFontScale");
   renderReaderStepperState(byId(ids.readingLetterSpacingSelect), "readerLetterSpacing");
   renderReaderStepperState(byId(ids.readingLineHeightSelect), "readerLineHeight");
@@ -934,7 +934,7 @@ export function renderReadingInfoPanel() {
   const descriptionNode = byId(ids.readingInfoDescription);
   const descriptionBtn = byId(ids.readingDescriptionBtn);
   const summaryItems = buildReadingSummaryItems();
-  const description = String(state.description || "").trim();
+  const description = String(state.clip.description || "").trim();
 
   summaryNode.innerHTML =
     summaryItems.length === 0
@@ -959,7 +959,7 @@ export function renderReadingInfoPanel() {
     const fullScrollHeight = descriptionNode.scrollHeight;
     descriptionNode.classList.add("is-collapsed");
     const clampedClientHeight = descriptionNode.clientHeight;
-    descriptionNode.classList.toggle("is-collapsed", !state.readingDescriptionExpanded);
+    descriptionNode.classList.toggle("is-collapsed", !state.reader.readingDescriptionExpanded);
     const hasOverflow = fullScrollHeight > clampedClientHeight + 2;
     if (!hasOverflow) {
       descriptionNode.classList.remove("is-collapsed");
@@ -967,25 +967,25 @@ export function renderReadingInfoPanel() {
       return;
     }
     descriptionBtn.hidden = false;
-    descriptionBtn.textContent = state.readingDescriptionExpanded ? "收起简介" : "查看更多";
+    descriptionBtn.textContent = state.reader.readingDescriptionExpanded ? "收起简介" : "查看更多";
   }
 }
 
 export function buildReadingSummaryItems() {
   const items = [];
-  if (state.title) {
-    items.push({ label: "标题", value: state.title });
+  if (state.clip.title) {
+    items.push({ label: "标题", value: state.clip.title });
   }
-  if (state.author) {
-    items.push({ label: "作者", value: state.author });
+  if (state.clip.author) {
+    items.push({ label: "作者", value: state.clip.author });
   }
-  if (state.uploadDate) {
-    items.push({ label: "日期", value: state.uploadDate });
+  if (state.clip.uploadDate) {
+    items.push({ label: "日期", value: state.clip.uploadDate });
   }
-  if (Number(state.pageCount) > 1) {
-    const pageParts = [`P${Number(state.pageIndex) > 0 ? Number(state.pageIndex) : 1}`];
-    if (state.pageTitle) {
-      pageParts.push(state.pageTitle);
+  if (Number(state.clip.pageCount) > 1) {
+    const pageParts = [`P${Number(state.clip.pageIndex) > 0 ? Number(state.clip.pageIndex) : 1}`];
+    if (state.clip.pageTitle) {
+      pageParts.push(state.clip.pageTitle);
     }
     items.push({ label: "分P", value: pageParts.join(" ") });
   }
@@ -993,26 +993,26 @@ export function buildReadingSummaryItems() {
 }
 
 export function updateReaderPreferences(next, { persist = true } = {}) {
-  state.readingTheme = normalizeReaderTheme(next.readerTheme ?? state.readingTheme);
-  state.readingFontScale = normalizeReaderFontScale(next.readerFontScale ?? state.readingFontScale);
-  state.readingLetterSpacing = normalizeReaderLetterSpacing(
-    next.readerLetterSpacing ?? state.readingLetterSpacing
+  state.reader.readingTheme = normalizeReaderTheme(next.readerTheme ?? state.reader.readingTheme);
+  state.reader.readingFontScale = normalizeReaderFontScale(next.readerFontScale ?? state.reader.readingFontScale);
+  state.reader.readingLetterSpacing = normalizeReaderLetterSpacing(
+    next.readerLetterSpacing ?? state.reader.readingLetterSpacing
   );
-  state.readingLineHeight = normalizeReaderLineHeight(next.readerLineHeight ?? state.readingLineHeight);
-  state.readingContentWidth = normalizeReaderContentWidth(next.readerContentWidth ?? state.readingContentWidth);
-  state.readingChapterVisible = next.readerChapterVisible !== undefined ? Boolean(next.readerChapterVisible) : state.readingChapterVisible;
-  state.readingTranscriptVisible = normalizeReaderTranscriptVisible(
-    next.readerTranscriptVisible ?? state.readingTranscriptVisible
+  state.reader.readingLineHeight = normalizeReaderLineHeight(next.readerLineHeight ?? state.reader.readingLineHeight);
+  state.reader.readingContentWidth = normalizeReaderContentWidth(next.readerContentWidth ?? state.reader.readingContentWidth);
+  state.reader.readingChapterVisible = next.readerChapterVisible !== undefined ? Boolean(next.readerChapterVisible) : state.reader.readingChapterVisible;
+  state.reader.readingTranscriptVisible = normalizeReaderTranscriptVisible(
+    next.readerTranscriptVisible ?? state.reader.readingTranscriptVisible
   );
   state.settings = {
     ...state.settings,
-    readerTheme: state.readingTheme,
-    readerFontScale: state.readingFontScale,
-    readerLetterSpacing: state.readingLetterSpacing,
-    readerLineHeight: state.readingLineHeight,
-    readerContentWidth: state.readingContentWidth,
-    readerChapterVisible: state.readingChapterVisible,
-    readerTranscriptVisible: state.readingTranscriptVisible
+    readerTheme: state.reader.readingTheme,
+    readerFontScale: state.reader.readingFontScale,
+    readerLetterSpacing: state.reader.readingLetterSpacing,
+    readerLineHeight: state.reader.readingLineHeight,
+    readerContentWidth: state.reader.readingContentWidth,
+    readerChapterVisible: state.reader.readingChapterVisible,
+    readerTranscriptVisible: state.reader.readingTranscriptVisible
   };
   applyReadingViewPresentation();
   renderReaderPanels();
@@ -1029,22 +1029,22 @@ export function persistReaderSettings() {
 
 export function buildReadingMetaLine() {
   const parts = [];
-  if (state.author) {
-    parts.push(state.author);
+  if (state.clip.author) {
+    parts.push(state.clip.author);
   }
-  if (state.uploadDate) {
-    parts.push(state.uploadDate);
+  if (state.clip.uploadDate) {
+    parts.push(state.clip.uploadDate);
   }
   parts.push("bilibili.com");
-  if (Number(state.pageCount) > 1) {
-    const pageParts = [`P${Number(state.pageIndex) > 0 ? Number(state.pageIndex) : 1}`];
-    if (state.pageTitle) {
-      pageParts.push(state.pageTitle);
+  if (Number(state.clip.pageCount) > 1) {
+    const pageParts = [`P${Number(state.clip.pageIndex) > 0 ? Number(state.clip.pageIndex) : 1}`];
+    if (state.clip.pageTitle) {
+      pageParts.push(state.clip.pageTitle);
     }
     parts.push(pageParts.join(" "));
   }
-  if (state.selectedSubtitleLang) {
-    parts.push(`字幕：${state.selectedSubtitleLang}`);
+  if (state.clip.selectedSubtitleLang) {
+    parts.push(`字幕：${state.clip.selectedSubtitleLang}`);
   }
   return parts.join(" · ");
 }
@@ -1054,24 +1054,24 @@ export function renderReadingStatus(text) {
 }
 
 export function setReadingViewReady(ready) {
-  state.readingViewReady = Boolean(ready);
+  state.reader.readingViewReady = Boolean(ready);
   const readingView = document.getElementById(ids.readingView);
   if (!readingView) {
     return;
   }
-  readingView.setAttribute("data-boc-reader-ready", state.readingViewReady ? "1" : "0");
-  readingView.setAttribute("aria-busy", state.readingViewReady ? "false" : "true");
+  readingView.setAttribute("data-boc-reader-ready", state.reader.readingViewReady ? "1" : "0");
+  readingView.setAttribute("aria-busy", state.reader.readingViewReady ? "false" : "true");
 }
 
-export function isReaderPresentationStable(playerHost = state.readingPlayerHost) {
-  if (!state.readingViewOpen || !playerHost?.isConnected) {
+export function isReaderPresentationStable(playerHost = state.reader.readingPlayerHost) {
+  if (!state.reader.readingViewOpen || !playerHost?.isConnected) {
     return false;
   }
   const rect = playerHost.getBoundingClientRect();
   if (!(rect.width > 240) || !(rect.height > 120)) {
     return false;
   }
-  if (!state.readingNativePageMode) {
+  if (!state.reader.readingNativePageMode) {
     return true;
   }
   return !hasNativeReaderPlayerLayoutIssue(playerHost);
@@ -1117,9 +1117,9 @@ export function createReaderDebugSnapshot(label = "manual") {
     };
   };
 
-  const playerHost = state.readingPlayerHost || findReaderPlayerHost(getRuntimeVideoElement());
+  const playerHost = state.reader.readingPlayerHost || findReaderPlayerHost(getRuntimeVideoElement());
   const wrapNode = getReaderPlayerWrapNode(playerHost);
-  const video = state.readingVideoEl || getRuntimeVideoElement();
+  const video = state.reader.readingVideoEl || getRuntimeVideoElement();
   const hostChain = [];
   let current = playerHost;
   let depth = 0;
@@ -1157,9 +1157,9 @@ export function createReaderDebugSnapshot(label = "manual") {
     url: cleanVideoUrl(),
     readerMode: document.documentElement.getAttribute("data-boc-reader-mode"),
     readingActive: document.body.getAttribute("data-boc-reading-active"),
-    readingViewOpen: state.readingViewOpen,
-    readingNativePageMode: state.readingNativePageMode,
-    readingViewReady: state.readingViewReady,
+    readingViewOpen: state.reader.readingViewOpen,
+    readingNativePageMode: state.reader.readingNativePageMode,
+    readingViewReady: state.reader.readingViewReady,
     readyStable: isReaderPresentationStable(playerHost),
     hasLayoutIssue: hasNativeReaderPlayerLayoutIssue(playerHost),
     hasRoot: Boolean(document.getElementById(ids.root)),
@@ -1204,46 +1204,46 @@ export function createReaderDebugSnapshot(label = "manual") {
 }
 
 export function bindReaderLayout() {
-  if (state.readingLayoutBound) {
+  if (state.reader.readingLayoutBound) {
     return;
   }
   window.addEventListener("resize", layoutReaderPlayerHost);
   window.addEventListener("scroll", layoutReaderPlayerHost, { passive: true });
   document.addEventListener("fullscreenchange", layoutReaderPlayerHost);
   document.addEventListener("webkitfullscreenchange", layoutReaderPlayerHost);
-  state.readingLayoutBound = true;
+  state.reader.readingLayoutBound = true;
 }
 
 export function unbindReaderLayout() {
-  if (!state.readingLayoutBound) {
+  if (!state.reader.readingLayoutBound) {
     return;
   }
   window.removeEventListener("resize", layoutReaderPlayerHost);
   window.removeEventListener("scroll", layoutReaderPlayerHost);
   document.removeEventListener("fullscreenchange", layoutReaderPlayerHost);
   document.removeEventListener("webkitfullscreenchange", layoutReaderPlayerHost);
-  state.readingLayoutBound = false;
+  state.reader.readingLayoutBound = false;
 }
 
 export function layoutReaderPlayerHost() {
-  if (!state.readingViewOpen || !isReaderMode()) {
+  if (!state.reader.readingViewOpen || !isReaderMode()) {
     return;
   }
 
   const readingView = byId(ids.readingView);
-  const playerHost = state.readingPlayerHost;
+  const playerHost = state.reader.readingPlayerHost;
   const slot = byId(ids.readingPlayerSlot);
   if (!playerHost) {
     return;
   }
 
-  if (state.readingNativePageMode) {
+  if (state.reader.readingNativePageMode) {
     const rect = playerHost.getBoundingClientRect();
     if (!(rect.width > 0) || !(rect.height > 0)) {
       return;
     }
 
-    const video = state.readingVideoEl;
+    const video = state.reader.readingVideoEl;
     let renderedWidth = rect.width;
     let renderedHeight = rect.height;
     if (Number(video?.videoWidth) > 0 && Number(video?.videoHeight) > 0) {
@@ -1288,7 +1288,7 @@ export function layoutReaderPlayerHost() {
     return;
   }
 
-  const video = state.readingVideoEl;
+  const video = state.reader.readingVideoEl;
   const aspectRatio =
     Number(video?.videoWidth) > 0 && Number(video?.videoHeight) > 0
       ? Number(video.videoWidth) / Number(video.videoHeight)
@@ -1335,81 +1335,81 @@ export function cleanupReaderPlayerHost() {
   restoreReaderPlayerContainer();
   unbindReaderPlayerControlsHover();
   unbindReaderHeaderActionsHover();
-  if (state.readingControlsRecoveryTimer) {
-    window.clearTimeout(state.readingControlsRecoveryTimer);
-    state.readingControlsRecoveryTimer = 0;
+  if (state.reader.readingControlsRecoveryTimer) {
+    window.clearTimeout(state.reader.readingControlsRecoveryTimer);
+    state.reader.readingControlsRecoveryTimer = 0;
   }
-  state.readingControlsRecoveryInFlight = false;
+  state.reader.readingControlsRecoveryInFlight = false;
   const readingView = byId(ids.readingView);
   readingView?.style.removeProperty("--boc-reader-player-rendered-width");
   readingView?.style.removeProperty("--boc-reader-player-rendered-height");
-  const playerHost = state.readingPlayerHost;
+  const playerHost = state.reader.readingPlayerHost;
   if (!playerHost) {
     return;
   }
   setReaderPlayerControlsVisible(false, playerHost);
   cleanupReaderPlayerHostNode(playerHost);
-  state.readingPlayerHost = null;
+  state.reader.readingPlayerHost = null;
 }
 
 export function startReadingViewSync() {
-  if (state.readingSyncTimer) {
-    window.clearInterval(state.readingSyncTimer);
+  if (state.reader.readingSyncTimer) {
+    window.clearInterval(state.reader.readingSyncTimer);
   }
-  state.readingSyncTimer = window.setInterval(() => {
+  state.reader.readingSyncTimer = window.setInterval(() => {
     syncReadingViewPlayback();
   }, 250);
 }
 
 export function stopReadingViewSync() {
-  if (state.readingSyncTimer) {
-    window.clearInterval(state.readingSyncTimer);
-    state.readingSyncTimer = 0;
+  if (state.reader.readingSyncTimer) {
+    window.clearInterval(state.reader.readingSyncTimer);
+    state.reader.readingSyncTimer = 0;
   }
-  if (state.readingMiniDismissTimer) {
-    window.clearTimeout(state.readingMiniDismissTimer);
-    state.readingMiniDismissTimer = 0;
+  if (state.reader.readingMiniDismissTimer) {
+    window.clearTimeout(state.reader.readingMiniDismissTimer);
+    state.reader.readingMiniDismissTimer = 0;
   }
-  if (state.readingControlsHideTimer) {
-    window.clearTimeout(state.readingControlsHideTimer);
-    state.readingControlsHideTimer = 0;
+  if (state.reader.readingControlsHideTimer) {
+    window.clearTimeout(state.reader.readingControlsHideTimer);
+    state.reader.readingControlsHideTimer = 0;
   }
-  if (state.readingControlsRecoveryTimer) {
-    window.clearTimeout(state.readingControlsRecoveryTimer);
-    state.readingControlsRecoveryTimer = 0;
+  if (state.reader.readingControlsRecoveryTimer) {
+    window.clearTimeout(state.reader.readingControlsRecoveryTimer);
+    state.reader.readingControlsRecoveryTimer = 0;
   }
-  state.readingControlsRecoveryInFlight = false;
-  if (state.readingPlayerMountTimer) {
-    window.clearTimeout(state.readingPlayerMountTimer);
-    state.readingPlayerMountTimer = 0;
+  state.reader.readingControlsRecoveryInFlight = false;
+  if (state.reader.readingPlayerMountTimer) {
+    window.clearTimeout(state.reader.readingPlayerMountTimer);
+    state.reader.readingPlayerMountTimer = 0;
   }
-  if (state.readingPlayerRetryTimer) {
-    window.clearTimeout(state.readingPlayerRetryTimer);
-    state.readingPlayerRetryTimer = 0;
+  if (state.reader.readingPlayerRetryTimer) {
+    window.clearTimeout(state.reader.readingPlayerRetryTimer);
+    state.reader.readingPlayerRetryTimer = 0;
   }
   stopReaderPlayerObserver();
   unbindReaderPlayerControlsHover();
-  if (state.readingVideoEl && state.readingVideoEl.__bocReadingSyncHandler) {
-    const video = state.readingVideoEl;
+  if (state.reader.readingVideoEl && state.reader.readingVideoEl.__bocReadingSyncHandler) {
+    const video = state.reader.readingVideoEl;
     video.removeEventListener("timeupdate", video.__bocReadingSyncHandler);
     video.removeEventListener("seeked", video.__bocReadingSyncHandler);
     video.removeEventListener("loadedmetadata", video.__bocReadingSyncHandler);
     delete video.__bocReadingSyncHandler;
   }
-  state.readingVideoEventsBound = false;
+  state.reader.readingVideoEventsBound = false;
 }
 
 export function startReaderPlayerObserver() {
-  if (!isReaderMode() || state.readingPlayerObserver || !document.body) {
+  if (!isReaderMode() || state.reader.readingPlayerObserver || !document.body) {
     return;
   }
   const observer = new MutationObserver(() => {
-    if (!state.readingViewOpen) {
+    if (!state.reader.readingViewOpen) {
       return;
     }
     const nextVideo = getRuntimeVideoElement();
     const nextHost = findReaderPlayerHost(nextVideo);
-    if (nextVideo && nextHost && (nextVideo !== state.readingVideoEl || nextHost !== state.readingPlayerHost)) {
+    if (nextVideo && nextHost && (nextVideo !== state.reader.readingVideoEl || nextHost !== state.reader.readingPlayerHost)) {
       queueEnsureReaderPlayerMounted();
     }
     if (document.querySelector(".bpx-player-mini-close, .bpx-player-mini-warp")) {
@@ -1420,48 +1420,48 @@ export function startReaderPlayerObserver() {
     childList: true,
     subtree: true
   });
-  state.readingPlayerObserver = observer;
+  state.reader.readingPlayerObserver = observer;
 }
 
 export function stopReaderPlayerObserver() {
-  if (state.readingPlayerObserver) {
-    state.readingPlayerObserver.disconnect();
-    state.readingPlayerObserver = null;
+  if (state.reader.readingPlayerObserver) {
+    state.reader.readingPlayerObserver.disconnect();
+    state.reader.readingPlayerObserver = null;
   }
 }
 
 export function bindReadingViewVideo(video = getRuntimeVideoElement()) {
   if (!video) {
-    if (state.readingVideoEl && state.readingVideoEl.__bocReadingSyncHandler) {
-      const prev = state.readingVideoEl;
+    if (state.reader.readingVideoEl && state.reader.readingVideoEl.__bocReadingSyncHandler) {
+      const prev = state.reader.readingVideoEl;
       prev.removeEventListener("timeupdate", prev.__bocReadingSyncHandler);
       prev.removeEventListener("seeked", prev.__bocReadingSyncHandler);
       prev.removeEventListener("loadedmetadata", prev.__bocReadingSyncHandler);
       delete prev.__bocReadingSyncHandler;
     }
-    state.readingVideoEl = null;
-    state.readingVideoEventsBound = false;
+    state.reader.readingVideoEl = null;
+    state.reader.readingVideoEventsBound = false;
     return null;
   }
 
-  if (state.readingVideoEl === video && state.readingVideoEventsBound) {
+  if (state.reader.readingVideoEl === video && state.reader.readingVideoEventsBound) {
     return video;
   }
 
-  if (state.readingVideoEl && state.readingVideoEl.__bocReadingSyncHandler) {
-    const prev = state.readingVideoEl;
+  if (state.reader.readingVideoEl && state.reader.readingVideoEl.__bocReadingSyncHandler) {
+    const prev = state.reader.readingVideoEl;
     prev.removeEventListener("timeupdate", prev.__bocReadingSyncHandler);
     prev.removeEventListener("seeked", prev.__bocReadingSyncHandler);
     prev.removeEventListener("loadedmetadata", prev.__bocReadingSyncHandler);
   }
 
   const syncHandler = (event) => {
-    if (state.readingViewOpen) {
+    if (state.reader.readingViewOpen) {
       if (event?.type === "loadedmetadata") {
         layoutReaderPlayerHost();
       }
       if (event?.type === "seeked") {
-        state.readingNextScrollBehavior = "auto";
+        state.reader.readingNextScrollBehavior = "auto";
         queueEnsureReaderPlayerControlsRecovered({
           reason: "seeked",
           delayMs: 140,
@@ -1469,7 +1469,7 @@ export function bindReadingViewVideo(video = getRuntimeVideoElement()) {
         });
       }
       const latestHost = findReaderPlayerHost(video);
-      if (latestHost && latestHost !== state.readingPlayerHost) {
+      if (latestHost && latestHost !== state.reader.readingPlayerHost) {
         queueEnsureReaderPlayerMounted();
       }
       syncReadingViewPlayback();
@@ -1479,9 +1479,9 @@ export function bindReadingViewVideo(video = getRuntimeVideoElement()) {
   video.addEventListener("seeked", syncHandler);
   video.addEventListener("loadedmetadata", syncHandler);
   video.__bocReadingSyncHandler = syncHandler;
-  state.readingVideoEl = video;
-  state.readingPlayerHost = findReaderPlayerHost(video) || state.readingPlayerHost;
-  state.readingVideoEventsBound = true;
+  state.reader.readingVideoEl = video;
+  state.reader.readingPlayerHost = findReaderPlayerHost(video) || state.reader.readingPlayerHost;
+  state.reader.readingVideoEventsBound = true;
   return video;
 }
 
@@ -1534,14 +1534,14 @@ export function moveReadingMainInline() {
     return;
   }
 
-  if (!state.readingMainOriginalParent) {
-    state.readingMainOriginalParent = readingMain.parentElement;
-    state.readingMainOriginalNextSibling = readingMain.nextSibling;
+  if (!state.reader.readingMainOriginalParent) {
+    state.reader.readingMainOriginalParent = readingMain.parentElement;
+    state.reader.readingMainOriginalNextSibling = readingMain.nextSibling;
   }
   const playerWrap =
     document.getElementById("playerWrap") ||
-    state.readingPlayerHost?.closest?.("#playerWrap") ||
-    state.readingPlayerHost;
+    state.reader.readingPlayerHost?.closest?.("#playerWrap") ||
+    state.reader.readingPlayerHost;
   const hostParent = playerWrap?.parentElement;
   if (!playerWrap || !hostParent) {
     return;
@@ -1559,7 +1559,7 @@ export function moveReadingMainInline() {
 
   if (!inlineHost.dataset.bocScrollBound) {
     const handleInlineHostManualScroll = () => {
-      if (Date.now() <= state.readingProgrammaticScrollUntil) {
+      if (Date.now() <= state.reader.readingProgrammaticScrollUntil) {
         return;
       }
       noteManualReaderInteraction();
@@ -1574,7 +1574,7 @@ export function moveReadingMainInline() {
   }
   const leftContainer = document.querySelector(".left-container");
   const bgColor = leftContainer ? getComputedStyle(leftContainer).backgroundColor : "";
-  if (state.readingTranscriptVisible) {
+  if (state.reader.readingTranscriptVisible) {
     inlineHost.style.border = "";
     inlineHost.style.background = "";
     inlineHost.style.marginTop = "";
@@ -1593,16 +1593,16 @@ export function moveReadingMainInline() {
 export function restoreReadingMainInline() {
   const readingMain = document.querySelector(".boc-reading-main");
   const inlineHost = document.getElementById("boc-reading-inline-host");
-  if (readingMain && state.readingMainOriginalParent) {
-    if (state.readingMainOriginalNextSibling?.parentNode === state.readingMainOriginalParent) {
-      state.readingMainOriginalParent.insertBefore(readingMain, state.readingMainOriginalNextSibling);
+  if (readingMain && state.reader.readingMainOriginalParent) {
+    if (state.reader.readingMainOriginalNextSibling?.parentNode === state.reader.readingMainOriginalParent) {
+      state.reader.readingMainOriginalParent.insertBefore(readingMain, state.reader.readingMainOriginalNextSibling);
     } else {
-      state.readingMainOriginalParent.appendChild(readingMain);
+      state.reader.readingMainOriginalParent.appendChild(readingMain);
     }
   }
   inlineHost?.remove();
-  state.readingMainOriginalParent = null;
-  state.readingMainOriginalNextSibling = null;
+  state.reader.readingMainOriginalParent = null;
+  state.reader.readingMainOriginalNextSibling = null;
 }
 
 export function pruneReaderNonKeepBranches(node) {
@@ -1714,7 +1714,7 @@ export function findReaderMetaContainer(titleNode = findReaderTitleContainer()) 
   return null;
 }
 
-export function findReaderContentHost(playerHost = state.readingPlayerHost, titleNode = findReaderTitleContainer()) {
+export function findReaderContentHost(playerHost = state.reader.readingPlayerHost, titleNode = findReaderTitleContainer()) {
   if (!playerHost && !titleNode) {
     return null;
   }
@@ -1740,7 +1740,7 @@ export function restoreRootMount() {
   return;
 }
 
-export function dismissReaderMiniPlayer(playerHost = state.readingPlayerHost) {
+export function dismissReaderMiniPlayer(playerHost = state.reader.readingPlayerHost) {
   const explicitClose = Array.from(document.querySelectorAll(".bpx-player-mini-close")).find(isVisibleReaderControl);
   if (explicitClose) {
     explicitClose.click();
@@ -1823,25 +1823,25 @@ export function dismissReaderMiniPlayer(playerHost = state.readingPlayerHost) {
 }
 
 export function scheduleReaderMiniPlayerDismiss(maxAttempts = 12, delayMs = 180) {
-  if (!state.readingViewOpen) {
+  if (!state.reader.readingViewOpen) {
     return;
   }
-  if (state.readingMiniDismissTimer) {
-    window.clearTimeout(state.readingMiniDismissTimer);
-    state.readingMiniDismissTimer = 0;
+  if (state.reader.readingMiniDismissTimer) {
+    window.clearTimeout(state.reader.readingMiniDismissTimer);
+    state.reader.readingMiniDismissTimer = 0;
   }
 
   let attempts = 0;
   const run = () => {
-    if (!state.readingViewOpen) {
-      state.readingMiniDismissTimer = 0;
+    if (!state.reader.readingViewOpen) {
+      state.reader.readingMiniDismissTimer = 0;
       return;
     }
 
     const closed = dismissReaderMiniPlayer();
     const host = findReaderPlayerHost(getRuntimeVideoElement());
     if (host) {
-      state.readingPlayerHost = host;
+      state.reader.readingPlayerHost = host;
       normalizeReaderPlayerContainer(host);
       layoutReaderPlayerHost();
     }
@@ -1850,16 +1850,16 @@ export function scheduleReaderMiniPlayerDismiss(maxAttempts = 12, delayMs = 180)
     const miniExists = Boolean(document.querySelector(".bpx-player-mini-close, .bpx-player-mini-warp"));
     const hostFixed = Boolean(host && window.getComputedStyle(host).position === "fixed");
     if (attempts < maxAttempts && (miniExists || hostFixed || closed)) {
-      state.readingMiniDismissTimer = window.setTimeout(run, delayMs);
+      state.reader.readingMiniDismissTimer = window.setTimeout(run, delayMs);
       return;
     }
-    state.readingMiniDismissTimer = 0;
+    state.reader.readingMiniDismissTimer = 0;
   };
 
-  state.readingMiniDismissTimer = window.setTimeout(run, 40);
+  state.reader.readingMiniDismissTimer = window.setTimeout(run, 40);
 }
 
-export function getReaderControlsRoot(playerHost = state.readingPlayerHost) {
+export function getReaderControlsRoot(playerHost = state.reader.readingPlayerHost) {
   return (
     playerHost?.closest?.("#playerWrap") ||
     playerHost?.closest?.("#bilibili-player") ||
@@ -1869,7 +1869,7 @@ export function getReaderControlsRoot(playerHost = state.readingPlayerHost) {
   );
 }
 
-export function getReaderPlayerControlsState(playerHost = state.readingPlayerHost) {
+export function getReaderPlayerControlsState(playerHost = state.reader.readingPlayerHost) {
   const controlRoot = getReaderControlsRoot(playerHost);
   const nodes = [".bpx-player-control-wrap", ".bpx-player-control-mask", ".bpx-player-control-entity"].map(
     (selector) => {
@@ -1891,8 +1891,8 @@ export function getReaderPlayerControlsState(playerHost = state.readingPlayerHos
   };
 }
 
-export function hasReaderPlayerControlsIssue(playerHost = state.readingPlayerHost) {
-  if (!state.readingNativePageMode || !playerHost || isWatchlaterPage()) {
+export function hasReaderPlayerControlsIssue(playerHost = state.reader.readingPlayerHost) {
+  if (!state.reader.readingNativePageMode || !playerHost || isWatchlaterPage()) {
     return false;
   }
 
@@ -1905,34 +1905,34 @@ export function queueEnsureReaderPlayerControlsRecovered({
   delayMs = 120,
   minIntervalMs = 480
 } = {}) {
-  if (!state.readingViewOpen || !state.readingNativePageMode || isWatchlaterPage()) {
+  if (!state.reader.readingViewOpen || !state.reader.readingNativePageMode || isWatchlaterPage()) {
     return;
   }
-  const playerHost = state.readingPlayerHost;
-  if (!playerHost?.isConnected || state.readingControlsRecoveryInFlight) {
+  const playerHost = state.reader.readingPlayerHost;
+  if (!playerHost?.isConnected || state.reader.readingControlsRecoveryInFlight) {
     return;
   }
 
   const now = Date.now();
-  if (state.readingControlsRecoveryTimer) {
+  if (state.reader.readingControlsRecoveryTimer) {
     return;
   }
-  if (now - state.readingControlsLastRecoverAt < minIntervalMs) {
+  if (now - state.reader.readingControlsLastRecoverAt < minIntervalMs) {
     return;
   }
 
-  state.readingControlsRecoveryTimer = window.setTimeout(() => {
-    state.readingControlsRecoveryTimer = 0;
-    if (!state.readingViewOpen || !state.readingNativePageMode || isWatchlaterPage()) {
+  state.reader.readingControlsRecoveryTimer = window.setTimeout(() => {
+    state.reader.readingControlsRecoveryTimer = 0;
+    if (!state.reader.readingViewOpen || !state.reader.readingNativePageMode || isWatchlaterPage()) {
       return;
     }
-    const activeHost = state.readingPlayerHost;
+    const activeHost = state.reader.readingPlayerHost;
     if (!activeHost?.isConnected || !hasReaderPlayerControlsIssue(activeHost)) {
       return;
     }
 
-    state.readingControlsRecoveryInFlight = true;
-    state.readingControlsLastRecoverAt = Date.now();
+    state.reader.readingControlsRecoveryInFlight = true;
+    state.reader.readingControlsLastRecoverAt = Date.now();
     ensureReaderPlayerControlsRecovered(activeHost, {
       reason,
       retryDelayMs: 120
@@ -1941,13 +1941,13 @@ export function queueEnsureReaderPlayerControlsRecovered({
         logWarn("[BOC] queued reader controls recovery failed", { reason, error });
       })
       .finally(() => {
-        state.readingControlsRecoveryInFlight = false;
+        state.reader.readingControlsRecoveryInFlight = false;
       });
   }, delayMs);
 }
 
-export function setReaderPlayerControlsVisible(visible, playerHost = state.readingPlayerHost) {
-  if (!state.readingNativePageMode || !playerHost) {
+export function setReaderPlayerControlsVisible(visible, playerHost = state.reader.readingPlayerHost) {
+  if (!state.reader.readingNativePageMode || !playerHost) {
     return;
   }
 
@@ -1995,10 +1995,10 @@ export function setReaderPlayerControlsVisible(visible, playerHost = state.readi
 }
 
 export async function ensureReaderPlayerControlsRecovered(
-  playerHost = state.readingPlayerHost,
+  playerHost = state.reader.readingPlayerHost,
   { reason = "unknown", retryDelayMs = 90 } = {}
 ) {
-  if (!state.readingNativePageMode || !playerHost || isWatchlaterPage()) {
+  if (!state.reader.readingNativePageMode || !playerHost || isWatchlaterPage()) {
     return false;
   }
 
@@ -2052,43 +2052,43 @@ export async function ensureReaderPlayerControlsRecovered(
   return !hasReaderPlayerControlsIssue(playerHost);
 }
 
-export function scheduleReaderPlayerControlsHide(playerHost = state.readingControlsHoverHost || state.readingPlayerHost) {
-  if (state.readingControlsHideTimer) {
-    window.clearTimeout(state.readingControlsHideTimer);
+export function scheduleReaderPlayerControlsHide(playerHost = state.reader.readingControlsHoverHost || state.reader.readingPlayerHost) {
+  if (state.reader.readingControlsHideTimer) {
+    window.clearTimeout(state.reader.readingControlsHideTimer);
   }
-  state.readingControlsHideTimer = window.setTimeout(() => {
-    state.readingControlsHideTimer = 0;
-    if (!state.readingViewOpen) {
+  state.reader.readingControlsHideTimer = window.setTimeout(() => {
+    state.reader.readingControlsHideTimer = 0;
+    if (!state.reader.readingViewOpen) {
       return;
     }
     setReaderPlayerControlsVisible(false, playerHost);
   }, 1200);
 }
 
-export function bindReaderPlayerControlsHover(playerHost = state.readingPlayerHost) {
-  if (!state.readingNativePageMode || !isWatchlaterPage() || !playerHost) {
+export function bindReaderPlayerControlsHover(playerHost = state.reader.readingPlayerHost) {
+  if (!state.reader.readingNativePageMode || !isWatchlaterPage() || !playerHost) {
     return;
   }
 
-  if (state.readingControlsHoverHost && state.readingControlsHoverHost !== playerHost) {
+  if (state.reader.readingControlsHoverHost && state.reader.readingControlsHoverHost !== playerHost) {
     unbindReaderPlayerControlsHover();
   }
   if (playerHost.__bocReaderControlsHoverBound) {
-    state.readingControlsHoverHost = playerHost;
+    state.reader.readingControlsHoverHost = playerHost;
     return;
   }
 
   const showControls = () => {
-    if (!state.readingViewOpen) {
+    if (!state.reader.readingViewOpen) {
       return;
     }
     setReaderPlayerControlsVisible(true, playerHost);
     scheduleReaderPlayerControlsHide(playerHost);
   };
   const hideControls = () => {
-    if (state.readingControlsHideTimer) {
-      window.clearTimeout(state.readingControlsHideTimer);
-      state.readingControlsHideTimer = 0;
+    if (state.reader.readingControlsHideTimer) {
+      window.clearTimeout(state.reader.readingControlsHideTimer);
+      state.reader.readingControlsHideTimer = 0;
     }
     setReaderPlayerControlsVisible(false, playerHost);
   };
@@ -2097,17 +2097,17 @@ export function bindReaderPlayerControlsHover(playerHost = state.readingPlayerHo
   playerHost.addEventListener("mousemove", showControls, true);
   playerHost.addEventListener("mouseleave", hideControls, true);
   playerHost.__bocReaderControlsHoverBound = { showControls, hideControls };
-  state.readingControlsHoverHost = playerHost;
+  state.reader.readingControlsHoverHost = playerHost;
 }
 
 export function unbindReaderPlayerControlsHover() {
-  const playerHost = state.readingControlsHoverHost;
-  if (state.readingControlsHideTimer) {
-    window.clearTimeout(state.readingControlsHideTimer);
-    state.readingControlsHideTimer = 0;
+  const playerHost = state.reader.readingControlsHoverHost;
+  if (state.reader.readingControlsHideTimer) {
+    window.clearTimeout(state.reader.readingControlsHideTimer);
+    state.reader.readingControlsHideTimer = 0;
   }
   if (!playerHost?.__bocReaderControlsHoverBound) {
-    state.readingControlsHoverHost = null;
+    state.reader.readingControlsHoverHost = null;
     return;
   }
 
@@ -2117,7 +2117,7 @@ export function unbindReaderPlayerControlsHover() {
   playerHost.removeEventListener("mouseleave", hideControls, true);
   delete playerHost.__bocReaderControlsHoverBound;
   setReaderPlayerControlsVisible(false, playerHost);
-  state.readingControlsHoverHost = null;
+  state.reader.readingControlsHoverHost = null;
 }
 
 export function setReaderHeaderActionsVisible(visible) {
@@ -2133,13 +2133,13 @@ export function setReaderHeaderActionsVisible(visible) {
 }
 
 export function scheduleReaderHeaderActionsHide(delayMs = 10000) {
-  if (state.readingHeaderHideTimer) {
-    window.clearTimeout(state.readingHeaderHideTimer);
-    state.readingHeaderHideTimer = 0;
+  if (state.reader.readingHeaderHideTimer) {
+    window.clearTimeout(state.reader.readingHeaderHideTimer);
+    state.reader.readingHeaderHideTimer = 0;
   }
-  state.readingHeaderHideTimer = window.setTimeout(() => {
-    state.readingHeaderHideTimer = 0;
-    if (!state.readingViewOpen) {
+  state.reader.readingHeaderHideTimer = window.setTimeout(() => {
+    state.reader.readingHeaderHideTimer = 0;
+    if (!state.reader.readingViewOpen) {
       return;
     }
     setReaderHeaderActionsVisible(false);
@@ -2147,27 +2147,27 @@ export function scheduleReaderHeaderActionsHide(delayMs = 10000) {
 }
 
 export function bindReaderHeaderActionsHover() {
-  if (!state.readingViewOpen) {
+  if (!state.reader.readingViewOpen) {
     return;
   }
   const header = document.querySelector(".boc-reading-header");
   if (!header || header.__bocReaderHeaderHoverBound) {
-    state.readingHeaderHoverHost = header || null;
+    state.reader.readingHeaderHoverHost = header || null;
     return;
   }
 
   const showActions = () => {
-    if (!state.readingViewOpen) {
+    if (!state.reader.readingViewOpen) {
       return;
     }
-    if (state.readingHeaderHideTimer) {
-      window.clearTimeout(state.readingHeaderHideTimer);
-      state.readingHeaderHideTimer = 0;
+    if (state.reader.readingHeaderHideTimer) {
+      window.clearTimeout(state.reader.readingHeaderHideTimer);
+      state.reader.readingHeaderHideTimer = 0;
     }
     setReaderHeaderActionsVisible(true);
   };
   const hideActionsLater = () => {
-    if (!state.readingViewOpen) {
+    if (!state.reader.readingViewOpen) {
       return;
     }
     scheduleReaderHeaderActionsHide();
@@ -2176,30 +2176,30 @@ export function bindReaderHeaderActionsHover() {
   header.addEventListener("mouseenter", showActions, true);
   header.addEventListener("mouseleave", hideActionsLater, true);
   header.__bocReaderHeaderHoverBound = { showActions, hideActionsLater };
-  state.readingHeaderHoverHost = header;
+  state.reader.readingHeaderHoverHost = header;
   setReaderHeaderActionsVisible(true);
   scheduleReaderHeaderActionsHide();
 }
 
 export function unbindReaderHeaderActionsHover() {
-  const header = state.readingHeaderHoverHost;
-  if (state.readingHeaderHideTimer) {
-    window.clearTimeout(state.readingHeaderHideTimer);
-    state.readingHeaderHideTimer = 0;
+  const header = state.reader.readingHeaderHoverHost;
+  if (state.reader.readingHeaderHideTimer) {
+    window.clearTimeout(state.reader.readingHeaderHideTimer);
+    state.reader.readingHeaderHideTimer = 0;
   }
   if (!header?.__bocReaderHeaderHoverBound) {
-    state.readingHeaderHoverHost = null;
+    state.reader.readingHeaderHoverHost = null;
     return;
   }
   const { showActions, hideActionsLater } = header.__bocReaderHeaderHoverBound;
   header.removeEventListener("mouseenter", showActions, true);
   header.removeEventListener("mouseleave", hideActionsLater, true);
   delete header.__bocReaderHeaderHoverBound;
-  state.readingHeaderHoverHost = null;
+  state.reader.readingHeaderHoverHost = null;
   setReaderHeaderActionsVisible(true);
 }
 
-export function normalizeReaderPlayerContainer(playerHost = state.readingPlayerHost) {
+export function normalizeReaderPlayerContainer(playerHost = state.reader.readingPlayerHost) {
   if (!playerHost) {
     return;
   }
@@ -2223,7 +2223,7 @@ export function normalizeReaderPlayerContainer(playerHost = state.readingPlayerH
       hasFloatingPosition ||
       /mini|picture|float|fixed-player/i.test(className) ||
       current.matches?.(".bpx-player-mini-warp, .bpx-player-mini-close");
-    const shouldReset = state.readingNativePageMode
+    const shouldReset = state.reader.readingNativePageMode
       ? Boolean(isExplicitMiniNode || (isPlayerLayoutNode && isMiniLike))
       : isPlayerLayoutNode || isMiniLike;
 
@@ -2260,11 +2260,11 @@ export function normalizeReaderPlayerContainer(playerHost = state.readingPlayerH
     depth += 1;
   }
 
-  state.readingPlayerAdjustedNodes = adjusted;
+  state.reader.readingPlayerAdjustedNodes = adjusted;
 }
 
 export function restoreReaderPlayerContainer() {
-  const adjusted = Array.isArray(state.readingPlayerAdjustedNodes) ? state.readingPlayerAdjustedNodes : [];
+  const adjusted = Array.isArray(state.reader.readingPlayerAdjustedNodes) ? state.reader.readingPlayerAdjustedNodes : [];
   adjusted.forEach((item) => {
     const node = item?.node;
     if (!node?.isConnected) {
@@ -2282,7 +2282,7 @@ export function restoreReaderPlayerContainer() {
     node.style.zIndex = item.zIndex || "";
     node.removeAttribute("data-boc-reader-player-reset");
   });
-  state.readingPlayerAdjustedNodes = [];
+  state.reader.readingPlayerAdjustedNodes = [];
 }
 
 export function alignReaderViewportToPlayer() {
@@ -2291,7 +2291,7 @@ export function alignReaderViewportToPlayer() {
   }
 
   const titleNode = findReaderTitleContainer();
-  const playerHost = state.readingPlayerHost || findReaderPlayerHost(getRuntimeVideoElement());
+  const playerHost = state.reader.readingPlayerHost || findReaderPlayerHost(getRuntimeVideoElement());
   const anchor = titleNode || playerHost;
   if (!anchor) {
     return;
@@ -2310,7 +2310,7 @@ export function alignReaderViewportToPlayer() {
   const nextTop = Math.max(0, window.scrollY + top - 16);
   window.scrollTo({ top: nextTop, behavior: "auto" });
   window.setTimeout(() => {
-    if (!state.readingViewOpen || !isReaderMode()) {
+    if (!state.reader.readingViewOpen || !isReaderMode()) {
       return;
     }
     window.scrollTo({ top: nextTop, behavior: "auto" });
@@ -2319,11 +2319,11 @@ export function alignReaderViewportToPlayer() {
 }
 
 export function syncReadingViewPlayback(forceScroll = false) {
-  if (!state.readingViewOpen) {
+  if (!state.reader.readingViewOpen) {
     return;
   }
 
-  if (state.readingNativePageMode) {
+  if (state.reader.readingNativePageMode) {
     layoutReaderPlayerHost();
   }
 
@@ -2331,13 +2331,13 @@ export function syncReadingViewPlayback(forceScroll = false) {
   const runtimeHost = findReaderPlayerHost(runtimeVideo);
   if (runtimeVideo && runtimeHost) {
     const playerChanged =
-      runtimeVideo !== state.readingVideoEl || runtimeHost !== state.readingPlayerHost;
+      runtimeVideo !== state.reader.readingVideoEl || runtimeHost !== state.reader.readingPlayerHost;
     if (playerChanged) {
       queueEnsureReaderPlayerMounted();
     }
   }
 
-  const video = bindReadingViewVideo(runtimeVideo || state.readingVideoEl);
+  const video = bindReadingViewVideo(runtimeVideo || state.reader.readingVideoEl);
   if (!video) {
     renderReadingStatus("当前页面没有找到可联动的视频播放器。");
     return;
@@ -2347,8 +2347,8 @@ export function syncReadingViewPlayback(forceScroll = false) {
   const subtitleIndex = findActiveSubtitleIndex(currentTime);
   const chapterIndex = findActiveChapterIndex(currentTime);
   const changed =
-    subtitleIndex !== state.readingActiveSubtitleIndex ||
-    chapterIndex !== state.readingActiveChapterIndex;
+    subtitleIndex !== state.reader.readingActiveSubtitleIndex ||
+    chapterIndex !== state.reader.readingActiveChapterIndex;
 
   setActiveReadingItems(subtitleIndex, chapterIndex, forceScroll || changed);
   updateReaderFollowState();
@@ -2376,11 +2376,11 @@ export function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll 
     nextChapter.classList.add("is-active");
   }
 
-  if (shouldScroll && state.readingAutoScroll) {
-    if (Date.now() < state.readingManualScrollPauseUntil) {
+  if (shouldScroll && state.reader.readingAutoScroll) {
+    if (Date.now() < state.reader.readingManualScrollPauseUntil) {
       updateReaderFollowState();
-      state.readingActiveSubtitleIndex = subtitleIndex;
-      state.readingActiveChapterIndex = chapterIndex;
+      state.reader.readingActiveSubtitleIndex = subtitleIndex;
+      state.reader.readingActiveChapterIndex = chapterIndex;
       return;
     }
     if (nextTranscript) {
@@ -2391,15 +2391,15 @@ export function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll 
     }
   }
 
-  state.readingActiveSubtitleIndex = subtitleIndex;
-  state.readingActiveChapterIndex = chapterIndex;
+  state.reader.readingActiveSubtitleIndex = subtitleIndex;
+  state.reader.readingActiveChapterIndex = chapterIndex;
 }
 
 export function scrollReadingRailItemIntoView(node) {
   if (!node) {
     return;
   }
-  state.readingProgrammaticScrollUntil = Date.now() + 600;
+  state.reader.readingProgrammaticScrollUntil = Date.now() + 600;
   node.scrollIntoView({
     behavior: "smooth",
     block: "nearest",
@@ -2421,10 +2421,10 @@ export function scrollReadingTranscriptItemIntoView(node) {
     return;
   }
 
-  const behavior = state.readingNextScrollBehavior === "auto" ? "auto" : "smooth";
-  state.readingProgrammaticScrollUntil = Date.now() + (behavior === "auto" ? 120 : 800);
-  state.readingNextScrollBehavior = "smooth";
-  if (state.readingNativePageMode && inlineHost && inlineHost.scrollHeight > inlineHost.clientHeight + 8) {
+  const behavior = state.reader.readingNextScrollBehavior === "auto" ? "auto" : "smooth";
+  state.reader.readingProgrammaticScrollUntil = Date.now() + (behavior === "auto" ? 120 : 800);
+  state.reader.readingNextScrollBehavior = "smooth";
+  if (state.reader.readingNativePageMode && inlineHost && inlineHost.scrollHeight > inlineHost.clientHeight + 8) {
     const hostRect = inlineHost.getBoundingClientRect();
     const computed = window.getComputedStyle(node);
     const lineHeight = Number.parseFloat(computed.lineHeight) || itemRect.height || 32;
@@ -2437,7 +2437,7 @@ export function scrollReadingTranscriptItemIntoView(node) {
     });
     return;
   }
-  if (state.readingNativePageMode || transcriptList.scrollHeight <= transcriptList.clientHeight + 8) {
+  if (state.reader.readingNativePageMode || transcriptList.scrollHeight <= transcriptList.clientHeight + 8) {
     const desiredTop = listRect.top + Math.max(72, Math.min(listRect.height * 0.24, 220));
     const nextTop = window.scrollY + itemRect.top - desiredTop;
     window.scrollTo({
@@ -2463,8 +2463,8 @@ export function jumpReadingTarget(seconds) {
   }
 
   const nextTime = Math.max(0, Number(seconds || 0) || 0);
-  state.readingManualScrollPauseUntil = 0;
-  state.readingNextScrollBehavior = "auto";
+  state.reader.readingManualScrollPauseUntil = 0;
+  state.reader.readingNextScrollBehavior = "auto";
   updateReaderFollowState();
   video.currentTime = nextTime;
   if (video.paused) {
@@ -2494,11 +2494,11 @@ export function onReadingTranscriptClick(event) {
 }
 
 export function noteManualReaderInteraction(durationMs = 3000) {
-  if (!state.readingAutoScroll) {
+  if (!state.reader.readingAutoScroll) {
     updateReaderFollowState();
     return;
   }
-  state.readingManualScrollPauseUntil = Date.now() + durationMs;
+  state.reader.readingManualScrollPauseUntil = Date.now() + durationMs;
   updateReaderFollowState();
 }
 
@@ -2508,7 +2508,7 @@ export function updateReaderFollowState() {
     return;
   }
   const mode =
-    !state.readingAutoScroll ? "off" : Date.now() < state.readingManualScrollPauseUntil ? "manual" : "auto";
+    !state.reader.readingAutoScroll ? "off" : Date.now() < state.reader.readingManualScrollPauseUntil ? "manual" : "auto";
   readingView.setAttribute("data-boc-reader-follow", mode);
 }
 

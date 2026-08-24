@@ -64,7 +64,7 @@ export function readUploadDate() {
   return formatLocalDate();
 }
 
-export function getReadingTranscriptItems(body = state.subtitleBody) {
+export function getReadingTranscriptItems(body = state.clip.subtitleBody) {
   return (Array.isArray(body) ? body : [])
     .map((item, index) => ({
       index,
@@ -76,17 +76,17 @@ export function getReadingTranscriptItems(body = state.subtitleBody) {
 }
 
 export function getReadingTranscriptPlaceholderText() {
-  if (state.subtitleFetchState === "loading") {
+  if (state.clip.subtitleFetchState === "loading") {
     return "正在加载字幕...";
   }
-  if (state.subtitleFetchState === "error") {
+  if (state.clip.subtitleFetchState === "error") {
     return "字幕加载失败，请刷新重试。";
   }
   return "当前视频无字幕。";
 }
 
 export function findActiveSubtitleIndex(currentTime) {
-  const items = Array.isArray(state.subtitleBody) ? state.subtitleBody : [];
+  const items = Array.isArray(state.clip.subtitleBody) ? state.clip.subtitleBody : [];
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
     const from = Number(item?.from || 0) || 0;
@@ -100,7 +100,7 @@ export function findActiveSubtitleIndex(currentTime) {
 }
 
 export function findActiveChapterIndex(currentTime) {
-  const chapters = normalizeChapters(state.chapters || []);
+  const chapters = normalizeChapters(state.clip.chapters || []);
   for (let index = 0; index < chapters.length; index += 1) {
     const item = chapters[index];
     const from = Number(item?.from || 0) || 0;
@@ -116,9 +116,9 @@ export function findActiveChapterIndex(currentTime) {
 }
 
 export function rebuildDerivedContent() {
-  const body = Array.isArray(state.subtitleBody) ? state.subtitleBody : [];
-  state.markdown = body.length ? buildMarkdown(state, body, state.settings) : "";
-  state.srt = body.length ? buildSrt(body) : "";
-  state.txt = body.length ? buildTxt(body, state.settings) : "";
+  const body = Array.isArray(state.clip.subtitleBody) ? state.clip.subtitleBody : [];
+  state.clip.markdown = body.length ? buildMarkdown(state, body, state.settings) : "";
+  state.clip.srt = body.length ? buildSrt(body) : "";
+  state.clip.txt = body.length ? buildTxt(body, state.settings) : "";
   byId("boc-preview").value = body.length ? buildSubtitlePreview(body, state.settings) : "";
 }

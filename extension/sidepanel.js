@@ -20,6 +20,7 @@ import {
   generateConversationId,
   extractPageIndexFromContextUrl
 } from "./conversation.js";
+import { escapeHtml, sanitizeFileName } from "./formatters.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
@@ -1635,13 +1636,6 @@ function sanitizeFolderTemplateValue(value) {
     .trim();
 }
 
-function sanitizeFileName(value) {
-  return String(value || "")
-    .replace(/[\\/:*?"<>|]/g, "_")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 160);
-}
 
 function escapeYaml(value) {
   return String(value || "").replaceAll("\\", "\\\\").replaceAll('"', '\\"');
@@ -2197,15 +2191,6 @@ function sendRuntimeMessage(message, { timeoutMs = 15000 } = {}) {
       resolve(resp);
     });
   });
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }
 
 function truncate(value, max) {

@@ -129,6 +129,27 @@
 
 这个限制是 Chrome Extension API 层面的，不是暂时 bug。后续拆分模块时，content 主入口仍需保持一个经典脚本注入路径。
 
+#### 构建 `content-classic.js`
+
+修改 `extension/shared-defaults.js` 或 `extension/content.js` 后，需要重新生成 `extension/content-classic.js`：
+
+```bash
+node scripts/build-content-classic.js
+```
+
+或在 `package.json` 脚本里执行：
+
+```bash
+npm run build:content-classic
+```
+
+生成规则：
+- 以 `extension/shared-defaults.js` 和 `extension/content.js` 为输入
+- 自动内联依赖并移除 `import` / `export` 语法
+- 输出为兼容 `chrome.scripting.executeScript` 的经典脚本
+
+`extension/content-classic.js` 是生成文件，不要手动编辑。
+
 ## 使用方式
 
 1. 打开任意 B 站视频页并点击扩展图标

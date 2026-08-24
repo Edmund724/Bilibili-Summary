@@ -43,8 +43,8 @@ export function replaceReaderModeUrl(nextUrl) {
 
   try {
     history.replaceState(history.state, "", targetUrl);
-    state.currentUrl = location.href;
-    state.currentClipSignature = computeCurrentClipSignature(location.href);
+    state.clip.currentUrl = location.href;
+    state.clip.currentClipSignature = computeCurrentClipSignature(location.href);
   } catch (error) {
     if (shouldDebugLog()) {
       console.warn("[BOC] failed to replace reader mode url", error);
@@ -61,26 +61,26 @@ export function isWatchlaterPage(url = location.href) {
 }
 
 export function startUrlWatcher() {
-  if (state.urlWatcherStarted) {
+  if (state.ui.urlWatcherStarted) {
     return;
   }
-  state.urlWatcherStarted = true;
+  state.ui.urlWatcherStarted = true;
 
   window.setInterval(() => {
     const nextUrl = location.href;
     const nextSignature = computeCurrentClipSignature();
-    if (nextSignature === state.currentClipSignature) {
+    if (nextSignature === state.clip.currentClipSignature) {
       return;
     }
 
-    state.currentUrl = nextUrl;
-    state.currentClipSignature = nextSignature;
+    state.clip.currentUrl = nextUrl;
+    state.clip.currentClipSignature = nextSignature;
     enforceNormalPageStateIfNeeded(nextUrl);
     ensureUiReady();
     resetClipState();
     schedulePlayerAiQuickActionSync();
     const shouldEnterReaderMode = isReaderMode(nextUrl);
-    if (!state.readingViewOpen && shouldEnterReaderMode) {
+    if (!state.reader.readingViewOpen && shouldEnterReaderMode) {
       document.documentElement.setAttribute("data-boc-reader-mode", "1");
       document.body.setAttribute("data-boc-reader-mode", "1");
       renderReadingStatus("检测到阅读视图跳转，正在打开阅读模式...");
@@ -89,7 +89,7 @@ export function startUrlWatcher() {
       });
       return;
     }
-    if (state.readingViewOpen || shouldEnterReaderMode) {
+    if (state.reader.readingViewOpen || shouldEnterReaderMode) {
       renderReadingStatus("检测到视频变化，正在自动刷新字幕...");
       waitForVideoMetadata().then(() => {
         refreshClip().catch((error) => {
@@ -267,7 +267,7 @@ export function extractPageIndex(url) {
 }
 
 export function ensureRunActive(runId) {
-  if (runId !== state.fetchRunId) {
+  if (runId !== state.clip.fetchRunId) {
     const error = new Error("Stale refresh run");
     error.code = "STALE_RUN";
     throw error;
@@ -338,16 +338,16 @@ export function isIgnoredReaderVideoCandidate(video) {
 }
 
 export function getRuntimeVideoElement() {
-  if (state.readingVideoEl?.isConnected) {
-    const currentHost = findReaderPlayerHost(state.readingVideoEl);
-    const currentRect = state.readingVideoEl.getBoundingClientRect();
+  if (state.reader.readingVideoEl?.isConnected) {
+    const currentHost = findReaderPlayerHost(state.reader.readingVideoEl);
+    const currentRect = state.reader.readingVideoEl.getBoundingClientRect();
     if (
       currentHost?.isConnected &&
       currentRect.width > 120 &&
       currentRect.height > 68 &&
-      !isIgnoredReaderVideoCandidate(state.readingVideoEl)
+      !isIgnoredReaderVideoCandidate(state.reader.readingVideoEl)
     ) {
-      return state.readingVideoEl;
+      return state.reader.readingVideoEl;
     }
   }
 
@@ -374,7 +374,7 @@ export function getRuntimeVideoElement() {
         (!item.paused ? 20000 : 0) +
         Number(item.readyState || 0) * 2000 +
         (item.currentSrc ? 10000 : 0) +
-        (item === state.readingVideoEl ? 500 : 0);
+        (item === state.reader.readingVideoEl ? 500 : 0);
       return { item, rect, score };
     })
     .filter(({ rect }) => rect.width > 240 && rect.height > 120)

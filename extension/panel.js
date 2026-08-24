@@ -146,7 +146,7 @@ export function buildUiHtml() {
         <section class="boc-reading-stage">
           <header class="boc-reading-header">
             <div class="boc-reading-header-copy">
-              <strong class="boc-reading-title">${escapeHtml(state.title || "B站字幕阅读")}</strong>
+              <strong class="boc-reading-title">${escapeHtml(state.clip.title || "B站字幕阅读")}</strong>
               <div id="${ids.readingMeta}" class="boc-reading-meta">bilibili.com</div>
             </div>
             <div class="boc-reading-actions">
@@ -274,9 +274,9 @@ export function bindUiEvents() {
     closeReadingView();
   });
   readingAutoScroll.addEventListener("change", (event) => {
-    state.readingAutoScroll = Boolean(event.target.checked);
-    if (state.readingAutoScroll) {
-      state.readingManualScrollPauseUntil = 0;
+    state.reader.readingAutoScroll = Boolean(event.target.checked);
+    if (state.reader.readingAutoScroll) {
+      state.reader.readingManualScrollPauseUntil = 0;
       syncReadingViewPlayback(true);
     }
     updateReaderFollowState();
@@ -296,7 +296,7 @@ export function bindUiEvents() {
   }
   readingThemeSelect.addEventListener("click", () => {
     const themes = ["light", "dark", "paper"];
-    const current = state.readingTheme || "light";
+    const current = state.reader.readingTheme || "light";
     const nextIndex = (themes.indexOf(current) + 1) % themes.length;
     updateReaderPreferences({ readerTheme: themes[nextIndex] }, { persist: true });
     readingThemeSelect.classList.add("is-active");
@@ -304,11 +304,11 @@ export function bindUiEvents() {
   });
   readingSettingsToggleBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    state.readingSettingsExpanded = !state.readingSettingsExpanded;
+    state.reader.readingSettingsExpanded = !state.reader.readingSettingsExpanded;
     renderReaderPanels();
   });
   readingDescriptionBtn.addEventListener("click", () => {
-    state.readingDescriptionExpanded = !state.readingDescriptionExpanded;
+    state.reader.readingDescriptionExpanded = !state.reader.readingDescriptionExpanded;
     renderReadingInfoPanel();
   });
   bindReaderStepperControl(readingFontScaleSelect, "readerFontScale");
@@ -321,7 +321,7 @@ export function bindUiEvents() {
     const option = event.target.options[event.target.selectedIndex];
     const url = String(option?.value || "");
     if (!url) return;
-    loadSubtitle(url, String(option.dataset.lang || "unknown"), state.fetchRunId, String(option.dataset.id || ""))
+    loadSubtitle(url, String(option.dataset.lang || "unknown"), state.clip.fetchRunId, String(option.dataset.id || ""))
       .then(() => {
         renderReadingView();
         syncReadingViewPlayback(true);
@@ -332,24 +332,24 @@ export function bindUiEvents() {
   });
 
   // Click outside settings panel to close
-  if (!state.readingDocumentClickBound) {
+  if (!state.reader.readingDocumentClickBound) {
     document.addEventListener("click", (e) => {
-      if (!state.readingSettingsExpanded) return;
+      if (!state.reader.readingSettingsExpanded) return;
       const settingsPanel = document.getElementById(ids.readingSettingsPanel);
       const settingsBtnEl = document.getElementById(ids.readingSettingsBtn);
       if (!settingsPanel || !settingsBtnEl) {
         return;
       }
       if (!settingsPanel.contains(e.target) && !settingsBtnEl.contains(e.target)) {
-        state.readingSettingsExpanded = false;
+        state.reader.readingSettingsExpanded = false;
         renderReaderPanels();
       }
     });
-    state.readingDocumentClickBound = true;
+    state.reader.readingDocumentClickBound = true;
   }
 
   const handleReaderManualScroll = () => {
-    if (Date.now() <= state.readingProgrammaticScrollUntil) {
+    if (Date.now() <= state.reader.readingProgrammaticScrollUntil) {
       return;
     }
     noteManualReaderInteraction();
@@ -362,7 +362,7 @@ export function bindUiEvents() {
   chapterList.addEventListener("click", onReadingChapterClick);
   transcriptList.addEventListener("click", onReadingTranscriptClick);
   readingView.addEventListener("transitionend", () => {
-    if (!state.readingViewOpen) {
+    if (!state.reader.readingViewOpen) {
       stopReadingViewSync();
     }
   });
@@ -371,7 +371,7 @@ export function ensureUiReady({ forceRecreate = false } = {}) {
   const existingRoot = document.getElementById(ids.root);
   if (existingRoot && forceRecreate) {
     existingRoot.remove();
-    state.uiEventsBound = false;
+    state.ui.uiEventsBound = false;
   }
 
   let root = document.getElementById(ids.root);
@@ -380,77 +380,77 @@ export function ensureUiReady({ forceRecreate = false } = {}) {
     root.id = ids.root;
     root.innerHTML = buildUiHtml();
     document.body.appendChild(root);
-    state.uiEventsBound = false;
+    state.ui.uiEventsBound = false;
   }
 
-  if (!state.uiEventsBound) {
+  if (!state.ui.uiEventsBound) {
     bindUiEvents();
-    state.uiEventsBound = true;
+    state.ui.uiEventsBound = true;
   }
 }
 
 export function resetClipState() {
-  state.bvid = "";
-  state.aid = "";
-  state.cid = "";
-  state.cidSource = "";
-  state.pageIndex = 1;
-  state.pageCount = 0;
-  state.pageTitle = "";
-  state.videoDuration = 0;
-  state.description = "";
-  state.title = "";
-  state.author = "";
-  state.uploadDate = "";
-  state.subtitles = [];
-  state.selectedSubtitleId = "";
-  state.selectedSubtitleUrl = "";
-  state.selectedSubtitleLang = "";
-  state.subtitleBody = [];
-  state.subtitleFetchState = "idle";
-  state.chapters = [];
-  state.hotComments = [];
-  state.markdown = "";
-  state.srt = "";
-  state.txt = "";
-  state.currentClipSignature = computeCurrentClipSignature();
+  state.clip.bvid = "";
+  state.clip.aid = "";
+  state.clip.cid = "";
+  state.clip.cidSource = "";
+  state.clip.pageIndex = 1;
+  state.clip.pageCount = 0;
+  state.clip.pageTitle = "";
+  state.clip.videoDuration = 0;
+  state.clip.description = "";
+  state.clip.title = "";
+  state.clip.author = "";
+  state.clip.uploadDate = "";
+  state.clip.subtitles = [];
+  state.clip.selectedSubtitleId = "";
+  state.clip.selectedSubtitleUrl = "";
+  state.clip.selectedSubtitleLang = "";
+  state.clip.subtitleBody = [];
+  state.clip.subtitleFetchState = "idle";
+  state.clip.chapters = [];
+  state.clip.hotComments = [];
+  state.clip.markdown = "";
+  state.clip.srt = "";
+  state.clip.txt = "";
+  state.clip.currentClipSignature = computeCurrentClipSignature();
   stopReadingViewSync();
-  state.readingActiveSubtitleIndex = -1;
-  state.readingActiveChapterIndex = -1;
-  state.readingVideoEl = null;
+  state.reader.readingActiveSubtitleIndex = -1;
+  state.reader.readingActiveChapterIndex = -1;
+  state.reader.readingVideoEl = null;
   stopReaderPlayerObserver();
 
   renderMeta();
   renderSubtitleSelect();
   byId(ids.preview).value = "";
   setMessage("");
-  if (state.readingViewOpen) {
+  if (state.reader.readingViewOpen) {
     renderReadingView();
     renderReadingStatus("请先点击“刷新抓取”加载当前视频字幕。");
   }
 }
 export async function refreshClip() {
-  const runId = ++state.fetchRunId;
+  const runId = ++state.clip.fetchRunId;
   try {
     setBusyState(true);
     setMessage("");
     setStatus("正在抓取视频信息...");
-    state.subtitleFetchState = "loading";
-    if (state.readingViewOpen) {
+    state.clip.subtitleFetchState = "loading";
+    if (state.reader.readingViewOpen) {
       renderReadingView();
     }
     state.settings = await getSettings();
     ensureRunActive(runId);
 
-    state.bvid = extractBvid(location.href);
-    if (!state.bvid) {
+    state.clip.bvid = extractBvid(location.href);
+    if (!state.clip.bvid) {
       throw new Error("当前页面不是标准 BV 视频地址，无法抓取字幕。");
     }
 
     const pageIndex = extractPageIndex(location.href);
     const oid = extractOid(location.href);
     const hasPageParam = hasExplicitPageParam(location.href);
-    const meta = await retryAsync(() => fetchVideoMeta(state.bvid), 2, 250);
+    const meta = await retryAsync(() => fetchVideoMeta(state.clip.bvid), 2, 250);
     ensureRunActive(runId);
 
     // 调试：打印 API 返回的原始数据
@@ -460,13 +460,13 @@ export async function refreshClip() {
       pagesCount: (meta.pages || []).length
     });
 
-    state.aid = meta.aid || "";
-    state.title = meta.title || readVideoTitle();
-    state.author = meta.author || readVideoAuthor();
-    state.uploadDate = meta.uploadDate || readUploadDate();
-    state.description = meta.description || readVideoDescription();
-    state.pageCount = Array.isArray(meta.pages) ? meta.pages.length : 0;
-    state.currentClipSignature = computeCurrentClipSignature();
+    state.clip.aid = meta.aid || "";
+    state.clip.title = meta.title || readVideoTitle();
+    state.clip.author = meta.author || readVideoAuthor();
+    state.clip.uploadDate = meta.uploadDate || readUploadDate();
+    state.clip.description = meta.description || readVideoDescription();
+    state.clip.pageCount = Array.isArray(meta.pages) ? meta.pages.length : 0;
+    state.clip.currentClipSignature = computeCurrentClipSignature();
     let resolvedPageIndex = pageIndex;
     if ((meta.pages || []).length > 1 && !hasPageParam) {
       const pageIndexFromOid = pickPageIndexFromOid(meta.pages, oid, {
@@ -489,40 +489,40 @@ export async function refreshClip() {
     }
 
     const currentPage = pickPageFromPages(meta.pages, resolvedPageIndex);
-    state.pageIndex = resolvedPageIndex;
-    state.pageTitle = currentPage?.part || "";
-    state.cid = currentPage?.cid || pickCidFromPages(meta.pages, resolvedPageIndex, meta.defaultCid);
-    state.cidSource = "meta-pages";
-    state.videoDuration = pickDurationFromPages(meta.pages, resolvedPageIndex, meta.defaultDuration);
-    if (!(state.videoDuration > 0)) {
-      state.videoDuration = readRuntimeVideoDuration();
+    state.clip.pageIndex = resolvedPageIndex;
+    state.clip.pageTitle = currentPage?.part || "";
+    state.clip.cid = currentPage?.cid || pickCidFromPages(meta.pages, resolvedPageIndex, meta.defaultCid);
+    state.clip.cidSource = "meta-pages";
+    state.clip.videoDuration = pickDurationFromPages(meta.pages, resolvedPageIndex, meta.defaultDuration);
+    if (!(state.clip.videoDuration > 0)) {
+      state.clip.videoDuration = readRuntimeVideoDuration();
     }
-    if (!(state.videoDuration > 0)) {
+    if (!(state.clip.videoDuration > 0)) {
       throw new Error("无法获取当前视频时长，已停止抓取以避免串到错误字幕。");
     }
 
     logInfo("[BOC] resolved video ids", {
       url: location.href,
-      aid: state.aid,
-      bvid: state.bvid,
-      cid: state.cid,
-      cidSource: state.cidSource,
+      aid: state.clip.aid,
+      bvid: state.clip.bvid,
+      cid: state.clip.cid,
+      cidSource: state.clip.cidSource,
       pageIndex: resolvedPageIndex,
-      videoDuration: state.videoDuration
+      videoDuration: state.clip.videoDuration
     });
 
     setStatus("正在获取可用字幕...");
     let subtitleBundle = await retryAsync(
-      () => fetchSubtitleBundle(state.bvid, state.cid, state.aid),
+      () => fetchSubtitleBundle(state.clip.bvid, state.clip.cid, state.clip.aid),
       3,
       500
     );
     ensureRunActive(runId);
-    state.subtitles = normalizeSubtitleTracks(subtitleBundle.tracks);
-    state.chapters = normalizeChapters(subtitleBundle.chapters);
+    state.clip.subtitles = normalizeSubtitleTracks(subtitleBundle.tracks);
+    state.clip.chapters = normalizeChapters(subtitleBundle.chapters);
     logInfo(
       "[BOC] chapters",
-      state.chapters.map((item) => ({
+      state.clip.chapters.map((item) => ({
         from: item.from,
         to: item.to,
         title: item.title
@@ -530,7 +530,7 @@ export async function refreshClip() {
     );
     logInfo(
       "[BOC] subtitle tracks",
-      state.subtitles.map((item) => ({
+      state.clip.subtitles.map((item) => ({
         id: item.id,
         lan: item.lan,
         lanDoc: item.lanDoc,
@@ -539,11 +539,11 @@ export async function refreshClip() {
     );
 
     // 无字幕时也允许进入阅读视图，只是字幕区域保持空态。
-    if (state.subtitles.length === 0) {
+    if (state.clip.subtitles.length === 0) {
       applyNoSubtitleState();
       renderMeta();
       renderSubtitleSelect();
-      if (state.readingViewOpen) {
+      if (state.reader.readingViewOpen) {
         moveReadingMainInline();
         renderReadingView();
         renderReadingStatus("当前视频无字幕。");
@@ -558,17 +558,17 @@ export async function refreshClip() {
     // 显式点击“刷新抓取”时默认走网络，避免命中历史缓存导致字幕错位。
     const forceRefresh = true;
 
-    const preferred = pickPreferredSubtitle(state.subtitles, {
-      previousId: state.selectedSubtitleId,
-      previousUrl: state.selectedSubtitleUrl,
-      previousLang: state.selectedSubtitleLang
+    const preferred = pickPreferredSubtitle(state.clip.subtitles, {
+      previousId: state.clip.selectedSubtitleId,
+      previousUrl: state.clip.selectedSubtitleUrl,
+      previousLang: state.clip.selectedSubtitleLang
     });
 
     if (!preferred) {
       applyNoSubtitleState();
       renderMeta();
       renderSubtitleSelect();
-      if (state.readingViewOpen) {
+      if (state.reader.readingViewOpen) {
         moveReadingMainInline();
         renderReadingView();
         renderReadingStatus("当前视频无字幕。");
@@ -580,7 +580,7 @@ export async function refreshClip() {
       return;
     }
 
-    const candidates = buildSubtitleCandidates(state.subtitles, preferred);
+    const candidates = buildSubtitleCandidates(state.clip.subtitles, preferred);
     let selected = null;
 
     try {
@@ -593,14 +593,14 @@ export async function refreshClip() {
 
       // Retry because subtitle signed URLs may expire quickly or hit rate limit.
       subtitleBundle = await retryAsync(
-        () => fetchSubtitleBundle(state.bvid, state.cid, state.aid),
+        () => fetchSubtitleBundle(state.clip.bvid, state.clip.cid, state.clip.aid),
         2,
         500
       );
       ensureRunActive(runId);
-      state.subtitles = normalizeSubtitleTracks(subtitleBundle.tracks);
-      state.chapters = normalizeChapters(subtitleBundle.chapters);
-      const retryPreferred = pickPreferredSubtitle(state.subtitles, {
+      state.clip.subtitles = normalizeSubtitleTracks(subtitleBundle.tracks);
+      state.clip.chapters = normalizeChapters(subtitleBundle.chapters);
+      const retryPreferred = pickPreferredSubtitle(state.clip.subtitles, {
         previousId: preferred.id,
         previousUrl: preferred.subtitleUrl,
         previousLang: preferred.lanDoc || preferred.lan || ""
@@ -608,7 +608,7 @@ export async function refreshClip() {
       if (!retryPreferred) {
         throw error;
       }
-      const retryCandidates = buildSubtitleCandidates(state.subtitles, retryPreferred);
+      const retryCandidates = buildSubtitleCandidates(state.clip.subtitles, retryPreferred);
       selected = await tryLoadSubtitleCandidates(retryCandidates, runId, forceRefresh);
     }
     ensureRunActive(runId);
@@ -619,10 +619,10 @@ export async function refreshClip() {
         lanDoc: selected.lanDoc
       });
     }
-    state.subtitleFetchState = "ready";
+    state.clip.subtitleFetchState = "ready";
     renderMeta();
     renderSubtitleSelect();
-    if (state.readingViewOpen) {
+    if (state.reader.readingViewOpen) {
       moveReadingMainInline();
       renderReadingView();
       renderReadingStatus("抓取完成，阅读视图已同步最新字幕。");
@@ -635,10 +635,10 @@ export async function refreshClip() {
     if (isStaleRunError(error)) {
       return;
     }
-    state.subtitleFetchState = "error";
+    state.clip.subtitleFetchState = "error";
     resetClipState();
-    state.subtitleFetchState = "error";
-    if (state.readingViewOpen) {
+    state.clip.subtitleFetchState = "error";
+    if (state.reader.readingViewOpen) {
       renderReadingView();
     }
     if (error?.code === "SUBTITLE_DURATION_MISMATCH") {
@@ -648,7 +648,7 @@ export async function refreshClip() {
     console.error("[BOC][t01-diag] refreshClip error", error);
     setStatus(`抓取失败：${getErrorMessage(error)}`);
   } finally {
-    if (runId === state.fetchRunId) {
+    if (runId === state.clip.fetchRunId) {
       setBusyState(false);
     }
   }
@@ -666,7 +666,7 @@ export async function onSubtitleChange(event) {
     setBusyState(true);
     setStatus(`正在切换字幕：${lang}`);
     setMessage("");
-    await loadSubtitle(value, lang, state.fetchRunId, subtitleId);
+    await loadSubtitle(value, lang, state.clip.fetchRunId, subtitleId);
     setStatus("字幕切换完成。");
   } catch (error) {
     if (isStaleRunError(error)) {
@@ -677,14 +677,14 @@ export async function onSubtitleChange(event) {
     setBusyState(false);
   }
 }
-export async function loadSubtitle(url, lang, runId = state.fetchRunId, subtitleId = "", forceRefresh = false) {
+export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, subtitleId = "", forceRefresh = false) {
   if (!url) {
     throw new Error("字幕 URL 为空。");
   }
 
   const cacheKey = getSubtitleCacheKey({
-    bvid: state.bvid,
-    cid: state.cid,
+    bvid: state.clip.bvid,
+    cid: state.clip.cid,
     subtitleId,
     subtitleUrl: url,
     lang
@@ -694,7 +694,7 @@ export async function loadSubtitle(url, lang, runId = state.fetchRunId, subtitle
   if (!forceRefresh) {
     const cachedBody = await loadSubtitleFromCache(cacheKey);
     if (cachedBody && Array.isArray(cachedBody) && cachedBody.length > 0) {
-      const cachedCheck = validateSubtitleByDuration(cachedBody, state.videoDuration);
+      const cachedCheck = validateSubtitleByDuration(cachedBody, state.clip.videoDuration);
       if (!cachedCheck.ok) {
         logWarn("[BOC] cached subtitle duration mismatch, clearing cache", {
           cacheKey,
@@ -704,13 +704,13 @@ export async function loadSubtitle(url, lang, runId = state.fetchRunId, subtitle
       } else {
         logInfo("[BOC] using cached subtitle", { cacheKey, itemCount: cachedBody.length });
         ensureRunActive(runId);
-        state.selectedSubtitleId = subtitleId ? String(subtitleId) : state.selectedSubtitleId;
-        state.selectedSubtitleUrl = url;
-        state.selectedSubtitleLang = lang;
-        state.subtitleBody = cachedBody;
-        state.subtitleFetchState = "ready";
+        state.clip.selectedSubtitleId = subtitleId ? String(subtitleId) : state.clip.selectedSubtitleId;
+        state.clip.selectedSubtitleUrl = url;
+        state.clip.selectedSubtitleLang = lang;
+        state.clip.subtitleBody = cachedBody;
+        state.clip.subtitleFetchState = "ready";
         await refreshDerivedContent();
-        if (state.readingViewOpen) {
+        if (state.reader.readingViewOpen) {
           renderReadingView();
           syncReadingViewPlayback(true);
         }
@@ -726,7 +726,7 @@ export async function loadSubtitle(url, lang, runId = state.fetchRunId, subtitle
   if (body.length === 0) {
     throw new Error("字幕文件为空。");
   }
-  const durationCheck = validateSubtitleByDuration(body, state.videoDuration);
+  const durationCheck = validateSubtitleByDuration(body, state.clip.videoDuration);
   if (!durationCheck.ok) {
     const mismatchError = new Error("字幕时长与当前视频不匹配。");
     mismatchError.code = "SUBTITLE_DURATION_MISMATCH";
@@ -737,13 +737,13 @@ export async function loadSubtitle(url, lang, runId = state.fetchRunId, subtitle
   // 存入缓存
   await saveSubtitleToCache(cacheKey, body);
 
-  state.selectedSubtitleId = subtitleId ? String(subtitleId) : state.selectedSubtitleId;
-  state.selectedSubtitleUrl = url;
-  state.selectedSubtitleLang = lang;
-  state.subtitleBody = body;
-  state.subtitleFetchState = "ready";
+  state.clip.selectedSubtitleId = subtitleId ? String(subtitleId) : state.clip.selectedSubtitleId;
+  state.clip.selectedSubtitleUrl = url;
+  state.clip.selectedSubtitleLang = lang;
+  state.clip.subtitleBody = body;
+  state.clip.subtitleFetchState = "ready";
   await refreshDerivedContent();
-  if (state.readingViewOpen) {
+  if (state.reader.readingViewOpen) {
     renderReadingView();
     syncReadingViewPlayback(true);
   }
@@ -754,23 +754,23 @@ export function getSubtitleCacheKey({ bvid, cid, subtitleId = "", subtitleUrl = 
 }
 export function renderMeta() {
   const meta = byId(ids.meta);
-  if (!state.bvid) {
+  if (!state.clip.bvid) {
     meta.innerHTML = '<div class="boc-meta-item">尚未抓取视频信息</div>';
     return;
   }
 
-  const subtitleCount = state.subtitles.length;
+  const subtitleCount = state.clip.subtitles.length;
   meta.innerHTML = `
-    <div class="boc-meta-item"><strong>标题：</strong>${escapeHtml(state.title)}</div>
+    <div class="boc-meta-item"><strong>标题：</strong>${escapeHtml(state.clip.title)}</div>
     <div class="boc-meta-item"><strong>URL：</strong>${escapeHtml(cleanVideoUrl())}</div>
-    <div class="boc-meta-item"><strong>作者：</strong>${escapeHtml(state.author || "未知")}</div>
-    <div class="boc-meta-item"><strong>日期：</strong>${escapeHtml(state.uploadDate || "未知")}</div>
+    <div class="boc-meta-item"><strong>作者：</strong>${escapeHtml(state.clip.author || "未知")}</div>
+    <div class="boc-meta-item"><strong>日期：</strong>${escapeHtml(state.clip.uploadDate || "未知")}</div>
     <div class="boc-meta-item"><strong>字幕轨：</strong>${subtitleCount}</div>
   `;
 }
 export function renderSubtitleSelect() {
   const select = byId(ids.subtitleSelect);
-  const subtitles = state.subtitles || [];
+  const subtitles = state.clip.subtitles || [];
 
   if (subtitles.length === 0) {
     select.innerHTML = '<option value="">暂无字幕</option>';
@@ -781,8 +781,8 @@ export function renderSubtitleSelect() {
   select.innerHTML = subtitles
     .map((item) => {
       const selectedById =
-        state.selectedSubtitleId && String(item.id) === String(state.selectedSubtitleId);
-      const selectedByUrl = item.subtitleUrl === state.selectedSubtitleUrl;
+        state.clip.selectedSubtitleId && String(item.id) === String(state.clip.selectedSubtitleId);
+      const selectedByUrl = item.subtitleUrl === state.clip.selectedSubtitleUrl;
       const selected = selectedById || selectedByUrl ? "selected" : "";
       const label = item.lanDoc || item.lan || "unknown";
       const isAi = isAiSubtitle(item);
@@ -798,12 +798,12 @@ export function renderSubtitleSelect() {
   select.disabled = false;
 }
 export function getPopupPayload() {
-  const subtitleOptions = (state.subtitles || []).map((item) => {
+  const subtitleOptions = (state.clip.subtitles || []).map((item) => {
     const label = item.lanDoc || item.lan || "unknown";
     const isAi = isAiSubtitle(item);
     const selectedById =
-      state.selectedSubtitleId && String(item.id) === String(state.selectedSubtitleId);
-    const selectedByUrl = item.subtitleUrl === state.selectedSubtitleUrl;
+      state.clip.selectedSubtitleId && String(item.id) === String(state.clip.selectedSubtitleId);
+    const selectedByUrl = item.subtitleUrl === state.clip.selectedSubtitleUrl;
     return {
       id: String(item.id || ""),
       url: item.subtitleUrl,
@@ -816,16 +816,16 @@ export function getPopupPayload() {
   return {
     contentVersion: BOC_VERSION,
     url: cleanVideoUrl(),
-    title: state.title || "",
-    author: state.author || "",
-    uploadDate: state.uploadDate || "",
+    title: state.clip.title || "",
+    author: state.clip.author || "",
+    uploadDate: state.clip.uploadDate || "",
     tags: String(state.settings?.tags || ""),
-    status: state.statusText || "",
-    message: state.messageText || "",
-    subtitlePreview: buildSubtitlePreview(state.subtitleBody || [], state.settings || DEFAULT_SETTINGS),
-    markdown: state.markdown || "",
-    srt: state.srt || "",
-    txt: state.txt || "",
+    status: state.ui.statusText || "",
+    message: state.ui.messageText || "",
+    subtitlePreview: buildSubtitlePreview(state.clip.subtitleBody || [], state.settings || DEFAULT_SETTINGS),
+    markdown: state.clip.markdown || "",
+    srt: state.clip.srt || "",
+    txt: state.clip.txt || "",
     downloadFormat: normalizeDownloadFormat(state.settings?.downloadFormat),
     subtitleOptions
   };
@@ -833,13 +833,13 @@ export function getPopupPayload() {
 export async function copyMarkdown() {
   state.settings = await getSettings();
   await refreshDerivedContent();
-  if (!state.markdown) {
+  if (!state.clip.markdown) {
     setMessage("没有可复制的内容，请先刷新抓取。");
     return;
   }
 
   try {
-    await navigator.clipboard.writeText(state.markdown);
+    await navigator.clipboard.writeText(state.clip.markdown);
     setMessage("Markdown 已复制到剪贴板。");
   } catch (error) {
     setMessage(`复制失败：${getErrorMessage(error)}`);
@@ -849,14 +849,14 @@ export async function downloadSubtitle() {
   state.settings = await getSettings();
   rebuildDerivedContent();
   const format = normalizeDownloadFormat(state.settings?.downloadFormat);
-  const content = format === "txt" ? state.txt : state.srt;
+  const content = format === "txt" ? state.clip.txt : state.clip.srt;
   if (!content) {
     setMessage("没有可下载的字幕，请先刷新抓取。");
     return;
   }
 
-  const safeTitle = sanitizeFileName(state.title || state.bvid || "bilibili-subtitle");
-  const langSuffix = sanitizeFileName(state.selectedSubtitleLang || "subtitle") || "subtitle";
+  const safeTitle = sanitizeFileName(state.clip.title || state.clip.bvid || "bilibili-subtitle");
+  const langSuffix = sanitizeFileName(state.clip.selectedSubtitleLang || "subtitle") || "subtitle";
   const filename = `${safeTitle}.${langSuffix}.${format}`;
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -876,22 +876,22 @@ export function setBusyState(disabled) {
   byId(ids.downloadBtn).disabled = disabled;
   byId(ids.refreshBtn).disabled = disabled;
   byId(ids.settingsBtn).disabled = disabled;
-  byId(ids.subtitleSelect).disabled = disabled || state.subtitles.length === 0;
+  byId(ids.subtitleSelect).disabled = disabled || state.clip.subtitles.length === 0;
 }
 export function setStatus(text) {
-  state.statusText = String(text || "");
-  byId(ids.status).textContent = state.statusText;
+  state.ui.statusText = String(text || "");
+  byId(ids.status).textContent = state.ui.statusText;
 }
 export function applyNoSubtitleState() {
-  state.selectedSubtitleId = "";
-  state.selectedSubtitleUrl = "";
-  state.selectedSubtitleLang = "";
-  state.subtitleBody = [];
-  state.subtitleFetchState = "empty";
-  state.hotComments = [];
-  state.markdown = "";
-  state.srt = "";
-  state.txt = "";
+  state.clip.selectedSubtitleId = "";
+  state.clip.selectedSubtitleUrl = "";
+  state.clip.selectedSubtitleLang = "";
+  state.clip.subtitleBody = [];
+  state.clip.subtitleFetchState = "empty";
+  state.clip.hotComments = [];
+  state.clip.markdown = "";
+  state.clip.srt = "";
+  state.clip.txt = "";
   byId(ids.preview).value = "";
 }
 export function readVideoDescription() {
@@ -969,12 +969,12 @@ export async function fetchSubtitleBundle(bvid, cid, aid = "") {
 export async function refreshDerivedContent({ refreshComments = false } = {}) {
   if (state.settings?.includeHotCommentsInNote) {
     const shouldFetchComments =
-      refreshComments || !Array.isArray(state.hotComments) || state.hotComments.length === 0;
+      refreshComments || !Array.isArray(state.clip.hotComments) || state.clip.hotComments.length === 0;
     if (shouldFetchComments) {
       try {
-        state.hotComments = await fetchHotComments(20);
+        state.clip.hotComments = await fetchHotComments(20);
       } catch (error) {
-        state.hotComments = [];
+        state.clip.hotComments = [];
         logWarn("[BOC] failed to fetch hot comments for note export", error);
       }
     }

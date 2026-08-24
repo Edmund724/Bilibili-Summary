@@ -41,7 +41,7 @@ export {
 };
 
 function startPlayerAiQuickActionObserver() {
-  if (state.playerAiQuickActionObserver || !document.body) {
+  if (state.playerAi.playerAiQuickActionObserver || !document.body) {
     return;
   }
 
@@ -54,11 +54,11 @@ function startPlayerAiQuickActionObserver() {
     attributes: true,
     attributeFilter: ["style", "class"]
   });
-  state.playerAiQuickActionObserver = observer;
+  state.playerAi.playerAiQuickActionObserver = observer;
 }
 
 function bindPlayerAiQuickActionLayoutEvents() {
-  if (state.playerAiQuickActionLayoutBound) {
+  if (state.playerAi.playerAiQuickActionLayoutBound) {
     return;
   }
   const schedule = () => schedulePlayerAiQuickActionSync(80);
@@ -68,15 +68,15 @@ function bindPlayerAiQuickActionLayoutEvents() {
   document.addEventListener("fullscreenchange", schedule);
   document.addEventListener("webkitfullscreenchange", schedule);
   window.visualViewport?.addEventListener?.("resize", schedule, { passive: true });
-  state.playerAiQuickActionLayoutBound = true;
+  state.playerAi.playerAiQuickActionLayoutBound = true;
 }
 
 function schedulePlayerAiQuickActionSync(delayMs = 120) {
-  if (state.playerAiQuickActionSyncTimer) {
-    window.clearTimeout(state.playerAiQuickActionSyncTimer);
+  if (state.playerAi.playerAiQuickActionSyncTimer) {
+    window.clearTimeout(state.playerAi.playerAiQuickActionSyncTimer);
   }
-  state.playerAiQuickActionSyncTimer = window.setTimeout(() => {
-    state.playerAiQuickActionSyncTimer = 0;
+  state.playerAi.playerAiQuickActionSyncTimer = window.setTimeout(() => {
+    state.playerAi.playerAiQuickActionSyncTimer = 0;
     syncPlayerAiQuickActionButton();
   }, delayMs);
 }
@@ -90,7 +90,7 @@ function schedulePlayerAiQuickActionRetry() {
 function syncPlayerAiQuickActionButton() {
   const existing = document.getElementById("boc-player-ai-quick-action");
   const existingWrap = existing?.closest(".boc-player-ai-wrap");
-  if (!state.settings?.enablePlayerAiQuickAction || state.readingViewOpen || isReaderMode()) {
+  if (!state.settings?.enablePlayerAiQuickAction || state.reader.readingViewOpen || isReaderMode()) {
     removePlayerAiQuickActionButton();
     return;
   }
@@ -139,17 +139,17 @@ function syncPlayerAiQuickActionButton() {
 }
 
 function removePlayerAiQuickActionButton() {
-  if (state.playerAiQuickActionRevealTimer) {
-    window.clearTimeout(state.playerAiQuickActionRevealTimer);
-    state.playerAiQuickActionRevealTimer = 0;
+  if (state.playerAi.playerAiQuickActionRevealTimer) {
+    window.clearTimeout(state.playerAi.playerAiQuickActionRevealTimer);
+    state.playerAi.playerAiQuickActionRevealTimer = 0;
   }
-  if (state.playerAiQuickActionHideTimer) {
-    window.clearTimeout(state.playerAiQuickActionHideTimer);
-    state.playerAiQuickActionHideTimer = 0;
+  if (state.playerAi.playerAiQuickActionHideTimer) {
+    window.clearTimeout(state.playerAi.playerAiQuickActionHideTimer);
+    state.playerAi.playerAiQuickActionHideTimer = 0;
   }
-  if (state.playerAiQuickActionCursorHideTimer) {
-    window.clearTimeout(state.playerAiQuickActionCursorHideTimer);
-    state.playerAiQuickActionCursorHideTimer = 0;
+  if (state.playerAi.playerAiQuickActionCursorHideTimer) {
+    window.clearTimeout(state.playerAi.playerAiQuickActionCursorHideTimer);
+    state.playerAi.playerAiQuickActionCursorHideTimer = 0;
   }
   document.getElementById("boc-player-ai-quick-action")?.closest(".boc-player-ai-wrap")?.remove();
 }
@@ -163,24 +163,24 @@ function bindPlayerAiQuickActionCursorSync(wrap) {
     return;
   }
   const hideForIdle = () => {
-    state.playerAiQuickActionCursorHideTimer = 0;
+    state.playerAi.playerAiQuickActionCursorHideTimer = 0;
     wrap.classList.remove("is-active");
   };
   const showForCursorActivity = () => {
-    if (!wrap.isConnected || state.readingViewOpen || isReaderMode()) {
+    if (!wrap.isConnected || state.reader.readingViewOpen || isReaderMode()) {
       wrap.classList.remove("is-active");
       return;
     }
     wrap.classList.add("is-active");
-    if (state.playerAiQuickActionCursorHideTimer) {
-      window.clearTimeout(state.playerAiQuickActionCursorHideTimer);
+    if (state.playerAi.playerAiQuickActionCursorHideTimer) {
+      window.clearTimeout(state.playerAi.playerAiQuickActionCursorHideTimer);
     }
-    state.playerAiQuickActionCursorHideTimer = window.setTimeout(hideForIdle, 1900);
+    state.playerAi.playerAiQuickActionCursorHideTimer = window.setTimeout(hideForIdle, 1900);
   };
   const hideImmediately = () => {
-    if (state.playerAiQuickActionCursorHideTimer) {
-      window.clearTimeout(state.playerAiQuickActionCursorHideTimer);
-      state.playerAiQuickActionCursorHideTimer = 0;
+    if (state.playerAi.playerAiQuickActionCursorHideTimer) {
+      window.clearTimeout(state.playerAi.playerAiQuickActionCursorHideTimer);
+      state.playerAi.playerAiQuickActionCursorHideTimer = 0;
     }
     wrap.classList.remove("is-active");
   };
@@ -334,15 +334,15 @@ async function handlePlayerAiQuickActionClick(event) {
   event.preventDefault();
   event.stopPropagation();
   if (
-    state.playerAiQuickActionSubmitting ||
-    state.readingViewOpen ||
+    state.playerAi.playerAiQuickActionSubmitting ||
+    state.reader.readingViewOpen ||
     isReaderMode() ||
-    Date.now() < state.playerAiQuickActionSuppressedUntil
+    Date.now() < state.playerAi.playerAiQuickActionSuppressedUntil
   ) {
     return;
   }
 
-  state.playerAiQuickActionSubmitting = true;
+  state.playerAi.playerAiQuickActionSubmitting = true;
   const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
   if (button) {
     button.disabled = true;
@@ -361,7 +361,7 @@ async function handlePlayerAiQuickActionClick(event) {
   } catch (error) {
     setMessage(`AI 快捷操作失败：${getErrorMessage(error)}`);
   } finally {
-    state.playerAiQuickActionSubmitting = false;
+    state.playerAi.playerAiQuickActionSubmitting = false;
     if (button) {
       button.disabled = false;
     }

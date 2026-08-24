@@ -5,6 +5,7 @@ import {
   isSupportedBilibiliPage,
   sleep
 } from "./shared-defaults.js";
+import { escapeHtml, sanitizeFileName } from "./formatters.js";
 
 const el = {
   status: document.getElementById("status"),
@@ -242,33 +243,9 @@ function setMessage(text) {
   el.message.textContent = String(text || "");
 }
 
-function sanitizeFileName(value) {
-  return String(value || "subtitle")
-    .replace(/[\\/:*?"<>|]/g, "_")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 120);
-}
-
-
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
 async function getActiveTab() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs?.[0] || null;
-}
-
-async function getActiveTabId() {
-  const tab = await getActiveTab();
-  return tab?.id || null;
 }
 
 async function sendToContent(message) {

@@ -32,10 +32,10 @@ import {
 } from "./formatters.js";
 
 export function bindRuntimeEvents() {
-  if (state.runtimeEventsBound) {
+  if (state.ui.runtimeEventsBound) {
     return;
   }
-  state.runtimeEventsBound = true;
+  state.ui.runtimeEventsBound = true;
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || typeof message !== "object") {
@@ -64,7 +64,7 @@ export function bindRuntimeEvents() {
         sendResponse({ ok: false, error: "Missing subtitle URL", payload: getPopupPayload() });
         return false;
       }
-      loadSubtitle(url, lang, state.fetchRunId, subtitleId)
+      loadSubtitle(url, lang, state.clip.fetchRunId, subtitleId)
         .then(() => {
           setStatus("字幕切换完成。");
           renderSubtitleSelect();
@@ -77,7 +77,7 @@ export function bindRuntimeEvents() {
     }
 
     if (message.type === "popup-trigger-reading-view") {
-      state.playerAiQuickActionSuppressedUntil = Date.now() + 2500;
+      state.playerAi.playerAiQuickActionSuppressedUntil = Date.now() + 2500;
       removePlayerAiQuickActionButton();
       ensureUiReady();
       const readerUrl = String(message.readerUrl || "").trim();
@@ -86,7 +86,7 @@ export function bindRuntimeEvents() {
         document.documentElement.setAttribute("data-boc-reader-mode", "1");
         document.body.setAttribute("data-boc-reader-mode", "1");
       }
-      if (!state.readingViewOpen) {
+      if (!state.reader.readingViewOpen) {
         enterReaderMode().catch((error) => {
           logWarn("[BOC] reading mode trigger failed", error);
         });
@@ -97,7 +97,7 @@ export function bindRuntimeEvents() {
 
     if (message.type === "sidepanel-get-context") {
       const settings = state.settings || DEFAULT_SETTINGS;
-      const body = state.subtitleBody || [];
+      const body = state.clip.subtitleBody || [];
       let subtitleMarkdown = "";
       try {
         subtitleMarkdown = body.length
@@ -111,21 +111,21 @@ export function bindRuntimeEvents() {
         ok: true,
         payload: {
           url: location.href,
-          title: state.title || "",
-          author: state.author || "",
-          uploadDate: state.uploadDate || "",
-          bvid: state.bvid || "",
-          cid: state.cid || "",
-          aid: state.aid || "",
-          pageIndex: Number(state.pageIndex) > 0 ? Number(state.pageIndex) : 1,
-          pageCount: Number(state.pageCount) > 0 ? Number(state.pageCount) : 0,
-          pageTitle: state.pageTitle || "",
+          title: state.clip.title || "",
+          author: state.clip.author || "",
+          uploadDate: state.clip.uploadDate || "",
+          bvid: state.clip.bvid || "",
+          cid: state.clip.cid || "",
+          aid: state.clip.aid || "",
+          pageIndex: Number(state.clip.pageIndex) > 0 ? Number(state.clip.pageIndex) : 1,
+          pageCount: Number(state.clip.pageCount) > 0 ? Number(state.clip.pageCount) : 0,
+          pageTitle: state.clip.pageTitle || "",
           subtitleBody: body,
           subtitleMarkdown,
-          subtitleLang: state.selectedSubtitleLang || "",
-          selectedSubtitleId: state.selectedSubtitleId || "",
-          selectedSubtitleUrl: state.selectedSubtitleUrl || "",
-          subtitleOptions: state.subtitles || [],
+          subtitleLang: state.clip.selectedSubtitleLang || "",
+          selectedSubtitleId: state.clip.selectedSubtitleId || "",
+          selectedSubtitleUrl: state.clip.selectedSubtitleUrl || "",
+          subtitleOptions: state.clip.subtitles || [],
           hotComments: []
         }
       });
@@ -140,18 +140,18 @@ export function bindRuntimeEvents() {
       }
 
       if (!getCurrentAid()) {
-        state.hotComments = [];
+        state.clip.hotComments = [];
         sendResponse({ ok: true, comments: [], note: "无法获取视频 aid" });
         return false;
       }
 
       fetchHotComments(count)
         .then((hotComments) => {
-          state.hotComments = hotComments;
+          state.clip.hotComments = hotComments;
           sendResponse({ ok: true, comments: hotComments });
         })
         .catch((error) => {
-          state.hotComments = [];
+          state.clip.hotComments = [];
           sendResponse({ ok: true, comments: [], note: String(error?.message || error) });
         });
       return true;
@@ -170,9 +170,9 @@ export function bindRuntimeEvents() {
       if (!wasPaused) {
         video.play().catch(() => {});
       }
-      if (state.readingViewOpen) {
-        state.readingManualScrollPauseUntil = 0;
-        state.readingNextScrollBehavior = "auto";
+      if (state.reader.readingViewOpen) {
+        state.reader.readingManualScrollPauseUntil = 0;
+        state.reader.readingNextScrollBehavior = "auto";
         updateReaderFollowState();
         syncReadingViewPlayback(true);
       }

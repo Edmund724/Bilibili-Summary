@@ -1,5 +1,21 @@
 import { DEFAULT_SETTINGS } from "./shared-defaults.js";
 
+/**
+ * State namespace objects.
+ *
+ * Access patterns:
+ * - Legacy flat: state.readingViewOpen, state.bvid, state.title, ...
+ * - Structured:   state.reader.readingViewOpen, state.clip.bvid, state.ui.statusText, ...
+ *
+ * During this expand phase both patterns work. The structured namespaces
+ * (state.reader, state.clip, state.playerAi, state.ui) expose the same
+ * properties as the current sub-state objects. A dev-mode warning is emitted
+ * when callers write to the flat namespace so the next migration ticket can
+ * identify and update those sites.
+ */
+
+const isDev = typeof process === "undefined" || process.env?.NODE_ENV !== "production";
+
 const readerState = {
   readingViewOpen: false,
   readingNativePageMode: false,
@@ -98,7 +114,11 @@ const stateTarget = {
   readerState,
   clipState,
   playerAiState,
-  uiState
+  uiState,
+  reader: readerState,
+  clip: clipState,
+  playerAi: playerAiState,
+  ui: uiState
 };
 
 const state = new Proxy(stateTarget, {
@@ -110,6 +130,25 @@ const state = new Proxy(stateTarget, {
     return target[prop];
   },
   set(target, prop, value) {
+    if (
+      isDev &&
+      (prop in readerState ||
+        prop in clipState ||
+        prop in playerAiState ||
+        prop in uiState)
+    ) {
+      const ns = prop in readerState
+        ? "reader"
+        : prop in clipState
+          ? "clip"
+          : prop in playerAiState
+            ? "playerAi"
+            : "ui";
+      console.warn(
+        `[state] flat write: state.${String(prop)} → prefer state.${ns}.${String(prop)}`
+      );
+    }
+
     if (prop in readerState) {
       readerState[prop] = value;
       return true;
