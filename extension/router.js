@@ -2,17 +2,21 @@ import { state } from "./state.js";
 import { DEFAULT_SETTINGS } from "./shared-defaults.js";
 import {
   enforceNormalPageStateIfNeeded,
-  ensureUiReady,
+  ensureUiReady
+} from "./content.js";
+import {
   resetClipState,
+  refreshClip,
+  setStatus
+} from "./panel.js";
+import {
   enterReaderMode,
   renderReadingStatus,
   waitForVideoMetadata,
-  refreshClip,
-  setStatus,
   logInfo,
   logWarn,
   shouldDebugLog
-} from "./content.js";
+} from "./reader.js";
 import { schedulePlayerAiQuickActionSync } from "./player-ai.js";
 
 export function isReaderMode(url = location.href) {

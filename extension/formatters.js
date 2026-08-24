@@ -1,6 +1,6 @@
 import { DEFAULT_SETTINGS, formatLocalDate, normalizeDownloadFormat } from "./shared-defaults.js";
 import { state } from "./state.js";
-import { extractPageIndex, cleanVideoUrl } from "./router.js";
+import { extractPageIndex, cleanVideoUrl, sendRuntimeMessage, isExtensionContextInvalidated, toReadableText } from "./router.js";
 
 export function buildBilibiliEmbedIframe(meta, page = 1) {
   const safeAid = encodeURIComponent(String(meta?.aid || "").trim());
@@ -750,7 +750,7 @@ export function normalizeSubtitleUrlForCache(url) {
   }
 }
 
-async function loadSubtitleFromCache(cacheKey) {
+export async function loadSubtitleFromCache(cacheKey) {
   try {
     const result = await chrome.storage.local.get(cacheKey);
     return result[cacheKey]?.body || null;
@@ -759,7 +759,7 @@ async function loadSubtitleFromCache(cacheKey) {
   }
 }
 
-async function saveSubtitleToCache(cacheKey, body) {
+export async function saveSubtitleToCache(cacheKey, body) {
   try {
     await chrome.storage.local.set({
       [cacheKey]: {
@@ -772,7 +772,7 @@ async function saveSubtitleToCache(cacheKey, body) {
   }
 }
 
-async function clearSubtitleCacheByKey(cacheKey) {
+export async function clearSubtitleCacheByKey(cacheKey) {
   try {
     await chrome.storage.local.remove(cacheKey);
   } catch (error) {
@@ -994,12 +994,12 @@ export function readRuntimeVideoDuration() {
   return 0;
 }
 
-async function fetchSubtitleBody(url) {
+export async function fetchSubtitleBody(url) {
   logInfo("[BOC] fetch subtitle body", { url });
   return fetchJsonInBackground(url);
 }
 
-async function fetchJson(url) {
+export async function fetchJson(url) {
   if (typeof url === "string" && url.startsWith("https://api.bilibili.com/")) {
     return fetchJsonInBackground(url);
   }
@@ -1016,7 +1016,7 @@ async function fetchJson(url) {
   return response.json();
 }
 
-async function fetchJsonInBackground(url) {
+export async function fetchJsonInBackground(url) {
   try {
     const resp = await sendRuntimeMessage({ type: "fetch-json", url });
     if (!resp?.ok) {
@@ -1042,7 +1042,7 @@ export function getCurrentAid() {
   return aid;
 }
 
-async function fetchHotComments(count = 20) {
+export async function fetchHotComments(count = 20) {
   const safeCount = Math.max(0, Number(count) || 0);
   if (!safeCount) {
     return [];
