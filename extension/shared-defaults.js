@@ -1,7 +1,6 @@
 // extension/shared-defaults.js
 // Shared defaults and pure normalizers across extension contexts.
 // This module consolidates the common defaults previously duplicated across pages.
-// Keep extension/defaults.js as the classic-script shim until T11.
 
 // ===== AI Prompts =====
 export const DEFAULT_PLAYER_AI_QUICK_PROMPT = "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。";

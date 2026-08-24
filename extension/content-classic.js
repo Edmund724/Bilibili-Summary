@@ -1,7 +1,6 @@
 // extension/shared-defaults.js
 // Shared defaults and pure normalizers across extension contexts.
 // This module consolidates the common defaults previously duplicated across pages.
-// Keep extension/defaults.js as the classic-script shim until T11.
 
 // ===== AI Prompts =====
 const DEFAULT_PLAYER_AI_QUICK_PROMPT = "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。";
@@ -265,13 +264,51 @@ const DEFAULT_SETTINGS = {
   defaultModel: ""
 };
 
-const PLAYER_AI_ICON_VARIANT = "badge";
 
-const BOC_VERSION = "1.1.4";
-const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
-globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
-const state = {
-  currentUrl: location.href,
+const readerState = {
+  readingViewOpen: false,
+  readingNativePageMode: false,
+  readingRootOriginalParent: null,
+  readingAutoScroll: true,
+  readingTheme: "light",
+  readingFontScale: "m",
+  readingLetterSpacing: "normal",
+  readingLineHeight: "tight",
+  readingContentWidth: "medium",
+  readingChapterVisible: true,
+  readingTranscriptVisible: true,
+  readingSettingsExpanded: false,
+  readingDescriptionExpanded: false,
+  readingActiveSubtitleIndex: -1,
+  readingActiveChapterIndex: -1,
+  readingNextScrollBehavior: "smooth",
+  readingSyncTimer: 0,
+  readingVideoEl: null,
+  readingPlayerHost: null,
+  readingMainOriginalParent: null,
+  readingMainOriginalNextSibling: null,
+  readingPlayerAdjustedNodes: [],
+  readingPlayerObserver: null,
+  readingPlayerMountTimer: 0,
+  readingPlayerRetryTimer: 0,
+  readingMiniDismissTimer: 0,
+  readingControlsHideTimer: 0,
+  readingControlsRecoveryTimer: 0,
+  readingControlsRecoveryInFlight: false,
+  readingControlsLastRecoverAt: 0,
+  readingControlsHoverHost: null,
+  readingHeaderHoverHost: null,
+  readingHeaderHideTimer: 0,
+  readingVideoEventsBound: false,
+  readingLayoutBound: false,
+  readingDocumentClickBound: false,
+  readingManualScrollPauseUntil: 0,
+  readingProgrammaticScrollUntil: 0,
+  readingViewReady: false
+};
+
+const clipState = {
+  currentUrl: typeof location !== "undefined" ? location.href : "",
   fetchRunId: 0,
   bvid: "",
   aid: "",
@@ -296,47 +333,10 @@ const state = {
   markdown: "",
   srt: "",
   txt: "",
-  readingViewOpen: false,
-  readingNativePageMode: false,
-  readingRootOriginalParent: null,
-  readingAutoScroll: true,
-  readingTheme: "light",
-  readingFontScale: "m",
-  readingLetterSpacing: "normal",
-  readingLineHeight: "tight",
-  readingContentWidth: "medium",
-  readingChapterVisible: true,
-  readingTranscriptVisible: true,
-  readingSettingsExpanded: false,
-  readingDescriptionExpanded: false,
-  readingActiveSubtitleIndex: -1,
-  readingActiveChapterIndex: -1,
-  readingNextScrollBehavior: "smooth",
-  readingSyncTimer: 0,
-  currentClipSignature: "",
-  readingVideoEl: null,
-  readingPlayerHost: null,
-  readingMainOriginalParent: null,
-  readingMainOriginalNextSibling: null,
-  readingPlayerAdjustedNodes: [],
-  readingPlayerObserver: null,
-  readingPlayerMountTimer: 0,
-  readingPlayerRetryTimer: 0,
-  readingMiniDismissTimer: 0,
-  readingControlsHideTimer: 0,
-  readingControlsRecoveryTimer: 0,
-  readingControlsRecoveryInFlight: false,
-  readingControlsLastRecoverAt: 0,
-  readingControlsHoverHost: null,
-  readingHeaderHoverHost: null,
-  readingHeaderHideTimer: 0,
-  readingVideoEventsBound: false,
-  readingLayoutBound: false,
-  uiEventsBound: false,
-  runtimeEventsBound: false,
-  settingsWatcherBound: false,
-  normalPageStateGuardBound: false,
-  urlWatcherStarted: false,
+  currentClipSignature: ""
+};
+
+const playerAiState = {
   playerAiQuickActionObserver: null,
   playerAiQuickActionLayoutBound: false,
   playerAiQuickActionSyncTimer: 0,
@@ -344,18 +344,82 @@ const state = {
   playerAiQuickActionHideTimer: 0,
   playerAiQuickActionCursorHideTimer: 0,
   playerAiQuickActionSubmitting: false,
-  playerAiQuickActionSuppressedUntil: 0,
-  normalPageStateObserver: null,
-  readingDocumentClickBound: false,
-  readingManualScrollPauseUntil: 0,
-  readingProgrammaticScrollUntil: 0,
-  readingViewReady: false,
-  statusText: "准备就绪，点击“刷新抓取”开始。",
-  messageText: "",
-  settings: { ...DEFAULT_SETTINGS }
+  playerAiQuickActionSuppressedUntil: 0
 };
 
+const uiState = {
+  uiEventsBound: false,
+  runtimeEventsBound: false,
+  settingsWatcherBound: false,
+  normalPageStateGuardBound: false,
+  urlWatcherStarted: false,
+  statusText: "准备就绪，点击“刷新抓取”开始。",
+  messageText: ""
+};
 
+const stateTarget = {
+  settings: { ...DEFAULT_SETTINGS },
+  normalPageStateObserver: null,
+  readerState,
+  clipState,
+  playerAiState,
+  uiState
+};
+
+const state = new Proxy(stateTarget, {
+  get(target, prop) {
+    if (prop in readerState) return readerState[prop];
+    if (prop in clipState) return clipState[prop];
+    if (prop in playerAiState) return playerAiState[prop];
+    if (prop in uiState) return uiState[prop];
+    return target[prop];
+  },
+  set(target, prop, value) {
+    if (prop in readerState) {
+      readerState[prop] = value;
+      return true;
+    }
+    if (prop in clipState) {
+      clipState[prop] = value;
+      return true;
+    }
+    if (prop in playerAiState) {
+      playerAiState[prop] = value;
+      return true;
+    }
+    if (prop in uiState) {
+      uiState[prop] = value;
+      return true;
+    }
+    target[prop] = value;
+    return true;
+  },
+  has(target, prop) {
+    if (prop in readerState) return true;
+    if (prop in clipState) return true;
+    if (prop in playerAiState) return true;
+    if (prop in uiState) return true;
+    return prop in target;
+  },
+  ownKeys(target) {
+    const keys = new Set([
+      ...Object.keys(readerState),
+      ...Object.keys(clipState),
+      ...Object.keys(playerAiState),
+      ...Object.keys(uiState),
+      ...Object.keys(target)
+    ]);
+    return Array.from(keys);
+  }
+});
+
+
+
+const PLAYER_AI_ICON_VARIANT = "badge";
+
+const BOC_VERSION = "1.1.4";
+const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
+globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
 
 function isReaderMode(url = location.href) {
   try {
