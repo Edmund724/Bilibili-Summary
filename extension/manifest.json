@@ -24,7 +24,8 @@
     "https://*/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "icons": {
     "16": "icons/icon16.png",
@@ -44,7 +45,7 @@
         "https://www.bilibili.com/list/watchlater/",
         "https://www.bilibili.com/list/watchlater/*"
       ],
-      "js": ["defaults.js", "content.js"],
+      "js": ["content-classic.js"],
       "css": ["content.css"],
       "run_at": "document_idle",
       "all_frames": true

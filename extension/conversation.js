@@ -2,11 +2,11 @@
 // 会话生命周期 + 上下文 key 计算的纯函数模块（Candidate 7 抽取）。
 // 作为经典脚本加载，不依赖任何外部状态或 Chrome API。
 
-const MAX_SAVED_CONVERSATIONS = 60;
+export const MAX_SAVED_CONVERSATIONS = 60;
 
 // ============ 上下文 key ============
 
-function buildContextKey(payload) {
+export function buildContextKey(payload) {
   if (!payload) {
     return "";
   }
@@ -20,7 +20,7 @@ function buildContextKey(payload) {
   return normalizedUrl ? `url:${normalizedUrl}` : "";
 }
 
-function normalizeContextUrlForKey(value) {
+export function normalizeContextUrlForKey(value) {
   const text = String(value || "").trim();
   if (!text) {
     return "";
@@ -36,7 +36,7 @@ function normalizeContextUrlForKey(value) {
 
 // ============ 会话规范化 ============
 
-function normalizeConversations(value) {
+export function normalizeConversations(value) {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -72,7 +72,7 @@ function normalizeConversations(value) {
     .slice(0, MAX_SAVED_CONVERSATIONS);
 }
 
-function resolveConversationStorageKey(rawKey, contextRef, contextUrl = "") {
+export function resolveConversationStorageKey(rawKey, contextRef, contextUrl = "") {
   const normalizedRefKey = buildContextKey(contextRef);
   if (normalizedRefKey) {
     return normalizedRefKey;
@@ -86,7 +86,7 @@ function resolveConversationStorageKey(rawKey, contextRef, contextUrl = "") {
 
 // ============ 上下文引用 ============
 
-function buildConversationContextRef(context) {
+export function buildConversationContextRef(context) {
   if (!context || typeof context !== "object") {
     return null;
   }
@@ -108,11 +108,11 @@ function buildConversationContextRef(context) {
   };
 }
 
-function normalizeConversationContextRef(ref) {
+export function normalizeConversationContextRef(ref) {
   return buildConversationContextRef(ref);
 }
 
-function buildContextPlaceholder(ref) {
+export function buildContextPlaceholder(ref) {
   if (!ref || typeof ref !== "object") {
     return null;
   }
@@ -138,19 +138,19 @@ function buildContextPlaceholder(ref) {
 
 // ============ 标题 ============
 
-function buildConversationTitle(context) {
+export function buildConversationTitle(context) {
   const rawTitle = String(context?.title || "当前页面").trim() || "当前页面";
   const baseTitle = extractConversationBaseTitle(rawTitle);
   return appendConversationPageSuffix(baseTitle, context);
 }
 
-function normalizeConversationTitle(title, contextTitle = "", contextRef = null, contextUrl = "") {
+export function normalizeConversationTitle(title, contextTitle = "", contextRef = null, contextUrl = "") {
   const preferredTitle = String(contextTitle || "").trim() || String(title || "").trim();
   const baseTitle = extractConversationBaseTitle(preferredTitle);
   return appendConversationPageSuffix(baseTitle || "历史对话", contextRef || { url: contextUrl });
 }
 
-function extractConversationBaseTitle(title) {
+export function extractConversationBaseTitle(title) {
   const raw = String(title || "").trim();
   if (!raw) {
     return "当前页面";
@@ -163,7 +163,7 @@ function extractConversationBaseTitle(title) {
   return parts[0] || normalizedRaw;
 }
 
-function truncateConversationTitle(title, maxChars = 22) {
+export function truncateConversationTitle(title, maxChars = 22) {
   const value = String(title || "").trim();
   const match = value.match(/^(.*?)(-P\d+)$/i);
   if (match) {
@@ -175,7 +175,7 @@ function truncateConversationTitle(title, maxChars = 22) {
   return value.length > maxChars ? `${value.slice(0, maxChars)}...` : value;
 }
 
-function buildConversationTitleDisplay(title, maxChars = 22) {
+export function buildConversationTitleDisplay(title, maxChars = 22) {
   const value = String(title || "").trim();
   const match = value.match(/^(.*?)(-P\d+)$/i);
   if (!match) {
@@ -195,7 +195,7 @@ function buildConversationTitleDisplay(title, maxChars = 22) {
   };
 }
 
-function appendConversationPageSuffix(title, context) {
+export function appendConversationPageSuffix(title, context) {
   const baseTitle = String(title || "").trim() || "历史对话";
   const existingSuffixMatch = baseTitle.match(/-P\d+$/i);
   const cleanTitle = existingSuffixMatch ? baseTitle.replace(/-P\d+$/i, "").trim() : baseTitle;
@@ -203,12 +203,12 @@ function appendConversationPageSuffix(title, context) {
   return pageSuffix ? `${cleanTitle}${pageSuffix}` : cleanTitle;
 }
 
-function extractConversationPageSuffix(context) {
+export function extractConversationPageSuffix(context) {
   const pageIndex = Number(context?.pageIndex || context?.page || 0) || extractPageIndexFromContextUrl(context?.url);
   return pageIndex > 1 ? `-P${pageIndex}` : "";
 }
 
-function extractPageIndexFromContextUrl(url) {
+export function extractPageIndexFromContextUrl(url) {
   try {
     const parsed = new URL(String(url || "").trim());
     const page = Number(parsed.searchParams.get("p") || "1");
@@ -220,11 +220,11 @@ function extractPageIndexFromContextUrl(url) {
 
 // ============ ID / 时间 ============
 
-function generateConversationId() {
+export function generateConversationId() {
   return `conv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function formatConversationTimestamp(value) {
+export function formatConversationTimestamp(value) {
   const date = new Date(Number(value) || Date.now());
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -236,7 +236,7 @@ function formatConversationTimestamp(value) {
 
 // ============ 匹配 / 比较 ============
 
-function doesConversationMatchCurrentContext(conversation, currentRef, targetContextKey = "") {
+export function doesConversationMatchCurrentContext(conversation, currentRef, targetContextKey = "") {
   if (!conversation) {
     return false;
   }
@@ -258,7 +258,7 @@ function doesConversationMatchCurrentContext(conversation, currentRef, targetCon
   return false;
 }
 
-function doesTabMatchContextUrl(tabUrl, targetUrl) {
+export function doesTabMatchContextUrl(tabUrl, targetUrl) {
   const current = extractVideoIdentity(tabUrl);
   const target = extractVideoIdentity(targetUrl);
   if (!current.bvid || !target.bvid) {
@@ -267,7 +267,7 @@ function doesTabMatchContextUrl(tabUrl, targetUrl) {
   return current.bvid === target.bvid && current.page === target.page;
 }
 
-function extractVideoIdentity(url) {
+export function extractVideoIdentity(url) {
   const text = String(url || "").trim();
   const bvidMatch = text.match(/\/video\/(BV[0-9A-Za-z]+)/i) || text.match(/[?&]bvid=(BV[0-9A-Za-z]+)/i);
   let page = 1;

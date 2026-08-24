@@ -1,30 +1,20 @@
-const DEFAULT_SETTINGS = {
-  tags: "clippings,bilibili",
-  downloadFormat: "srt",
-  includeDateInFilename: true,
-  includeHotCommentsInNote: false,
-  enablePlayerAiQuickAction: false,
-  playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
-  includeTimestampInBody: true,
-  enableDebugLogs: false,
-  frontmatterFields: [
-    "title",
-    "url",
-    "bvid",
-    "cid",
-    "author",
-    "upload_date",
-    "subtitle_lang",
-    "created",
-    "tags"
-  ],
-  fixedFrontmatterProperties: [],
-  notePlaceholderSections: [],
-  aiSystemPrompt: DEFAULT_AI_SYSTEM_PROMPT,
-  aiInitialQuickPrompts: DEFAULT_INITIAL_QUICK_PROMPTS.slice(),
-  aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice(),
-  defaultModel: ""
-};
+import {
+  DEFAULT_SETTINGS,
+  DEFAULT_PLAYER_AI_QUICK_PROMPT,
+  DEFAULT_AI_SYSTEM_PROMPT,
+  DEFAULT_INITIAL_QUICK_PROMPTS,
+  DEFAULT_PRESET_PROMPTS,
+  PRESETS,
+  normalizeDownloadFormat,
+  normalizePlayerAiQuickPrompt,
+  normalizeFixedPropertyType,
+  normalizeFixedPropertyValue,
+  isFixedPropertyRowEffectivelyEmpty,
+  normalizeFixedFrontmatterProperties,
+  normalizeNotePlaceholderSections,
+  normalizeBaseUrl,
+  formatLocalDate
+} from "./shared-defaults.js";
 
 const SYSTEM_FRONTMATTER_FIELDS = new Set(DEFAULT_SETTINGS.frontmatterFields.map((field) => String(field).toLowerCase()));
 const CUSTOM_PROPERTY_KEY_PATTERN = /^[\p{L}\p{N}_\-\s]+$/u;
@@ -47,21 +37,7 @@ async function loadAiPresets() {
     // fallback to built-in list when background is unreachable
   }
 
-  aiPresets = [
-    { id: "openai_compat", name: "OpenAI 兼容", baseUrl: "https://api.openai.com/v1", requiresKey: true },
-    { id: "deepseek",      name: "DeepSeek",    baseUrl: "https://api.deepseek.com/v1", requiresKey: true },
-    { id: "qwen",          name: "Qwen",        baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", requiresKey: true },
-    { id: "zhipu",         name: "GLM",         baseUrl: "https://open.bigmodel.cn/api/paas/v4", requiresKey: true },
-    { id: "moonshot",      name: "Kimi",        baseUrl: "https://api.kimi.com/coding/v1", requiresKey: true },
-    { id: "minimax",       name: "MiniMax",     baseUrl: "https://api.minimaxi.com/v1", requiresKey: true },
-    { id: "mimo",          name: "Mimo",        baseUrl: "https://api.mimo.ai/v1", requiresKey: true },
-    { id: "opencodego",    name: "Opencode Go", baseUrl: "https://api.doubao.com/v1", requiresKey: true },
-    { id: "openrouter",    name: "OpenRouter",  baseUrl: "https://openrouter.ai/api/v1", requiresKey: true },
-    { id: "stepfun",       name: "Stepfun",     baseUrl: "https://api.stepfun.com/step_plan/v1", requiresKey: true },
-    { id: "modelscope",    name: "ModelScope",  baseUrl: "https://api-inference.modelscope.cn/v1", requiresKey: true },
-    { id: "ollama",        name: "Ollama (本地)", baseUrl: "http://localhost:11434/v1", requiresKey: false },
-    { id: "custom",        name: "自定义",      baseUrl: "", requiresKey: true }
-  ];
+  aiPresets = PRESETS.slice();
 }
 
 const elements = {
@@ -543,20 +519,6 @@ function validateNotePlaceholderSections(items) {
   return { ok: true };
 }
 
-function normalizeNotePlaceholderSections(items) {
-  if (!Array.isArray(items)) {
-    return [];
-  }
-  return items
-    .map((item) => ({
-      title: String(item?.title || "").trim(),
-      position: normalizeNoteSectionPosition(item?.position),
-      content: String(item?.content || "").trim()
-    }))
-    .filter((item) => item.title)
-    .slice(0, MAX_NOTE_PLACEHOLDER_SECTIONS);
-}
-
 function normalizeNoteSectionPosition(value) {
   const key = String(value || "").trim().toLowerCase();
   return NOTE_SECTION_POSITIONS.has(key) ? key : "before_intro";
@@ -784,10 +746,6 @@ function closeAllFixedPropertyMenus() {
 
 function escapeAttribute(value) {
   return String(value || "").replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
-}
-
-function normalizeBaseUrl(value) {
-  return String(value || "").trim().replace(/\/+$/g, "");
 }
 
 function normalizeApiKey(value) {

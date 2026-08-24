@@ -1,3 +1,26 @@
+import {
+  DEFAULT_INITIAL_QUICK_PROMPTS,
+  DEFAULT_PRESET_PROMPTS,
+  PLAYER_AI_QUICK_ACTION_STORAGE_KEY,
+  formatLocalDate
+} from "./shared-defaults.js";
+
+import {
+  normalizeConversations,
+  buildContextKey,
+  doesConversationMatchCurrentContext,
+  doesTabMatchContextUrl,
+  buildConversationTitle,
+  normalizeConversationTitle,
+  resolveConversationStorageKey,
+  buildConversationContextRef,
+  buildContextPlaceholder,
+  formatConversationTimestamp,
+  buildConversationTitleDisplay,
+  generateConversationId,
+  extractPageIndexFromContextUrl
+} from "./conversation.js";
+
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
 const MAX_SAVED_CONVERSATIONS = 60;

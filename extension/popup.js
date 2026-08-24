@@ -1,3 +1,11 @@
+import {
+  DEFAULT_SETTINGS,
+  normalizeDownloadFormat,
+  formatLocalDate,
+  isSupportedBilibiliPage,
+  sleep
+} from "./shared-defaults.js";
+
 const el = {
   status: document.getElementById("status"),
   message: document.getElementById("message"),
@@ -17,9 +25,6 @@ const el = {
 
 let latestPayload = null;
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
-const DEFAULT_SETTINGS = {
-  downloadFormat: "srt"
-};
 
 
 
@@ -326,7 +331,7 @@ async function ensureContentScriptReady(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ["content.js"]
+      files: ["content-classic.js"]
     });
   } catch (error) {
     const message = String(error?.message || "");
@@ -380,10 +385,6 @@ async function sendMessageToTab(tabId, message) {
       resolve(resp);
     });
   });
-}
-
-async function sleep(ms) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 async function sendToRuntime(message) {

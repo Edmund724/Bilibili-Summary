@@ -1,4 +1,34 @@
-importScripts("defaults.js");
+import {
+  DEFAULT_SETTINGS,
+  DEFAULT_PLAYER_AI_QUICK_PROMPT,
+  DEFAULT_AI_SYSTEM_PROMPT,
+  DEFAULT_INITIAL_QUICK_PROMPTS,
+  DEFAULT_PRESET_PROMPTS,
+  PLAYER_AI_QUICK_ACTION_STORAGE_KEY,
+  PRESETS,
+  getPresetById,
+  normalizeDownloadFormat,
+  normalizeIncludeHotCommentsInNote,
+  normalizeEnablePlayerAiQuickAction,
+  normalizePlayerAiQuickPrompt,
+  normalizeReaderTheme,
+  normalizeReaderFontScale,
+  normalizeReaderLetterSpacing,
+  normalizeReaderLineHeight,
+  normalizeReaderContentWidth,
+  normalizeReaderChapterVisibility,
+  normalizeReaderTranscriptVisible,
+  normalizeFixedFrontmatterProperties,
+  normalizeNotePlaceholderSections,
+  normalizeAiSystemPrompt,
+  normalizeAiInitialQuickPrompts,
+  normalizeAiPresetPrompts,
+  normalizeDefaultModel,
+  normalizeBaseUrl,
+  formatLocalDate,
+  isSupportedBilibiliPage,
+  sleep
+} from "./shared-defaults.js";
 
 var _parseSsePayload = null;
 async function ensureSseParser() {
@@ -12,41 +42,6 @@ async function ensureSseParser() {
   }
   return _parseSsePayload;
 }
-
-const DEFAULT_SYNC_SETTINGS = {
-  tags: "clippings,bilibili",
-  downloadFormat: "srt",
-  includeDateInFilename: true,
-  includeHotCommentsInNote: false,
-  enablePlayerAiQuickAction: false,
-  playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
-  includeTimestampInBody: true,
-  enableDebugLogs: false,
-  readerTheme: "light",
-  readerFontScale: "m",
-  readerLetterSpacing: "normal",
-  readerLineHeight: "tight",
-  readerContentWidth: "medium",
-  readerChapterVisibility: "show",
-  readerTranscriptVisible: true,
-  frontmatterFields: [
-    "title",
-    "url",
-    "bvid",
-    "cid",
-    "author",
-    "upload_date",
-    "subtitle_lang",
-    "created",
-    "tags"
-  ],
-  fixedFrontmatterProperties: [],
-  notePlaceholderSections: [],
-  aiSystemPrompt: DEFAULT_AI_SYSTEM_PROMPT,
-  aiInitialQuickPrompts: DEFAULT_INITIAL_QUICK_PROMPTS.slice(),
-  aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice(),
-  defaultModel: ""
-};
 
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 
@@ -448,10 +443,6 @@ async function ensureReaderContentReady(tabId) {
   throw new Error("扩展脚本未能和当前页面同步，请刷新浏览器网页重试");
 }
 
-async function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function probeContentScriptVersion(tabId) {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -482,7 +473,7 @@ async function injectReaderContent(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ["content.js"]
+      files: ["content-classic.js"]
     });
   } catch (error) {
     const message = String(error?.message || "");
@@ -1180,14 +1171,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function initializeSettingsStorage() {
-  const syncCurrent = await chrome.storage.sync.get(DEFAULT_SYNC_SETTINGS);
-  await chrome.storage.sync.set({ ...DEFAULT_SYNC_SETTINGS, ...syncCurrent });
+  const syncCurrent = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+  await chrome.storage.sync.set({ ...DEFAULT_SETTINGS, ...syncCurrent });
 }
 
 async function getMergedSettings() {
-  const syncSettings = await chrome.storage.sync.get(DEFAULT_SYNC_SETTINGS);
+  const syncSettings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
 
-  const merged = { ...DEFAULT_SYNC_SETTINGS, ...syncSettings };
+  const merged = { ...DEFAULT_SETTINGS, ...syncSettings };
   merged.downloadFormat = normalizeDownloadFormat(merged.downloadFormat);
   merged.includeHotCommentsInNote = normalizeIncludeHotCommentsInNote(merged.includeHotCommentsInNote);
   merged.enablePlayerAiQuickAction = normalizeEnablePlayerAiQuickAction(merged.enablePlayerAiQuickAction);
@@ -1234,30 +1225,6 @@ async function saveSettings(settings) {
 
   await chrome.storage.sync.set(syncPayload);
 }
-function normalizeNotePlaceholderSections(items) {
-
-
-  const allowedPositions = new Set(["before_intro", "before_chapters", "before_subtitle"]);
-  if (!Array.isArray(items)) {
-    return [];
-  }
-  return items
-    .map((item) => {
-      const title = toString(item?.title).trim();
-      const content = toString(item?.content).trim();
-      const position = allowedPositions.has(toString(item?.position).trim())
-        ? toString(item?.position).trim()
-        : "before_intro";
-      return {
-        title,
-        position,
-        content
-      };
-    })
-    .filter((item) => item.title)
-    .slice(0, 5);
-}
-
 
 // ===== AI 模型平台存储 =====
 
