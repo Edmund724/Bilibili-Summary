@@ -283,6 +283,44 @@
       </article>
     </section>
 
+    <section id="implementation-status" class="mt-10 bg-white shadow rounded-2xl p-6">
+      <h2 class="text-2xl font-semibold mb-4">Implementation Status (content-deep-split, 2025-08-24)</h2>
+      <div class="grid md:grid-cols-2 gap-4">
+        <div class="p-4 bg-emerald-50 rounded-xl">
+          <h3 class="font-semibold text-emerald-800">Candidate 1: 默认值与提示词的单一真实来源</h3>
+          <p class="text-sm text-emerald-700">已完成。引入 <code>extension/shared-defaults.js</code>，统一导出 <code>DEFAULT_*</code>、<code>PRESETS</code> 及规范化函数；<code>extension/defaults.js</code> 已删除。</p>
+        </div>
+        <div class="p-4 bg-emerald-50 rounded-xl">
+          <h3 class="font-semibold text-emerald-800">Candidate 2: AI 平台预设的单一读取路径</h3>
+          <p class="text-sm text-emerald-700">已完成。<code>options.js</code> 改从 <code>shared-defaults.js</code> import <code>PRESETS</code>，并通过 runtime 消息读取运行时配置。</p>
+        </div>
+        <div class="p-4 bg-emerald-50 rounded-xl">
+          <h3 class="font-semibold text-emerald-800">Candidate 3: SSE 解析逻辑共享</h3>
+          <p class="text-sm text-emerald-700">已完成。统一使用 <code>ai/sse-parser.js</code> 的 <code>parseSsePayload</code>；<code>background.js</code> 改为动态 import，<code>ai/client.js</code> 直接 import。</p>
+        </div>
+        <div class="p-4 bg-slate-50 rounded-xl">
+          <h3 class="font-semibold text-slate-800">Candidate 4: 统一 streamChat</h3>
+          <p class="text-sm text-slate-600">未合并。<code>background.js</code> 与 <code>ai/client.js</code> 仍各自实现流式请求，差异较小，可后续评估。</p>
+        </div>
+        <div class="p-4 bg-emerald-50 rounded-xl">
+          <h3 class="font-semibold text-emerald-800">Candidate 5: 规范化函数与日期/URL 工具集中化</h3>
+          <p class="text-sm text-emerald-700">已完成。大部分 normalizer 已迁入 <code>shared-defaults.js</code>，各页面统一 import。</p>
+        </div>
+        <div class="p-4 bg-emerald-50 rounded-xl">
+          <h3 class="font-semibold text-emerald-800">Candidate 6: content.js 深度拆分</h3>
+          <p class="text-sm text-emerald-700">已完成。拆分为 <code>state.js</code>、<code>subtitle.js</code>、<code>formatters.js</code>、<code>reader.js</code>、<code>player-ai.js</code>、<code>router.js</code>、<code>messages.js</code>、<code>message.js</code>、<code>panel.js</code>；<code>content.js</code> 降至约 96 行编排器；动态注入保留 <code>content-classic.js</code> bundle。</p>
+        </div>
+        <div class="p-4 bg-emerald-50 rounded-xl">
+          <h3 class="font-semibold text-emerald-800">Candidate 7: sidepanel.js 对话与上下文管理外置</h3>
+          <p class="text-sm text-emerald-700">已完成。<code>conversation.js</code> 已抽离会话生命周期与上下文 key 计算，<code>sidepanel.js</code> 专注 UI。</p>
+        </div>
+        <div class="p-4 bg-emerald-50 rounded-xl">
+          <h3 class="font-semibold text-emerald-800">Candidate 8: background.js 消息路由表驱化</h3>
+          <p class="text-sm text-emerald-700">已完成。<code>chrome.runtime.onMessage</code> 已改为通过 <code>messageHandlers</code> <code>Map&lt;type, handler&gt;</code> 分发。</p>
+        </div>
+      </div>
+    </section>
+
     <section id="top" class="mt-10 bg-white shadow rounded-2xl p-6">
       <h2 class="text-2xl font-semibold mb-2">Top recommendation</h2>
       <p class="mb-2">优先推进 <strong>Candidates 1 + 5</strong>：建立共享默认值/规范化 seam。风险低、收益高，也能为后续 Candidates 2/3/4 建立一致的依赖路径。</p>

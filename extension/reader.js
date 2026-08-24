@@ -1,5 +1,13 @@
 import { state, readerState, clipState, playerAiState, uiState } from "./state.js";
-import { sleep } from "./shared-defaults.js";
+import {
+  normalizeReaderTheme,
+  normalizeReaderFontScale,
+  normalizeReaderLetterSpacing,
+  normalizeReaderLineHeight,
+  normalizeReaderContentWidth,
+  normalizeReaderTranscriptVisible,
+  sleep
+} from "./shared-defaults.js";
 import {
   byId,
   findReaderPlayerHost,

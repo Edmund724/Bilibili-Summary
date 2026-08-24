@@ -1,4 +1,10 @@
-import { DEFAULT_SETTINGS, formatLocalDate, normalizeDownloadFormat } from "./shared-defaults.js";
+import {
+  DEFAULT_SETTINGS,
+  formatLocalDate,
+  normalizeDownloadFormat,
+  normalizeFixedPropertyType,
+  isFixedPropertyRowEffectivelyEmpty
+} from "./shared-defaults.js";
 import { state } from "./state.js";
 import { extractPageIndex, cleanVideoUrl, sendRuntimeMessage, isExtensionContextInvalidated, toReadableText } from "./router.js";
 
