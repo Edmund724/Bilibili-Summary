@@ -1,10 +1,62 @@
-// 编排：拼请求 → fetch → 解析 SSE → 通过 port 把 token 回吐给 side panel。
+// 编排：拼请求 → fetch → 解析 SSE → 通过 port 把 token / reasoning 回吐给 side panel。
 
 import { OPENAI_COMPAT } from "./providers.js";
-import { parseOpenAISSE } from "./stream.js";
 import { buildMessages, clipSubtitleForContext } from "./context.js";
 
-export async function streamChat({ provider, context, userPrompt, port }) {
+const MAX_STREAM_RETRIES = 2;
+
+/**
+ * 发送单条 SSE 数据块。
+ */
+function postSseMessage(port, json) {
+  const delta = json?.choices?.[0]?.delta || {};
+  if (delta.reasoning_content) {
+    port.postMessage({ type: "reasoning", data: String(delta.reasoning_content) });
+  }
+  if (delta.content) {
+    port.postMessage({ type: "token", data: String(delta.content) });
+  }
+}
+
+/**
+ * 读取并解析单个 SSE 响应。
+ */
+async function drainSseStream({ response, port, signal }) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    if (signal?.aborted) {
+      port.postMessage({ type: "stopped", reason: "已停止生成" });
+      return "stopped";
+    }
+
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.length ? lines.pop() : "";
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === "[DONE]") continue;
+
+      try {
+        const json = JSON.parse(data);
+        postSseMessage(port, json);
+      } catch {
+        // 忽略单条坏数据，避免中断整段流
+      }
+    }
+  }
+  return "done";
+}
+
+export async function streamChat({ provider, context, userPrompt, port, signal }) {
   if (!port) return;
 
   const baseUrl = String(provider?.baseUrl || "").trim().replace(/\/+$/, "");
@@ -27,38 +79,70 @@ export async function streamChat({ provider, context, userPrompt, port }) {
     headers["Authorization"] = `Bearer ${provider.apiKey}`;
   }
 
-  let response;
-  try {
-    response = await fetch(`${baseUrl}${OPENAI_COMPAT.chatPath}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model: provider.model,
-        messages,
-        stream: true
-      })
-    });
-  } catch (e) {
-    port.postMessage({ type: "error", error: `网络错误：${e?.message || e}` });
-    return;
-  }
-
-  if (!response.ok) {
-    let detail = "";
-    try {
-      detail = (await response.text()).slice(0, 200);
-    } catch {}
-    port.postMessage({ type: "error", error: `HTTP ${response.status}${detail ? `: ${detail}` : ""}` });
-    return;
-  }
-
-  try {
-    for await (const token of parseOpenAISSE(response)) {
-      port.postMessage({ type: "token", data: token });
+  for (let attempt = 0; attempt <= MAX_STREAM_RETRIES; attempt++) {
+    if (attempt > 0) {
+      port.postMessage({ type: "notice", data: `连接中断，正在重新连接（${attempt}/${MAX_STREAM_RETRIES}）...` });
+      await new Promise(resolve => window.setTimeout(resolve, 800 * attempt));
     }
-    port.postMessage({ type: "done" });
-  } catch (e) {
-    port.postMessage({ type: "error", error: String(e?.message ?? e) });
+
+    let response;
+    try {
+      response = await fetch(`${baseUrl}${OPENAI_COMPAT.chatPath}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: provider.model,
+          messages,
+          stream: true
+        }),
+        signal
+      });
+    } catch (e) {
+      if (signal?.aborted) {
+        port.postMessage({ type: "stopped", reason: "已停止生成" });
+        return;
+      }
+      if (attempt >= MAX_STREAM_RETRIES) {
+        port.postMessage({ type: "error", error: `网络错误：${e?.message || e}` });
+        return;
+      }
+      continue;
+    }
+
+    if (!response.ok) {
+      let detail = "";
+      try {
+        detail = (await response.text()).slice(0, 200);
+      } catch {}
+      const errorMsg = `HTTP ${response.status}${detail ? `: ${detail}` : ""}`;
+      if (attempt >= MAX_STREAM_RETRIES) {
+        port.postMessage({ type: "error", error: errorMsg });
+        return;
+      }
+      port.postMessage({ type: "notice", data: `${errorMsg}，正在重试...` });
+      continue;
+    }
+
+    try {
+      const result = await drainSseStream({
+        response,
+        port,
+        signal
+      });
+      if (result === "stopped") return;
+      port.postMessage({ type: "done" });
+      return;
+    } catch (e) {
+      if (signal?.aborted) {
+        port.postMessage({ type: "stopped", reason: "已停止生成" });
+        return;
+      }
+      if (attempt >= MAX_STREAM_RETRIES) {
+        port.postMessage({ type: "error", error: String(e?.message ?? e) });
+        return;
+      }
+      // 否则继续重试
+    }
   }
 }
 
