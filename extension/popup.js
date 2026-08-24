@@ -27,8 +27,6 @@ const el = {
 let latestPayload = null;
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 
-
-
 init().catch((error) => {
   setStatus(`初始化失败：${error.message}`, true);
 });

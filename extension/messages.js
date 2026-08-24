@@ -43,7 +43,8 @@ export function bindRuntimeEvents() {
     }
 
     if (message.type === "popup-get-state") {
-      sendResponse({ ok: true, payload: getPopupPayload() });
+      const payload = getPopupPayload();
+      sendResponse({ ok: true, payload });
       return false;
     }
 

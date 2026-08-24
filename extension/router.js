@@ -189,14 +189,21 @@ export function requestOpenOptions() {
     });
 }
 
-export async function getSettings() {
+export async function getSettings(timeoutMs = 5000) {
   try {
-    const response = await sendRuntimeMessage({ type: "get-settings" });
+    const timeoutPromise = new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error("getSettings timeout")), timeoutMs);
+    });
+    const response = await Promise.race([
+      sendRuntimeMessage({ type: "get-settings" }),
+      timeoutPromise
+    ]);
     if (!response?.ok) {
       return { ...DEFAULT_SETTINGS };
     }
     return { ...DEFAULT_SETTINGS, ...(response.settings || {}) };
   } catch (error) {
+    console.warn("[BOC] getSettings fallback to defaults", error?.message);
     return { ...DEFAULT_SETTINGS };
   }
 }

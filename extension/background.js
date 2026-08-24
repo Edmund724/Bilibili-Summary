@@ -997,8 +997,14 @@ async function initializeSettingsStorage() {
   await chrome.storage.sync.set({ ...DEFAULT_SETTINGS, ...syncCurrent });
 }
 
-async function getMergedSettings() {
-  const syncSettings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+async function getMergedSettings(timeoutMs = 5000) {
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("storage timeout")), timeoutMs);
+  });
+  const syncSettings = await Promise.race([
+    chrome.storage.sync.get(DEFAULT_SETTINGS),
+    timeoutPromise
+  ]).catch(() => ({}));
 
   const merged = { ...DEFAULT_SETTINGS, ...syncSettings };
   merged.downloadFormat = normalizeDownloadFormat(merged.downloadFormat);

@@ -96,7 +96,8 @@ import {
   pickPageFromPages,
   pickCidFromPages,
   pickDurationFromPages,
-  pickPageIndexFromOid
+  pickPageIndexFromOid,
+  ids
 } from "./reader.js";
 
 import {
@@ -110,7 +111,6 @@ import {
   renderReadingInfoPanel,
   updateReaderFollowState,
   bindReaderStepperControl,
-  ids,
   stopReadingViewSync,
   stopReaderPlayerObserver,
   startReadingViewSync,
