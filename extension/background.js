@@ -1,4 +1,4 @@
-importScripts('defaults.js');
+importScripts("defaults.js");
 
 const DEFAULT_SYNC_SETTINGS = {
   tags: "clippings,bilibili",
@@ -36,6 +36,342 @@ const DEFAULT_SYNC_SETTINGS = {
 };
 
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
+
+// ===== 消息路由表（Candidate 8） =====
+
+function handleGetSettings(message, sender, sendResponse) {
+  getMergedSettings()
+    .then((settings) => sendResponse({ ok: true, settings }))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleSaveSettings(message, sender, sendResponse) {
+  saveSettings(message.settings || {})
+    .then(() => sendResponse({ ok: true }))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleOpenOptions(message, sender, sendResponse) {
+  chrome.tabs
+    .create({ url: chrome.runtime.getURL("options.html") })
+    .then(() => sendResponse({ ok: true }))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handlePlayerAiQuickAction(message, sender, sendResponse) {
+  const tabId = Number(message.tabId || sender?.tab?.id || 0) || 0;
+  if (!tabId) {
+    sendResponse({ ok: false, error: "找不到当前标签页。" });
+    return false;
+  }
+
+  const openPromise = openAiSidepanelForTab(tabId);
+  getMergedSettings()
+    .then(async (settings) => {
+      if (!settings.enablePlayerAiQuickAction) {
+        throw new Error("AI 按钮未开启");
+      }
+      await openPromise;
+      const request = buildPlayerAiQuickActionRequest(tabId, settings.playerAiQuickPrompt);
+      await chrome.storage.local.set({ [PLAYER_AI_QUICK_ACTION_STORAGE_KEY]: request });
+      sendResponse({ ok: true });
+    })
+    .catch((error) => sendResponse({ ok: false, error: error.message || "打开 AI 侧边栏失败" }));
+  return true;
+}
+
+function handleOpenReadingViewTab(message, sender, sendResponse) {
+  const url = String(message.url || "").trim();
+  const tabId = Number(message.tabId || 0) || 0;
+  if (!url) {
+    sendResponse({ ok: false, error: "缺少视频地址" });
+    return false;
+  }
+  if (!tabId) {
+    sendResponse({ ok: false, error: "缺少标签页信息" });
+    return false;
+  }
+
+  let readerUrl = "";
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== "www.bilibili.com") {
+      throw new Error("当前网页不是 B 站视频页");
+    }
+    parsed.searchParams.set("boc_reader", "1");
+    readerUrl = parsed.toString();
+  } catch (error) {
+    sendResponse({ ok: false, error: error.message || "阅读视图地址无效" });
+    return false;
+  }
+
+  ensureReaderContentReady(tabId)
+    .then(() => triggerReaderModeInTab(tabId, readerUrl))
+    .then((triggered) => {
+      if (!triggered) {
+        throw new Error("阅读视图触发失败，请刷新浏览器网页重试");
+      }
+      sendResponse({ ok: true });
+    })
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleFetchJson(message, sender, sendResponse) {
+  const url = typeof message.url === "string" ? message.url : "";
+  if (!url) {
+    sendResponse({ ok: false, error: "Missing subtitle URL" });
+    return false;
+  }
+
+  const isBiliRequest = /(?:api\.bilibili\.com|hdslb\.com)/.test(url);
+  const headers = new Headers();
+  if (isBiliRequest) {
+    headers.set("Accept", "application/json, text/plain, */*");
+    headers.set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+    headers.set("Cache-Control", "no-cache");
+    headers.set("Pragma", "no-cache");
+  }
+
+  const fetchOptions = {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store"
+  };
+  if (headers.size > 0) {
+    fetchOptions.headers = headers;
+  }
+  if (isBiliRequest) {
+    fetchOptions.referrer = "https://www.bilibili.com/";
+    fetchOptions.referrerPolicy = "strict-origin-when-cross-origin";
+  }
+
+  fetch(url, fetchOptions)
+    .then(async (response) => {
+      if (!response.ok) {
+        sendResponse({ ok: false, error: `HTTP ${response.status}` });
+        return;
+      }
+
+      const text = await response.text();
+      try {
+        const data = JSON.parse(text);
+        sendResponse({ ok: true, data });
+      } catch {
+        sendResponse({ ok: false, error: "Invalid JSON response" });
+      }
+    })
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleAiProvidersList(message, sender, sendResponse) {
+  loadAiProviders()
+    .then((items) => sendResponse({ ok: true, providers: items }))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleAiPresetsList(message, sender, sendResponse) {
+  sendResponse({ ok: true, presets: PRESETS.slice() });
+  return false;
+}
+
+function handleGetAiProviderKey(message, sender, sendResponse) {
+  const providerId = String(message.providerId || "").trim();
+  if (!providerId) {
+    sendResponse({ ok: false, error: "缺少 providerId" });
+    return false;
+  }
+  loadAiProviderKeys()
+    .then((keys) => {
+      const apiKey = String(keys[providerId] || "").trim();
+      sendResponse({ ok: true, apiKey });
+    })
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleAiProvidersSave(message, sender, sendResponse) {
+  saveAiProviders(message.providers || [])
+    .then((items) => sendResponse({ ok: true, providers: items }))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleAiProviderSetKey(message, sender, sendResponse) {
+  saveAiProviderKey(String(message.providerId || ""), String(message.apiKey || ""))
+    .then(() => sendResponse({ ok: true }))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleAiProvidersDelete(message, sender, sendResponse) {
+  deleteAiProvider(String(message.providerId || ""))
+    .then((items) => sendResponse({ ok: true, providers: items }))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleAiProvidersTest(message, sender, sendResponse) {
+  const baseUrl = String(message.baseUrl || "").trim();
+  const providerId = String(message.providerId || "").trim();
+  const model = String(message.model || "").trim();
+  if (!baseUrl) {
+    sendResponse({ ok: false, error: "请填写 baseUrl" });
+    return false;
+  }
+  Promise.resolve()
+    .then(async () => {
+      const directApiKey = String(message.apiKey || "").trim();
+      if (directApiKey) {
+        return directApiKey;
+      }
+      if (!providerId) {
+        return "";
+      }
+      const keys = await loadAiProviderKeys();
+      return String(keys[providerId] || "").trim();
+    })
+    .then((apiKey) => testAiConnection({ baseUrl, apiKey, model }))
+    .then((resp) => sendResponse(resp))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleAiProvidersModels(message, sender, sendResponse) {
+  try {
+    const baseUrl = String(message.baseUrl || "").trim();
+    const apiKey = String(message.apiKey || "").trim();
+    const providerId = String(message.providerId || "").trim();
+    if (!baseUrl) {
+      sendResponse({ ok: false, error: "请填写 baseUrl" });
+      return true;
+    }
+    const normalizedBaseUrl = baseUrl.replace(/\/+$/, "").replace(/\/v1$/i, "");
+    const headers = { Accept: "application/json" };
+    let timer = null;
+    let responded = false;
+
+    const respond = (payload) => {
+      try {
+        if (responded) {
+          console.warn("[ai-providers-models] duplicate respond ignored");
+          return;
+        }
+        responded = true;
+        if (timer) { clearTimeout(timer); timer = null; }
+        console.log("[ai-providers-models] responding", payload);
+        sendResponse(payload);
+      } catch (err) {
+        console.error("[ai-providers-models] sendResponse failed", err);
+      }
+    };
+
+    console.log("[ai-providers-models] fetching", normalizedBaseUrl, "providerId", providerId, "hasApiKey", Boolean(apiKey));
+
+    Promise.resolve()
+      .then(async () => {
+        if (apiKey) return apiKey;
+        if (!providerId) return "";
+        const keys = await loadAiProviderKeys();
+        return String(keys[providerId] || "").trim();
+      })
+      .then((resolvedKey) => {
+        if (resolvedKey) headers["Authorization"] = `Bearer ${resolvedKey}`;
+        const controller = new AbortController();
+        timer = setTimeout(() => controller.abort(), 15000);
+        console.log("[ai-providers-models] requesting", `${normalizedBaseUrl}/v1/models`);
+        return fetch(`${normalizedBaseUrl}/v1/models`, { headers, method: "GET", signal: controller.signal })
+          .then((resp) => {
+            console.log("[ai-providers-models] response status", resp.status, resp.statusText);
+            if (!resp.ok) {
+              return resp.text().then((text) => {
+                throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`);
+              });
+            }
+            return resp.json().then((data) => ({ ok: true, data })).catch((err) => {
+              throw new Error(`无法解析模型列表：${err?.message || String(err)}`);
+            });
+          })
+          .then(({ data }) => {
+            const models = [];
+            if (Array.isArray(data?.data)) {
+              for (const item of data.data) {
+                if (item?.id) models.push(String(item.id));
+              }
+            }
+            console.log("[ai-providers-models] parsed models", models.length);
+            return models;
+          });
+      })
+      .then((models) => respond({ ok: true, models }))
+      .catch((error) => {
+        console.error("[ai-providers-models] fetch error", error);
+        if (error?.name === "AbortError") {
+          respond({ ok: false, error: "请求超时，请检查 baseUrl 或稍后重试" });
+        } else {
+          respond({ ok: false, error: error?.message || String(error) });
+        }
+      });
+
+    // Safety net: ensure we always respond within the timeout window.
+    timer = setTimeout(() => {
+      console.warn("[ai-providers-models] safety net triggered");
+      respond({ ok: false, error: "请求超时，请检查 baseUrl 或稍后重试" });
+    }, 16000);
+  } catch (error) {
+    console.error("[ai-providers-models] handler error", error);
+    sendResponse({ ok: false, error: error?.message || String(error) });
+  }
+  return true;
+}
+
+function handleAiSidepanelGetState(message, sender, sendResponse) {
+  const tabId = Number(message.tabId || 0) || 0;
+  const forceRefresh = message.forceRefresh === true;
+  getAiSidepanelState(tabId, { forceRefresh })
+    .then((payload) => sendResponse({ ok: true, payload }))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleAiSidepanelResolveContext(message, sender, sendResponse) {
+  resolveAiSidepanelContext(message.contextRef || {})
+    .then((payload) => sendResponse({ ok: true, payload }))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleAiSidepanelResolvePageRef(message, sender, sendResponse) {
+  resolveAiSidepanelPageRef(message.contextRef || {})
+    .then((payload) => sendResponse({ ok: true, payload }))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+const messageHandlers = new Map([
+  ["get-settings", handleGetSettings],
+  ["save-settings", handleSaveSettings],
+  ["open-options", handleOpenOptions],
+  ["player-ai-quick-action", handlePlayerAiQuickAction],
+  ["open-reading-view-tab", handleOpenReadingViewTab],
+  ["fetch-json", handleFetchJson],
+  ["ai-providers-list", handleAiProvidersList],
+  ["ai-presets-list", handleAiPresetsList],
+  ["get-ai-provider-key", handleGetAiProviderKey],
+  ["ai-providers-save", handleAiProvidersSave],
+  ["ai-provider-set-key", handleAiProviderSetKey],
+  ["ai-providers-delete", handleAiProvidersDelete],
+  ["ai-providers-test", handleAiProvidersTest],
+  ["ai-providers-models", handleAiProvidersModels],
+  ["ai-sidepanel-get-state", handleAiSidepanelGetState],
+  ["ai-sidepanel-resolve-context", handleAiSidepanelResolveContext],
+  ["ai-sidepanel-resolve-page-ref", handleAiSidepanelResolvePageRef]
+]);
 
 chrome.runtime.onInstalled.addListener(async () => {
   await initializeSettingsStorage();
@@ -803,316 +1139,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  if (message.type === "get-settings") {
-    getMergedSettings()
-      .then((settings) => sendResponse({ ok: true, settings }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
+  const handler = messageHandlers.get(message.type);
+  if (!handler) {
+    return false;
   }
 
-  if (message.type === "save-settings") {
-    saveSettings(message.settings || {})
-      .then(() => sendResponse({ ok: true }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message.type === "open-options") {
-    chrome.tabs
-      .create({ url: chrome.runtime.getURL("options.html") })
-      .then(() => sendResponse({ ok: true }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message.type === "player-ai-quick-action") {
-    const tabId = Number(message.tabId || sender?.tab?.id || 0) || 0;
-    if (!tabId) {
-      sendResponse({ ok: false, error: "找不到当前标签页。" });
-      return false;
-    }
-
-    const openPromise = openAiSidepanelForTab(tabId);
-    getMergedSettings()
-      .then(async (settings) => {
-        if (!settings.enablePlayerAiQuickAction) {
-          throw new Error("AI 按钮未开启");
-        }
-        await openPromise;
-        const request = buildPlayerAiQuickActionRequest(tabId, settings.playerAiQuickPrompt);
-        await chrome.storage.local.set({ [PLAYER_AI_QUICK_ACTION_STORAGE_KEY]: request });
-        sendResponse({ ok: true });
-      })
-      .catch((error) => sendResponse({ ok: false, error: error.message || "打开 AI 侧边栏失败" }));
-    return true;
-  }
-
-  if (message.type === "open-reading-view-tab") {
-    const url = String(message.url || "").trim();
-    const tabId = Number(message.tabId || 0) || 0;
-    if (!url) {
-      sendResponse({ ok: false, error: "缺少视频地址" });
-      return false;
-    }
-    if (!tabId) {
-      sendResponse({ ok: false, error: "缺少标签页信息" });
-      return false;
-    }
-
-    let readerUrl = "";
-    try {
-      const parsed = new URL(url);
-      if (parsed.hostname !== "www.bilibili.com") {
-        throw new Error("当前网页不是 B 站视频页");
-      }
-      parsed.searchParams.set("boc_reader", "1");
-      readerUrl = parsed.toString();
-    } catch (error) {
-      sendResponse({ ok: false, error: error.message || "阅读视图地址无效" });
-      return false;
-    }
-
-    ensureReaderContentReady(tabId)
-      .then(() => triggerReaderModeInTab(tabId, readerUrl))
-      .then((triggered) => {
-        if (!triggered) {
-          throw new Error("阅读视图触发失败，请刷新浏览器网页重试");
-        }
-        sendResponse({ ok: true });
-      })
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message.type === "fetch-json") {
-    const url = typeof message.url === "string" ? message.url : "";
-    if (!url) {
-      sendResponse({ ok: false, error: "Missing subtitle URL" });
-      return false;
-    }
-
-    const isBiliRequest = /(?:api\.bilibili\.com|hdslb\.com)/.test(url);
-    const headers = new Headers();
-    if (isBiliRequest) {
-      headers.set("Accept", "application/json, text/plain, */*");
-      headers.set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
-      headers.set("Cache-Control", "no-cache");
-      headers.set("Pragma", "no-cache");
-    }
-
-    const fetchOptions = {
-      method: "GET",
-      credentials: "include",
-      cache: "no-store"
-    };
-    if (headers.size > 0) {
-      fetchOptions.headers = headers;
-    }
-    if (isBiliRequest) {
-      fetchOptions.referrer = "https://www.bilibili.com/";
-      fetchOptions.referrerPolicy = "strict-origin-when-cross-origin";
-    }
-
-    fetch(url, fetchOptions)
-      .then(async (response) => {
-        if (!response.ok) {
-          sendResponse({ ok: false, error: `HTTP ${response.status}` });
-          return;
-        }
-
-        const text = await response.text();
-        try {
-          const data = JSON.parse(text);
-          sendResponse({ ok: true, data });
-        } catch {
-          sendResponse({ ok: false, error: "Invalid JSON response" });
-        }
-      })
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message.type === "ai-providers-list") {
-    loadAiProviders()
-      .then((items) => sendResponse({ ok: true, providers: items }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message.type === "get-ai-provider-key") {
-    const providerId = String(message.providerId || "").trim();
-    if (!providerId) {
-      sendResponse({ ok: false, error: "缺少 providerId" });
-      return false;
-    }
-    loadAiProviderKeys()
-      .then((keys) => {
-        const apiKey = String(keys[providerId] || "").trim();
-        sendResponse({ ok: true, apiKey });
-      })
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message.type === "ai-providers-save") {
-    saveAiProviders(message.providers || [])
-      .then((items) => sendResponse({ ok: true, providers: items }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message.type === "ai-provider-set-key") {
-    saveAiProviderKey(String(message.providerId || ""), String(message.apiKey || ""))
-      .then(() => sendResponse({ ok: true }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message.type === "ai-providers-delete") {
-    deleteAiProvider(String(message.providerId || ""))
-      .then((items) => sendResponse({ ok: true, providers: items }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message.type === "ai-providers-test") {
-    const baseUrl = String(message.baseUrl || "").trim();
-    const providerId = String(message.providerId || "").trim();
-    const model = String(message.model || "").trim();
-    if (!baseUrl) {
-      sendResponse({ ok: false, error: "请填写 baseUrl" });
-      return false;
-    }
-    Promise.resolve()
-      .then(async () => {
-        const directApiKey = String(message.apiKey || "").trim();
-        if (directApiKey) {
-          return directApiKey;
-        }
-        if (!providerId) {
-          return "";
-        }
-        const keys = await loadAiProviderKeys();
-        return String(keys[providerId] || "").trim();
-      })
-      .then((apiKey) => testAiConnection({ baseUrl, apiKey, model }))
-      .then((resp) => sendResponse(resp))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message.type === "ai-providers-models") {
-    try {
-      const baseUrl = String(message.baseUrl || "").trim();
-      const apiKey = String(message.apiKey || "").trim();
-      const providerId = String(message.providerId || "").trim();
-      if (!baseUrl) {
-        sendResponse({ ok: false, error: "请填写 baseUrl" });
-        return true;
-      }
-      const normalizedBaseUrl = baseUrl.replace(/\/+$/, "").replace(/\/v1$/i, "");
-      const headers = { Accept: "application/json" };
-      let timer = null;
-      let responded = false;
-
-      const respond = (payload) => {
-        try {
-          if (responded) {
-            console.warn("[ai-providers-models] duplicate respond ignored");
-            return;
-          }
-          responded = true;
-          if (timer) { clearTimeout(timer); timer = null; }
-          console.log("[ai-providers-models] responding", payload);
-          sendResponse(payload);
-        } catch (err) {
-          console.error("[ai-providers-models] sendResponse failed", err);
-        }
-      };
-
-      console.log("[ai-providers-models] fetching", normalizedBaseUrl, "providerId", providerId, "hasApiKey", Boolean(apiKey));
-
-      Promise.resolve()
-        .then(async () => {
-          if (apiKey) return apiKey;
-          if (!providerId) return "";
-          const keys = await loadAiProviderKeys();
-          return String(keys[providerId] || "").trim();
-        })
-        .then((resolvedKey) => {
-          if (resolvedKey) headers["Authorization"] = `Bearer ${resolvedKey}`;
-          const controller = new AbortController();
-          timer = setTimeout(() => controller.abort(), 15000);
-          console.log("[ai-providers-models] requesting", `${normalizedBaseUrl}/v1/models`);
-          return fetch(`${normalizedBaseUrl}/v1/models`, { headers, method: "GET", signal: controller.signal })
-            .then((resp) => {
-              console.log("[ai-providers-models] response status", resp.status, resp.statusText);
-              if (!resp.ok) {
-                return resp.text().then((text) => {
-                  throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`);
-                });
-              }
-              return resp.json().then((data) => ({ ok: true, data })).catch((err) => {
-                throw new Error(`无法解析模型列表：${err?.message || String(err)}`);
-              });
-            })
-            .then(({ data }) => {
-              const models = [];
-              if (Array.isArray(data?.data)) {
-                for (const item of data.data) {
-                  if (item?.id) models.push(String(item.id));
-                }
-              }
-              console.log("[ai-providers-models] parsed models", models.length);
-              return models;
-            });
-        })
-        .then((models) => respond({ ok: true, models }))
-        .catch((error) => {
-          console.error("[ai-providers-models] fetch error", error);
-          if (error?.name === "AbortError") {
-            respond({ ok: false, error: "请求超时，请检查 baseUrl 或稍后重试" });
-          } else {
-            respond({ ok: false, error: error?.message || String(error) });
-          }
-        });
-
-      // Safety net: ensure we always respond within the timeout window.
-      timer = setTimeout(() => {
-        console.warn("[ai-providers-models] safety net triggered");
-        respond({ ok: false, error: "请求超时，请检查 baseUrl 或稍后重试" });
-      }, 16000);
-    } catch (error) {
-      console.error("[ai-providers-models] handler error", error);
-      sendResponse({ ok: false, error: error?.message || String(error) });
-    }
-    return true;
-  }
-
-  if (message.type === "ai-sidepanel-get-state") {
-    const tabId = Number(message.tabId || 0) || 0;
-    const forceRefresh = message.forceRefresh === true;
-    getAiSidepanelState(tabId, { forceRefresh })
-      .then((payload) => sendResponse({ ok: true, payload }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message.type === "ai-sidepanel-resolve-context") {
-    resolveAiSidepanelContext(message.contextRef || {})
-      .then((payload) => sendResponse({ ok: true, payload }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message.type === "ai-sidepanel-resolve-page-ref") {
-    resolveAiSidepanelPageRef(message.contextRef || {})
-      .then((payload) => sendResponse({ ok: true, payload }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  return false;
+  return handler(message, sender, sendResponse);
 });
 
 chrome.runtime.onConnect.addListener((port) => {

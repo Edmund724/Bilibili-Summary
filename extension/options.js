@@ -34,21 +34,35 @@ const FRONTMATTER_DATE_VALUE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const NOTE_SECTION_POSITIONS = new Set(["before_intro", "before_chapters", "before_subtitle"]);
 const MAX_NOTE_PLACEHOLDER_SECTIONS = 5;
 
-const AI_PRESETS = [
-  { id: "openai_compat", name: "OpenAI 兼容", baseUrl: "https://api.openai.com/v1", requiresKey: true },
-  { id: "deepseek",      name: "DeepSeek",    baseUrl: "https://api.deepseek.com/v1", requiresKey: true },
-  { id: "qwen",          name: "Qwen",        baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", requiresKey: true },
-  { id: "zhipu",         name: "GLM",         baseUrl: "https://open.bigmodel.cn/api/paas/v4", requiresKey: true },
-  { id: "moonshot",      name: "Kimi",        baseUrl: "https://api.kimi.com/coding/v1", requiresKey: true },
-  { id: "minimax",       name: "MiniMax",     baseUrl: "https://api.minimaxi.com/v1", requiresKey: true },
-  { id: "mimo",          name: "Mimo",        baseUrl: "https://api.mimo.ai/v1", requiresKey: true },
-  { id: "opencodego",    name: "Opencode Go", baseUrl: "https://api.doubao.com/v1", requiresKey: true },
-  { id: "openrouter",    name: "OpenRouter",  baseUrl: "https://openrouter.ai/api/v1", requiresKey: true },
-  { id: "stepfun",       name: "Stepfun",     baseUrl: "https://api.stepfun.com/step_plan/v1", requiresKey: true },
-  { id: "modelscope",    name: "ModelScope",  baseUrl: "https://api-inference.modelscope.cn/v1", requiresKey: true },
-  { id: "ollama",        name: "Ollama (本地)", baseUrl: "http://localhost:11434/v1", requiresKey: false },
-  { id: "custom",        name: "自定义",      baseUrl: "", requiresKey: true }
-];
+let aiPresets = [];
+
+async function loadAiPresets() {
+  try {
+    const resp = await sendRuntimeMessage({ type: "ai-presets-list" });
+    if (resp?.ok && Array.isArray(resp.presets)) {
+      aiPresets = resp.presets;
+      return;
+    }
+  } catch {
+    // fallback to built-in list when background is unreachable
+  }
+
+  aiPresets = [
+    { id: "openai_compat", name: "OpenAI 兼容", baseUrl: "https://api.openai.com/v1", requiresKey: true },
+    { id: "deepseek",      name: "DeepSeek",    baseUrl: "https://api.deepseek.com/v1", requiresKey: true },
+    { id: "qwen",          name: "Qwen",        baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", requiresKey: true },
+    { id: "zhipu",         name: "GLM",         baseUrl: "https://open.bigmodel.cn/api/paas/v4", requiresKey: true },
+    { id: "moonshot",      name: "Kimi",        baseUrl: "https://api.kimi.com/coding/v1", requiresKey: true },
+    { id: "minimax",       name: "MiniMax",     baseUrl: "https://api.minimaxi.com/v1", requiresKey: true },
+    { id: "mimo",          name: "Mimo",        baseUrl: "https://api.mimo.ai/v1", requiresKey: true },
+    { id: "opencodego",    name: "Opencode Go", baseUrl: "https://api.doubao.com/v1", requiresKey: true },
+    { id: "openrouter",    name: "OpenRouter",  baseUrl: "https://openrouter.ai/api/v1", requiresKey: true },
+    { id: "stepfun",       name: "Stepfun",     baseUrl: "https://api.stepfun.com/step_plan/v1", requiresKey: true },
+    { id: "modelscope",    name: "ModelScope",  baseUrl: "https://api-inference.modelscope.cn/v1", requiresKey: true },
+    { id: "ollama",        name: "Ollama (本地)", baseUrl: "http://localhost:11434/v1", requiresKey: false },
+    { id: "custom",        name: "自定义",      baseUrl: "", requiresKey: true }
+  ];
+}
 
 const elements = {
   tags: document.getElementById("tags"),
@@ -88,7 +102,8 @@ function closeAllModelDropdowns() {
 
 init();
 
-function init() {
+async function init() {
+  await loadAiPresets();
   loadSettings();
   elements.saveBtn.addEventListener("click", saveSettings);
   elements.addFixedPropertyBtn.addEventListener("click", () => addFixedPropertyRow());
@@ -844,7 +859,7 @@ function generateAiProviderId() {
 function addAiProviderRow(item = {}) {
   const id = String(item.id || generateAiProviderId());
   const presetId = String(item.presetId || "custom");
-  const preset = AI_PRESETS.find((p) => p.id === presetId) || AI_PRESETS[AI_PRESETS.length - 1];
+  const preset = aiPresets.find((p) => p.id === presetId) || aiPresets[aiPresets.length - 1];
   const baseUrl = String(item.baseUrl ?? preset.baseUrl ?? "");
   const model = String(item.model || "");
   const requiresKey = item.requiresKey !== false && preset.requiresKey !== false;
@@ -857,7 +872,7 @@ function addAiProviderRow(item = {}) {
   row.dataset.currentPresetId = presetId;
   row.innerHTML = `
     <select class="ai-provider-preset" title="平台">
-      ${AI_PRESETS.map((p) => `<option value="${escapeAttribute(p.id)}" ${p.id === presetId ? "selected" : ""}>${escapeAttribute(p.name)}</option>`).join("")}
+      ${aiPresets.map((p) => `<option value="${escapeAttribute(p.id)}" ${p.id === presetId ? "selected" : ""}>${escapeAttribute(p.name)}</option>`).join("")}
     </select>
     <input class="ai-provider-baseurl" type="text" placeholder="baseUrl（如 https://api.openai.com/v1）" value="${escapeAttribute(baseUrl)}" />
     <input class="ai-provider-apikey" type="password" placeholder="${hasSavedKey ? "已保存" : (requiresKey ? "API Key" : "API Key（可选）")}" autocomplete="off" />
@@ -884,8 +899,8 @@ function addAiProviderRow(item = {}) {
   `;
 
   row.querySelector(".ai-provider-preset").addEventListener("change", (e) => {
-    const previousPreset = AI_PRESETS.find((p) => p.id === row.dataset.currentPresetId) || null;
-    const next = AI_PRESETS.find((p) => p.id === e.target.value);
+    const previousPreset = aiPresets.find((p) => p.id === row.dataset.currentPresetId) || null;
+    const next = aiPresets.find((p) => p.id === e.target.value);
     if (!next) return;
     const baseUrlInput = row.querySelector(".ai-provider-baseurl");
     const currentBaseUrl = baseUrlInput.value.trim();
@@ -1080,7 +1095,7 @@ function showAiProviderStatus(node, text, isError = false) {
 function collectAiProviders() {
   return Array.from(elements.aiProvidersList.querySelectorAll(".ai-provider-row")).map((row) => {
     const presetSelect = row.querySelector(".ai-provider-preset");
-    const preset = AI_PRESETS.find((p) => p.id === presetSelect.value) || AI_PRESETS[AI_PRESETS.length - 1];
+    const preset = aiPresets.find((p) => p.id === presetSelect.value) || aiPresets[aiPresets.length - 1];
     const apiKey = row.querySelector(".ai-provider-apikey").value.trim();
     const baseUrl = row.querySelector(".ai-provider-baseurl").value.trim().replace(/\/+$/, "");
     return {
