@@ -4711,6 +4711,106 @@ function pickDurationFromPages(pages, pageIndex, fallbackDuration = 0) {
 const BOC_VERSION = "1.1.4";
 const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
 
+async function retryAsync(task, retries = 1, delayMs = 180) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      lastError = error;
+      const isNetworkError = isRetryableNetworkError(error);
+      const isRetryable = error?.retryable === true;
+      if (!isNetworkError && !isRetryable) {
+        throw error;
+      }
+      if (attempt >= retries) {
+        throw error;
+      }
+      const backoffDelay = Math.min(delayMs * Math.pow(2, attempt - 1), 5000);
+      logInfo(`[BOC] retrying after ${backoffDelay}ms, attempt ${attempt + 1}/${retries}`, {
+        error: getErrorMessage(error),
+        code: error.code
+      });
+      await sleep(backoffDelay);
+    }
+  }
+  throw lastError || new Error("Unknown retry error");
+}
+
+async function fetchVideoMeta(bvid) {
+  const url = `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`;
+  logInfo("[BOC] fetch video meta", { url, bvid });
+  const payload = await fetchJson(url);
+  if (payload.code !== 0) {
+    throw new Error(toReadableText(payload?.message, "无法获取视频信息"));
+  }
+
+  const data = payload.data || {};
+  const pubdate = Number(data.pubdate || 0);
+  const uploadDate = pubdate > 0 ? formatLocalDate(pubdate * 1000) : "";
+  const pages = Array.isArray(data.pages) ? data.pages : [];
+
+  return {
+    aid: data.aid ? String(data.aid) : "",
+    title: String(data.title || ""),
+    author: String(data.owner?.name || ""),
+    description: String(data.desc || ""),
+    uploadDate,
+    defaultCid: data.cid ? String(data.cid) : "",
+    defaultDuration: Number(data.duration || 0) || 0,
+    pages: pages.map((item) => ({
+      cid: String(item.cid || ""),
+      page: Number(item.page || 0) || 0,
+      part: String(item.part || "").trim(),
+      duration: Number(item.duration || 0) || 0
+    }))
+  };
+}
+
+async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh) {
+  let lastError = null;
+  for (const item of candidates || []) {
+    try {
+      logInfo("[BOC] try subtitle track", {
+        id: item.id,
+        lan: item.lan,
+        lanDoc: item.lanDoc,
+        url: item.subtitleUrl
+      });
+      await loadSubtitle(
+        item.subtitleUrl,
+        item.lanDoc || item.lan || "unknown",
+        runId,
+        item.id,
+        forceRefresh
+      );
+      return item;
+    } catch (error) {
+      lastError = error;
+      const reasonCode = toReadableText(error?.code, "");
+      const reasonMessage = getErrorMessage(error, "unknown");
+      const meta = {
+        id: item.id,
+        lan: item.lan,
+        lanDoc: item.lanDoc,
+        reason: reasonCode || reasonMessage
+      };
+      if (reasonCode === "SUBTITLE_DURATION_MISMATCH") {
+        logInfo(`[BOC] subtitle track skipped ${JSON.stringify(meta)}`);
+      } else {
+        logWarn(`[BOC] subtitle track rejected ${JSON.stringify(meta)}`);
+      }
+      ensureRunActive(runId);
+      continue;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+  throw new Error("这个视频暂时没有可用字幕。");
+}
+
 function buildUiHtml() {
   return `
     <aside id="${ids.panel}" aria-hidden="true">

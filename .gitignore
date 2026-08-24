@@ -5,3 +5,7 @@ AGENTS.md
 PRIVACY_POLICY_zh-CN.md
 WEBSTORE_LISTING_zh-CN.md
 extension/content-classic.js
+.scratch/
+formatters-processed.js
+architecture-review-20250824-211600.html
+docs/agents/domain.md
