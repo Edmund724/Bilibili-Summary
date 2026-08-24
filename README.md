@@ -6,6 +6,16 @@
 
 > 注意：仅支持获取"有字幕轨"的 B 站视频字幕（播放器里有「字幕」选项，通常表示作者上传了外挂字幕或平台提供了 AI 字幕）；没有字幕轨的视频无法获取字幕。
 
+## 变更日志
+
+### 2025-08-24
+
+- **content script 架构重构（T10）**：`extension/content.js` 从 458 行缩减到 96 行，变为纯粹的初始化编排器，仅保留 `init()` 调用链、`isSupportedUrl()` 判断以及对各模块的聚合 import。
+- 新增 `extension/messages.js`，迁出 `chrome.runtime.onMessage` 监听器；并修复其中 `fetchHotComments`、`getCurrentAid`、`buildMarkdown` 缺失 import 导致的运行时 `ReferenceError`。
+- `extension/panel.js` 迁入并导出 `ensureUiReady()`；`extension/reader.js` 迁入 `clearReaderModePageState()`、`shouldForceNormalPageState()`、`enforceNormalPageStateIfNeeded()`、`bindNormalPageStateGuard()`。
+- 打破 `router.js -> content.js -> router.js` 的循环依赖：`router.js` 改为直接从 `panel.js` 和 `reader.js` 导入所需函数。
+- 视频页、稍后再看页、阅读视图、播放器 AI 按钮四条路径保持原有调用链，仅模块边界被重新组织。
+
 ## 功能
 
 ### AI 侧边栏
