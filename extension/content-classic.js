@@ -275,17 +275,12 @@ const DEFAULT_SETTINGS = {
  * State namespace objects.
  *
  * Access patterns:
- * - Legacy flat: state.readingViewOpen, state.bvid, state.title, ...
- * - Structured:   state.reader.readingViewOpen, state.clip.bvid, state.ui.statusText, ...
+ * - Structured: state.reader.X, state.clip.X, state.playerAi.X, state.ui.X
  *
- * During this expand phase both patterns work. The structured namespaces
- * (state.reader, state.clip, state.playerAi, state.ui) expose the same
- * properties as the current sub-state objects. A dev-mode warning is emitted
- * when callers write to the flat namespace so the next migration ticket can
- * identify and update those sites.
+ * The structured namespaces expose the sub-state objects directly.
+ * Flat sub-state property access (e.g. state.readingViewOpen) is no longer
+ * supported; use the structured namespace (state.reader.readingViewOpen) instead.
  */
-
-const isDev = typeof process === "undefined" || process.env?.NODE_ENV !== "production";
 
 const readerState = {
   readingViewOpen: false,
@@ -392,71 +387,7 @@ const stateTarget = {
   ui: uiState
 };
 
-const state = new Proxy(stateTarget, {
-  get(target, prop) {
-    if (prop in readerState) return readerState[prop];
-    if (prop in clipState) return clipState[prop];
-    if (prop in playerAiState) return playerAiState[prop];
-    if (prop in uiState) return uiState[prop];
-    return target[prop];
-  },
-  set(target, prop, value) {
-    if (
-      isDev &&
-      (prop in readerState ||
-        prop in clipState ||
-        prop in playerAiState ||
-        prop in uiState)
-    ) {
-      const ns = prop in readerState
-        ? "reader"
-        : prop in clipState
-          ? "clip"
-          : prop in playerAiState
-            ? "playerAi"
-            : "ui";
-      console.warn(
-        `[state] flat write: state.${String(prop)} → prefer state.${ns}.${String(prop)}`
-      );
-    }
-
-    if (prop in readerState) {
-      readerState[prop] = value;
-      return true;
-    }
-    if (prop in clipState) {
-      clipState[prop] = value;
-      return true;
-    }
-    if (prop in playerAiState) {
-      playerAiState[prop] = value;
-      return true;
-    }
-    if (prop in uiState) {
-      uiState[prop] = value;
-      return true;
-    }
-    target[prop] = value;
-    return true;
-  },
-  has(target, prop) {
-    if (prop in readerState) return true;
-    if (prop in clipState) return true;
-    if (prop in playerAiState) return true;
-    if (prop in uiState) return true;
-    return prop in target;
-  },
-  ownKeys(target) {
-    const keys = new Set([
-      ...Object.keys(readerState),
-      ...Object.keys(clipState),
-      ...Object.keys(playerAiState),
-      ...Object.keys(uiState),
-      ...Object.keys(target)
-    ]);
-    return Array.from(keys);
-  }
-});
+const state = stateTarget;
 
 { state, readerState, clipState, playerAiState, uiState };
 
