@@ -367,6 +367,28 @@ export function bindUiEvents() {
     }
   });
 }
+export function ensureUiReady({ forceRecreate = false } = {}) {
+  const existingRoot = document.getElementById(ids.root);
+  if (existingRoot && forceRecreate) {
+    existingRoot.remove();
+    state.uiEventsBound = false;
+  }
+
+  let root = document.getElementById(ids.root);
+  if (!root) {
+    root = document.createElement("div");
+    root.id = ids.root;
+    root.innerHTML = buildUiHtml();
+    document.body.appendChild(root);
+    state.uiEventsBound = false;
+  }
+
+  if (!state.uiEventsBound) {
+    bindUiEvents();
+    state.uiEventsBound = true;
+  }
+}
+
 export function resetClipState() {
   state.bvid = "";
   state.aid = "";

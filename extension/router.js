@@ -1,9 +1,7 @@
 import { state } from "./state.js";
 import { DEFAULT_SETTINGS } from "./shared-defaults.js";
-import {
-  enforceNormalPageStateIfNeeded,
-  ensureUiReady
-} from "./content.js";
+import { ensureUiReady } from "./panel.js";
+import { enforceNormalPageStateIfNeeded } from "./reader.js";
 import {
   resetClipState,
   refreshClip,

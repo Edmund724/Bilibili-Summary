@@ -196,6 +196,63 @@ export function installReaderDebugHelpers() {
   };
 }
 
+export function clearReaderModePageState() {
+  document.documentElement.removeAttribute("data-boc-reader-mode");
+  document.documentElement.removeAttribute("data-boc-reader-line-height");
+  document.documentElement.removeAttribute("data-boc-reader-theme");
+  document.documentElement.removeAttribute("data-boc-reader-font-scale");
+  document.documentElement.removeAttribute("data-boc-reader-letter-spacing");
+  document.documentElement.removeAttribute("data-boc-reader-content-width");
+  document.documentElement.removeAttribute("data-boc-reader-chapter-visibility");
+  document.documentElement.removeAttribute("data-boc-reader-has-chapters");
+  document.documentElement.removeAttribute("data-boc-reader-transcript-visible");
+  document.body.removeAttribute("data-boc-reader-mode");
+  document.body.removeAttribute("data-boc-reader-line-height");
+  document.body.removeAttribute("data-boc-reading-active");
+}
+
+export function shouldForceNormalPageState(url = location.href) {
+  return !isReaderMode(url) && !state.readingViewOpen;
+}
+
+export function enforceNormalPageStateIfNeeded(url = location.href) {
+  if (!shouldForceNormalPageState(url)) {
+    return;
+  }
+  clearReaderModePageState();
+}
+
+export function bindNormalPageStateGuard() {
+  if (state.normalPageStateGuardBound) {
+    return;
+  }
+  state.normalPageStateGuardBound = true;
+
+  const observer = new MutationObserver(() => {
+    enforceNormalPageStateIfNeeded();
+  });
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: [
+      "data-boc-reader-mode",
+      "data-boc-reader-line-height",
+      "data-boc-reader-theme",
+      "data-boc-reader-font-scale",
+      "data-boc-reader-letter-spacing",
+      "data-boc-reader-content-width",
+      "data-boc-reader-chapter-visibility",
+      "data-boc-reader-has-chapters",
+      "data-boc-reader-transcript-visible"
+    ]
+  });
+  observer.observe(document.body, {
+    attributes: true,
+    attributeFilter: ["data-boc-reader-mode", "data-boc-reader-line-height", "data-boc-reading-active"]
+  });
+  state.normalPageStateObserver = observer;
+  enforceNormalPageStateIfNeeded();
+}
+
 export const ids = {
   root: "boc-root",
   panel: "boc-panel",
