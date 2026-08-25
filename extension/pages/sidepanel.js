@@ -13,6 +13,7 @@ import {
 } from "../ai/conversation.js";
 import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
 import { renderMarkdown, renderInline, stripThinkBlocks, sanitizeMarkdownHeadingText, isTimestampOnlyInlineCode } from "../ui/markdown.js";
+import { linkifyAssistantTimestamps, unwrapTimestampInlineCode } from "../ui/timestamp-nav.js";
 import { createConversationStore } from "./sidepanel-conversation-store.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
@@ -1214,7 +1215,7 @@ function renderAssistantMessage(node, raw, { userPrompt = "" } = {}) {
   const content = document.createElement("div");
   content.className = "sp-msg-assistant-body";
   content.innerHTML = renderMarkdown(cleanedRaw);
-  linkifyAssistantTimestamps(content);
+  linkifyAssistantTimestamps(content, getTimestampNavDeps());
   node.appendChild(content);
 
   const actions = document.createElement("div");
@@ -1357,120 +1358,14 @@ export function normalizeMarkdownForSectionPaste(raw, baseLevel = 2) {
   return normalized.join("\n");
 }
 
-const TIMESTAMP_PATTERN = /\b\d{1,3}:\d{2}(?::\d{2})?\b/g;
-
-export function unwrapTimestampInlineCode(text) {
-  return String(text || "").replace(/`([^`\n]+)`/g, (_, content) =>
-    isTimestampOnlyInlineCode(content) ? content : `\`${content}\``
-  );
-}
-
-function linkifyAssistantTimestamps(root) {
-  if (!root) {
-    return;
-  }
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const textNodes = [];
-  while (walker.nextNode()) {
-    const current = walker.currentNode;
-    if (!(current instanceof Text)) {
-      continue;
-    }
-    const parent = current.parentElement;
-    if (!parent || parent.closest("a, code, pre, button")) {
-      continue;
-    }
-    TIMESTAMP_PATTERN.lastIndex = 0;
-    if (!TIMESTAMP_PATTERN.test(current.textContent || "")) {
-      continue;
-    }
-    textNodes.push(current);
-  }
-
-  textNodes.forEach((node) => {
-    const text = node.textContent || "";
-    const fragment = document.createDocumentFragment();
-    let lastIndex = 0;
-    let hasMatch = false;
-    TIMESTAMP_PATTERN.lastIndex = 0;
-    let match;
-    while ((match = TIMESTAMP_PATTERN.exec(text))) {
-      hasMatch = true;
-      if (match.index > lastIndex) {
-        fragment.append(document.createTextNode(text.slice(lastIndex, match.index)));
-      }
-      const timestamp = match[0];
-      const seconds = parseTimestampToSeconds(timestamp);
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "sp-timestamp-link";
-      button.textContent = timestamp;
-      button.setAttribute("title", `跳转到 ${timestamp}`);
-      button.addEventListener("click", () => {
-        void jumpToAssistantTimestamp(seconds, timestamp);
-      });
-      fragment.append(button);
-      lastIndex = match.index + timestamp.length;
-    }
-    if (!hasMatch) {
-      return;
-    }
-    if (lastIndex < text.length) {
-      fragment.append(document.createTextNode(text.slice(lastIndex)));
-    }
-    node.replaceWith(fragment);
-  });
-}
-
-export function parseTimestampToSeconds(value) {
-  const parts = String(value || "")
-    .trim()
-    .split(":")
-    .map((item) => Number(item));
-  if (!parts.length || parts.some((item) => !Number.isFinite(item) || item < 0)) {
-    return 0;
-  }
-  if (parts.length === 3) {
-    return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  }
-  if (parts.length === 2) {
-    return parts[0] * 60 + parts[1];
-  }
-  return 0;
-}
-
-async function jumpToAssistantTimestamp(seconds, label = "") {
-  const safeSeconds = Math.max(0, Number(seconds || 0) || 0);
-  const targetUrl = String(contextData?.url || currentConversationMeta?.contextUrl || "").trim();
-  if (!targetUrl) {
-    showConversationContextNotice("当前没有可跳转的视频上下文。", 2200);
-    return;
-  }
-
-  const tab = await getActiveTab().catch(() => null);
-  if (!tab?.id) {
-    showConversationContextNotice("找不到当前标签页。", 2200);
-    return;
-  }
-
-  showConversationContextNotice(`正在跳转到 ${label || formatCompactTimestamp(safeSeconds, safeSeconds >= 3600)}...`, 1800);
-
-  try {
-    const sameVideo = doesTabMatchContextUrl(tab.url || "", targetUrl);
-    if (!sameVideo) {
-      await chrome.tabs.update(tab.id, { url: targetUrl });
-      await waitForTabComplete(tab.id);
-    }
-    const response = await sendMessageToActiveTab(tab.id, {
-      type: "sidepanel-seek-video-time",
-      seconds: safeSeconds
-    });
-    if (!response?.ok) {
-      throw new Error(response?.error || "视频时间跳转失败");
-    }
-  } catch (error) {
-    showConversationContextNotice(`时间跳转失败：${error?.message || error}`, 2600);
-  }
+function getTimestampNavDeps() {
+  return {
+    contextUrl: String(contextData?.url || currentConversationMeta?.contextUrl || "").trim(),
+    notice: showConversationContextNotice,
+    getActiveTab,
+    matchContextUrl: doesTabMatchContextUrl,
+    sendMessageToActiveTab
+  };
 }
 
 async function waitForTabComplete(tabId, timeoutMs = 15000) {
