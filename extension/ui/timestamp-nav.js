@@ -6,6 +6,11 @@
 // object `{ contextUrl, notice, getActiveTab, matchContextUrl, sendMessageToActiveTab }`
 // — no direct reads of sidepanel globals, no chrome/window imports here.
 //
+// NOTE (ticket 08): the seek flow reuses the sidepanel's own retrying
+// `sendMessageToActiveTab` via the injected deps field (it is NOT reimplemented
+// here). The tab-polling helpers `waitForTabComplete` / `delay` are sourced
+// from the shared transport helpers (../shared/tab-utils.js).
+//
 // Module-local constant:
 //   - TIMESTAMP_PATTERN: moved verbatim from sidepanel.js. NOTE: markdown.js
 //     keeps a deliberate PARALLEL-LOCAL copy of the same regex source (used only
@@ -16,10 +21,12 @@
 //   - linkifyAssistantTimestamps(root, deps)    DOM walker; swaps timestamp text nodes for seek buttons
 //   - jumpToAssistantTimestamp(seconds, label, deps)  async seek; deps injected at call time
 //
-// Internal seek helper waitForTabComplete and the notice label formatting live
-// here (jumpToAssistantTimestamp owns the whole seek flow). isTimestampOnlyInlineCode
-// is imported from ./markdown.js (its home after ticket 03).
+// Internal seek flow lives here (jumpToAssistantTimestamp owns the whole seek
+// flow). isTimestampOnlyInlineCode comes from ./markdown.js (its home after
+// ticket 03). sendMessageToActiveTab is NOT reimplemented here — the
+// retry-wrapped send is injected as a dep (sidepanel provides it).
 import { formatCompactTimestamp } from "../shared/string-utils.js";
+import { waitForTabComplete } from "../shared/tab-utils.js";
 import { isTimestampOnlyInlineCode } from "./markdown.js";
 
 const TIMESTAMP_PATTERN = /\b\d{1,3}:\d{2}(?::\d{2})?\b/g;
@@ -126,7 +133,7 @@ export async function jumpToAssistantTimestamp(seconds, label = "", deps = {}) {
       await chrome.tabs.update(tab.id, { url: targetUrl });
       await waitForTabComplete(tab.id);
     }
-    const response = await deps.sendMessageToActiveTab?.(tab.id, {
+    const response = await deps.sendMessageToActiveTab(tab.id, {
       type: "sidepanel-seek-video-time",
       seconds: safeSeconds
     });
@@ -136,20 +143,4 @@ export async function jumpToAssistantTimestamp(seconds, label = "", deps = {}) {
   } catch (error) {
     deps.notice?.(`时间跳转失败：${error?.message || error}`, 2600);
   }
-}
-
-async function waitForTabComplete(tabId, timeoutMs = 15000) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const tab = await chrome.tabs.get(tabId).catch(() => null);
-    if (tab?.status === "complete") {
-      return true;
-    }
-    await delay(250);
-  }
-  throw new Error("视频页面加载超时");
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

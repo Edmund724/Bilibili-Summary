@@ -1,7 +1,27 @@
+// sidepanel.js — UI 绑定 + 编排薄层（sidepanel-split ticket 08 收尾产物）。
+//
+// 02-07 已把各域实现抽走：helper 消重到 shared/notes/bilibili（02）、markdown
+// 渲染到 ../ui/markdown.js（03）、时间戳跳转到 ../ui/timestamp-nav.js（04）、
+// 对话持久化到 ./sidepanel-conversation-store.js（05）、笔记粘贴归一化到
+// ../notes/paste.js（06）、chat 流状态机到 ./sidepanel-chat-runtime.js（07）。
+//
+// 本文件只剩四类东西：
+//   1. init / bindEvents（启动编排、事件绑定）
+//   2. 上下文 chip、各列表（历史/建议/预设）与消息区渲染
+//   3. 滚动与布局更新、popover toggle、autosizeInput、modelSelect 宽度、通知显示
+//   4. 对 02-07 模块的编排调用（loadContextState、player AI 快捷动作、上下文
+//      同步调度、新对话/刷新等页面级流程）
+// 页面级 transport 辅助（delay / waitForTabComplete / sendMessageToActiveTab /
+// truncate）由 ../shared/tab-utils.js 提供（08 新增共享模块，同时供
+// ui/timestamp-nav.js 的 seek 流程复用）；sendRuntimeMessage 由 ../core/runtime.js
+// 提供（core 域）。
+
 import {
   DEFAULT_INITIAL_QUICK_PROMPTS,
   DEFAULT_PRESET_PROMPTS,
-  PLAYER_AI_QUICK_ACTION_STORAGE_KEY
+  PLAYER_AI_QUICK_ACTION_STORAGE_KEY,
+  normalizeAiInitialQuickPrompts,
+  normalizeAiPresetPrompts
 } from "../core/shared-defaults.js";
 
 import {
@@ -11,8 +31,10 @@ import {
   formatConversationTimestamp,
   buildConversationTitleDisplay
 } from "../ai/conversation.js";
-import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
-import { renderMarkdown, renderInline, stripThinkBlocks, sanitizeMarkdownHeadingText, isTimestampOnlyInlineCode } from "../ui/markdown.js";
+import { escapeHtml } from "../shared/string-utils.js";
+import { sendMessageToActiveTab, truncate, waitForTabComplete } from "../shared/tab-utils.js";
+import { sendRuntimeMessage } from "../core/runtime.js";
+import { renderMarkdown, stripThinkBlocks } from "../ui/markdown.js";
 import { linkifyAssistantTimestamps } from "../ui/timestamp-nav.js";
 import { normalizeMarkdownForSectionPaste } from "../notes/paste.js";
 import { createChatRuntime } from "./sidepanel-chat-runtime.js";
@@ -264,6 +286,9 @@ function setStreamingUiState(isStreaming, { stopping = false } = {}) {
   }
 }
 
+// ============================================================
+// AI 平台 / 预设（providers + aiPrefs 加载，settings 获取走 core 域）
+// ============================================================
 async function loadProvidersAndPrefs({ preferredProviderId = "" } = {}) {
   const [providersResp, settingsResp] = await Promise.all([
     sendRuntimeMessage({ type: "ai-providers-list" }),
@@ -274,10 +299,8 @@ async function loadProvidersAndPrefs({ preferredProviderId = "" } = {}) {
     : [];
   aiPrefs = {
     aiSystemPrompt: String(settingsResp?.settings?.aiSystemPrompt || "").trim(),
-    aiInitialQuickPrompts: normalizeInitialQuickPrompts(settingsResp?.settings?.aiInitialQuickPrompts),
-    aiPresetPrompts: Array.isArray(settingsResp?.settings?.aiPresetPrompts)
-      ? settingsResp.settings.aiPresetPrompts.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 12)
-      : [],
+    aiInitialQuickPrompts: normalizeAiInitialQuickPrompts(settingsResp?.settings?.aiInitialQuickPrompts),
+    aiPresetPrompts: normalizeAiPresetPrompts(settingsResp?.settings?.aiPresetPrompts),
     defaultModel: String(settingsResp?.settings?.defaultModel || "").trim()
   };
   if (!aiPrefs.aiPresetPrompts.length) {
@@ -386,6 +409,9 @@ async function runPlayerAiQuickActionPrompt(prompt) {
   await chatRuntime.sendMessage();
 }
 
+// ============================================================
+// modelSelect 宽度（canvas 测量 + header 布局计算，纯 UI 杂项）
+// ============================================================
 function updateModelSelectWidth() {
   if (!els.modelSelect) {
     return;
@@ -437,6 +463,9 @@ function getModelSelectMaxWidth() {
   return Math.max(92, Math.floor(contentWidth - siblingWidth));
 }
 
+// ============================================================
+// 上下文状态加载（侧面板编排核心：读标签页状态 → 应用上下文 → 恢复对话）
+// ============================================================
 async function loadContextState({ forceRefresh = false, silent = false } = {}) {
   const hasPinnedConversation = currentConversationMeta?.pinnedContext === true;
   const tab = await getActiveTab();
@@ -620,7 +649,7 @@ function renderSuggestions() {
     suggestionsNode.innerHTML = "";
     return;
   }
-  const prompts = normalizeInitialQuickPrompts(aiPrefs.aiInitialQuickPrompts).filter(Boolean);
+  const prompts = normalizeAiInitialQuickPrompts(aiPrefs.aiInitialQuickPrompts).filter(Boolean);
   suggestionsNode.innerHTML = prompts
     .map((prompt) => `<button type="button" class="sp-chip">${escapeHtml(prompt)}</button>`)
     .join("");
@@ -631,13 +660,6 @@ function renderSuggestions() {
       chatRuntime.sendMessage();
     });
   });
-}
-
-function normalizeInitialQuickPrompts(value) {
-  if (!Array.isArray(value)) {
-    return DEFAULT_INITIAL_QUICK_PROMPTS.slice();
-  }
-  return value.map((item) => String(item || "").trim()).slice(0, 4);
 }
 
 function renderPresetPrompts() {
@@ -916,6 +938,9 @@ async function startNewConversation() {
   renderInitialState();
 }
 
+// ============================================================
+// 消息区渲染（历史对话回放 → chat-runtime 渲染）
+// ============================================================
 function renderConversationMessages() {
   updateSidepanelLayoutState();
   els.messages.innerHTML = "";
@@ -941,6 +966,7 @@ function renderConversationMessages() {
   scrollToBottom(true);
 }
 
+// 历史回放时找该助手消息的前一条用户消息（注入 renderAssistantMessage 的 userPrompt）
 function findPreviousUserPrompt(index) {
   for (let i = Number(index) - 1; i >= 0; i -= 1) {
     const item = chatHistory[i];
@@ -951,6 +977,7 @@ function findPreviousUserPrompt(index) {
   return "";
 }
 
+// 发送前确保当前上下文就绪（pinned 对话补水 / 普通对话读当前页）
 async function ensureCurrentContextForSend() {
   if (currentConversationMeta?.pinnedContext) {
     await loadContextState({ forceRefresh: false, silent: true }).catch(() => null);
@@ -964,78 +991,7 @@ async function ensureCurrentContextForSend() {
   return true;
 }
 
-function buildConversationTurns(messages) {
-  const turns = [];
-  let pendingPrompt = "";
-  (Array.isArray(messages) ? messages : []).forEach((message) => {
-    if (!message || typeof message.content !== "string") {
-      return;
-    }
-    if (message.role === "user") {
-      pendingPrompt = message.content.trim();
-      return;
-    }
-    if (message.role === "assistant" && pendingPrompt) {
-      const answer = normalizeMarkdownForSectionPaste(stripThinkBlocks(message.content)).trim();
-      if (answer) {
-        turns.push({
-          prompt: pendingPrompt,
-          answer
-        });
-      }
-      pendingPrompt = "";
-    }
-  });
-  return turns;
-}
-
-function confirmOverwriteNote(filepath) {
-  return new Promise((resolve) => {
-    const existing = document.querySelector(".sp-confirm-overlay");
-    if (existing) {
-      existing.remove();
-    }
-
-    const overlay = document.createElement("div");
-    overlay.className = "sp-confirm-overlay";
-    overlay.innerHTML = `
-      <div class="sp-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="spConfirmTitle">
-        <div id="spConfirmTitle" class="sp-confirm-title">该笔记已存在</div>
-        <div class="sp-confirm-body">继续会覆盖原内容：</div>
-        <div class="sp-confirm-path"></div>
-        <div class="sp-confirm-actions">
-          <button type="button" class="sp-confirm-cancel">取消</button>
-          <button type="button" class="sp-confirm-primary">覆盖</button>
-        </div>
-      </div>
-    `;
-    overlay.querySelector(".sp-confirm-path").textContent = String(filepath || "");
-
-    const cleanup = (value) => {
-      overlay.remove();
-      document.removeEventListener("keydown", onKeydown, true);
-      resolve(value);
-    };
-    const onKeydown = (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        cleanup(false);
-      }
-    };
-
-    overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) {
-        cleanup(false);
-      }
-    });
-    overlay.querySelector(".sp-confirm-cancel")?.addEventListener("click", () => cleanup(false));
-    overlay.querySelector(".sp-confirm-primary")?.addEventListener("click", () => cleanup(true));
-    document.addEventListener("keydown", onKeydown, true);
-    document.body.appendChild(overlay);
-    overlay.querySelector(".sp-confirm-primary")?.focus();
-  });
-}
-
+// 时间戳跳转依赖包（注入 timestamp-nav，seek 复用 shared 的 sendMessageToActiveTab）
 function getTimestampNavDeps() {
   return {
     contextUrl: String(contextData?.url || currentConversationMeta?.contextUrl || "").trim(),
@@ -1046,43 +1002,7 @@ function getTimestampNavDeps() {
   };
 }
 
-async function waitForTabComplete(tabId, timeoutMs = 15000) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const tab = await chrome.tabs.get(tabId).catch(() => null);
-    if (tab?.status === "complete") {
-      return true;
-    }
-    await delay(250);
-  }
-  throw new Error("视频页面加载超时");
-}
-
-async function sendMessageToActiveTab(tabId, message, retries = 12) {
-  let lastError = null;
-  for (let attempt = 0; attempt < retries; attempt += 1) {
-    try {
-      return await new Promise((resolve, reject) => {
-        chrome.tabs.sendMessage(tabId, message, (resp) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-          resolve(resp);
-        });
-      });
-    } catch (error) {
-      lastError = error;
-      await delay(220);
-    }
-  }
-  throw lastError || new Error("无法连接视频页面");
-}
-
-function delay(ms) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
+// 重启对话：清流状态 + 清会话状态 + 重置消息区（编排入口，被新对话/上下文切换复用）
 function restartChat({ keepContext = false } = {}) {
   chatRuntime.resetStreamState();
   chatHistory = [];
@@ -1102,6 +1022,9 @@ function removeCenteredState() {
   els.messages.querySelectorAll(".sp-center-error").forEach((node) => node.remove());
 }
 
+// ============================================================
+// 消息区提示 / 滚动（通知显示、自动滚动判定，纯 UI 杂项）
+// ============================================================
 function removeSuggestions() {
   suggestionsNode?.remove();
   suggestionsNode = null;
@@ -1153,33 +1076,8 @@ function scrollToBottom(force = false) {
   els.messages.scrollTop = els.messages.scrollHeight;
 }
 
+// 获取当前活动标签页（transport 辅助，注入 store/timestamp-nav）
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab || null;
-}
-
-function sendRuntimeMessage(message, { timeoutMs = 15000 } = {}) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(new Error("消息响应超时，请检查扩展是否正常运行"));
-    }, timeoutMs);
-    chrome.runtime.sendMessage(message, (resp) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(resp);
-    });
-  });
-}
-
-function truncate(value, max) {
-  const s = String(value || "");
-  return s.length > max ? s.slice(0, max) + "..." : s;
 }
