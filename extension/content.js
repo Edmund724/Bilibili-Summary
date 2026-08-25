@@ -16,16 +16,18 @@ import {
 
 import { ensureUiReady } from "./panel.js";
 import {
+  clearReaderModePageState,
+  bindNormalPageStateGuard
+} from "./reader-page-frame.js";
+import {
   logInfo,
   installReaderDebugHelpers,
   bindSettingsWatcher,
   hydrateReaderStateFromSettings,
   applyReadingViewPresentation,
   enterReaderMode,
-  renderReadingStatus,
-  clearReaderModePageState,
-  bindNormalPageStateGuard
-} from "./reader.js";
+  renderReadingStatus
+} from "./reader-shell.js";
 
 import { bindRuntimeEvents } from "./messages.js";
 

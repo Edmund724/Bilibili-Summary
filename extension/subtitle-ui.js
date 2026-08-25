@@ -4,7 +4,7 @@ import { getErrorMessage, isStaleRunError, cleanVideoUrl, getSettings, byId } fr
 import { DEFAULT_SETTINGS, normalizeDownloadFormat } from "./shared-defaults.js";
 import { state } from "./state.js";
 import { setMessage } from "./message.js";
-import { ids } from "./reader.js";
+import { ids } from "./reader-shell.js";
 import { refreshDerivedContent } from "./note-build.js";
 import { rebuildDerivedContent } from "./subtitle.js";
 import { setBusyState, setStatus } from "./ui-renderer.js";

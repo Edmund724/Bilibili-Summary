@@ -24,35 +24,39 @@ import {
   pickPreferredSubtitle
 } from "./formatters.js";
 import {
-  logInfo,
-  logWarn,
-  shouldDebugLog,
   extractOid,
   hasExplicitPageParam,
   pickPageFromPages,
   pickCidFromPages,
   pickDurationFromPages,
   pickPageIndexFromOid,
-  ids
-} from "./reader.js";
+  moveReadingMainInline
+} from "./reader-page-frame.js";
 import {
+  logInfo,
+  logWarn,
+  shouldDebugLog,
+  ids,
   hydrateReaderStateFromSettings,
   applyReadingViewPresentation,
   renderReadingView,
   closeReadingView,
-  syncReadingViewPlayback,
   updateReaderPreferences,
   renderReaderPanels,
   renderReadingInfoPanel,
-  updateReaderFollowState,
   bindReaderStepperControl,
-  stopReadingViewSync,
-  stopReaderPlayerObserver,
-  startReadingViewSync,
-  startReaderPlayerObserver,
-  moveReadingMainInline,
   renderReadingStatus
-} from "./reading-view-adapter.js";
+} from "./reader-shell.js";
+import {
+  syncReadingViewPlayback,
+  updateReaderFollowState,
+  stopReadingViewSync,
+  startReadingViewSync
+} from "./reader-transcript-sync.js";
+import {
+  stopReaderPlayerObserver,
+  startReaderPlayerObserver
+} from "./reader-player-host.js";
 import {
   renderMeta,
   renderSubtitleSelect,

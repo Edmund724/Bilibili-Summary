@@ -19,11 +19,14 @@ import {
 import { removePlayerAiQuickActionButton } from "./player-ai.js";
 
 import {
-  enterReaderMode,
-  logWarn,
   updateReaderFollowState,
   syncReadingViewPlayback
-} from "./reader.js";
+} from "./reader-transcript-sync.js";
+
+import {
+  enterReaderMode,
+  logWarn
+} from "./reader-shell.js";
 
 import {
   getCurrentAid,

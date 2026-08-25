@@ -34,40 +34,46 @@ import {
   setMessage
 } from "./ui-renderer.js";
 
-import { ids } from "./reader.js";
 import {
+  ids,
   buildReaderStepperControl,
   bindReaderStepperControl,
   updateReaderPreferences,
   renderReaderPanels,
   renderReadingInfoPanel,
-  updateReaderFollowState,
-  syncReadingViewPlayback,
-  closeReadingView,
-  renderReadingView,
-  stopReadingViewSync,
-  noteManualReaderInteraction,
-  logWarn,
-  onReadingChapterClick,
-  onReadingTranscriptClick,
   hydrateReaderStateFromSettings,
   applyReadingViewPresentation,
   renderReadingStatus,
   syncReaderModeAfterMount,
   settleReaderModePresentation,
+  closeReadingView,
+  renderReadingView,
+  logWarn,
+  openReaderViewShell,
+  maybeRefreshReaderSubtitleInBackground
+} from "./reader-shell.js";
+import {
+  updateReaderFollowState,
+  syncReadingViewPlayback,
+  stopReadingViewSync,
+  noteManualReaderInteraction,
+  onReadingChapterClick,
+  onReadingTranscriptClick,
+  startReadingViewSync
+} from "./reader-transcript-sync.js";
+import {
   bindReaderHeaderActionsHover,
-  startReadingViewSync,
   startReaderPlayerObserver,
   stopReaderPlayerObserver,
+  scheduleReaderMiniPlayerDismiss,
+  ensureReaderPlayerMounted,
+  layoutReaderPlayerHost
+} from "./reader-player-host.js";
+import {
   moveReadingMainInline,
   alignReaderViewportToPlayer,
-  scheduleReaderMiniPlayerDismiss,
-  openReaderViewShell,
-  applyReaderPageFocus,
-  ensureReaderPlayerMounted,
-  layoutReaderPlayerHost,
-  maybeRefreshReaderSubtitleInBackground
-} from "./reading-view-adapter.js";
+  applyReaderPageFocus
+} from "./reader-page-frame.js";
 
 export {
   BOC_VERSION,

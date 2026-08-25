@@ -14,23 +14,25 @@ import {
   isAiSubtitle
 } from "./formatters.js";
 import { DEFAULT_SETTINGS } from "./shared-defaults.js";
-import { ids } from "./reader.js";
 import {
+  ids,
   buildReaderStepperControl,
   bindReaderStepperControl,
   updateReaderPreferences,
   renderReaderPanels,
   renderReadingInfoPanel,
-  updateReaderFollowState,
-  syncReadingViewPlayback,
   closeReadingView,
   renderReadingView,
+  logWarn
+} from "./reader-shell.js";
+import {
+  updateReaderFollowState,
+  syncReadingViewPlayback,
   stopReadingViewSync,
   noteManualReaderInteraction,
-  logWarn,
   onReadingChapterClick,
   onReadingTranscriptClick
-} from "./reading-view-adapter.js";
+} from "./reader-transcript-sync.js";
 import {
   refreshClip,
   loadSubtitle

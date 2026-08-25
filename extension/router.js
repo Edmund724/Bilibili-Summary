@@ -1,7 +1,7 @@
 import { state } from "./state.js";
 import { DEFAULT_SETTINGS } from "./shared-defaults.js";
 import { ensureUiReady } from "./panel.js";
-import { enforceNormalPageStateIfNeeded } from "./reader.js";
+import { enforceNormalPageStateIfNeeded } from "./reader-page-frame.js";
 import {
   resetClipState,
   refreshClip,
@@ -15,7 +15,7 @@ import {
   logInfo,
   logWarn,
   shouldDebugLog
-} from "./reader.js";
+} from "./reader-shell.js";
 import { schedulePlayerAiQuickActionSync } from "./player-ai.js";
 
 export function isReaderMode(url = location.href) {

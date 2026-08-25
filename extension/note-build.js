@@ -1,7 +1,7 @@
 import { fetchHotComments } from "./formatters.js";
 import { rebuildDerivedContent } from "./subtitle.js";
 import { state } from "./state.js";
-import { logWarn } from "./reader.js";
+import { logWarn } from "./reader-shell.js";
 
 export async function refreshDerivedContent({ refreshComments = false } = {}) {
   if (state.settings?.includeHotCommentsInNote) {
