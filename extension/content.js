@@ -1,4 +1,5 @@
 import { state } from "./state.js";
+import { BOC_VERSION } from "./version.js";
 
 import { isReaderMode, isWatchlaterPage } from "./url-utils.js";
 import { startUrlWatcher, getSettings } from "./runtime.js";
@@ -27,7 +28,6 @@ import {
 
 import { bindRuntimeEvents } from "./messages.js";
 
-const BOC_VERSION = "1.1.4";
 globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
 
 init();
