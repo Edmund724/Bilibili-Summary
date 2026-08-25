@@ -85,6 +85,20 @@ function bindEvents() {
       return;
     }
 
+    if (isReaderModeUrl(tab?.url || "")) {
+      setStatus("正在退出阅读视图...");
+      const closeResp = await sendToContent({ type: "popup-close-reading-view" });
+      if (!closeResp?.ok) {
+        setStatus(`退出失败：${closeResp?.error || "未知错误"}`, true);
+        setMessage(`退出失败：${closeResp?.error || "未知错误"}`);
+        return;
+      }
+      setMessage("已退出阅读视图，回到普通模式。");
+      setStatus("阅读视图已关闭。");
+      window.setTimeout(() => window.close(), 80);
+      return;
+    }
+
     const prepResp = await sendToContent({ type: "popup-get-state" });
     if (!prepResp?.ok) {
       setStatus(prepResp?.error || "请刷新浏览器网页重试，或当前网页不支持", true);
@@ -244,6 +258,14 @@ function setMessage(text) {
 async function getActiveTab() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs?.[0] || null;
+}
+
+function isReaderModeUrl(url) {
+  try {
+    return new URL(url).searchParams.get("boc_reader") === "1";
+  } catch {
+    return false;
+  }
 }
 
 async function sendToContent(message) {

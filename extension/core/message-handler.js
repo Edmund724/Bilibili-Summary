@@ -24,8 +24,14 @@ import {
 
 import {
   enterReaderMode,
+  closeReadingView,
   logWarn
 } from "../reader/shell.js";
+
+import {
+  isReaderMode,
+  stripReaderModeUrl
+} from "../bilibili/url-utils.js";
 
 import {
   getCurrentAid,
@@ -96,6 +102,19 @@ export function bindRuntimeEvents() {
       }
       sendResponse({ ok: true });
       return true;
+    }
+
+    if (message.type === "popup-close-reading-view") {
+      try {
+        if (isReaderMode()) {
+          replaceReaderModeUrl(stripReaderModeUrl(location.href));
+        }
+        closeReadingView();
+        sendResponse({ ok: true });
+      } catch (error) {
+        sendResponse({ ok: false, error: getErrorMessage(error) });
+      }
+      return false;
     }
 
     if (message.type === "sidepanel-get-context") {
