@@ -90,3 +90,28 @@ export function buildCanonicalVideoUrl(bvid, pageIndex = 1) {
   }
   return `https://www.bilibili.com/video/${safeBvid}/`;
 }
+
+// Pure variant of the former sidepanel.js buildCleanBilibiliVideoUrl.
+// The original read the module-level mutable `currentConversationMeta?.contextUrl`
+// as a fallback, which made it impure. Here that fallback is injected as an
+// explicit `currentMetaContextUrl` argument so the function is a deterministic
+// computation over its inputs.
+//
+// Fallback chain (preserves the original behavior exactly):
+//   bvid = context?.bvid
+//        || extractBvidFromUrl(context?.url)
+//        || extractBvidFromUrl(currentMetaContextUrl)
+//   if bvid -> "https://www.bilibili.com/video/${bvid}/"
+//   else      -> context?.url || currentMetaContextUrl  (stringified + trimmed)
+export function buildCanonicalVideoUrlFromContext(context, currentMetaContextUrl) {
+  const bvid = String(
+    context?.bvid ||
+      extractBvidFromUrl(context?.url) ||
+      extractBvidFromUrl(currentMetaContextUrl) ||
+      ""
+  ).trim();
+  if (bvid) {
+    return `https://www.bilibili.com/video/${bvid}/`;
+  }
+  return String(context?.url || currentMetaContextUrl || "").trim();
+}

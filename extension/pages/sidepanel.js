@@ -1,27 +1,19 @@
 import {
   DEFAULT_INITIAL_QUICK_PROMPTS,
   DEFAULT_PRESET_PROMPTS,
-  PLAYER_AI_QUICK_ACTION_STORAGE_KEY,
-  formatLocalDate
+  PLAYER_AI_QUICK_ACTION_STORAGE_KEY
 } from "../core/shared-defaults.js";
 
 import {
-  normalizeConversations,
   buildContextKey,
   doesConversationMatchCurrentContext,
   doesTabMatchContextUrl,
-  buildConversationTitle,
-  normalizeConversationTitle,
-  resolveConversationStorageKey,
-  buildConversationContextRef,
-  buildContextPlaceholder,
   formatConversationTimestamp,
-  buildConversationTitleDisplay,
-  generateConversationId,
-  extractPageIndexFromContextUrl
+  buildConversationTitleDisplay
 } from "../ai/conversation.js";
-import { escapeHtml, sanitizeFileName } from "../shared/string-utils.js";
-import { extractBvidFromUrl } from "../bilibili/video-id-shared.js";
+import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
+import { renderMarkdown, renderInline, stripThinkBlocks, sanitizeMarkdownHeadingText, isTimestampOnlyInlineCode } from "../ui/markdown.js";
+import { createConversationStore } from "./sidepanel-conversation-store.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
@@ -81,6 +73,36 @@ let streamSlowNoticeTimer = 0;
 let streamFirstTokenReceived = false;
 let initCompleted = false;
 
+const conversationStore = createConversationStore({
+  getSavedConversations: () => savedConversations,
+  setSavedConversations: (v) => { savedConversations = v; },
+  getCurrentConversationId: () => currentConversationId,
+  setCurrentConversationId: (v) => { currentConversationId = v; },
+  getCurrentConversationMeta: () => currentConversationMeta,
+  setCurrentConversationMeta: (v) => { currentConversationMeta = v; },
+  getChatHistory: () => chatHistory,
+  setChatHistory: (v) => { chatHistory = v; },
+  getContextData: () => contextData,
+  setContextData: (v) => { contextData = v; },
+  getCurrentContextKey: () => currentContextKey,
+  setCurrentContextKey: (v) => { currentContextKey = v; },
+  getLiveContextData: () => liveContextData,
+  getLiveContextKey: () => liveContextKey,
+  renderHistoryList,
+  renderInitialState,
+  updateContextChip,
+  showConversationContextNotice,
+  showConversationContextError,
+  removeConversationContextNotice,
+  hideHistoryPopover,
+  loadContextState,
+  getActiveTab,
+  sendRuntimeMessage,
+  storage: chrome.storage.local,
+  conversationsStorageKey: CONVERSATIONS_STORAGE_KEY,
+  maxSavedConversations: MAX_SAVED_CONVERSATIONS
+});
+
 init().catch((err) => {
   resetConversationView(`初始化失败：${escapeHtml(err?.message || err)}`);
 });
@@ -104,9 +126,9 @@ async function init() {
 
   bindEvents();
   await loadProvidersAndPrefs();
-  await loadSavedConversations();
+  await conversationStore.loadAll();
   await loadContextState();
-  await restoreLatestConversationForCurrentContext();
+  await conversationStore.restoreLatest();
   renderInitialState();
   autosizeInput();
   initCompleted = true;
@@ -135,7 +157,7 @@ function bindEvents() {
   els.presetBtn.addEventListener("click", togglePresetPopover);
   els.historyBtn.addEventListener("click", toggleHistoryPopover);
   els.historyClearBtn?.addEventListener("click", () => {
-    void clearAllConversations();
+    void conversationStore.clearAll();
   });
   els.stopBtn?.addEventListener("click", () => {
     stopActiveStream();
@@ -440,7 +462,7 @@ async function loadContextState({ forceRefresh = false, silent = false } = {}) {
   const contextChanged = applyContextPayload(resp.payload);
   renderHistoryList();
   if (contextChanged) {
-    await restoreLatestConversationForCurrentContext();
+    await conversationStore.restoreLatest();
     renderInitialState();
   }
   return true;
@@ -667,7 +689,7 @@ function renderHistoryList() {
   els.historyList.querySelectorAll(".sp-history-open").forEach((btn) => {
     btn.addEventListener("click", () => {
       const id = String(btn.getAttribute("data-id") || "");
-      loadConversationById(id);
+      conversationStore.applyById(id);
       hideHistoryPopover();
     });
   });
@@ -676,212 +698,9 @@ function renderHistoryList() {
     btn.addEventListener("click", async (event) => {
       event.stopPropagation();
       const id = String(btn.getAttribute("data-id") || "");
-      await deleteConversation(id);
+      await conversationStore.deleteById(id);
     });
   });
-}
-
-async function loadSavedConversations() {
-  const data = await chrome.storage.local.get([CONVERSATIONS_STORAGE_KEY]).catch(() => ({}));
-  savedConversations = normalizeConversations(data?.[CONVERSATIONS_STORAGE_KEY]);
-  renderHistoryList();
-  void hydrateConversationPageMetadata();
-}
-
-async function hydrateConversationPageMetadata() {
-  const candidates = savedConversations
-    .filter((item) => needsConversationPageHydration(item))
-    .slice(0, 12);
-  if (!candidates.length) {
-    return;
-  }
-
-  let changed = false;
-  for (const conversation of candidates) {
-    const contextRef = conversation.contextRef || null;
-    if (!contextRef?.bvid || !contextRef?.cid) {
-      continue;
-    }
-    const response = await sendRuntimeMessage({
-      type: "ai-sidepanel-resolve-page-ref",
-      contextRef
-    }).catch(() => null);
-    if (!response?.ok || !response.payload) {
-      continue;
-    }
-
-    const payload = response.payload;
-    const nextPageIndex = Number(payload.pageIndex) > 0 ? Number(payload.pageIndex) : 1;
-    const nextUrl = String(payload.url || conversation.contextUrl || contextRef.url || "").trim();
-    const nextContextRef = {
-      ...contextRef,
-      url: nextUrl,
-      cid: String(payload.cid || contextRef.cid || "").trim(),
-      pageIndex: nextPageIndex,
-      pageTitle: String(payload.pageTitle || contextRef.pageTitle || "").trim()
-    };
-    const nextTitle = normalizeConversationTitle(conversation.title, conversation.contextTitle, nextContextRef, nextUrl);
-    const nextContextKey = resolveConversationStorageKey(conversation.contextKey, nextContextRef, nextUrl);
-    if (
-      nextTitle === conversation.title &&
-      nextUrl === conversation.contextUrl &&
-      nextContextKey === conversation.contextKey &&
-      Number(conversation.contextRef?.pageIndex || 1) === nextPageIndex
-    ) {
-      continue;
-    }
-
-    conversation.title = nextTitle;
-    conversation.contextUrl = nextUrl;
-    conversation.contextKey = nextContextKey;
-    conversation.contextRef = nextContextRef;
-    changed = true;
-  }
-
-  if (!changed) {
-    return;
-  }
-
-  if (currentConversationId) {
-    const activeConversation = savedConversations.find((item) => item.id === currentConversationId);
-    if (activeConversation) {
-      currentConversationMeta = {
-        ...currentConversationMeta,
-        title: activeConversation.title,
-        contextKey: activeConversation.contextKey,
-        contextUrl: activeConversation.contextUrl,
-        contextRef: activeConversation.contextRef
-      };
-    }
-  }
-  renderHistoryList();
-  updateContextChip();
-  await saveConversations();
-}
-
-function needsConversationPageHydration(conversation) {
-  if (!conversation?.isVideoContext) {
-    return false;
-  }
-  if (/-P\d+$/i.test(String(conversation.title || "").trim())) {
-    return false;
-  }
-  const pageIndex = Number(conversation.contextRef?.pageIndex || 0) || 0;
-  if (pageIndex > 1) {
-    return true;
-  }
-  const urlPageIndex = extractPageIndexFromContextUrl(conversation.contextUrl || conversation.contextRef?.url || "");
-  if (urlPageIndex > 1) {
-    return true;
-  }
-  return Boolean(conversation.contextRef?.bvid && conversation.contextRef?.cid);
-}
-
-async function saveConversations() {
-  savedConversations = normalizeConversations(savedConversations);
-  await chrome.storage.local.set({
-    [CONVERSATIONS_STORAGE_KEY]: savedConversations.slice(0, MAX_SAVED_CONVERSATIONS)
-  });
-  renderHistoryList();
-}
-
-async function restoreLatestConversationForCurrentContext() {
-  const targetContextKey = liveContextKey || currentContextKey;
-  const currentRef = liveContextData || contextData;
-  const latest = savedConversations.find((item) => doesConversationMatchCurrentContext(item, currentRef, targetContextKey));
-  if (!latest) {
-    currentConversationId = "";
-    currentConversationMeta = null;
-    chatHistory = [];
-    return false;
-  }
-  applyConversation(latest);
-  return true;
-}
-
-function applyConversation(conversation) {
-  if (!conversation) {
-    return;
-  }
-  currentConversationId = conversation.id;
-  currentConversationMeta = {
-    id: conversation.id,
-    title: conversation.title,
-    createdAt: conversation.createdAt,
-    updatedAt: conversation.updatedAt,
-    contextKey: conversation.contextKey,
-    contextTitle: conversation.contextTitle,
-    contextUrl: conversation.contextUrl,
-    isVideoContext: conversation.isVideoContext !== false,
-    pinnedContext: true,
-    contextRef: conversation.contextRef || null,
-    resolvedContext: null
-  };
-  chatHistory = Array.isArray(conversation.messages)
-    ? conversation.messages.map((item) => ({ role: item.role, content: String(item.content || "") }))
-    : [];
-  if (liveContextData && conversation.contextKey && conversation.contextKey === liveContextKey) {
-    contextData = { ...liveContextData };
-    currentContextKey = liveContextKey;
-    currentConversationMeta.resolvedContext = { ...liveContextData };
-  } else if (conversation.contextRef) {
-    contextData = buildContextPlaceholder(conversation.contextRef);
-    currentContextKey = conversation.contextKey || buildContextKey(contextData);
-  }
-  updateContextChip();
-  renderHistoryList();
-}
-
-function loadConversationById(id) {
-  const conversation = savedConversations.find((item) => item.id === id);
-  if (!conversation) {
-    return;
-  }
-  applyConversation(conversation);
-  renderInitialState();
-  if (conversation.contextKey && conversation.contextKey !== liveContextKey) {
-    showConversationContextNotice("正在加载原视频上下文...");
-    void hydratePinnedConversationContext({ silent: true });
-  }
-}
-
-async function deleteConversation(id) {
-  const wasCurrent = id && id === currentConversationId;
-  savedConversations = savedConversations.filter((item) => item.id !== id);
-  await saveConversations();
-  if (!wasCurrent) {
-    return;
-  }
-  currentConversationId = "";
-  currentConversationMeta = null;
-  chatHistory = [];
-  if (liveContextData) {
-    contextData = { ...liveContextData };
-    currentContextKey = liveContextKey || buildContextKey(liveContextData);
-    updateContextChip();
-  }
-  renderInitialState();
-}
-
-async function clearAllConversations() {
-  if (!savedConversations.length) {
-    return;
-  }
-  if (!confirm("确定要清空全部历史对话吗？")) {
-    return;
-  }
-  savedConversations = [];
-  currentConversationId = "";
-  currentConversationMeta = null;
-  chatHistory = [];
-  await saveConversations();
-  hideHistoryPopover();
-  if (liveContextData) {
-    contextData = { ...liveContextData };
-    currentContextKey = liveContextKey || buildContextKey(liveContextData);
-    updateContextChip();
-  }
-  renderInitialState();
 }
 
 function insertPresetPrompt(prompt) {
@@ -1101,62 +920,10 @@ function findPreviousUserPrompt(index) {
   return "";
 }
 
-async function persistCurrentConversation() {
-  if (!chatHistory.length || !contextData) {
-    return;
-  }
-  const now = Date.now();
-  if (!currentConversationId) {
-    currentConversationId = generateConversationId();
-    currentConversationMeta = {
-      id: currentConversationId,
-      title: buildConversationTitle(contextData),
-      createdAt: now,
-      contextKey: currentContextKey,
-      contextTitle: String(contextData.title || "").trim(),
-      contextUrl: String(contextData.url || "").trim(),
-      isVideoContext: contextData.isVideoContext !== false,
-      pinnedContext: true,
-      contextRef: buildConversationContextRef(contextData),
-      resolvedContext: { ...contextData }
-    };
-  }
-  const nextConversation = {
-    id: currentConversationId,
-    title: currentConversationMeta?.title || buildConversationTitle(contextData),
-    contextKey: String(currentConversationMeta?.contextKey || currentContextKey || "").trim(),
-    contextTitle: String(currentConversationMeta?.contextTitle || contextData.title || "").trim(),
-    contextUrl: String(currentConversationMeta?.contextUrl || contextData.url || "").trim(),
-    isVideoContext: currentConversationMeta?.isVideoContext !== false,
-    createdAt: Number(currentConversationMeta?.createdAt) || now,
-    updatedAt: now,
-    contextRef: currentConversationMeta?.contextRef || buildConversationContextRef(contextData),
-    messages: chatHistory.map((item) => ({ role: item.role, content: String(item.content || "") }))
-  };
-  savedConversations = [
-    nextConversation,
-    ...savedConversations.filter((item) => item.id !== currentConversationId)
-  ];
-  currentConversationMeta = {
-    id: nextConversation.id,
-    title: nextConversation.title,
-    createdAt: nextConversation.createdAt,
-    updatedAt: nextConversation.updatedAt,
-    contextKey: nextConversation.contextKey,
-    contextTitle: nextConversation.contextTitle,
-    contextUrl: nextConversation.contextUrl,
-    isVideoContext: nextConversation.isVideoContext,
-    pinnedContext: true,
-    contextRef: nextConversation.contextRef,
-    resolvedContext: currentConversationMeta?.resolvedContext ? { ...currentConversationMeta.resolvedContext } : { ...contextData }
-  };
-  await saveConversations();
-}
-
 async function ensureCurrentContextForSend() {
   if (currentConversationMeta?.pinnedContext) {
     await loadContextState({ forceRefresh: false, silent: true }).catch(() => null);
-    return hydratePinnedConversationContext();
+    return conversationStore.hydratePinned();
   }
   const ok = await loadContextState({ forceRefresh: false, silent: true });
   if (!ok || !contextData) {
@@ -1164,76 +931,6 @@ async function ensureCurrentContextForSend() {
     return false;
   }
   return true;
-}
-
-async function hydratePinnedConversationContext({ silent = false } = {}) {
-  const targetKey = String(currentConversationMeta?.contextKey || "").trim();
-  const cachedResolvedContext = currentConversationMeta?.resolvedContext;
-  if (cachedResolvedContext && typeof cachedResolvedContext === "object") {
-    contextData = { ...cachedResolvedContext };
-    currentContextKey = targetKey || buildContextKey(contextData);
-    updateContextChip();
-    removeConversationContextNotice();
-    return true;
-  }
-
-  if (targetKey && liveContextKey && targetKey === liveContextKey) {
-    const ok = await loadContextState({ forceRefresh: false, silent: true });
-    if (ok && contextData) {
-      currentContextKey = targetKey;
-      currentConversationMeta = {
-        ...currentConversationMeta,
-        resolvedContext: { ...contextData }
-      };
-      updateContextChip();
-      removeConversationContextNotice();
-      return true;
-    }
-  }
-
-  const contextRef = currentConversationMeta?.contextRef || null;
-  if (!contextRef) {
-    removeConversationContextNotice();
-    if (!silent) {
-      showConversationContextError("历史对话缺少原视频信息，无法继续。");
-    }
-    return false;
-  }
-
-  const response = await resolveConversationContext(contextRef).catch((error) => ({
-    ok: false,
-    error: error?.message || String(error || "")
-  }));
-  if (!response?.ok || !response.payload) {
-    removeConversationContextNotice();
-    if (!silent) {
-      showConversationContextError(`历史视频上下文获取失败：${response?.error || "未知错误"}`);
-    }
-    return false;
-  }
-
-  contextData = response.payload;
-  currentContextKey = targetKey || buildContextKey(contextData);
-  currentConversationMeta = {
-    ...currentConversationMeta,
-    contextKey: currentContextKey,
-    contextTitle: String(contextData.title || currentConversationMeta?.contextTitle || "").trim(),
-    contextUrl: String(contextData.url || currentConversationMeta?.contextUrl || "").trim(),
-    contextRef: buildConversationContextRef(contextData),
-    resolvedContext: { ...contextData }
-  };
-  updateContextChip();
-  removeConversationContextNotice();
-  return true;
-}
-
-async function resolveConversationContext(contextRef) {
-  const tab = await getActiveTab().catch(() => null);
-  return sendRuntimeMessage({
-    type: "ai-sidepanel-resolve-context",
-    tabId: Number(tab?.id || 0) || 0,
-    contextRef
-  });
 }
 
 async function sendMessage() {
@@ -1396,7 +1093,7 @@ function finalizeAssistant(node) {
     chatHistory.push({ role: "user", content: activeUserPrompt });
     chatHistory.push({ role: "assistant", content: raw });
     activeUserPrompt = "";
-    void persistCurrentConversation();
+    void conversationStore.persistCurrent();
   }
   if (activePort) {
     try { activePort.disconnect(); } catch {}
@@ -1443,7 +1140,7 @@ function handleAssistantStopped(node, reason) {
       chatHistory.push({ role: "user", content: activeUserPrompt });
       chatHistory.push({ role: "assistant", content: raw });
       activeUserPrompt = "";
-      void persistCurrentConversation();
+      void conversationStore.persistCurrent();
     }
   } else {
     node.innerHTML = "";
@@ -1552,13 +1249,6 @@ function renderAssistantMessage(node, raw, { userPrompt = "" } = {}) {
   node.appendChild(actions);
 }
 
-function sanitizeMarkdownHeadingText(value) {
-  return String(value || "")
-    .replace(/\s+/g, " ")
-    .replace(/^#+\s*/, "")
-    .trim() || "AI问答";
-}
-
 function buildConversationTurns(messages) {
   const turns = [];
   let pendingPrompt = "";
@@ -1584,80 +1274,8 @@ function buildConversationTurns(messages) {
   return turns;
 }
 
-function buildCleanBilibiliVideoUrl(context) {
-  const bvid = String(context?.bvid || extractBvidFromUrl(context?.url) || extractBvidFromUrl(currentConversationMeta?.contextUrl) || "").trim();
-  if (bvid) {
-    return `https://www.bilibili.com/video/${bvid}/`;
-  }
-  return String(context?.url || currentConversationMeta?.contextUrl || "").trim();
-}
-
-function resolveFolderTemplate(template, context) {
-  const normalized = normalizeFolder(template);
-  if (!normalized) {
-    return "";
-  }
-
-  const allowedKeys = new Set(["created", "upload_date", "author", "bvid"]);
-  const values = {
-    created: sanitizeFolderTemplateValue(formatLocalDate()),
-    upload_date: sanitizeFolderTemplateValue(context?.uploadDate || ""),
-    author: sanitizeFolderTemplateValue(context?.author || ""),
-    bvid: sanitizeFolderTemplateValue(context?.bvid || "")
-  };
-  const resolved = normalized.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, rawKey) => {
-    const key = String(rawKey || "").trim().toLowerCase();
-    if (!allowedKeys.has(key)) {
-      return "";
-    }
-    return values[key] || "";
-  });
-
-  return resolved
-    .split("/")
-    .map((segment) => sanitizeFolderTemplateValue(segment))
-    .filter(Boolean)
-    .join("/");
-}
-
-function normalizeFolder(input) {
-  return String(input || "").trim().replace(/^\/+|\/+$/g, "");
-}
-
-function sanitizeFolderTemplateValue(value) {
-  return String(value || "")
-    .replace(/[\/\\:*?"<>|]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-
-function escapeYaml(value) {
-  return String(value || "").replaceAll("\\", "\\\\").replaceAll('"', '\\"');
-}
-
-function escapeWikiLinkTarget(value) {
+export function escapeWikiLinkTarget(value) {
   return String(value || "").replace(/\]/g, "\\]");
-}
-
-
-
-function getReadableText(value, fallback = "") {
-  if (typeof value === "string") {
-    return value.trim() || fallback;
-  }
-  if (value == null) {
-    return fallback;
-  }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value || fallback);
-  }
-}
-
-function getErrorMessage(error, fallback = "未知错误") {
-  return getReadableText(error?.message || error, fallback);
 }
 
 function confirmOverwriteNote(filepath) {
@@ -1707,7 +1325,7 @@ function confirmOverwriteNote(filepath) {
   });
 }
 
-function normalizeMarkdownForSectionPaste(raw, baseLevel = 2) {
+export function normalizeMarkdownForSectionPaste(raw, baseLevel = 2) {
   const shift = Math.max(0, Number(baseLevel) || 0);
   const lines = String(raw || "").split("\n");
   const normalized = [];
@@ -1740,28 +1358,11 @@ function normalizeMarkdownForSectionPaste(raw, baseLevel = 2) {
 }
 
 const TIMESTAMP_PATTERN = /\b\d{1,3}:\d{2}(?::\d{2})?\b/g;
-const TIMESTAMP_INLINE_CODE_REST_PATTERN = /^[\s,，、;；:：\-–—~～至到]+$/;
 
-function unwrapTimestampInlineCode(text) {
+export function unwrapTimestampInlineCode(text) {
   return String(text || "").replace(/`([^`\n]+)`/g, (_, content) =>
     isTimestampOnlyInlineCode(content) ? content : `\`${content}\``
   );
-}
-
-function isTimestampOnlyInlineCode(value) {
-  const text = String(value || "").trim();
-  if (!text) {
-    return false;
-  }
-  TIMESTAMP_PATTERN.lastIndex = 0;
-  const hasTimestamp = TIMESTAMP_PATTERN.test(text);
-  TIMESTAMP_PATTERN.lastIndex = 0;
-  if (!hasTimestamp) {
-    return false;
-  }
-  const rest = text.replace(TIMESTAMP_PATTERN, "").trim();
-  TIMESTAMP_PATTERN.lastIndex = 0;
-  return !rest || TIMESTAMP_INLINE_CODE_REST_PATTERN.test(rest);
 }
 
 function linkifyAssistantTimestamps(root) {
@@ -1821,7 +1422,7 @@ function linkifyAssistantTimestamps(root) {
   });
 }
 
-function parseTimestampToSeconds(value) {
+export function parseTimestampToSeconds(value) {
   const parts = String(value || "")
     .trim()
     .split(":")
@@ -1852,7 +1453,7 @@ async function jumpToAssistantTimestamp(seconds, label = "") {
     return;
   }
 
-  showConversationContextNotice(`正在跳转到 ${label || formatSecondsAsTimestamp(safeSeconds)}...`, 1800);
+  showConversationContextNotice(`正在跳转到 ${label || formatCompactTimestamp(safeSeconds, safeSeconds >= 3600)}...`, 1800);
 
   try {
     const sameVideo = doesTabMatchContextUrl(tab.url || "", targetUrl);
@@ -1907,17 +1508,6 @@ async function sendMessageToActiveTab(tabId, message, retries = 12) {
 
 function delay(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-function formatSecondsAsTimestamp(seconds) {
-  const safe = Math.max(0, Math.floor(Number(seconds) || 0));
-  const hour = Math.floor(safe / 3600);
-  const minute = Math.floor((safe % 3600) / 60);
-  const second = safe % 60;
-  if (hour > 0) {
-    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
-  }
-  return `${String(Math.floor(safe / 60)).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
 }
 
 function restartChat({ keepContext = false } = {}) {
@@ -1984,175 +1574,6 @@ function removeConversationContextNotice() {
 function isMessagesNearBottom(threshold = 56) {
   const { scrollTop, scrollHeight, clientHeight } = els.messages;
   return scrollHeight - (scrollTop + clientHeight) <= threshold;
-}
-
-function renderMarkdown(text) {
-  let escaped = escapeHtml(stripThinkBlocks(text));
-  const codeBlocks = [];
-  escaped = escaped.replace(/```([\s\S]*?)```/g, (_, code) => {
-    codeBlocks.push(code);
-    return `\u0001BOC_CODE_${codeBlocks.length - 1}\u0001`;
-  });
-
-  const lines = escaped.split("\n");
-  const out = [];
-  let listType = "";
-  let listStartNumber = 1;
-  let paraBuf = [];
-
-  const flushPara = () => {
-    if (paraBuf.length) {
-      out.push(`<p>${renderInline(paraBuf.join(" "))}</p>`);
-      paraBuf = [];
-    }
-  };
-  const closeList = () => {
-    if (!listType) {
-      return;
-    }
-    out.push(listType === "ul" ? "</ul>" : "</ol>");
-    listType = "";
-    listStartNumber = 1;
-  };
-  const openList = (nextType, startNumber = 1) => {
-    if (listType === nextType && (nextType !== "ol" || listStartNumber === startNumber)) {
-      return;
-    }
-    closeList();
-    listType = nextType;
-    listStartNumber = nextType === "ol" ? startNumber : 1;
-    if (nextType === "ul") {
-      out.push("<ul>");
-      return;
-    }
-    out.push(startNumber > 1 ? `<ol start="${startNumber}">` : "<ol>");
-  };
-  const getNextListType = (startIndex) => {
-    for (let index = startIndex; index < lines.length; index += 1) {
-      const nextLine = lines[index].trim();
-      if (!nextLine) {
-        continue;
-      }
-      if (/^[-*+]\s+(.+)$/.test(nextLine)) {
-        return "ul";
-      }
-      if (/^\d+\.\s+(.+)$/.test(nextLine)) {
-        return "ol";
-      }
-      break;
-    }
-    return "";
-  };
-  const isTableSeparatorLine = (value) => /^\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?$/.test(value);
-  const isTableRowLine = (value) => /^\|.+\|$/.test(value);
-  const splitTableCells = (value) =>
-    value
-      .trim()
-      .replace(/^\|/, "")
-      .replace(/\|$/, "")
-      .split("|")
-      .map((cell) => renderInline(cell.trim()));
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const rawLine = lines[index];
-    const line = rawLine.trim();
-
-    const codeMatch = line.match(/^\u0001BOC_CODE_(\d+)\u0001$/);
-    if (codeMatch) {
-      flushPara();
-      closeList();
-      out.push(`<pre><code>${codeBlocks[Number(codeMatch[1])]}</code></pre>`);
-      continue;
-    }
-
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      flushPara();
-      closeList();
-      const level = heading[1].length + 2;
-      out.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
-      continue;
-    }
-
-    if (
-      isTableRowLine(line) &&
-      index + 1 < lines.length &&
-      isTableSeparatorLine(lines[index + 1].trim())
-    ) {
-      flushPara();
-      closeList();
-      const headers = splitTableCells(line);
-      const bodyRows = [];
-      index += 2;
-      while (index < lines.length) {
-        const tableLine = lines[index].trim();
-        if (!isTableRowLine(tableLine)) {
-          index -= 1;
-          break;
-        }
-        bodyRows.push(splitTableCells(tableLine));
-        index += 1;
-      }
-      out.push(
-        `<table><thead><tr>${headers.map((cell) => `<th>${cell}</th>`).join("")}</tr></thead><tbody>${
-          bodyRows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")
-        }</tbody></table>`
-      );
-      continue;
-    }
-
-    const ul = line.match(/^[-*+]\s+(.+)$/);
-    if (ul) {
-      flushPara();
-      openList("ul");
-      out.push(`<li>${renderInline(ul[1])}</li>`);
-      continue;
-    }
-
-    const ol = line.match(/^(\d+)\.\s+(.+)$/);
-    if (ol) {
-      flushPara();
-      const orderNumber = Number(ol[1]) || 1;
-      openList("ol", orderNumber);
-      out.push(`<li>${renderInline(ol[2])}</li>`);
-      continue;
-    }
-
-    if (!line) {
-      flushPara();
-      if (listType && getNextListType(index + 1) === listType) {
-        continue;
-      }
-      closeList();
-      continue;
-    }
-
-    paraBuf.push(line);
-  }
-
-  flushPara();
-  closeList();
-  return out.join("");
-}
-
-function renderInline(text) {
-  return text
-    .replace(/`([^`]+)`/g, (_, c) => (isTimestampOnlyInlineCode(c) ? c : `<code>${c}</code>`))
-    .replace(/\*\*([^*\n]+)\*\*/g, (_, c) => `<strong>${c}</strong>`)
-    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, (_, pre, c) => `${pre}<em>${c}</em>`)
-    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, u) => {
-      const safeUrl = /^(https?:|mailto:|#)/i.test(u) ? u : "#";
-      return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${t}</a>`;
-    });
-}
-
-function stripThinkBlocks(text) {
-  return String(text || "")
-    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "")
-    .replace(/<think\b[^>]*>[\s\S]*$/gi, "")
-    .replace(/<\/think>/gi, "")
-    .replace(/^\s*<\/?think\b[^>]*>\s*$/gim, "")
-    .trim();
 }
 
 function scrollToBottom(force = false) {
