@@ -1,4 +1,4 @@
-import { state } from "./state.js";
+import { state, clipState, uiState } from "./state.js";
 import { DEFAULT_SETTINGS } from "./shared-defaults.js";
 import { ensureUiReady } from "./panel.js";
 import { enforceNormalPageStateIfNeeded } from "./reader-page-frame.js";
@@ -26,8 +26,8 @@ export function replaceReaderModeUrl(nextUrl) {
 
   try {
     history.replaceState(history.state, "", targetUrl);
-    state.clip.currentUrl = location.href;
-    state.clip.currentClipSignature = computeCurrentClipSignature(location.href);
+    clipState.setCurrentUrl(location.href);
+    clipState.setCurrentClipSignature(computeCurrentClipSignature(location.href));
   } catch (error) {
     if (shouldDebugLog()) {
       console.warn("[BOC] failed to replace reader mode url", error);
@@ -39,7 +39,7 @@ export function startUrlWatcher() {
   if (state.ui.urlWatcherStarted) {
     return;
   }
-  state.ui.urlWatcherStarted = true;
+  uiState.setUrlWatcherStarted(true);
 
   window.setInterval(() => {
     const nextUrl = location.href;
@@ -48,8 +48,8 @@ export function startUrlWatcher() {
       return;
     }
 
-    state.clip.currentUrl = nextUrl;
-    state.clip.currentClipSignature = nextSignature;
+    clipState.setCurrentUrl(nextUrl);
+    clipState.setCurrentClipSignature(nextSignature);
     enforceNormalPageStateIfNeeded(nextUrl);
     ensureUiReady();
     resetClipState();

@@ -1,6 +1,6 @@
 import { fetchHotComments } from "./bili-api.js";
 import { rebuildDerivedContent } from "./subtitle.js";
-import { state } from "./state.js";
+import { state, clipState } from "./state.js";
 import { logWarn } from "./reader-shell.js";
 
 export async function refreshDerivedContent({ refreshComments = false } = {}) {
@@ -9,9 +9,9 @@ export async function refreshDerivedContent({ refreshComments = false } = {}) {
       refreshComments || !Array.isArray(state.clip.hotComments) || state.clip.hotComments.length === 0;
     if (shouldFetchComments) {
       try {
-        state.clip.hotComments = await fetchHotComments(20);
+        clipState.setHotComments(await fetchHotComments(20));
       } catch (error) {
-        state.clip.hotComments = [];
+        clipState.setHotComments([]);
         logWarn("[BOC] failed to fetch hot comments for note export", error);
       }
     }

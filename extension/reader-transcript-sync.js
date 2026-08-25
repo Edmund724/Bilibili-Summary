@@ -1,4 +1,4 @@
-import { state } from "./state.js";
+import { state, readerState } from "./state.js";
 import { byId } from "./runtime.js";
 import { getRuntimeVideoElement, findReaderPlayerHost } from "./video-probe.js";
 import { findActiveSubtitleIndex, findActiveChapterIndex } from "./subtitle.js";
@@ -120,8 +120,8 @@ export function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll 
   if (shouldScroll && state.reader.readingAutoScroll) {
     if (Date.now() < state.reader.readingManualScrollPauseUntil) {
       updateReaderFollowState();
-      state.reader.readingActiveSubtitleIndex = subtitleIndex;
-      state.reader.readingActiveChapterIndex = chapterIndex;
+      readerState.setActiveSubtitleIndex(subtitleIndex);
+      readerState.setActiveChapterIndex(chapterIndex);
       return;
     }
     if (nextTranscript) {
@@ -132,8 +132,8 @@ export function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll 
     }
   }
 
-  state.reader.readingActiveSubtitleIndex = subtitleIndex;
-  state.reader.readingActiveChapterIndex = chapterIndex;
+  readerState.setActiveSubtitleIndex(subtitleIndex);
+  readerState.setActiveChapterIndex(chapterIndex);
 }
 
 export function scrollReadingRailItemIntoView(node) {
@@ -164,7 +164,7 @@ export function scrollReadingTranscriptItemIntoView(node) {
 
   const behavior = state.reader.readingNextScrollBehavior === "auto" ? "auto" : "smooth";
   state.reader.readingProgrammaticScrollUntil = Date.now() + (behavior === "auto" ? 120 : 800);
-  state.reader.readingNextScrollBehavior = "smooth";
+  readerState.setNextScrollBehavior("smooth");
   if (state.reader.readingNativePageMode && inlineHost && inlineHost.scrollHeight > inlineHost.clientHeight + 8) {
     const hostRect = inlineHost.getBoundingClientRect();
     const computed = window.getComputedStyle(node);
@@ -205,7 +205,7 @@ export function jumpReadingTarget(seconds) {
 
   const nextTime = Math.max(0, Number(seconds || 0) || 0);
   state.reader.readingManualScrollPauseUntil = 0;
-  state.reader.readingNextScrollBehavior = "auto";
+  readerState.setNextScrollBehavior("auto");
   updateReaderFollowState();
   video.currentTime = nextTime;
   if (video.paused) {

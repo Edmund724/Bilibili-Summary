@@ -50,7 +50,23 @@ const readerState = {
   readingDocumentClickBound: false,
   readingManualScrollPauseUntil: 0,
   readingProgrammaticScrollUntil: 0,
-  readingViewReady: false
+  readingViewReady: false,
+  setViewOpen(value) { this.readingViewOpen = value; },
+  setNativePageMode(value) { this.readingNativePageMode = value; },
+  setAutoScroll(value) { this.readingAutoScroll = value; },
+  setTheme(value) { this.readingTheme = value; },
+  setFontScale(value) { this.readingFontScale = value; },
+  setLetterSpacing(value) { this.readingLetterSpacing = value; },
+  setLineHeight(value) { this.readingLineHeight = value; },
+  setContentWidth(value) { this.readingContentWidth = value; },
+  setChapterVisible(value) { this.readingChapterVisible = value; },
+  setTranscriptVisible(value) { this.readingTranscriptVisible = value; },
+  setSettingsExpanded(value) { this.readingSettingsExpanded = value; },
+  setDescriptionExpanded(value) { this.readingDescriptionExpanded = value; },
+  setActiveSubtitleIndex(value) { this.readingActiveSubtitleIndex = value; },
+  setActiveChapterIndex(value) { this.readingActiveChapterIndex = value; },
+  setNextScrollBehavior(value) { this.readingNextScrollBehavior = value; },
+  setViewReady(value) { this.readingViewReady = value; }
 };
 
 const clipState = {
@@ -79,7 +95,33 @@ const clipState = {
   markdown: "",
   srt: "",
   txt: "",
-  currentClipSignature: ""
+  currentClipSignature: "",
+  setCurrentUrl(value) { this.currentUrl = value; },
+  setFetchRunId(value) { this.fetchRunId = value; },
+  setBvid(value) { this.bvid = value; },
+  setAid(value) { this.aid = value; },
+  setCid(value) { this.cid = value; },
+  setCidSource(value) { this.cidSource = value; },
+  setPageIndex(value) { this.pageIndex = value; },
+  setPageCount(value) { this.pageCount = value; },
+  setPageTitle(value) { this.pageTitle = value; },
+  setVideoDuration(value) { this.videoDuration = value; },
+  setDescription(value) { this.description = value; },
+  setTitle(value) { this.title = value; },
+  setAuthor(value) { this.author = value; },
+  setUploadDate(value) { this.uploadDate = value; },
+  setSubtitles(value) { this.subtitles = value; },
+  setSelectedSubtitleId(value) { this.selectedSubtitleId = value; },
+  setSelectedSubtitleUrl(value) { this.selectedSubtitleUrl = value; },
+  setSelectedSubtitleLang(value) { this.selectedSubtitleLang = value; },
+  setSubtitleBody(value) { this.subtitleBody = value; },
+  setSubtitleFetchState(value) { this.subtitleFetchState = value; },
+  setChapters(value) { this.chapters = value; },
+  setHotComments(value) { this.hotComments = value; },
+  setMarkdown(value) { this.markdown = value; },
+  setSrt(value) { this.srt = value; },
+  setTxt(value) { this.txt = value; },
+  setCurrentClipSignature(value) { this.currentClipSignature = value; }
 };
 
 const playerAiState = {
@@ -90,7 +132,15 @@ const playerAiState = {
   playerAiQuickActionHideTimer: 0,
   playerAiQuickActionCursorHideTimer: 0,
   playerAiQuickActionSubmitting: false,
-  playerAiQuickActionSuppressedUntil: 0
+  playerAiQuickActionSuppressedUntil: 0,
+  setObserver(value) { this.playerAiQuickActionObserver = value; },
+  setLayoutBound(value) { this.playerAiQuickActionLayoutBound = value; },
+  setSyncTimer(value) { this.playerAiQuickActionSyncTimer = value; },
+  setRevealTimer(value) { this.playerAiQuickActionRevealTimer = value; },
+  setHideTimer(value) { this.playerAiQuickActionHideTimer = value; },
+  setCursorHideTimer(value) { this.playerAiQuickActionCursorHideTimer = value; },
+  setSubmitting(value) { this.playerAiQuickActionSubmitting = value; },
+  setSuppressedUntil(value) { this.playerAiQuickActionSuppressedUntil = value; }
 };
 
 const uiState = {
@@ -100,7 +150,14 @@ const uiState = {
   normalPageStateGuardBound: false,
   urlWatcherStarted: false,
   statusText: "准备就绪，点击“刷新抓取”开始。",
-  messageText: ""
+  messageText: "",
+  setEventsBound(value) { this.uiEventsBound = value; },
+  setRuntimeEventsBound(value) { this.runtimeEventsBound = value; },
+  setSettingsWatcherBound(value) { this.settingsWatcherBound = value; },
+  setNormalPageStateGuardBound(value) { this.normalPageStateGuardBound = value; },
+  setUrlWatcherStarted(value) { this.urlWatcherStarted = value; },
+  setStatusText(value) { this.statusText = value; },
+  setMessageText(value) { this.messageText = value; }
 };
 
 const stateTarget = {
@@ -113,7 +170,8 @@ const stateTarget = {
   reader: readerState,
   clip: clipState,
   playerAi: playerAiState,
-  ui: uiState
+  ui: uiState,
+  setSettings(next) { this.settings = next; }
 };
 
 const state = stateTarget;

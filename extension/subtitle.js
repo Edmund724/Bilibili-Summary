@@ -1,4 +1,4 @@
-import { state } from "./state.js";
+import { state, clipState } from "./state.js";
 import { formatLocalDate } from "./shared-defaults.js";
 import { extractBvid, cleanVideoUrl } from "./url-utils.js";
 import { byId } from "./runtime.js";
@@ -120,8 +120,8 @@ export function findActiveChapterIndex(currentTime) {
 
 export function rebuildDerivedContent() {
   const body = Array.isArray(state.clip.subtitleBody) ? state.clip.subtitleBody : [];
-  state.clip.markdown = body.length ? buildMarkdown(state, body, state.settings) : "";
-  state.clip.srt = body.length ? buildSrt(body) : "";
-  state.clip.txt = body.length ? buildTxt(body, state.settings) : "";
+  clipState.setMarkdown(body.length ? buildMarkdown(state, body, state.settings) : "");
+  clipState.setSrt(body.length ? buildSrt(body) : "");
+  clipState.setTxt(body.length ? buildTxt(body, state.settings) : "");
   byId("boc-preview").value = body.length ? buildSubtitlePreview(body, state.settings) : "";
 }

@@ -1,4 +1,4 @@
-import { state } from "./state.js";
+import { state, uiState, playerAiState, clipState, readerState } from "./state.js";
 import { DEFAULT_SETTINGS } from "./shared-defaults.js";
 
 import {
@@ -42,7 +42,7 @@ export function bindRuntimeEvents() {
   if (state.ui.runtimeEventsBound) {
     return;
   }
-  state.ui.runtimeEventsBound = true;
+  uiState.setRuntimeEventsBound(true);
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || typeof message !== "object") {
@@ -85,7 +85,7 @@ export function bindRuntimeEvents() {
     }
 
     if (message.type === "popup-trigger-reading-view") {
-      state.playerAi.playerAiQuickActionSuppressedUntil = Date.now() + 2500;
+      playerAiState.setSuppressedUntil(Date.now() + 2500);
       removePlayerAiQuickActionButton();
       ensureUiReady();
       const readerUrl = String(message.readerUrl || "").trim();
@@ -148,18 +148,18 @@ export function bindRuntimeEvents() {
       }
 
       if (!getCurrentAid()) {
-        state.clip.hotComments = [];
+        clipState.setHotComments([]);
         sendResponse({ ok: true, comments: [], note: "无法获取视频 aid" });
         return false;
       }
 
       fetchHotComments(count)
         .then((hotComments) => {
-          state.clip.hotComments = hotComments;
+          clipState.setHotComments(hotComments);
           sendResponse({ ok: true, comments: hotComments });
         })
         .catch((error) => {
-          state.clip.hotComments = [];
+          clipState.setHotComments([]);
           sendResponse({ ok: true, comments: [], note: String(error?.message || error) });
         });
       return true;
@@ -180,7 +180,7 @@ export function bindRuntimeEvents() {
       }
       if (state.reader.readingViewOpen) {
         state.reader.readingManualScrollPauseUntil = 0;
-        state.reader.readingNextScrollBehavior = "auto";
+        readerState.setNextScrollBehavior("auto");
         updateReaderFollowState();
         syncReadingViewPlayback(true);
       }

@@ -80,7 +80,7 @@ function init() {
   bindPlayerAiQuickActionLayoutEvents();
   startUrlWatcher();
   getSettings().then((settings) => {
-    state.settings = settings;
+    state.setSettings(settings);
     hydrateReaderStateFromSettings(settings);
     applyReadingViewPresentation();
     startPlayerAiQuickActionObserver();

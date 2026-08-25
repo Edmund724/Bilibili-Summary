@@ -1,6 +1,6 @@
 import { setMessage } from "./message.js";
 import { DEFAULT_SETTINGS, normalizeDownloadFormat } from "./shared-defaults.js";
-import { state } from "./state.js";
+import { state, clipState, readerState } from "./state.js";
 import { extractBvid, extractPageIndex, computeCurrentClipSignature } from "./url-utils.js";
 import { getSettings, byId } from "./runtime.js";
 import { ensureRunActive, isStaleRunError, getErrorMessage, toReadableText } from "./error-helpers.js";
@@ -118,33 +118,33 @@ export async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh)
 }
 
 export function resetClipState() {
-  state.clip.bvid = "";
-  state.clip.aid = "";
-  state.clip.cid = "";
-  state.clip.cidSource = "";
-  state.clip.pageIndex = 1;
-  state.clip.pageCount = 0;
-  state.clip.pageTitle = "";
-  state.clip.videoDuration = 0;
-  state.clip.description = "";
-  state.clip.title = "";
-  state.clip.author = "";
-  state.clip.uploadDate = "";
-  state.clip.subtitles = [];
-  state.clip.selectedSubtitleId = "";
-  state.clip.selectedSubtitleUrl = "";
-  state.clip.selectedSubtitleLang = "";
-  state.clip.subtitleBody = [];
-  state.clip.subtitleFetchState = "idle";
-  state.clip.chapters = [];
-  state.clip.hotComments = [];
-  state.clip.markdown = "";
-  state.clip.srt = "";
-  state.clip.txt = "";
-  state.clip.currentClipSignature = computeCurrentClipSignature();
+  clipState.setBvid("");
+  clipState.setAid("");
+  clipState.setCid("");
+  clipState.setCidSource("");
+  clipState.setPageIndex(1);
+  clipState.setPageCount(0);
+  clipState.setPageTitle("");
+  clipState.setVideoDuration(0);
+  clipState.setDescription("");
+  clipState.setTitle("");
+  clipState.setAuthor("");
+  clipState.setUploadDate("");
+  clipState.setSubtitles([]);
+  clipState.setSelectedSubtitleId("");
+  clipState.setSelectedSubtitleUrl("");
+  clipState.setSelectedSubtitleLang("");
+  clipState.setSubtitleBody([]);
+  clipState.setSubtitleFetchState("idle");
+  clipState.setChapters([]);
+  clipState.setHotComments([]);
+  clipState.setMarkdown("");
+  clipState.setSrt("");
+  clipState.setTxt("");
+  clipState.setCurrentClipSignature(computeCurrentClipSignature());
   stopReadingViewSync();
-  state.reader.readingActiveSubtitleIndex = -1;
-  state.reader.readingActiveChapterIndex = -1;
+  readerState.setActiveSubtitleIndex(-1);
+  readerState.setActiveChapterIndex(-1);
   state.reader.readingVideoEl = null;
   stopReaderPlayerObserver();
 
@@ -159,19 +159,20 @@ export function resetClipState() {
 }
 
 export async function refreshClip() {
-  const runId = ++state.clip.fetchRunId;
+  const runId = state.clip.fetchRunId + 1;
+  clipState.setFetchRunId(runId);
   try {
     setBusyState(true);
     setMessage("");
     setStatus("正在抓取视频信息...");
-    state.clip.subtitleFetchState = "loading";
+    clipState.setSubtitleFetchState("loading");
     if (state.reader.readingViewOpen) {
       renderReadingView();
     }
-    state.settings = await getSettings();
+    state.setSettings(await getSettings());
     ensureRunActive(runId);
 
-    state.clip.bvid = extractBvid(location.href);
+    clipState.setBvid(extractBvid(location.href));
     if (!state.clip.bvid) {
       throw new Error("当前页面不是标准 BV 视频地址，无法抓取字幕。");
     }
@@ -189,13 +190,13 @@ export async function refreshClip() {
       pagesCount: (meta.pages || []).length
     });
 
-    state.clip.aid = meta.aid || "";
-    state.clip.title = meta.title || readVideoTitle();
-    state.clip.author = meta.author || readVideoAuthor();
-    state.clip.uploadDate = meta.uploadDate || readUploadDate();
-    state.clip.description = meta.description || readVideoDescription();
-    state.clip.pageCount = Array.isArray(meta.pages) ? meta.pages.length : 0;
-    state.clip.currentClipSignature = computeCurrentClipSignature();
+    clipState.setAid(meta.aid || "");
+    clipState.setTitle(meta.title || readVideoTitle());
+    clipState.setAuthor(meta.author || readVideoAuthor());
+    clipState.setUploadDate(meta.uploadDate || readUploadDate());
+    clipState.setDescription(meta.description || readVideoDescription());
+    clipState.setPageCount(Array.isArray(meta.pages) ? meta.pages.length : 0);
+    clipState.setCurrentClipSignature(computeCurrentClipSignature());
     let resolvedPageIndex = pageIndex;
     if ((meta.pages || []).length > 1 && !hasPageParam) {
       const pageIndexFromOid = pickPageIndexFromOid(meta.pages, oid, {
@@ -218,13 +219,13 @@ export async function refreshClip() {
     }
 
     const currentPage = pickPageFromPages(meta.pages, resolvedPageIndex);
-    state.clip.pageIndex = resolvedPageIndex;
-    state.clip.pageTitle = currentPage?.part || "";
-    state.clip.cid = currentPage?.cid || pickCidFromPages(meta.pages, resolvedPageIndex, meta.defaultCid);
-    state.clip.cidSource = "meta-pages";
-    state.clip.videoDuration = pickDurationFromPages(meta.pages, resolvedPageIndex, meta.defaultDuration);
+    clipState.setPageIndex(resolvedPageIndex);
+    clipState.setPageTitle(currentPage?.part || "");
+    clipState.setCid(currentPage?.cid || pickCidFromPages(meta.pages, resolvedPageIndex, meta.defaultCid));
+    clipState.setCidSource("meta-pages");
+    clipState.setVideoDuration(pickDurationFromPages(meta.pages, resolvedPageIndex, meta.defaultDuration));
     if (!(state.clip.videoDuration > 0)) {
-      state.clip.videoDuration = readRuntimeVideoDuration();
+      clipState.setVideoDuration(readRuntimeVideoDuration());
     }
     if (!(state.clip.videoDuration > 0)) {
       throw new Error("无法获取当前视频时长，已停止抓取以避免串到错误字幕。");
@@ -247,8 +248,8 @@ export async function refreshClip() {
       500
     );
     ensureRunActive(runId);
-    state.clip.subtitles = normalizeSubtitleTracks(subtitleBundle.tracks);
-    state.clip.chapters = normalizeChapters(subtitleBundle.chapters);
+    clipState.setSubtitles(normalizeSubtitleTracks(subtitleBundle.tracks));
+    clipState.setChapters(normalizeChapters(subtitleBundle.chapters));
     logInfo(
       "[BOC] chapters",
       state.clip.chapters.map((item) => ({
@@ -327,8 +328,8 @@ export async function refreshClip() {
         500
       );
       ensureRunActive(runId);
-      state.clip.subtitles = normalizeSubtitleTracks(subtitleBundle.tracks);
-      state.clip.chapters = normalizeChapters(subtitleBundle.chapters);
+      clipState.setSubtitles(normalizeSubtitleTracks(subtitleBundle.tracks));
+      clipState.setChapters(normalizeChapters(subtitleBundle.chapters));
       const retryPreferred = pickPreferredSubtitle(state.clip.subtitles, {
         previousId: preferred.id,
         previousUrl: preferred.subtitleUrl,
@@ -348,7 +349,7 @@ export async function refreshClip() {
         lanDoc: selected.lanDoc
       });
     }
-    state.clip.subtitleFetchState = "ready";
+    clipState.setSubtitleFetchState("ready");
     renderMeta();
     renderSubtitleSelect();
     if (state.reader.readingViewOpen) {
@@ -364,9 +365,9 @@ export async function refreshClip() {
     if (isStaleRunError(error)) {
       return;
     }
-    state.clip.subtitleFetchState = "error";
+    clipState.setSubtitleFetchState("error");
     resetClipState();
-    state.clip.subtitleFetchState = "error";
+    clipState.setSubtitleFetchState("error");
     if (state.reader.readingViewOpen) {
       renderReadingView();
     }
@@ -410,11 +411,11 @@ export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, sub
       } else {
         logInfo("[BOC] using cached subtitle", { cacheKey, itemCount: cachedBody.length });
         ensureRunActive(runId);
-        state.clip.selectedSubtitleId = subtitleId ? String(subtitleId) : state.clip.selectedSubtitleId;
-        state.clip.selectedSubtitleUrl = url;
-        state.clip.selectedSubtitleLang = lang;
-        state.clip.subtitleBody = cachedBody;
-        state.clip.subtitleFetchState = "ready";
+        clipState.setSelectedSubtitleId(subtitleId ? String(subtitleId) : state.clip.selectedSubtitleId);
+        clipState.setSelectedSubtitleUrl(url);
+        clipState.setSelectedSubtitleLang(lang);
+        clipState.setSubtitleBody(cachedBody);
+        clipState.setSubtitleFetchState("ready");
         await refreshDerivedContent();
         if (state.reader.readingViewOpen) {
           renderReadingView();
@@ -443,11 +444,11 @@ export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, sub
   // 存入缓存
   await saveSubtitleToCache(cacheKey, body);
 
-  state.clip.selectedSubtitleId = subtitleId ? String(subtitleId) : state.clip.selectedSubtitleId;
-  state.clip.selectedSubtitleUrl = url;
-  state.clip.selectedSubtitleLang = lang;
-  state.clip.subtitleBody = body;
-  state.clip.subtitleFetchState = "ready";
+  clipState.setSelectedSubtitleId(subtitleId ? String(subtitleId) : state.clip.selectedSubtitleId);
+  clipState.setSelectedSubtitleUrl(url);
+  clipState.setSelectedSubtitleLang(lang);
+  clipState.setSubtitleBody(body);
+  clipState.setSubtitleFetchState("ready");
   await refreshDerivedContent();
   if (state.reader.readingViewOpen) {
     renderReadingView();

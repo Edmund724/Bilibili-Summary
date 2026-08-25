@@ -12,7 +12,7 @@ import {
 import {
   getRuntimeVideoElement
 } from "./video-probe.js";
-import { state } from "./state.js";
+import { state, playerAiState } from "./state.js";
 
 const PLAYER_AI_ICON_VARIANT = "badge";
 
@@ -60,7 +60,7 @@ function startPlayerAiQuickActionObserver() {
     attributes: true,
     attributeFilter: ["style", "class"]
   });
-  state.playerAi.playerAiQuickActionObserver = observer;
+  playerAiState.setObserver(observer);
 }
 
 function bindPlayerAiQuickActionLayoutEvents() {
@@ -74,17 +74,17 @@ function bindPlayerAiQuickActionLayoutEvents() {
   document.addEventListener("fullscreenchange", schedule);
   document.addEventListener("webkitfullscreenchange", schedule);
   window.visualViewport?.addEventListener?.("resize", schedule, { passive: true });
-  state.playerAi.playerAiQuickActionLayoutBound = true;
+  playerAiState.setLayoutBound(true);
 }
 
 function schedulePlayerAiQuickActionSync(delayMs = 120) {
   if (state.playerAi.playerAiQuickActionSyncTimer) {
     window.clearTimeout(state.playerAi.playerAiQuickActionSyncTimer);
   }
-  state.playerAi.playerAiQuickActionSyncTimer = window.setTimeout(() => {
-    state.playerAi.playerAiQuickActionSyncTimer = 0;
+  playerAiState.setSyncTimer(window.setTimeout(() => {
+    playerAiState.setSyncTimer(0);
     syncPlayerAiQuickActionButton();
-  }, delayMs);
+  }, delayMs));
 }
 
 function schedulePlayerAiQuickActionRetry() {
@@ -147,15 +147,15 @@ function syncPlayerAiQuickActionButton() {
 function removePlayerAiQuickActionButton() {
   if (state.playerAi.playerAiQuickActionRevealTimer) {
     window.clearTimeout(state.playerAi.playerAiQuickActionRevealTimer);
-    state.playerAi.playerAiQuickActionRevealTimer = 0;
+    playerAiState.setRevealTimer(0);
   }
   if (state.playerAi.playerAiQuickActionHideTimer) {
     window.clearTimeout(state.playerAi.playerAiQuickActionHideTimer);
-    state.playerAi.playerAiQuickActionHideTimer = 0;
+    playerAiState.setHideTimer(0);
   }
   if (state.playerAi.playerAiQuickActionCursorHideTimer) {
     window.clearTimeout(state.playerAi.playerAiQuickActionCursorHideTimer);
-    state.playerAi.playerAiQuickActionCursorHideTimer = 0;
+    playerAiState.setCursorHideTimer(0);
   }
   document.getElementById("boc-player-ai-quick-action")?.closest(".boc-player-ai-wrap")?.remove();
 }
@@ -169,7 +169,7 @@ function bindPlayerAiQuickActionCursorSync(wrap) {
     return;
   }
   const hideForIdle = () => {
-    state.playerAi.playerAiQuickActionCursorHideTimer = 0;
+    playerAiState.setCursorHideTimer(0);
     wrap.classList.remove("is-active");
   };
   const showForCursorActivity = () => {
@@ -181,12 +181,12 @@ function bindPlayerAiQuickActionCursorSync(wrap) {
     if (state.playerAi.playerAiQuickActionCursorHideTimer) {
       window.clearTimeout(state.playerAi.playerAiQuickActionCursorHideTimer);
     }
-    state.playerAi.playerAiQuickActionCursorHideTimer = window.setTimeout(hideForIdle, 1900);
+    playerAiState.setCursorHideTimer(window.setTimeout(hideForIdle, 1900));
   };
   const hideImmediately = () => {
     if (state.playerAi.playerAiQuickActionCursorHideTimer) {
       window.clearTimeout(state.playerAi.playerAiQuickActionCursorHideTimer);
-      state.playerAi.playerAiQuickActionCursorHideTimer = 0;
+      playerAiState.setCursorHideTimer(0);
     }
     wrap.classList.remove("is-active");
   };
@@ -348,14 +348,14 @@ async function handlePlayerAiQuickActionClick(event) {
     return;
   }
 
-  state.playerAi.playerAiQuickActionSubmitting = true;
+  playerAiState.setSubmitting(true);
   const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
   if (button) {
     button.disabled = true;
   }
 
   try {
-    state.settings = await getSettings();
+    state.setSettings(await getSettings());
     if (!state.settings?.enablePlayerAiQuickAction) {
       throw new Error("AI 按钮未开启");
     }
@@ -367,7 +367,7 @@ async function handlePlayerAiQuickActionClick(event) {
   } catch (error) {
     setMessage(`AI 快捷操作失败：${getErrorMessage(error)}`);
   } finally {
-    state.playerAi.playerAiQuickActionSubmitting = false;
+    playerAiState.setSubmitting(false);
     if (button) {
       button.disabled = false;
     }

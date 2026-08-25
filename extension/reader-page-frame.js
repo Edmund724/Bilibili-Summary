@@ -1,7 +1,7 @@
 // Page-frame helpers for the reader: layout sizing, page-state guards,
 // focus/keep-tree management, player host alignment, multi-page (p数) page
 // resolution, and small DOM utilities used by reader.js.
-import { state } from "./state.js";
+import { state, uiState } from "./state.js";
 import { isReaderMode } from "./url-utils.js";
 import { byId } from "./runtime.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "./video-probe.js";
@@ -67,7 +67,7 @@ export function bindNormalPageStateGuard() {
   if (state.ui.normalPageStateGuardBound) {
     return;
   }
-  state.ui.normalPageStateGuardBound = true;
+  uiState.setNormalPageStateGuardBound(true);
 
   const observer = new MutationObserver(() => {
     enforceNormalPageStateIfNeeded();

@@ -1,4 +1,4 @@
-import { state } from "./state.js";
+import { state, readerState, uiState } from "./state.js";
 import { logInfo, logWarn, shouldDebugLog } from "./logging.js";
 import {
   normalizeReaderTheme,
@@ -131,7 +131,7 @@ export function bindSettingsWatcher() {
   if (state.ui.settingsWatcherBound || !chrome.storage?.onChanged) {
     return;
   }
-  state.ui.settingsWatcherBound = true;
+  uiState.setSettingsWatcherBound(true);
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "sync" && areaName !== "local") {
@@ -153,7 +153,7 @@ export function bindSettingsWatcher() {
 
     getSettings()
       .then((settings) => {
-        state.settings = settings;
+        state.setSettings(settings);
         hydrateReaderStateFromSettings(settings);
         applyReadingViewPresentation();
         schedulePlayerAiQuickActionSync();
@@ -194,8 +194,8 @@ export function renderReadingSubtitleSelect() {
 }
 export async function enterReaderMode() {
   const readingView = byId(ids.readingView);
-  state.reader.readingViewOpen = true;
-  state.reader.readingNativePageMode = true;
+  readerState.setViewOpen(true);
+  readerState.setNativePageMode(true);
   document.body.setAttribute("data-boc-reading-active", "1");
   hydrateReaderStateFromSettings(state.settings);
   applyReadingViewPresentation();
@@ -312,13 +312,13 @@ export function settleReaderModePresentation() {
 
 export function closeReadingView() {
   cleanupReaderFloatingArtifacts();
-  state.reader.readingViewOpen = false;
-  state.reader.readingNativePageMode = false;
-  state.reader.readingViewReady = false;
-  state.reader.readingSettingsExpanded = false;
+  readerState.setViewOpen(false);
+  readerState.setNativePageMode(false);
+  readerState.setViewReady(false);
+  readerState.setSettingsExpanded(false);
   state.reader.readingManualScrollPauseUntil = 0;
   state.reader.readingProgrammaticScrollUntil = 0;
-  state.reader.readingNextScrollBehavior = "smooth";
+  readerState.setNextScrollBehavior("smooth");
   if (state.reader.readingPlayerRetryTimer) {
     window.clearTimeout(state.reader.readingPlayerRetryTimer);
     state.reader.readingPlayerRetryTimer = 0;
@@ -437,8 +437,8 @@ export function renderReadingView() {
   renderReaderPanels();
   applyReadingViewPresentation();
   updateReadingTranscriptTailSpacer();
-  state.reader.readingActiveSubtitleIndex = -1;
-  state.reader.readingActiveChapterIndex = -1;
+  readerState.setActiveSubtitleIndex(-1);
+  readerState.setActiveChapterIndex(-1);
 }
 
 export function updateReadingTranscriptTailSpacer() {
@@ -454,13 +454,13 @@ export function updateReadingTranscriptTailSpacer() {
 }
 
 export function hydrateReaderStateFromSettings(settings = state.settings) {
-  state.reader.readingTheme = normalizeReaderTheme(settings?.readerTheme);
-  state.reader.readingFontScale = normalizeReaderFontScale(settings?.readerFontScale);
-  state.reader.readingLetterSpacing = normalizeReaderLetterSpacing(settings?.readerLetterSpacing ?? settings?.readerLineHeight);
-  state.reader.readingLineHeight = normalizeReaderLineHeight(settings?.readerLineHeight);
-  state.reader.readingContentWidth = normalizeReaderContentWidth(settings?.readerContentWidth);
-  state.reader.readingChapterVisible = settings?.readerChapterVisible !== undefined ? Boolean(settings.readerChapterVisible) : true;
-  state.reader.readingTranscriptVisible = normalizeReaderTranscriptVisible(settings?.readerTranscriptVisible);
+  readerState.setTheme(normalizeReaderTheme(settings?.readerTheme));
+  readerState.setFontScale(normalizeReaderFontScale(settings?.readerFontScale));
+  readerState.setLetterSpacing(normalizeReaderLetterSpacing(settings?.readerLetterSpacing ?? settings?.readerLineHeight));
+  readerState.setLineHeight(normalizeReaderLineHeight(settings?.readerLineHeight));
+  readerState.setContentWidth(normalizeReaderContentWidth(settings?.readerContentWidth));
+  readerState.setChapterVisible(settings?.readerChapterVisible !== undefined ? Boolean(settings.readerChapterVisible) : true);
+  readerState.setTranscriptVisible(normalizeReaderTranscriptVisible(settings?.readerTranscriptVisible));
 }
 
 export function applyReadingViewPresentation() {
@@ -712,18 +712,18 @@ export function buildReadingSummaryItems() {
 }
 
 export function updateReaderPreferences(next, { persist = true } = {}) {
-  state.reader.readingTheme = normalizeReaderTheme(next.readerTheme ?? state.reader.readingTheme);
-  state.reader.readingFontScale = normalizeReaderFontScale(next.readerFontScale ?? state.reader.readingFontScale);
-  state.reader.readingLetterSpacing = normalizeReaderLetterSpacing(
-    next.readerLetterSpacing ?? state.reader.readingLetterSpacing
+  readerState.setTheme(normalizeReaderTheme(next.readerTheme ?? state.reader.readingTheme));
+  readerState.setFontScale(normalizeReaderFontScale(next.readerFontScale ?? state.reader.readingFontScale));
+  readerState.setLetterSpacing(
+    normalizeReaderLetterSpacing(next.readerLetterSpacing ?? state.reader.readingLetterSpacing)
   );
-  state.reader.readingLineHeight = normalizeReaderLineHeight(next.readerLineHeight ?? state.reader.readingLineHeight);
-  state.reader.readingContentWidth = normalizeReaderContentWidth(next.readerContentWidth ?? state.reader.readingContentWidth);
-  state.reader.readingChapterVisible = next.readerChapterVisible !== undefined ? Boolean(next.readerChapterVisible) : state.reader.readingChapterVisible;
-  state.reader.readingTranscriptVisible = normalizeReaderTranscriptVisible(
-    next.readerTranscriptVisible ?? state.reader.readingTranscriptVisible
+  readerState.setLineHeight(normalizeReaderLineHeight(next.readerLineHeight ?? state.reader.readingLineHeight));
+  readerState.setContentWidth(normalizeReaderContentWidth(next.readerContentWidth ?? state.reader.readingContentWidth));
+  readerState.setChapterVisible(next.readerChapterVisible !== undefined ? Boolean(next.readerChapterVisible) : state.reader.readingChapterVisible);
+  readerState.setTranscriptVisible(
+    normalizeReaderTranscriptVisible(next.readerTranscriptVisible ?? state.reader.readingTranscriptVisible)
   );
-  state.settings = {
+  state.setSettings({
     ...state.settings,
     readerTheme: state.reader.readingTheme,
     readerFontScale: state.reader.readingFontScale,
@@ -732,7 +732,7 @@ export function updateReaderPreferences(next, { persist = true } = {}) {
     readerContentWidth: state.reader.readingContentWidth,
     readerChapterVisible: state.reader.readingChapterVisible,
     readerTranscriptVisible: state.reader.readingTranscriptVisible
-  };
+  });
   applyReadingViewPresentation();
   renderReaderPanels();
   if (persist) {
@@ -773,7 +773,7 @@ export function renderReadingStatus(text) {
 }
 
 export function setReadingViewReady(ready) {
-  state.reader.readingViewReady = Boolean(ready);
+  readerState.setViewReady(Boolean(ready));
   const readingView = document.getElementById(ids.readingView);
   if (!readingView) {
     return;

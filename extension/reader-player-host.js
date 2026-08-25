@@ -2,7 +2,7 @@
 // Owns the lifecycle of the embedded player host inside reader mode: mount/dismount,
 // layout, mini-player dismissal, native control recovery, and header hover affordances.
 
-import { state } from "./state.js";
+import { state, readerState } from "./state.js";
 import { sleep } from "./shared-defaults.js";
 import { isReaderMode, isWatchlaterPage } from "./url-utils.js";
 import { byId } from "./runtime.js";
@@ -393,7 +393,7 @@ export function bindReadingViewVideo(video = getRuntimeVideoElement()) {
         layoutReaderPlayerHost();
       }
       if (event?.type === "seeked") {
-        state.reader.readingNextScrollBehavior = "auto";
+        readerState.setNextScrollBehavior("auto");
         queueEnsureReaderPlayerControlsRecovered({
           reason: "seeked",
           delayMs: 140,

@@ -321,7 +321,23 @@ const readerState = {
   readingDocumentClickBound: false,
   readingManualScrollPauseUntil: 0,
   readingProgrammaticScrollUntil: 0,
-  readingViewReady: false
+  readingViewReady: false,
+  setViewOpen(value) { this.readingViewOpen = value; },
+  setNativePageMode(value) { this.readingNativePageMode = value; },
+  setAutoScroll(value) { this.readingAutoScroll = value; },
+  setTheme(value) { this.readingTheme = value; },
+  setFontScale(value) { this.readingFontScale = value; },
+  setLetterSpacing(value) { this.readingLetterSpacing = value; },
+  setLineHeight(value) { this.readingLineHeight = value; },
+  setContentWidth(value) { this.readingContentWidth = value; },
+  setChapterVisible(value) { this.readingChapterVisible = value; },
+  setTranscriptVisible(value) { this.readingTranscriptVisible = value; },
+  setSettingsExpanded(value) { this.readingSettingsExpanded = value; },
+  setDescriptionExpanded(value) { this.readingDescriptionExpanded = value; },
+  setActiveSubtitleIndex(value) { this.readingActiveSubtitleIndex = value; },
+  setActiveChapterIndex(value) { this.readingActiveChapterIndex = value; },
+  setNextScrollBehavior(value) { this.readingNextScrollBehavior = value; },
+  setViewReady(value) { this.readingViewReady = value; }
 };
 
 const clipState = {
@@ -350,7 +366,33 @@ const clipState = {
   markdown: "",
   srt: "",
   txt: "",
-  currentClipSignature: ""
+  currentClipSignature: "",
+  setCurrentUrl(value) { this.currentUrl = value; },
+  setFetchRunId(value) { this.fetchRunId = value; },
+  setBvid(value) { this.bvid = value; },
+  setAid(value) { this.aid = value; },
+  setCid(value) { this.cid = value; },
+  setCidSource(value) { this.cidSource = value; },
+  setPageIndex(value) { this.pageIndex = value; },
+  setPageCount(value) { this.pageCount = value; },
+  setPageTitle(value) { this.pageTitle = value; },
+  setVideoDuration(value) { this.videoDuration = value; },
+  setDescription(value) { this.description = value; },
+  setTitle(value) { this.title = value; },
+  setAuthor(value) { this.author = value; },
+  setUploadDate(value) { this.uploadDate = value; },
+  setSubtitles(value) { this.subtitles = value; },
+  setSelectedSubtitleId(value) { this.selectedSubtitleId = value; },
+  setSelectedSubtitleUrl(value) { this.selectedSubtitleUrl = value; },
+  setSelectedSubtitleLang(value) { this.selectedSubtitleLang = value; },
+  setSubtitleBody(value) { this.subtitleBody = value; },
+  setSubtitleFetchState(value) { this.subtitleFetchState = value; },
+  setChapters(value) { this.chapters = value; },
+  setHotComments(value) { this.hotComments = value; },
+  setMarkdown(value) { this.markdown = value; },
+  setSrt(value) { this.srt = value; },
+  setTxt(value) { this.txt = value; },
+  setCurrentClipSignature(value) { this.currentClipSignature = value; }
 };
 
 const playerAiState = {
@@ -361,7 +403,15 @@ const playerAiState = {
   playerAiQuickActionHideTimer: 0,
   playerAiQuickActionCursorHideTimer: 0,
   playerAiQuickActionSubmitting: false,
-  playerAiQuickActionSuppressedUntil: 0
+  playerAiQuickActionSuppressedUntil: 0,
+  setObserver(value) { this.playerAiQuickActionObserver = value; },
+  setLayoutBound(value) { this.playerAiQuickActionLayoutBound = value; },
+  setSyncTimer(value) { this.playerAiQuickActionSyncTimer = value; },
+  setRevealTimer(value) { this.playerAiQuickActionRevealTimer = value; },
+  setHideTimer(value) { this.playerAiQuickActionHideTimer = value; },
+  setCursorHideTimer(value) { this.playerAiQuickActionCursorHideTimer = value; },
+  setSubmitting(value) { this.playerAiQuickActionSubmitting = value; },
+  setSuppressedUntil(value) { this.playerAiQuickActionSuppressedUntil = value; }
 };
 
 const uiState = {
@@ -371,7 +421,14 @@ const uiState = {
   normalPageStateGuardBound: false,
   urlWatcherStarted: false,
   statusText: "准备就绪，点击“刷新抓取”开始。",
-  messageText: ""
+  messageText: "",
+  setEventsBound(value) { this.uiEventsBound = value; },
+  setRuntimeEventsBound(value) { this.runtimeEventsBound = value; },
+  setSettingsWatcherBound(value) { this.settingsWatcherBound = value; },
+  setNormalPageStateGuardBound(value) { this.normalPageStateGuardBound = value; },
+  setUrlWatcherStarted(value) { this.urlWatcherStarted = value; },
+  setStatusText(value) { this.statusText = value; },
+  setMessageText(value) { this.messageText = value; }
 };
 
 const stateTarget = {
@@ -384,7 +441,8 @@ const stateTarget = {
   reader: readerState,
   clip: clipState,
   playerAi: playerAiState,
-  ui: uiState
+  ui: uiState,
+  setSettings(next) { this.settings = next; }
 };
 
 const state = stateTarget;
@@ -484,7 +542,7 @@ function extractPageIndex(url) {
 
 // === message.js ===
 function setMessage(text) {
-  state.ui.messageText = String(text || "");
+  uiState.setMessageText(String(text || ""));
   byId("boc-message").textContent = state.ui.messageText;
 }
 
@@ -1832,9 +1890,9 @@ function findActiveChapterIndex(currentTime) {
 
 function rebuildDerivedContent() {
   const body = Array.isArray(state.clip.subtitleBody) ? state.clip.subtitleBody : [];
-  state.clip.markdown = body.length ? buildMarkdown(state, body, state.settings) : "";
-  state.clip.srt = body.length ? buildSrt(body) : "";
-  state.clip.txt = body.length ? buildTxt(body, state.settings) : "";
+  clipState.setMarkdown(body.length ? buildMarkdown(state, body, state.settings) : "");
+  clipState.setSrt(body.length ? buildSrt(body) : "");
+  clipState.setTxt(body.length ? buildTxt(body, state.settings) : "");
   byId("boc-preview").value = body.length ? buildSubtitlePreview(body, state.settings) : "";
 }
 
@@ -1885,7 +1943,7 @@ function startPlayerAiQuickActionObserver() {
     attributes: true,
     attributeFilter: ["style", "class"]
   });
-  state.playerAi.playerAiQuickActionObserver = observer;
+  playerAiState.setObserver(observer);
 }
 
 function bindPlayerAiQuickActionLayoutEvents() {
@@ -1899,17 +1957,17 @@ function bindPlayerAiQuickActionLayoutEvents() {
   document.addEventListener("fullscreenchange", schedule);
   document.addEventListener("webkitfullscreenchange", schedule);
   window.visualViewport?.addEventListener?.("resize", schedule, { passive: true });
-  state.playerAi.playerAiQuickActionLayoutBound = true;
+  playerAiState.setLayoutBound(true);
 }
 
 function schedulePlayerAiQuickActionSync(delayMs = 120) {
   if (state.playerAi.playerAiQuickActionSyncTimer) {
     window.clearTimeout(state.playerAi.playerAiQuickActionSyncTimer);
   }
-  state.playerAi.playerAiQuickActionSyncTimer = window.setTimeout(() => {
-    state.playerAi.playerAiQuickActionSyncTimer = 0;
+  playerAiState.setSyncTimer(window.setTimeout(() => {
+    playerAiState.setSyncTimer(0);
     syncPlayerAiQuickActionButton();
-  }, delayMs);
+  }, delayMs));
 }
 
 function schedulePlayerAiQuickActionRetry() {
@@ -1972,15 +2030,15 @@ function syncPlayerAiQuickActionButton() {
 function removePlayerAiQuickActionButton() {
   if (state.playerAi.playerAiQuickActionRevealTimer) {
     window.clearTimeout(state.playerAi.playerAiQuickActionRevealTimer);
-    state.playerAi.playerAiQuickActionRevealTimer = 0;
+    playerAiState.setRevealTimer(0);
   }
   if (state.playerAi.playerAiQuickActionHideTimer) {
     window.clearTimeout(state.playerAi.playerAiQuickActionHideTimer);
-    state.playerAi.playerAiQuickActionHideTimer = 0;
+    playerAiState.setHideTimer(0);
   }
   if (state.playerAi.playerAiQuickActionCursorHideTimer) {
     window.clearTimeout(state.playerAi.playerAiQuickActionCursorHideTimer);
-    state.playerAi.playerAiQuickActionCursorHideTimer = 0;
+    playerAiState.setCursorHideTimer(0);
   }
   document.getElementById("boc-player-ai-quick-action")?.closest(".boc-player-ai-wrap")?.remove();
 }
@@ -1994,7 +2052,7 @@ function bindPlayerAiQuickActionCursorSync(wrap) {
     return;
   }
   const hideForIdle = () => {
-    state.playerAi.playerAiQuickActionCursorHideTimer = 0;
+    playerAiState.setCursorHideTimer(0);
     wrap.classList.remove("is-active");
   };
   const showForCursorActivity = () => {
@@ -2006,12 +2064,12 @@ function bindPlayerAiQuickActionCursorSync(wrap) {
     if (state.playerAi.playerAiQuickActionCursorHideTimer) {
       window.clearTimeout(state.playerAi.playerAiQuickActionCursorHideTimer);
     }
-    state.playerAi.playerAiQuickActionCursorHideTimer = window.setTimeout(hideForIdle, 1900);
+    playerAiState.setCursorHideTimer(window.setTimeout(hideForIdle, 1900));
   };
   const hideImmediately = () => {
     if (state.playerAi.playerAiQuickActionCursorHideTimer) {
       window.clearTimeout(state.playerAi.playerAiQuickActionCursorHideTimer);
-      state.playerAi.playerAiQuickActionCursorHideTimer = 0;
+      playerAiState.setCursorHideTimer(0);
     }
     wrap.classList.remove("is-active");
   };
@@ -2173,14 +2231,14 @@ async function handlePlayerAiQuickActionClick(event) {
     return;
   }
 
-  state.playerAi.playerAiQuickActionSubmitting = true;
+  playerAiState.setSubmitting(true);
   const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
   if (button) {
     button.disabled = true;
   }
 
   try {
-    state.settings = await getSettings();
+    state.setSettings(await getSettings());
     if (!state.settings?.enablePlayerAiQuickAction) {
       throw new Error("AI 按钮未开启");
     }
@@ -2192,7 +2250,7 @@ async function handlePlayerAiQuickActionClick(event) {
   } catch (error) {
     setMessage(`AI 快捷操作失败：${getErrorMessage(error)}`);
   } finally {
-    state.playerAi.playerAiQuickActionSubmitting = false;
+    playerAiState.setSubmitting(false);
     if (button) {
       button.disabled = false;
     }
@@ -2320,8 +2378,8 @@ function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll = false
   if (shouldScroll && state.reader.readingAutoScroll) {
     if (Date.now() < state.reader.readingManualScrollPauseUntil) {
       updateReaderFollowState();
-      state.reader.readingActiveSubtitleIndex = subtitleIndex;
-      state.reader.readingActiveChapterIndex = chapterIndex;
+      readerState.setActiveSubtitleIndex(subtitleIndex);
+      readerState.setActiveChapterIndex(chapterIndex);
       return;
     }
     if (nextTranscript) {
@@ -2332,8 +2390,8 @@ function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll = false
     }
   }
 
-  state.reader.readingActiveSubtitleIndex = subtitleIndex;
-  state.reader.readingActiveChapterIndex = chapterIndex;
+  readerState.setActiveSubtitleIndex(subtitleIndex);
+  readerState.setActiveChapterIndex(chapterIndex);
 }
 
 function scrollReadingRailItemIntoView(node) {
@@ -2364,7 +2422,7 @@ function scrollReadingTranscriptItemIntoView(node) {
 
   const behavior = state.reader.readingNextScrollBehavior === "auto" ? "auto" : "smooth";
   state.reader.readingProgrammaticScrollUntil = Date.now() + (behavior === "auto" ? 120 : 800);
-  state.reader.readingNextScrollBehavior = "smooth";
+  readerState.setNextScrollBehavior("smooth");
   if (state.reader.readingNativePageMode && inlineHost && inlineHost.scrollHeight > inlineHost.clientHeight + 8) {
     const hostRect = inlineHost.getBoundingClientRect();
     const computed = window.getComputedStyle(node);
@@ -2405,7 +2463,7 @@ function jumpReadingTarget(seconds) {
 
   const nextTime = Math.max(0, Number(seconds || 0) || 0);
   state.reader.readingManualScrollPauseUntil = 0;
-  state.reader.readingNextScrollBehavior = "auto";
+  readerState.setNextScrollBehavior("auto");
   updateReaderFollowState();
   video.currentTime = nextTime;
   if (video.paused) {
@@ -2846,7 +2904,7 @@ function bindReadingViewVideo(video = getRuntimeVideoElement()) {
         layoutReaderPlayerHost();
       }
       if (event?.type === "seeked") {
-        state.reader.readingNextScrollBehavior = "auto";
+        readerState.setNextScrollBehavior("auto");
         queueEnsureReaderPlayerControlsRecovered({
           reason: "seeked",
           delayMs: 140,
@@ -3347,7 +3405,7 @@ function bindSettingsWatcher() {
   if (state.ui.settingsWatcherBound || !chrome.storage?.onChanged) {
     return;
   }
-  state.ui.settingsWatcherBound = true;
+  uiState.setSettingsWatcherBound(true);
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "sync" && areaName !== "local") {
@@ -3369,7 +3427,7 @@ function bindSettingsWatcher() {
 
     getSettings()
       .then((settings) => {
-        state.settings = settings;
+        state.setSettings(settings);
         hydrateReaderStateFromSettings(settings);
         applyReadingViewPresentation();
         schedulePlayerAiQuickActionSync();
@@ -3410,8 +3468,8 @@ function renderReadingSubtitleSelect() {
 }
 async function enterReaderMode() {
   const readingView = byId(ids.readingView);
-  state.reader.readingViewOpen = true;
-  state.reader.readingNativePageMode = true;
+  readerState.setViewOpen(true);
+  readerState.setNativePageMode(true);
   document.body.setAttribute("data-boc-reading-active", "1");
   hydrateReaderStateFromSettings(state.settings);
   applyReadingViewPresentation();
@@ -3528,13 +3586,13 @@ function settleReaderModePresentation() {
 
 function closeReadingView() {
   cleanupReaderFloatingArtifacts();
-  state.reader.readingViewOpen = false;
-  state.reader.readingNativePageMode = false;
-  state.reader.readingViewReady = false;
-  state.reader.readingSettingsExpanded = false;
+  readerState.setViewOpen(false);
+  readerState.setNativePageMode(false);
+  readerState.setViewReady(false);
+  readerState.setSettingsExpanded(false);
   state.reader.readingManualScrollPauseUntil = 0;
   state.reader.readingProgrammaticScrollUntil = 0;
-  state.reader.readingNextScrollBehavior = "smooth";
+  readerState.setNextScrollBehavior("smooth");
   if (state.reader.readingPlayerRetryTimer) {
     window.clearTimeout(state.reader.readingPlayerRetryTimer);
     state.reader.readingPlayerRetryTimer = 0;
@@ -3653,8 +3711,8 @@ function renderReadingView() {
   renderReaderPanels();
   applyReadingViewPresentation();
   updateReadingTranscriptTailSpacer();
-  state.reader.readingActiveSubtitleIndex = -1;
-  state.reader.readingActiveChapterIndex = -1;
+  readerState.setActiveSubtitleIndex(-1);
+  readerState.setActiveChapterIndex(-1);
 }
 
 function updateReadingTranscriptTailSpacer() {
@@ -3670,13 +3728,13 @@ function updateReadingTranscriptTailSpacer() {
 }
 
 function hydrateReaderStateFromSettings(settings = state.settings) {
-  state.reader.readingTheme = normalizeReaderTheme(settings?.readerTheme);
-  state.reader.readingFontScale = normalizeReaderFontScale(settings?.readerFontScale);
-  state.reader.readingLetterSpacing = normalizeReaderLetterSpacing(settings?.readerLetterSpacing ?? settings?.readerLineHeight);
-  state.reader.readingLineHeight = normalizeReaderLineHeight(settings?.readerLineHeight);
-  state.reader.readingContentWidth = normalizeReaderContentWidth(settings?.readerContentWidth);
-  state.reader.readingChapterVisible = settings?.readerChapterVisible !== undefined ? Boolean(settings.readerChapterVisible) : true;
-  state.reader.readingTranscriptVisible = normalizeReaderTranscriptVisible(settings?.readerTranscriptVisible);
+  readerState.setTheme(normalizeReaderTheme(settings?.readerTheme));
+  readerState.setFontScale(normalizeReaderFontScale(settings?.readerFontScale));
+  readerState.setLetterSpacing(normalizeReaderLetterSpacing(settings?.readerLetterSpacing ?? settings?.readerLineHeight));
+  readerState.setLineHeight(normalizeReaderLineHeight(settings?.readerLineHeight));
+  readerState.setContentWidth(normalizeReaderContentWidth(settings?.readerContentWidth));
+  readerState.setChapterVisible(settings?.readerChapterVisible !== undefined ? Boolean(settings.readerChapterVisible) : true);
+  readerState.setTranscriptVisible(normalizeReaderTranscriptVisible(settings?.readerTranscriptVisible));
 }
 
 function applyReadingViewPresentation() {
@@ -3928,18 +3986,18 @@ function buildReadingSummaryItems() {
 }
 
 function updateReaderPreferences(next, { persist = true } = {}) {
-  state.reader.readingTheme = normalizeReaderTheme(next.readerTheme ?? state.reader.readingTheme);
-  state.reader.readingFontScale = normalizeReaderFontScale(next.readerFontScale ?? state.reader.readingFontScale);
-  state.reader.readingLetterSpacing = normalizeReaderLetterSpacing(
-    next.readerLetterSpacing ?? state.reader.readingLetterSpacing
+  readerState.setTheme(normalizeReaderTheme(next.readerTheme ?? state.reader.readingTheme));
+  readerState.setFontScale(normalizeReaderFontScale(next.readerFontScale ?? state.reader.readingFontScale));
+  readerState.setLetterSpacing(
+    normalizeReaderLetterSpacing(next.readerLetterSpacing ?? state.reader.readingLetterSpacing)
   );
-  state.reader.readingLineHeight = normalizeReaderLineHeight(next.readerLineHeight ?? state.reader.readingLineHeight);
-  state.reader.readingContentWidth = normalizeReaderContentWidth(next.readerContentWidth ?? state.reader.readingContentWidth);
-  state.reader.readingChapterVisible = next.readerChapterVisible !== undefined ? Boolean(next.readerChapterVisible) : state.reader.readingChapterVisible;
-  state.reader.readingTranscriptVisible = normalizeReaderTranscriptVisible(
-    next.readerTranscriptVisible ?? state.reader.readingTranscriptVisible
+  readerState.setLineHeight(normalizeReaderLineHeight(next.readerLineHeight ?? state.reader.readingLineHeight));
+  readerState.setContentWidth(normalizeReaderContentWidth(next.readerContentWidth ?? state.reader.readingContentWidth));
+  readerState.setChapterVisible(next.readerChapterVisible !== undefined ? Boolean(next.readerChapterVisible) : state.reader.readingChapterVisible);
+  readerState.setTranscriptVisible(
+    normalizeReaderTranscriptVisible(next.readerTranscriptVisible ?? state.reader.readingTranscriptVisible)
   );
-  state.settings = {
+  state.setSettings({
     ...state.settings,
     readerTheme: state.reader.readingTheme,
     readerFontScale: state.reader.readingFontScale,
@@ -3948,7 +4006,7 @@ function updateReaderPreferences(next, { persist = true } = {}) {
     readerContentWidth: state.reader.readingContentWidth,
     readerChapterVisible: state.reader.readingChapterVisible,
     readerTranscriptVisible: state.reader.readingTranscriptVisible
-  };
+  });
   applyReadingViewPresentation();
   renderReaderPanels();
   if (persist) {
@@ -3989,7 +4047,7 @@ function renderReadingStatus(text) {
 }
 
 function setReadingViewReady(ready) {
-  state.reader.readingViewReady = Boolean(ready);
+  readerState.setViewReady(Boolean(ready));
   const readingView = document.getElementById(ids.readingView);
   if (!readingView) {
     return;
@@ -4252,7 +4310,7 @@ function bindNormalPageStateGuard() {
   if (state.ui.normalPageStateGuardBound) {
     return;
   }
-  state.ui.normalPageStateGuardBound = true;
+  uiState.setNormalPageStateGuardBound(true);
 
   const observer = new MutationObserver(() => {
     enforceNormalPageStateIfNeeded();
@@ -4903,9 +4961,9 @@ async function refreshDerivedContent({ refreshComments = false } = {}) {
       refreshComments || !Array.isArray(state.clip.hotComments) || state.clip.hotComments.length === 0;
     if (shouldFetchComments) {
       try {
-        state.clip.hotComments = await fetchHotComments(20);
+        clipState.setHotComments(await fetchHotComments(20));
       } catch (error) {
-        state.clip.hotComments = [];
+        clipState.setHotComments([]);
         logWarn("[BOC] failed to fetch hot comments for note export", error);
       }
     }
@@ -4941,7 +4999,7 @@ async function onSubtitleChange(event) {
 }
 
 async function copyMarkdown() {
-  state.settings = await getSettings();
+  state.setSettings(await getSettings());
   await refreshDerivedContent();
   if (!state.clip.markdown) {
     setMessage("没有可复制的内容，请先刷新抓取。");
@@ -4957,7 +5015,7 @@ async function copyMarkdown() {
 }
 
 async function downloadSubtitle() {
-  state.settings = await getSettings();
+  state.setSettings(await getSettings());
   rebuildDerivedContent();
   const format = normalizeDownloadFormat(state.settings?.downloadFormat);
   const content = format === "txt" ? state.clip.txt : state.clip.srt;
@@ -5018,15 +5076,15 @@ function getPopupPayload() {
 }
 
 function applyNoSubtitleState() {
-  state.clip.selectedSubtitleId = "";
-  state.clip.selectedSubtitleUrl = "";
-  state.clip.selectedSubtitleLang = "";
-  state.clip.subtitleBody = [];
-  state.clip.subtitleFetchState = "empty";
-  state.clip.hotComments = [];
-  state.clip.markdown = "";
-  state.clip.srt = "";
-  state.clip.txt = "";
+  clipState.setSelectedSubtitleId("");
+  clipState.setSelectedSubtitleUrl("");
+  clipState.setSelectedSubtitleLang("");
+  clipState.setSubtitleBody([]);
+  clipState.setSubtitleFetchState("empty");
+  clipState.setHotComments([]);
+  clipState.setMarkdown("");
+  clipState.setSrt("");
+  clipState.setTxt("");
   byId(ids.preview).value = "";
 }
 
@@ -5209,7 +5267,7 @@ function bindUiEvents() {
     closeReadingView();
   });
   readingAutoScroll.addEventListener("change", (event) => {
-    state.reader.readingAutoScroll = Boolean(event.target.checked);
+    readerState.setAutoScroll(Boolean(event.target.checked));
     if (state.reader.readingAutoScroll) {
       state.reader.readingManualScrollPauseUntil = 0;
       syncReadingViewPlayback(true);
@@ -5239,11 +5297,11 @@ function bindUiEvents() {
   });
   readingSettingsToggleBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    state.reader.readingSettingsExpanded = !state.reader.readingSettingsExpanded;
+    readerState.setSettingsExpanded(!state.reader.readingSettingsExpanded);
     renderReaderPanels();
   });
   readingDescriptionBtn.addEventListener("click", () => {
-    state.reader.readingDescriptionExpanded = !state.reader.readingDescriptionExpanded;
+    readerState.setDescriptionExpanded(!state.reader.readingDescriptionExpanded);
     renderReadingInfoPanel();
   });
   bindReaderStepperControl(readingFontScaleSelect, "readerFontScale");
@@ -5276,7 +5334,7 @@ function bindUiEvents() {
         return;
       }
       if (!settingsPanel.contains(e.target) && !settingsBtnEl.contains(e.target)) {
-        state.reader.readingSettingsExpanded = false;
+        readerState.setSettingsExpanded(false);
         renderReaderPanels();
       }
     });
@@ -5307,7 +5365,7 @@ function ensureUiReady({ forceRecreate = false } = {}) {
   const existingRoot = document.getElementById(ids.root);
   if (existingRoot && forceRecreate) {
     existingRoot.remove();
-    state.ui.uiEventsBound = false;
+    uiState.setEventsBound(false);
   }
 
   let root = document.getElementById(ids.root);
@@ -5316,12 +5374,12 @@ function ensureUiReady({ forceRecreate = false } = {}) {
     root.id = ids.root;
     root.innerHTML = buildUiHtml();
     document.body.appendChild(root);
-    state.ui.uiEventsBound = false;
+    uiState.setEventsBound(false);
   }
 
   if (!state.ui.uiEventsBound) {
     bindUiEvents();
-    state.ui.uiEventsBound = true;
+    uiState.setEventsBound(true);
   }
 }
 
@@ -5381,7 +5439,7 @@ function setBusyState(disabled) {
 }
 
 function setStatus(text) {
-  state.ui.statusText = String(text || "");
+  uiState.setStatusText(String(text || ""));
   byId(ids.status).textContent = state.ui.statusText;
 }
 
@@ -5567,33 +5625,33 @@ async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh) {
 }
 
 function resetClipState() {
-  state.clip.bvid = "";
-  state.clip.aid = "";
-  state.clip.cid = "";
-  state.clip.cidSource = "";
-  state.clip.pageIndex = 1;
-  state.clip.pageCount = 0;
-  state.clip.pageTitle = "";
-  state.clip.videoDuration = 0;
-  state.clip.description = "";
-  state.clip.title = "";
-  state.clip.author = "";
-  state.clip.uploadDate = "";
-  state.clip.subtitles = [];
-  state.clip.selectedSubtitleId = "";
-  state.clip.selectedSubtitleUrl = "";
-  state.clip.selectedSubtitleLang = "";
-  state.clip.subtitleBody = [];
-  state.clip.subtitleFetchState = "idle";
-  state.clip.chapters = [];
-  state.clip.hotComments = [];
-  state.clip.markdown = "";
-  state.clip.srt = "";
-  state.clip.txt = "";
-  state.clip.currentClipSignature = computeCurrentClipSignature();
+  clipState.setBvid("");
+  clipState.setAid("");
+  clipState.setCid("");
+  clipState.setCidSource("");
+  clipState.setPageIndex(1);
+  clipState.setPageCount(0);
+  clipState.setPageTitle("");
+  clipState.setVideoDuration(0);
+  clipState.setDescription("");
+  clipState.setTitle("");
+  clipState.setAuthor("");
+  clipState.setUploadDate("");
+  clipState.setSubtitles([]);
+  clipState.setSelectedSubtitleId("");
+  clipState.setSelectedSubtitleUrl("");
+  clipState.setSelectedSubtitleLang("");
+  clipState.setSubtitleBody([]);
+  clipState.setSubtitleFetchState("idle");
+  clipState.setChapters([]);
+  clipState.setHotComments([]);
+  clipState.setMarkdown("");
+  clipState.setSrt("");
+  clipState.setTxt("");
+  clipState.setCurrentClipSignature(computeCurrentClipSignature());
   stopReadingViewSync();
-  state.reader.readingActiveSubtitleIndex = -1;
-  state.reader.readingActiveChapterIndex = -1;
+  readerState.setActiveSubtitleIndex(-1);
+  readerState.setActiveChapterIndex(-1);
   state.reader.readingVideoEl = null;
   stopReaderPlayerObserver();
 
@@ -5608,19 +5666,20 @@ function resetClipState() {
 }
 
 async function refreshClip() {
-  const runId = ++state.clip.fetchRunId;
+  const runId = state.clip.fetchRunId + 1;
+  clipState.setFetchRunId(runId);
   try {
     setBusyState(true);
     setMessage("");
     setStatus("正在抓取视频信息...");
-    state.clip.subtitleFetchState = "loading";
+    clipState.setSubtitleFetchState("loading");
     if (state.reader.readingViewOpen) {
       renderReadingView();
     }
-    state.settings = await getSettings();
+    state.setSettings(await getSettings());
     ensureRunActive(runId);
 
-    state.clip.bvid = extractBvid(location.href);
+    clipState.setBvid(extractBvid(location.href));
     if (!state.clip.bvid) {
       throw new Error("当前页面不是标准 BV 视频地址，无法抓取字幕。");
     }
@@ -5638,13 +5697,13 @@ async function refreshClip() {
       pagesCount: (meta.pages || []).length
     });
 
-    state.clip.aid = meta.aid || "";
-    state.clip.title = meta.title || readVideoTitle();
-    state.clip.author = meta.author || readVideoAuthor();
-    state.clip.uploadDate = meta.uploadDate || readUploadDate();
-    state.clip.description = meta.description || readVideoDescription();
-    state.clip.pageCount = Array.isArray(meta.pages) ? meta.pages.length : 0;
-    state.clip.currentClipSignature = computeCurrentClipSignature();
+    clipState.setAid(meta.aid || "");
+    clipState.setTitle(meta.title || readVideoTitle());
+    clipState.setAuthor(meta.author || readVideoAuthor());
+    clipState.setUploadDate(meta.uploadDate || readUploadDate());
+    clipState.setDescription(meta.description || readVideoDescription());
+    clipState.setPageCount(Array.isArray(meta.pages) ? meta.pages.length : 0);
+    clipState.setCurrentClipSignature(computeCurrentClipSignature());
     let resolvedPageIndex = pageIndex;
     if ((meta.pages || []).length > 1 && !hasPageParam) {
       const pageIndexFromOid = pickPageIndexFromOid(meta.pages, oid, {
@@ -5667,13 +5726,13 @@ async function refreshClip() {
     }
 
     const currentPage = pickPageFromPages(meta.pages, resolvedPageIndex);
-    state.clip.pageIndex = resolvedPageIndex;
-    state.clip.pageTitle = currentPage?.part || "";
-    state.clip.cid = currentPage?.cid || pickCidFromPages(meta.pages, resolvedPageIndex, meta.defaultCid);
-    state.clip.cidSource = "meta-pages";
-    state.clip.videoDuration = pickDurationFromPages(meta.pages, resolvedPageIndex, meta.defaultDuration);
+    clipState.setPageIndex(resolvedPageIndex);
+    clipState.setPageTitle(currentPage?.part || "");
+    clipState.setCid(currentPage?.cid || pickCidFromPages(meta.pages, resolvedPageIndex, meta.defaultCid));
+    clipState.setCidSource("meta-pages");
+    clipState.setVideoDuration(pickDurationFromPages(meta.pages, resolvedPageIndex, meta.defaultDuration));
     if (!(state.clip.videoDuration > 0)) {
-      state.clip.videoDuration = readRuntimeVideoDuration();
+      clipState.setVideoDuration(readRuntimeVideoDuration());
     }
     if (!(state.clip.videoDuration > 0)) {
       throw new Error("无法获取当前视频时长，已停止抓取以避免串到错误字幕。");
@@ -5696,8 +5755,8 @@ async function refreshClip() {
       500
     );
     ensureRunActive(runId);
-    state.clip.subtitles = normalizeSubtitleTracks(subtitleBundle.tracks);
-    state.clip.chapters = normalizeChapters(subtitleBundle.chapters);
+    clipState.setSubtitles(normalizeSubtitleTracks(subtitleBundle.tracks));
+    clipState.setChapters(normalizeChapters(subtitleBundle.chapters));
     logInfo(
       "[BOC] chapters",
       state.clip.chapters.map((item) => ({
@@ -5776,8 +5835,8 @@ async function refreshClip() {
         500
       );
       ensureRunActive(runId);
-      state.clip.subtitles = normalizeSubtitleTracks(subtitleBundle.tracks);
-      state.clip.chapters = normalizeChapters(subtitleBundle.chapters);
+      clipState.setSubtitles(normalizeSubtitleTracks(subtitleBundle.tracks));
+      clipState.setChapters(normalizeChapters(subtitleBundle.chapters));
       const retryPreferred = pickPreferredSubtitle(state.clip.subtitles, {
         previousId: preferred.id,
         previousUrl: preferred.subtitleUrl,
@@ -5797,7 +5856,7 @@ async function refreshClip() {
         lanDoc: selected.lanDoc
       });
     }
-    state.clip.subtitleFetchState = "ready";
+    clipState.setSubtitleFetchState("ready");
     renderMeta();
     renderSubtitleSelect();
     if (state.reader.readingViewOpen) {
@@ -5813,9 +5872,9 @@ async function refreshClip() {
     if (isStaleRunError(error)) {
       return;
     }
-    state.clip.subtitleFetchState = "error";
+    clipState.setSubtitleFetchState("error");
     resetClipState();
-    state.clip.subtitleFetchState = "error";
+    clipState.setSubtitleFetchState("error");
     if (state.reader.readingViewOpen) {
       renderReadingView();
     }
@@ -5859,11 +5918,11 @@ async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, subtitleId
       } else {
         logInfo("[BOC] using cached subtitle", { cacheKey, itemCount: cachedBody.length });
         ensureRunActive(runId);
-        state.clip.selectedSubtitleId = subtitleId ? String(subtitleId) : state.clip.selectedSubtitleId;
-        state.clip.selectedSubtitleUrl = url;
-        state.clip.selectedSubtitleLang = lang;
-        state.clip.subtitleBody = cachedBody;
-        state.clip.subtitleFetchState = "ready";
+        clipState.setSelectedSubtitleId(subtitleId ? String(subtitleId) : state.clip.selectedSubtitleId);
+        clipState.setSelectedSubtitleUrl(url);
+        clipState.setSelectedSubtitleLang(lang);
+        clipState.setSubtitleBody(cachedBody);
+        clipState.setSubtitleFetchState("ready");
         await refreshDerivedContent();
         if (state.reader.readingViewOpen) {
           renderReadingView();
@@ -5892,11 +5951,11 @@ async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, subtitleId
   // 存入缓存
   await saveSubtitleToCache(cacheKey, body);
 
-  state.clip.selectedSubtitleId = subtitleId ? String(subtitleId) : state.clip.selectedSubtitleId;
-  state.clip.selectedSubtitleUrl = url;
-  state.clip.selectedSubtitleLang = lang;
-  state.clip.subtitleBody = body;
-  state.clip.subtitleFetchState = "ready";
+  clipState.setSelectedSubtitleId(subtitleId ? String(subtitleId) : state.clip.selectedSubtitleId);
+  clipState.setSelectedSubtitleUrl(url);
+  clipState.setSelectedSubtitleLang(lang);
+  clipState.setSubtitleBody(body);
+  clipState.setSubtitleFetchState("ready");
   await refreshDerivedContent();
   if (state.reader.readingViewOpen) {
     renderReadingView();
@@ -5974,8 +6033,8 @@ function replaceReaderModeUrl(nextUrl) {
 
   try {
     history.replaceState(history.state, "", targetUrl);
-    state.clip.currentUrl = location.href;
-    state.clip.currentClipSignature = computeCurrentClipSignature(location.href);
+    clipState.setCurrentUrl(location.href);
+    clipState.setCurrentClipSignature(computeCurrentClipSignature(location.href));
   } catch (error) {
     if (shouldDebugLog()) {
       console.warn("[BOC] failed to replace reader mode url", error);
@@ -5987,7 +6046,7 @@ function startUrlWatcher() {
   if (state.ui.urlWatcherStarted) {
     return;
   }
-  state.ui.urlWatcherStarted = true;
+  uiState.setUrlWatcherStarted(true);
 
   window.setInterval(() => {
     const nextUrl = location.href;
@@ -5996,8 +6055,8 @@ function startUrlWatcher() {
       return;
     }
 
-    state.clip.currentUrl = nextUrl;
-    state.clip.currentClipSignature = nextSignature;
+    clipState.setCurrentUrl(nextUrl);
+    clipState.setCurrentClipSignature(nextSignature);
     enforceNormalPageStateIfNeeded(nextUrl);
     ensureUiReady();
     resetClipState();
@@ -6096,7 +6155,7 @@ function bindRuntimeEvents() {
   if (state.ui.runtimeEventsBound) {
     return;
   }
-  state.ui.runtimeEventsBound = true;
+  uiState.setRuntimeEventsBound(true);
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || typeof message !== "object") {
@@ -6139,7 +6198,7 @@ function bindRuntimeEvents() {
     }
 
     if (message.type === "popup-trigger-reading-view") {
-      state.playerAi.playerAiQuickActionSuppressedUntil = Date.now() + 2500;
+      playerAiState.setSuppressedUntil(Date.now() + 2500);
       removePlayerAiQuickActionButton();
       ensureUiReady();
       const readerUrl = String(message.readerUrl || "").trim();
@@ -6202,18 +6261,18 @@ function bindRuntimeEvents() {
       }
 
       if (!getCurrentAid()) {
-        state.clip.hotComments = [];
+        clipState.setHotComments([]);
         sendResponse({ ok: true, comments: [], note: "无法获取视频 aid" });
         return false;
       }
 
       fetchHotComments(count)
         .then((hotComments) => {
-          state.clip.hotComments = hotComments;
+          clipState.setHotComments(hotComments);
           sendResponse({ ok: true, comments: hotComments });
         })
         .catch((error) => {
-          state.clip.hotComments = [];
+          clipState.setHotComments([]);
           sendResponse({ ok: true, comments: [], note: String(error?.message || error) });
         });
       return true;
@@ -6234,7 +6293,7 @@ function bindRuntimeEvents() {
       }
       if (state.reader.readingViewOpen) {
         state.reader.readingManualScrollPauseUntil = 0;
-        state.reader.readingNextScrollBehavior = "auto";
+        readerState.setNextScrollBehavior("auto");
         updateReaderFollowState();
         syncReadingViewPlayback(true);
       }
@@ -6299,7 +6358,7 @@ function init() {
   bindPlayerAiQuickActionLayoutEvents();
   startUrlWatcher();
   getSettings().then((settings) => {
-    state.settings = settings;
+    state.setSettings(settings);
     hydrateReaderStateFromSettings(settings);
     applyReadingViewPresentation();
     startPlayerAiQuickActionObserver();

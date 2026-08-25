@@ -1,5 +1,5 @@
 import { setMessage } from "./message.js";
-import { state } from "./state.js";
+import { state, uiState, readerState } from "./state.js";
 import {
   byId,
   requestOpenOptions,
@@ -214,7 +214,7 @@ export function bindUiEvents() {
     closeReadingView();
   });
   readingAutoScroll.addEventListener("change", (event) => {
-    state.reader.readingAutoScroll = Boolean(event.target.checked);
+    readerState.setAutoScroll(Boolean(event.target.checked));
     if (state.reader.readingAutoScroll) {
       state.reader.readingManualScrollPauseUntil = 0;
       syncReadingViewPlayback(true);
@@ -244,11 +244,11 @@ export function bindUiEvents() {
   });
   readingSettingsToggleBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    state.reader.readingSettingsExpanded = !state.reader.readingSettingsExpanded;
+    readerState.setSettingsExpanded(!state.reader.readingSettingsExpanded);
     renderReaderPanels();
   });
   readingDescriptionBtn.addEventListener("click", () => {
-    state.reader.readingDescriptionExpanded = !state.reader.readingDescriptionExpanded;
+    readerState.setDescriptionExpanded(!state.reader.readingDescriptionExpanded);
     renderReadingInfoPanel();
   });
   bindReaderStepperControl(readingFontScaleSelect, "readerFontScale");
@@ -281,7 +281,7 @@ export function bindUiEvents() {
         return;
       }
       if (!settingsPanel.contains(e.target) && !settingsBtnEl.contains(e.target)) {
-        state.reader.readingSettingsExpanded = false;
+        readerState.setSettingsExpanded(false);
         renderReaderPanels();
       }
     });
@@ -312,7 +312,7 @@ export function ensureUiReady({ forceRecreate = false } = {}) {
   const existingRoot = document.getElementById(ids.root);
   if (existingRoot && forceRecreate) {
     existingRoot.remove();
-    state.ui.uiEventsBound = false;
+    uiState.setEventsBound(false);
   }
 
   let root = document.getElementById(ids.root);
@@ -321,12 +321,12 @@ export function ensureUiReady({ forceRecreate = false } = {}) {
     root.id = ids.root;
     root.innerHTML = buildUiHtml();
     document.body.appendChild(root);
-    state.ui.uiEventsBound = false;
+    uiState.setEventsBound(false);
   }
 
   if (!state.ui.uiEventsBound) {
     bindUiEvents();
-    state.ui.uiEventsBound = true;
+    uiState.setEventsBound(true);
   }
 }
 
@@ -386,6 +386,6 @@ export function setBusyState(disabled) {
 }
 
 export function setStatus(text) {
-  state.ui.statusText = String(text || "");
+  uiState.setStatusText(String(text || ""));
   byId(ids.status).textContent = state.ui.statusText;
 }

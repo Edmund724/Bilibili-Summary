@@ -6,7 +6,7 @@ import { cleanVideoUrl } from "./url-utils.js";
 import { getSettings, byId } from "./runtime.js";
 import { getErrorMessage, isStaleRunError } from "./error-helpers.js";
 import { DEFAULT_SETTINGS, normalizeDownloadFormat } from "./shared-defaults.js";
-import { state } from "./state.js";
+import { state, clipState } from "./state.js";
 import { setMessage } from "./message.js";
 import { ids } from "./reader-shell.js";
 import { refreshDerivedContent } from "./note-build.js";
@@ -39,7 +39,7 @@ export async function onSubtitleChange(event) {
 }
 
 export async function copyMarkdown() {
-  state.settings = await getSettings();
+  state.setSettings(await getSettings());
   await refreshDerivedContent();
   if (!state.clip.markdown) {
     setMessage("没有可复制的内容，请先刷新抓取。");
@@ -55,7 +55,7 @@ export async function copyMarkdown() {
 }
 
 export async function downloadSubtitle() {
-  state.settings = await getSettings();
+  state.setSettings(await getSettings());
   rebuildDerivedContent();
   const format = normalizeDownloadFormat(state.settings?.downloadFormat);
   const content = format === "txt" ? state.clip.txt : state.clip.srt;
@@ -116,15 +116,15 @@ export function getPopupPayload() {
 }
 
 export function applyNoSubtitleState() {
-  state.clip.selectedSubtitleId = "";
-  state.clip.selectedSubtitleUrl = "";
-  state.clip.selectedSubtitleLang = "";
-  state.clip.subtitleBody = [];
-  state.clip.subtitleFetchState = "empty";
-  state.clip.hotComments = [];
-  state.clip.markdown = "";
-  state.clip.srt = "";
-  state.clip.txt = "";
+  clipState.setSelectedSubtitleId("");
+  clipState.setSelectedSubtitleUrl("");
+  clipState.setSelectedSubtitleLang("");
+  clipState.setSubtitleBody([]);
+  clipState.setSubtitleFetchState("empty");
+  clipState.setHotComments([]);
+  clipState.setMarkdown("");
+  clipState.setSrt("");
+  clipState.setTxt("");
   byId(ids.preview).value = "";
 }
 
