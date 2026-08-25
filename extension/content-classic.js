@@ -449,38 +449,13 @@ const state = stateTarget;
 
 { state, readerState, clipState, playerAiState, uiState };
 
-// === url-utils.js ===
-function isReaderMode(url = location.href) {
-  try {
-    return new URL(url).searchParams.get("boc_reader") === "1";
-  } catch {
-    return false;
-  }
-}
+// === video-id-shared.js ===
+// Shared pure URL / video-identity helpers (issue 02).
+// Extracted from extension/url-utils.js and extension/background.js.
+// These functions are pure, deterministic computations over a URL string.
+// They must NOT contain any transport logic, Chrome APIs, DOM, or `state`.
 
-function stripReaderModeUrl(url = location.href) {
-  try {
-    const parsed = new URL(url);
-    parsed.searchParams.delete("boc_reader");
-    return parsed.toString();
-  } catch {
-    return url;
-  }
-}
-
-function isWatchlaterPage(url = location.href) {
-  try {
-    return new URL(url).pathname.replace(/\/+$/, "") === "/list/watchlater";
-  } catch {
-    return false;
-  }
-}
-
-function computeCurrentClipSignature(url = location.href) {
-  const bvid = extractBvid(url);
-  const page = extractPageIndex(url);
-  return [bvid, page].map((item) => String(item || "").trim()).join("|");
-}
+// ===== from extension/url-utils.js =====
 
 function extractBvid(url) {
   const match = url.match(/\/video\/(BV[0-9A-Za-z]+)/);
@@ -538,6 +513,69 @@ function extractPageIndex(url) {
   } catch {
     return 1;
   }
+}
+
+// ===== from extension/background.js =====
+
+function extractBvidFromUrl(url) {
+  const text = String(url || "").trim();
+  const match = text.match(/\/video\/(BV[0-9A-Za-z]+)/i) || text.match(/[?&]bvid=(BV[0-9A-Za-z]+)/i);
+  return match?.[1] || "";
+}
+
+function extractPageIndexFromUrl(url) {
+  try {
+    const page = Number(new URL(String(url || "")).searchParams.get("p") || "1");
+    return Number.isFinite(page) && page > 0 ? page : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function buildCanonicalVideoUrl(bvid, pageIndex = 1) {
+  const safeBvid = String(bvid || "").trim();
+  if (!safeBvid) {
+    return "";
+  }
+  if (Number(pageIndex) > 1) {
+    return `https://www.bilibili.com/video/${safeBvid}/?p=${Number(pageIndex)}`;
+  }
+  return `https://www.bilibili.com/video/${safeBvid}/`;
+}
+
+// === url-utils.js ===
+{ extractBvid, extractPageIndex, cleanVideoUrl };
+
+function isReaderMode(url = location.href) {
+  try {
+    return new URL(url).searchParams.get("boc_reader") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function stripReaderModeUrl(url = location.href) {
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.delete("boc_reader");
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function isWatchlaterPage(url = location.href) {
+  try {
+    return new URL(url).pathname.replace(/\/+$/, "") === "/list/watchlater";
+  } catch {
+    return false;
+  }
+}
+
+function computeCurrentClipSignature(url = location.href) {
+  const bvid = extractBvid(url);
+  const page = extractPageIndex(url);
+  return [bvid, page].map((item) => String(item || "").trim()).join("|");
 }
 
 // === message.js ===
@@ -1136,7 +1174,20 @@ function getRuntimeVideoElement() {
   return visible?.item || candidates[0] || null;
 }
 
-// === bili-api.js ===
+// === bili-api-shared.js ===
+// extension/bili-api-shared.js
+// Pure B站 (Bilibili) API primitives shared between the content-script side
+// and the background service worker. This module centralizes reusable request
+// builders, response mappers, and error helpers so both sides reuse the same
+// API primitives and avoid behavior drift.
+//
+// Contains ONLY pure functions. It has NO transport logic (no fetch, no
+// sendRuntimeMessage, no Chrome/browser APIs) and does NOT touch `state`,
+// `getRuntimeVideoElement`, `window`, or the DOM.
+
+
+
+
 function normalizeHotComments(comments, limit = 20) {
   if (!Array.isArray(comments)) {
     return [];
@@ -1200,6 +1251,9 @@ function isRetryableError(code) {
   // 其他负数错误码也可能是临时性的
   return code === -509 || code === -3 || code < 0;
 }
+
+// === bili-api.js ===
+{ normalizeHotComments, buildSubtitleInfoRequests, buildBiliApiError, isRetryableError };
 
 
 function readRuntimeVideoDuration() {

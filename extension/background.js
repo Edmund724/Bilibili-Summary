@@ -31,7 +31,8 @@ import {
 } from "./shared-defaults.js";
 import { formatCompactTimestamp } from "./string-utils.js";
 import { normalizeSubtitleUrlForCache } from "./subtitle-cache.js";
-import { buildSubtitleInfoRequests } from "./bili-api.js";
+import { buildSubtitleInfoRequests } from "./bili-api-shared.js";
+import { extractBvidFromUrl, extractPageIndexFromUrl, buildCanonicalVideoUrl } from "./video-id-shared.js";
 import {
   normalizeChapters,
   subtitlePriority,
@@ -646,34 +647,6 @@ function normalizeAiContextRef(ref) {
     selectedSubtitleUrl: String(value.selectedSubtitleUrl || "").trim(),
     isVideoContext: value.isVideoContext !== false
   };
-}
-
-function extractBvidFromUrl(url) {
-  const text = String(url || "").trim();
-  const match = text.match(/\/video\/(BV[0-9A-Za-z]+)/i) || text.match(/[?&]bvid=(BV[0-9A-Za-z]+)/i);
-  return match?.[1] || "";
-}
-
-
-
-function extractPageIndexFromUrl(url) {
-  try {
-    const page = Number(new URL(String(url || "")).searchParams.get("p") || "1");
-    return Number.isFinite(page) && page > 0 ? page : 1;
-  } catch {
-    return 1;
-  }
-}
-
-function buildCanonicalVideoUrl(bvid, pageIndex = 1) {
-  const safeBvid = String(bvid || "").trim();
-  if (!safeBvid) {
-    return "";
-  }
-  if (Number(pageIndex) > 1) {
-    return `https://www.bilibili.com/video/${safeBvid}/?p=${Number(pageIndex)}`;
-  }
-  return `https://www.bilibili.com/video/${safeBvid}/`;
 }
 
 function createBiliHeaders(url) {

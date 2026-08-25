@@ -4,11 +4,13 @@ import { logInfo, logWarn } from "./reader-shell.js";
 import { state } from "./state.js";
 import {
   fetchJson,
-  buildBiliApiError,
   fetchSubtitleBody,
-  buildSubtitleInfoRequests,
   readRuntimeVideoDuration
 } from "./bili-api.js";
+import {
+  buildSubtitleInfoRequests,
+  buildBiliApiError
+} from "./bili-api-shared.js";
 import {
   buildSubtitleSourceKey,
   clearSubtitleCacheByKey,

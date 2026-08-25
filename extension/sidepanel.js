@@ -21,6 +21,7 @@ import {
   extractPageIndexFromContextUrl
 } from "./conversation.js";
 import { escapeHtml, sanitizeFileName } from "./string-utils.js";
+import { extractBvidFromUrl } from "./video-id-shared.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
@@ -1589,12 +1590,6 @@ function buildCleanBilibiliVideoUrl(context) {
     return `https://www.bilibili.com/video/${bvid}/`;
   }
   return String(context?.url || currentConversationMeta?.contextUrl || "").trim();
-}
-
-function extractBvidFromUrl(url) {
-  const text = String(url || "").trim();
-  const match = text.match(/\/video\/(BV[0-9A-Za-z]+)/i) || text.match(/[?&]bvid=(BV[0-9A-Za-z]+)/i);
-  return match?.[1] || "";
 }
 
 function resolveFolderTemplate(template, context) {
