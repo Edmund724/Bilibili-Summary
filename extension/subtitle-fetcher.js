@@ -68,7 +68,8 @@ import {
   getSubtitleCacheKey
 } from "./subtitle-fetch.js";
 import {
-  fetchSubtitleBody
+  fetchSubtitleBody,
+  readRuntimeVideoDuration
 } from "./bili-api.js";
 import {
   readVideoDescription
