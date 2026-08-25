@@ -32,7 +32,11 @@ def prepare_release_dir(path: Path):
 
 
 def disable_firefox_player_ai_quick_action(release_folder: Path):
-    options_css = release_folder / "options.css"
+    # After the directory restructure, options.css lives under pages/ and the
+    # normalizeEnablePlayerAiQuickAction helper is defined in core/shared-defaults.js
+    # (the service worker in entry/background.js only imports it). Targeting the
+    # right files keeps the Firefox-only disable change from being silently skipped.
+    options_css = release_folder / "pages" / "options.css"
     if options_css.exists():
         with options_css.open("a", encoding="utf-8") as fh:
             fh.write(
@@ -40,14 +44,14 @@ def disable_firefox_player_ai_quick_action(release_folder: Path):
                 ".player-ai-quick-action-settings { display: none !important; }\n"
             )
 
-    background_js = release_folder / "background.js"
-    if background_js.exists():
-        source = background_js.read_text(encoding="utf-8")
+    shared_defaults_js = release_folder / "core" / "shared-defaults.js"
+    if shared_defaults_js.exists():
+        source = shared_defaults_js.read_text(encoding="utf-8")
         source = source.replace(
-            "function normalizeEnablePlayerAiQuickAction(value) {\n  return value === true;\n}",
-            "function normalizeEnablePlayerAiQuickAction(_value) {\n  return false;\n}",
+            "export function normalizeEnablePlayerAiQuickAction(value) {\n  return value === true;\n}",
+            "export function normalizeEnablePlayerAiQuickAction(_value) {\n  return false;\n}",
         )
-        background_js.write_text(source, encoding="utf-8")
+        shared_defaults_js.write_text(source, encoding="utf-8")
 
 
 def build_variant(manifest: dict, browser: str, version: str):
@@ -62,7 +66,7 @@ def build_variant(manifest: dict, browser: str, version: str):
         variant_manifest.pop("sidebar_action", None)
         background = variant_manifest.setdefault("background", {})
         background.pop("scripts", None)
-        background["service_worker"] = "background.js"
+        background["service_worker"] = "entry/background.js"
     elif browser == "firefox":
         gecko = variant_manifest.setdefault("browser_specific_settings", {}).setdefault("gecko", {})
         gecko.setdefault("id", "bilibili-summary@github.com")
@@ -78,12 +82,12 @@ def build_variant(manifest: dict, browser: str, version: str):
                 "32": "icons/icon32.png",
                 "48": "icons/icon48.png"
             },
-            "default_panel": "sidepanel.html",
+            "default_panel": "pages/sidepanel.html",
             "open_at_install": False
         }
         background = variant_manifest.setdefault("background", {})
         background.pop("service_worker", None)
-        background["scripts"] = ["background.js"]
+        background["scripts"] = ["entry/background.js"]
         disable_firefox_player_ai_quick_action(release_folder)
     else:
         raise ValueError(f"Unsupported browser: {browser}")

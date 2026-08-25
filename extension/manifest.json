@@ -24,7 +24,7 @@
     "https://*/*"
   ],
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "entry/background.js",
     "type": "module"
   },
   "icons": {
@@ -34,9 +34,9 @@
     "128": "icons/icon128.png"
   },
   "side_panel": {
-    "default_path": "sidepanel.html"
+    "default_path": "pages/sidepanel.html"
   },
-  "options_page": "options.html",
+  "options_page": "pages/options.html",
   "content_scripts": [
     {
       "matches": [
@@ -45,8 +45,8 @@
         "https://www.bilibili.com/list/watchlater/",
         "https://www.bilibili.com/list/watchlater/*"
       ],
-      "js": ["content-classic.js"],
-      "css": ["content.css"],
+      "js": ["entry/content-classic.js"],
+      "css": ["entry/content.css"],
       "run_at": "document_idle",
       "all_frames": true
     }
@@ -57,6 +57,6 @@
       "16": "icons/icon16.png",
       "32": "icons/icon32.png"
     },
-    "default_popup": "popup.html"
+    "default_popup": "pages/popup.html"
   }
 }

@@ -10,7 +10,7 @@ node_modules/
 /build/
 
 # Generated extension files
-/extension/content-classic.js
+/extension/entry/content-classic.js
 
 # Local agent / store assets
 AGENTS.md

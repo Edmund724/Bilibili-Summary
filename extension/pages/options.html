@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bilibili-Summary｜一键总结B站视频 设置</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Bilibili-Summary｜一键总结B站视频</h1>
+
+      <section class="quick-start">
+        <div class="quick-start-head">
+          <h2>配置指引</h2>
+          <p class="quick-links">
+            <a
+              href="https://www.bilibili.com/video/BV15qQwB4EZ9/?spm_id_from=333.1387.homepage.video_card.click&vd_source=040bc5ea7866b419558ec2682a2ccb59"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              视频教程
+            </a>
+            <span>·</span>
+            <a
+              href="https://github.com/Edmund724/Bilibili-Summary"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              GitHub 仓库地址
+            </a>
+          </p>
+        </div>
+        <ol>
+          <li>在本页上方的“AI 模型平台”区域，点击 <strong>+ 添加平台</strong>。</li>
+          <li>
+            填写平台名称、API Base URL、API Key 与模型名称。支持 OpenAI 兼容协议，例如
+            <code>OpenAI / DeepSeek / Qwen / GLM / Kimi / MiniMax / Mimo / Opencode Go / OpenRouter / Stepfun / ModelScope / Ollama</code> 等。
+          </li>
+          <li>
+            填写完成后，点击平台条目右侧的 <strong>测试</strong> 按钮验证配置；<strong>连接成功后会自动保存</strong>，无需再点击底部“保存设置”。若需手动保存全部设置，仍可使用底部按钮。
+          </li>
+        </ol>
+      </section>
+
+      <section class="field-group">
+        <h2>AI 模型平台</h2>
+        <p class="hint">支持 OpenAI 兼容协议（OpenAI / DeepSeek / Qwen / GLM / Kimi / MiniMax / Mimo / Opencode Go / OpenRouter / Stepfun / ModelScope / Ollama 等）。</p>
+        <div id="aiProvidersList" class="ai-providers-list"></div>
+        <p id="aiProvidersEmpty" class="ai-providers-empty">还没有配置平台，点击下方按钮添加。</p>
+        <button id="addAiProviderBtn" class="add-property-btn" type="button">+ 添加平台</button>
+        <div class="default-model-row">
+          <label for="defaultModel">默认模型</label>
+          <select id="defaultModel" class="default-model-select">
+            <option value="">未设置</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="field-group field-group-tight-bottom player-ai-quick-action-settings">
+        <h2>AI 按钮</h2>
+        <label class="checkbox">
+          <input id="enablePlayerAiQuickAction" type="checkbox" />
+          在视频播放器显示 AI 按钮，点击按照预设提示词调用 AI 对话，提示词可为空
+        </label>
+        <textarea
+          id="playerAiQuickPrompt"
+          class="settings-textarea"
+          placeholder="例如：整理这期视频的内容，输出结构化总结。"
+        ></textarea>
+      </section>
+
+      <section class="field-group field-group-tight-bottom">
+        <h2>AI 对话 - 系统提示词</h2>
+        <textarea id="aiSystemPrompt" class="settings-textarea" placeholder="例如：回答尽量简洁；优先总结视频观点；必要时引用字幕原话。"></textarea>
+      </section>
+
+      <section class="field-group field-group-tight-bottom">
+        <h2>AI 对话 - 初始问题</h2>
+        <p class="hint">新视频没有历史对话时显示，最多 4 条，留空则不显示。</p>
+        <div class="quick-prompts-grid">
+          <input class="ai-initial-quick-prompt" type="text" placeholder="快捷问题 1" />
+          <input class="ai-initial-quick-prompt" type="text" placeholder="快捷问题 2" />
+          <input class="ai-initial-quick-prompt" type="text" placeholder="快捷问题 3" />
+          <input class="ai-initial-quick-prompt" type="text" placeholder="快捷问题 4" />
+        </div>
+      </section>
+
+      <label for="tags">默认标签（逗号分隔）</label>
+      <input id="tags" type="text" placeholder="例如：clippings,bilibili,subtitle" />
+
+      <label for="downloadFormat">下载格式</label>
+      <select id="downloadFormat">
+        <option value="srt">SRT</option>
+        <option value="txt">TXT</option>
+      </select>
+
+      <label class="checkbox">
+        <input id="includeDateInFilename" type="checkbox" />
+        文件名前包含导出日期
+      </label>
+
+      <label class="checkbox">
+        <input id="includeHotCommentsInNote" type="checkbox" />
+        导出前 20 条热门评论
+      </label>
+
+      <label class="checkbox">
+        <input id="includeTimestampInBody" type="checkbox" />
+        在字幕正文中保留时间戳
+      </label>
+
+      <label class="checkbox">
+        <input id="enableDebugLogs" type="checkbox" />
+        启用调试日志（仅在排查问题时开启）
+      </label>
+
+      <section class="field-group">
+        <h2>笔记属性（Frontmatter）</h2>
+        <p class="hint">勾选需要写入到笔记属性区（Frontmatter）的字段。</p>
+        <div class="field-grid">
+          <label class="mini-checkbox"><input type="checkbox" name="frontmatterField" value="title" /> title</label>
+          <label class="mini-checkbox"><input type="checkbox" name="frontmatterField" value="url" /> url</label>
+          <label class="mini-checkbox"><input type="checkbox" name="frontmatterField" value="bvid" /> bvid</label>
+          <label class="mini-checkbox"><input type="checkbox" name="frontmatterField" value="cid" /> cid</label>
+          <label class="mini-checkbox"><input type="checkbox" name="frontmatterField" value="author" /> author</label>
+          <label class="mini-checkbox">
+            <input type="checkbox" name="frontmatterField" value="upload_date" /> upload_date
+          </label>
+          <label class="mini-checkbox">
+            <input type="checkbox" name="frontmatterField" value="subtitle_lang" /> subtitle_lang
+          </label>
+          <label class="mini-checkbox">
+            <input type="checkbox" name="frontmatterField" value="created" /> created
+          </label>
+          <label class="mini-checkbox"><input type="checkbox" name="frontmatterField" value="tags" /> tags</label>
+        </div>
+      </section>
+
+      <section class="field-group property-editor">
+        <h2>自定义属性</h2>
+        <p class="hint">支持默认属性的变量映射，比如 `{{upload_date}}`、`{{created}}`</p>
+        <div id="fixedPropertiesList" class="fixed-properties-list"></div>
+        <p id="fixedPropertiesEmpty" class="fixed-properties-empty">还没有自定义属性</p>
+        <button id="addFixedPropertyBtn" class="add-property-btn" type="button">+ 添加属性</button>
+      </section>
+
+      <section class="field-group property-editor">
+        <h2>正文附加段落</h2>
+        <p class="hint">在正文插入占位段落标题。默认结构：简介-章节-字幕；具体内容可留空。</p>
+        <div id="noteSectionsList" class="note-sections-list"></div>
+        <p id="noteSectionsEmpty" class="fixed-properties-empty">还没有正文附加段落</p>
+        <button id="addNoteSectionBtn" class="add-property-btn" type="button">+ 添加段落</button>
+      </section>
+
+      <div class="action-row">
+        <button id="saveBtn" type="button">保存设置</button>
+      </div>
+      <p id="status" class="status"></p>
+    </main>
+
+    <script type="module" src="../core/shared-defaults.js"></script>
+    <script type="module" src="./options.js"></script>
+  </body>
+</html>

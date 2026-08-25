@@ -3,15 +3,16 @@ const path = require("path");
 const { execFileSync } = require("child_process");
 const { build } = require("esbuild");
 
-const entry = path.join(__dirname, "..", "extension", "content.js");
-const outfile = path.join(__dirname, "..", "extension", "content-classic.js");
+const extensionRoot = path.join(__dirname, "..", "extension");
+const entry = path.join(extensionRoot, "entry", "content.js");
+const outfile = path.join(extensionRoot, "entry", "content-classic.js");
 
 // Version-consistency guard: fail fast before invoking esbuild if the
 // BOC_VERSION literal in extension/version.js drifts from manifest.json's
 // "version". This guards the runtime probe that compares
 // __BOC_CONTENT_SCRIPT_LOADED__ against chrome.runtime.getManifest().version.
 const manifestPath = path.join(__dirname, "..", "extension", "manifest.json");
-const versionJsPath = path.join(__dirname, "..", "extension", "version.js");
+const versionJsPath = path.join(__dirname, "..", "extension", "shared", "version.js");
 
 const manifestVersion = JSON.parse(fs.readFileSync(manifestPath, "utf8")).version;
 const versionJsText = fs.readFileSync(versionJsPath, "utf8");
@@ -29,6 +30,30 @@ if (!versionJsVersion || versionJsVersion !== manifestVersion) {
 const minify = process.env.BOC_MINIFY !== "0";
 const REQUIRED_MARKER = "__BOC_CONTENT_SCRIPT_LOADED__";
 
+// Guard: every resolved local (`./`/`../`) import must stay inside extension/.
+// Absolute and external (package) imports are left untouched. The guard lives
+// on the build object via esbuild's onResolve so it never rewrites paths, only
+// validates them as esbuild resolves them.
+const EXTENSION_ROOT = path.resolve(extensionRoot) + path.sep;
+const localImportGuard = {
+  name: "extension-local-import-guard",
+  setup(build) {
+    build.onResolve({ filter: /^\.\.?\// }, (args) => {
+      const resolved = path.resolve(args.resolveDir, args.path);
+      if (resolved.startsWith(EXTENSION_ROOT)) return undefined;
+      const relFromExtension = path.relative(extensionRoot, resolved);
+      return {
+        errors: [
+          {
+            text: `Import "${args.path}" in "${args.importer}" resolves to "${resolved}", ` +
+              `which is outside extension/ (${relFromExtension || resolved}).`,
+          },
+        ],
+      };
+    });
+  },
+};
+
 build({
   entryPoints: [entry],
   outfile,
@@ -36,6 +61,7 @@ build({
   format: "iife",
   platform: "browser",
   minify,
+  plugins: [localImportGuard],
 })
   .then(() => {
     // Grammar check: the IIFE output is a classic script, so `node --check`

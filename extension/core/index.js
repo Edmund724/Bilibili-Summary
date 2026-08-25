@@ -1,0 +1,45 @@
+export {
+  byId,
+  getSettings,
+  isExtensionContextInvalidated,
+  replaceReaderModeUrl,
+  requestOpenOptions,
+  sendRuntimeMessage,
+  startUrlWatcher
+} from "./runtime.js";
+export { clipState, playerAiState, readerState, state, uiState } from "./state.js";
+export {
+  DEFAULT_AI_SYSTEM_PROMPT,
+  DEFAULT_INITIAL_QUICK_PROMPTS,
+  DEFAULT_PLAYER_AI_QUICK_PROMPT,
+  DEFAULT_PRESET_PROMPTS,
+  DEFAULT_SETTINGS,
+  PLAYER_AI_QUICK_ACTION_STORAGE_KEY,
+  PRESETS,
+  formatLocalDate,
+  getPresetById,
+  isFixedPropertyRowEffectivelyEmpty,
+  isSupportedBilibiliPage,
+  normalizeAiInitialQuickPrompts,
+  normalizeAiPresetPrompts,
+  normalizeAiSystemPrompt,
+  normalizeBaseUrl,
+  normalizeDefaultModel,
+  normalizeDownloadFormat,
+  normalizeEnablePlayerAiQuickAction,
+  normalizeFixedFrontmatterProperties,
+  normalizeFixedPropertyType,
+  normalizeFixedPropertyValue,
+  normalizeIncludeHotCommentsInNote,
+  normalizeNotePlaceholderSections,
+  normalizePlayerAiQuickPrompt,
+  normalizeReaderChapterVisibility,
+  normalizeReaderContentWidth,
+  normalizeReaderFontScale,
+  normalizeReaderLetterSpacing,
+  normalizeReaderLineHeight,
+  normalizeReaderTheme,
+  normalizeReaderTranscriptVisible,
+  sleep
+} from "./shared-defaults.js";
+export { bindRuntimeEvents } from "./message-handler.js";
