@@ -1,5 +1,5 @@
 import { sleep, formatLocalDate } from "./shared-defaults.js";
-import { toReadableText, getErrorMessage, isRetryableNetworkError } from "./router.js";
+import { toReadableText, getErrorMessage, isRetryableNetworkError } from "./error-helpers.js";
 import { logInfo, logWarn } from "./reader-shell.js";
 import { state } from "./state.js";
 import {

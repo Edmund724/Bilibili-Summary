@@ -1,6 +1,7 @@
 import { state } from "./state.js";
 import { formatLocalDate } from "./shared-defaults.js";
-import { byId, extractBvid, cleanVideoUrl } from "./router.js";
+import { extractBvid, cleanVideoUrl } from "./url-utils.js";
+import { byId } from "./runtime.js";
 import {
   normalizeSubtitleTracks,
   pickPreferredSubtitle,

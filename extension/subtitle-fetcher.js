@@ -1,17 +1,9 @@
 import { setMessage } from "./message.js";
 import { DEFAULT_SETTINGS, normalizeDownloadFormat } from "./shared-defaults.js";
 import { state } from "./state.js";
-import {
-  getSettings,
-  byId,
-  extractBvid,
-  extractPageIndex,
-  ensureRunActive,
-  isStaleRunError,
-  computeCurrentClipSignature,
-  getErrorMessage,
-  toReadableText
-} from "./router.js";
+import { extractBvid, extractPageIndex, computeCurrentClipSignature } from "./url-utils.js";
+import { getSettings, byId } from "./runtime.js";
+import { ensureRunActive, isStaleRunError, getErrorMessage, toReadableText } from "./error-helpers.js";
 import {
   readVideoTitle,
   readVideoAuthor,

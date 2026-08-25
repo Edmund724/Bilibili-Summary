@@ -1,6 +1,8 @@
 import { loadSubtitle, BOC_VERSION } from "./subtitle-fetcher.js";
 import { buildSubtitlePreview, isAiSubtitle, sanitizeFileName } from "./formatters.js";
-import { getErrorMessage, isStaleRunError, cleanVideoUrl, getSettings, byId } from "./router.js";
+import { cleanVideoUrl } from "./url-utils.js";
+import { getSettings, byId } from "./runtime.js";
+import { getErrorMessage, isStaleRunError } from "./error-helpers.js";
 import { DEFAULT_SETTINGS, normalizeDownloadFormat } from "./shared-defaults.js";
 import { state } from "./state.js";
 import { setMessage } from "./message.js";

@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { byId } from "./router.js";
+import { byId } from "./runtime.js";
 
 export function setMessage(text) {
   state.ui.messageText = String(text || "");

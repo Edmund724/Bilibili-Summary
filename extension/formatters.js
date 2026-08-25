@@ -6,7 +6,9 @@ import {
   isFixedPropertyRowEffectivelyEmpty
 } from "./shared-defaults.js";
 import { state } from "./state.js";
-import { extractPageIndex, cleanVideoUrl, sendRuntimeMessage, isExtensionContextInvalidated, toReadableText } from "./router.js";
+import { extractPageIndex, cleanVideoUrl } from "./url-utils.js";
+import { sendRuntimeMessage, isExtensionContextInvalidated } from "./runtime.js";
+import { toReadableText } from "./error-helpers.js";
 
 export function buildBilibiliEmbedIframe(meta, page = 1) {
   const safeAid = encodeURIComponent(String(meta?.aid || "").trim());

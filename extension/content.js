@@ -1,12 +1,8 @@
 import { state } from "./state.js";
 
-import {
-  isReaderMode,
-  isWatchlaterPage,
-  startUrlWatcher,
-  getErrorMessage,
-  getSettings
-} from "./router.js";
+import { isReaderMode, isWatchlaterPage } from "./url-utils.js";
+import { startUrlWatcher, getSettings } from "./runtime.js";
+import { getErrorMessage } from "./error-helpers.js";
 
 import {
   bindPlayerAiQuickActionLayoutEvents,

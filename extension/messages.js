@@ -2,10 +2,14 @@ import { state } from "./state.js";
 import { DEFAULT_SETTINGS } from "./shared-defaults.js";
 
 import {
-  getErrorMessage,
-  replaceReaderModeUrl,
+  replaceReaderModeUrl
+} from "./runtime.js";
+import {
+  getErrorMessage
+} from "./error-helpers.js";
+import {
   getRuntimeVideoElement
-} from "./router.js";
+} from "./video-probe.js";
 
 import {
   getPopupPayload,

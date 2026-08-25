@@ -1,11 +1,17 @@
 import { setMessage } from "./message.js";
 import {
-  isReaderMode,
+  isReaderMode
+} from "./url-utils.js";
+import {
   sendRuntimeMessage,
-  getSettings,
-  getErrorMessage,
+  getSettings
+} from "./runtime.js";
+import {
+  getErrorMessage
+} from "./error-helpers.js";
+import {
   getRuntimeVideoElement
-} from "./router.js";
+} from "./video-probe.js";
 import { state } from "./state.js";
 
 const PLAYER_AI_ICON_VARIANT = "badge";

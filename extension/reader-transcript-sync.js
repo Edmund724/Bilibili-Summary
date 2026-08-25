@@ -1,5 +1,6 @@
 import { state } from "./state.js";
-import { byId, getRuntimeVideoElement, findReaderPlayerHost } from "./router.js";
+import { byId } from "./runtime.js";
+import { getRuntimeVideoElement, findReaderPlayerHost } from "./video-probe.js";
 import { findActiveSubtitleIndex, findActiveChapterIndex } from "./subtitle.js";
 import { formatCompactTimestamp } from "./formatters.js";
 import {

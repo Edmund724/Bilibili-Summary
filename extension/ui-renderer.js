@@ -2,12 +2,14 @@ import { setMessage } from "./message.js";
 import { state } from "./state.js";
 import {
   byId,
-  cleanVideoUrl,
   requestOpenOptions,
+  replaceReaderModeUrl
+} from "./runtime.js";
+import {
+  cleanVideoUrl,
   isReaderMode,
-  replaceReaderModeUrl,
   stripReaderModeUrl
-} from "./router.js";
+} from "./url-utils.js";
 import {
   escapeHtml,
   buildSubtitlePreview,

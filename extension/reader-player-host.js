@@ -4,13 +4,9 @@
 
 import { state } from "./state.js";
 import { sleep } from "./shared-defaults.js";
-import {
-  byId,
-  findReaderPlayerHost,
-  getRuntimeVideoElement,
-  isReaderMode,
-  isWatchlaterPage
-} from "./router.js";
+import { isReaderMode, isWatchlaterPage } from "./url-utils.js";
+import { byId } from "./runtime.js";
+import { findReaderPlayerHost, getRuntimeVideoElement } from "./video-probe.js";
 import { isVisibleReaderControl } from "./player-ai.js";
 import {
   dismissReaderMiniPlayer,

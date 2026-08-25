@@ -2,7 +2,9 @@
 // focus/keep-tree management, player host alignment, multi-page (p数) page
 // resolution, and small DOM utilities used by reader.js.
 import { state } from "./state.js";
-import { isReaderMode, findReaderPlayerHost, getRuntimeVideoElement, byId } from "./router.js";
+import { isReaderMode } from "./url-utils.js";
+import { byId } from "./runtime.js";
+import { findReaderPlayerHost, getRuntimeVideoElement } from "./video-probe.js";
 import { isVisibleReaderControl } from "./player-ai.js";
 // Cross-reader-module imports point at modules that will land in later split
 // steps; the build script and runtime bundle already tolerate them, and the

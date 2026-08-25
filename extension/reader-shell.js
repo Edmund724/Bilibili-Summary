@@ -8,17 +8,10 @@ import {
   normalizeReaderTranscriptVisible,
   sleep
 } from "./shared-defaults.js";
-import {
-  byId,
-  findReaderPlayerHost,
-  getRuntimeVideoElement,
-  getErrorMessage,
-  isReaderMode,
-  isStaleRunError,
-  isWatchlaterPage,
-  cleanVideoUrl,
-  sendRuntimeMessage
-} from "./router.js";
+import { isReaderMode, isWatchlaterPage, cleanVideoUrl } from "./url-utils.js";
+import { byId, sendRuntimeMessage } from "./runtime.js";
+import { findReaderPlayerHost, getRuntimeVideoElement } from "./video-probe.js";
+import { getErrorMessage, isStaleRunError } from "./error-helpers.js";
 import {
   getReadingTranscriptItems,
   getReadingTranscriptPlaceholderText,

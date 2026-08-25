@@ -391,10 +391,177 @@ const state = stateTarget;
 
 { state, readerState, clipState, playerAiState, uiState };
 
+// === url-utils.js ===
+function isReaderMode(url = location.href) {
+  try {
+    return new URL(url).searchParams.get("boc_reader") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function stripReaderModeUrl(url = location.href) {
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.delete("boc_reader");
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function isWatchlaterPage(url = location.href) {
+  try {
+    return new URL(url).pathname.replace(/\/+$/, "") === "/list/watchlater";
+  } catch {
+    return false;
+  }
+}
+
+function computeCurrentClipSignature(url = location.href) {
+  const bvid = extractBvid(url);
+  const page = extractPageIndex(url);
+  return [bvid, page].map((item) => String(item || "").trim()).join("|");
+}
+
+function extractBvid(url) {
+  const match = url.match(/\/video\/(BV[0-9A-Za-z]+)/);
+  if (match?.[1]) {
+    return match[1];
+  }
+
+  try {
+    const parsed = new URL(url);
+    const fromQuery = String(parsed.searchParams.get("bvid") || "").trim();
+    if (/^BV[0-9A-Za-z]+$/.test(fromQuery)) {
+      return fromQuery;
+    }
+  } catch {
+    // ignore invalid URL
+  }
+
+  return "";
+}
+
+function cleanVideoUrl(href = location.href) {
+  try {
+    const parsed = new URL(href);
+    if (parsed.hostname !== "www.bilibili.com") {
+      return href;
+    }
+
+    if (parsed.pathname === "/list/watchlater" || parsed.pathname === "/list/watchlater/") {
+      const bvid = extractBvid(href);
+      if (bvid) {
+        return `https://www.bilibili.com/video/${bvid}/`;
+      }
+      return href;
+    }
+
+    const bvid = extractBvid(href);
+    if (!bvid) {
+      return href;
+    }
+    const p = parsed.searchParams.get("p");
+    const qs = p ? `?p=${encodeURIComponent(p)}` : "";
+    return `https://www.bilibili.com/video/${bvid}/${qs}`;
+  } catch {
+    return href;
+  }
+}
+
+function extractPageIndex(url) {
+  try {
+    const page = Number(new URL(url).searchParams.get("p") || "1");
+    if (!Number.isFinite(page) || page <= 0) {
+      return 1;
+    }
+    return page;
+  } catch {
+    return 1;
+  }
+}
+
 // === message.js ===
 function setMessage(text) {
   state.ui.messageText = String(text || "");
   byId("boc-message").textContent = state.ui.messageText;
+}
+
+// === error-helpers.js ===
+function toReadableText(value, fallback = "") {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text || text === "[object Object]") {
+      return fallback;
+    }
+    return text;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    const json = JSON.stringify(value);
+    if (json && json !== "{}") {
+      return json;
+    }
+  } catch {
+    // ignore
+  }
+  const text = String(value);
+  if (!text || text === "[object Object]") {
+    return fallback;
+  }
+  return text;
+}
+
+function getErrorMessage(error, fallback = "未知错误") {
+  const code = toReadableText(error?.code, "");
+  const message = toReadableText(error?.message, "");
+  if (message) {
+    return code ? `${message} (code: ${code})` : message;
+  }
+  if (code) {
+    return `code: ${code}`;
+  }
+  return toReadableText(error, fallback);
+}
+
+function ensureRunActive(runId) {
+  if (runId !== state.clip.fetchRunId) {
+    const error = new Error("Stale refresh run");
+    error.code = "STALE_RUN";
+    throw error;
+  }
+}
+
+function isStaleRunError(error) {
+  return error?.code === "STALE_RUN";
+}
+
+function isRetryableNetworkError(error) {
+  const message = getErrorMessage(error, "").toLowerCase();
+  if (!message) {
+    return false;
+  }
+
+  if (message.includes("http ")) {
+    return true;
+  }
+
+  return (
+    message.includes("请求失败") ||
+    message.includes("failed to fetch") ||
+    message.includes("fetch failed") ||
+    message.includes("networkerror") ||
+    message.includes("net::") ||
+    message.includes("background fetch failed") ||
+    message.includes("timeout") ||
+    message.includes("timed out")
+  );
 }
 
 // === formatters.js ===
@@ -1597,6 +1764,90 @@ function rebuildDerivedContent() {
   byId("boc-preview").value = body.length ? buildSubtitlePreview(body, state.settings) : "";
 }
 
+// === video-probe.js ===
+function findReaderPlayerHost(video) {
+  if (!video) {
+    return null;
+  }
+
+  return (
+    video.closest(".bpx-player-container") ||
+    video.closest(".bpx-player-video-area") ||
+    video.closest("#bilibili-player") ||
+    video.parentElement
+  );
+}
+
+function isIgnoredReaderVideoCandidate(video) {
+  if (!video) {
+    return true;
+  }
+  const host = findReaderPlayerHost(video);
+  const blockedSelector = [
+    "[data-boc-reader-hidden='1']",
+    ".bpx-player-mini-warp",
+    ".bpx-player-mini-close",
+    ".bpx-player-ending-panel",
+    ".bpx-player-ending-related",
+    "[class*='mini-player']",
+    "[class*='picture-in-picture']",
+    "[class*='adcard']",
+    ".ad-report",
+    "[class*='ad-report']",
+    ".video-page-card-small",
+    ".video-page-special-card-small",
+    ".feed-card",
+    ".bili-video-card"
+  ].join(", ");
+  return Boolean(video.closest(blockedSelector) || host?.closest?.(blockedSelector));
+}
+
+function getRuntimeVideoElement() {
+  if (state.reader.readingVideoEl?.isConnected) {
+    const currentHost = findReaderPlayerHost(state.reader.readingVideoEl);
+    const currentRect = state.reader.readingVideoEl.getBoundingClientRect();
+    if (
+      currentHost?.isConnected &&
+      currentRect.width > 120 &&
+      currentRect.height > 68 &&
+      !isIgnoredReaderVideoCandidate(state.reader.readingVideoEl)
+    ) {
+      return state.reader.readingVideoEl;
+    }
+  }
+
+  const candidates = Array.from(document.querySelectorAll("video")).filter(
+    (item) => item.isConnected && !isIgnoredReaderVideoCandidate(item)
+  );
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const visible = candidates
+    .map((item) => {
+      const rect = item.getBoundingClientRect();
+      const host = findReaderPlayerHost(item);
+      const inPlayer = Boolean(
+        host &&
+          (host.matches?.("#bilibili-player, .bpx-player-container, .bpx-player-video-area") ||
+            host.querySelector?.(".bpx-player-video-area"))
+      );
+      const area = Math.max(0, rect.width) * Math.max(0, rect.height);
+      const score =
+        area +
+        (inPlayer ? 1000000 : 0) +
+        (!item.paused ? 20000 : 0) +
+        Number(item.readyState || 0) * 2000 +
+        (item.currentSrc ? 10000 : 0) +
+        (item === state.reader.readingVideoEl ? 500 : 0);
+      return { item, rect, score };
+    })
+    .filter(({ rect }) => rect.width > 240 && rect.height > 120)
+    .sort((a, b) => b.score - a.score)[0];
+
+  return visible?.item || candidates[0] || null;
+}
+
 // === player-ai.js ===
 const PLAYER_AI_ICON_VARIANT = "badge";
 
@@ -2216,6 +2467,8 @@ function updateReaderFollowState() {
 // Reader player host module.
 // Owns the lifecycle of the embedded player host inside reader mode: mount/dismount,
 // layout, mini-player dismissal, native control recovery, and header hover affordances.
+
+
 
 
 
@@ -3957,6 +4210,8 @@ async function ensureReaderPlayerControlsRecovered(
 // Page-frame helpers for the reader: layout sizing, page-state guards,
 // focus/keep-tree management, player host alignment, multi-page (p数) page
 // resolution, and small DOM utilities used by reader.js.
+
+
 
 
 
@@ -5734,25 +5989,7 @@ async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, subtitleId
   maybeRefreshReaderSubtitleInBackground
 };
 
-// === router.js ===
-function isReaderMode(url = location.href) {
-  try {
-    return new URL(url).searchParams.get("boc_reader") === "1";
-  } catch {
-    return false;
-  }
-}
-
-function stripReaderModeUrl(url = location.href) {
-  try {
-    const parsed = new URL(url);
-    parsed.searchParams.delete("boc_reader");
-    return parsed.toString();
-  } catch {
-    return url;
-  }
-}
-
+// === runtime.js ===
 function replaceReaderModeUrl(nextUrl) {
   const targetUrl = String(nextUrl || "").trim();
   if (!targetUrl || targetUrl === location.href) {
@@ -5767,14 +6004,6 @@ function replaceReaderModeUrl(nextUrl) {
     if (shouldDebugLog()) {
       console.warn("[BOC] failed to replace reader mode url", error);
     }
-  }
-}
-
-function isWatchlaterPage(url = location.href) {
-  try {
-    return new URL(url).pathname.replace(/\/+$/, "") === "/list/watchlater";
-  } catch {
-    return false;
   }
 }
 
@@ -5820,53 +6049,6 @@ function startUrlWatcher() {
     }
     setStatus("检测到页面变化，请点击“刷新抓取”加载当前视频字幕。");
   }, 1200);
-}
-
-function computeCurrentClipSignature(url = location.href) {
-  const bvid = extractBvid(url);
-  const page = extractPageIndex(url);
-  return [bvid, page].map((item) => String(item || "").trim()).join("|");
-}
-
-function toReadableText(value, fallback = "") {
-  if (value === undefined || value === null) {
-    return fallback;
-  }
-  if (typeof value === "string") {
-    const text = value.trim();
-    if (!text || text === "[object Object]") {
-      return fallback;
-    }
-    return text;
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  try {
-    const json = JSON.stringify(value);
-    if (json && json !== "{}") {
-      return json;
-    }
-  } catch {
-    // ignore
-  }
-  const text = String(value);
-  if (!text || text === "[object Object]") {
-    return fallback;
-  }
-  return text;
-}
-
-function getErrorMessage(error, fallback = "未知错误") {
-  const code = toReadableText(error?.code, "");
-  const message = toReadableText(error?.message, "");
-  if (message) {
-    return code ? `${message} (code: ${code})` : message;
-  }
-  if (code) {
-    return `code: ${code}`;
-  }
-  return toReadableText(error, fallback);
 }
 
 function sendRuntimeMessage(message) {
@@ -5931,181 +6113,6 @@ function byId(id) {
     throw new Error(`Missing node: ${id}`);
   }
   return node;
-}
-
-function extractBvid(url) {
-  const match = url.match(/\/video\/(BV[0-9A-Za-z]+)/);
-  if (match?.[1]) {
-    return match[1];
-  }
-
-  try {
-    const parsed = new URL(url);
-    const fromQuery = String(parsed.searchParams.get("bvid") || "").trim();
-    if (/^BV[0-9A-Za-z]+$/.test(fromQuery)) {
-      return fromQuery;
-    }
-  } catch {
-    // ignore invalid URL
-  }
-
-  return "";
-}
-
-function cleanVideoUrl(href = location.href) {
-  try {
-    const parsed = new URL(href);
-    if (parsed.hostname !== "www.bilibili.com") {
-      return href;
-    }
-
-    if (parsed.pathname === "/list/watchlater" || parsed.pathname === "/list/watchlater/") {
-      const bvid = extractBvid(href);
-      if (bvid) {
-        return `https://www.bilibili.com/video/${bvid}/`;
-      }
-      return href;
-    }
-
-    const bvid = extractBvid(href);
-    if (!bvid) {
-      return href;
-    }
-    const p = parsed.searchParams.get("p");
-    const qs = p ? `?p=${encodeURIComponent(p)}` : "";
-    return `https://www.bilibili.com/video/${bvid}/${qs}`;
-  } catch {
-    return href;
-  }
-}
-
-function extractPageIndex(url) {
-  try {
-    const page = Number(new URL(url).searchParams.get("p") || "1");
-    if (!Number.isFinite(page) || page <= 0) {
-      return 1;
-    }
-    return page;
-  } catch {
-    return 1;
-  }
-}
-
-function ensureRunActive(runId) {
-  if (runId !== state.clip.fetchRunId) {
-    const error = new Error("Stale refresh run");
-    error.code = "STALE_RUN";
-    throw error;
-  }
-}
-
-function isStaleRunError(error) {
-  return error?.code === "STALE_RUN";
-}
-
-function isRetryableNetworkError(error) {
-  const message = getErrorMessage(error, "").toLowerCase();
-  if (!message) {
-    return false;
-  }
-
-  if (message.includes("http ")) {
-    return true;
-  }
-
-  return (
-    message.includes("请求失败") ||
-    message.includes("failed to fetch") ||
-    message.includes("fetch failed") ||
-    message.includes("networkerror") ||
-    message.includes("net::") ||
-    message.includes("background fetch failed") ||
-    message.includes("timeout") ||
-    message.includes("timed out")
-  );
-}
-
-function findReaderPlayerHost(video) {
-  if (!video) {
-    return null;
-  }
-
-  return (
-    video.closest(".bpx-player-container") ||
-    video.closest(".bpx-player-video-area") ||
-    video.closest("#bilibili-player") ||
-    video.parentElement
-  );
-}
-
-function isIgnoredReaderVideoCandidate(video) {
-  if (!video) {
-    return true;
-  }
-  const host = findReaderPlayerHost(video);
-  const blockedSelector = [
-    "[data-boc-reader-hidden='1']",
-    ".bpx-player-mini-warp",
-    ".bpx-player-mini-close",
-    ".bpx-player-ending-panel",
-    ".bpx-player-ending-related",
-    "[class*='mini-player']",
-    "[class*='picture-in-picture']",
-    "[class*='adcard']",
-    ".ad-report",
-    "[class*='ad-report']",
-    ".video-page-card-small",
-    ".video-page-special-card-small",
-    ".feed-card",
-    ".bili-video-card"
-  ].join(", ");
-  return Boolean(video.closest(blockedSelector) || host?.closest?.(blockedSelector));
-}
-
-function getRuntimeVideoElement() {
-  if (state.reader.readingVideoEl?.isConnected) {
-    const currentHost = findReaderPlayerHost(state.reader.readingVideoEl);
-    const currentRect = state.reader.readingVideoEl.getBoundingClientRect();
-    if (
-      currentHost?.isConnected &&
-      currentRect.width > 120 &&
-      currentRect.height > 68 &&
-      !isIgnoredReaderVideoCandidate(state.reader.readingVideoEl)
-    ) {
-      return state.reader.readingVideoEl;
-    }
-  }
-
-  const candidates = Array.from(document.querySelectorAll("video")).filter(
-    (item) => item.isConnected && !isIgnoredReaderVideoCandidate(item)
-  );
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  const visible = candidates
-    .map((item) => {
-      const rect = item.getBoundingClientRect();
-      const host = findReaderPlayerHost(item);
-      const inPlayer = Boolean(
-        host &&
-          (host.matches?.("#bilibili-player, .bpx-player-container, .bpx-player-video-area") ||
-            host.querySelector?.(".bpx-player-video-area"))
-      );
-      const area = Math.max(0, rect.width) * Math.max(0, rect.height);
-      const score =
-        area +
-        (inPlayer ? 1000000 : 0) +
-        (!item.paused ? 20000 : 0) +
-        Number(item.readyState || 0) * 2000 +
-        (item.currentSrc ? 10000 : 0) +
-        (item === state.reader.readingVideoEl ? 500 : 0);
-      return { item, rect, score };
-    })
-    .filter(({ rect }) => rect.width > 240 && rect.height > 120)
-    .sort((a, b) => b.score - a.score)[0];
-
-  return visible?.item || candidates[0] || null;
 }
 
 // === messages.js ===
