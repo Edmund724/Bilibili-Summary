@@ -34,9 +34,9 @@ import {
 
 import {
   getCurrentAid,
-  fetchHotComments,
-  buildMarkdown
-} from "./formatters.js";
+  fetchHotComments
+} from "./bili-api.js";
+import { buildMarkdown } from "./note-rendering.js";
 
 export function bindRuntimeEvents() {
   if (state.ui.runtimeEventsBound) {

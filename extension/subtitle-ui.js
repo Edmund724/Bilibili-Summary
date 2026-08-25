@@ -1,5 +1,7 @@
 import { loadSubtitle, BOC_VERSION } from "./subtitle-fetcher.js";
-import { buildSubtitlePreview, isAiSubtitle, sanitizeFileName } from "./formatters.js";
+import { buildSubtitlePreview } from "./note-rendering.js";
+import { isAiSubtitle } from "./subtitle-selection.js";
+import { sanitizeFileName } from "./string-utils.js";
 import { cleanVideoUrl } from "./url-utils.js";
 import { getSettings, byId } from "./runtime.js";
 import { getErrorMessage, isStaleRunError } from "./error-helpers.js";

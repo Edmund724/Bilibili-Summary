@@ -6,13 +6,15 @@ import {
   normalizeSubtitleTracks,
   pickPreferredSubtitle,
   normalizeChapters,
-  buildSubtitlePreview,
   mapSubtitleTracks,
-  mapChaptersFromPlayerData,
+  mapChaptersFromPlayerData
+} from "./subtitle-selection.js";
+import {
+  buildSubtitlePreview,
   buildMarkdown,
   buildSrt,
   buildTxt
-} from "./formatters.js";
+} from "./note-rendering.js";
 
 export { extractBvid, cleanVideoUrl };
 export {

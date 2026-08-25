@@ -2,7 +2,7 @@ import { state } from "./state.js";
 import { byId } from "./runtime.js";
 import { getRuntimeVideoElement, findReaderPlayerHost } from "./video-probe.js";
 import { findActiveSubtitleIndex, findActiveChapterIndex } from "./subtitle.js";
-import { formatCompactTimestamp } from "./formatters.js";
+import { formatCompactTimestamp } from "./string-utils.js";
 import {
   bindReadingViewVideo,
   queueEnsureReaderPlayerMounted,

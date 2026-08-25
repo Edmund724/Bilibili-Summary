@@ -564,219 +564,65 @@ function isRetryableNetworkError(error) {
   );
 }
 
-// === formatters.js ===
-function buildBilibiliEmbedIframe(meta, page = 1) {
-  const safeAid = encodeURIComponent(String(meta?.aid || "").trim());
-  const safeBvid = encodeURIComponent(String(meta?.bvid || "").trim());
-  const safeCid = encodeURIComponent(String(meta?.cid || "").trim());
-  const safePage = Number(page) > 0 ? Number(page) : 1;
-
-  return `<iframe src="https://player.bilibili.com/player.html?aid=${safeAid}&bvid=${safeBvid}&cid=${safeCid}&page=${safePage}&autoplay=0" scrolling="no" border="0" frameborder="no" framespacing="0" allow="fullscreen; picture-in-picture" allowfullscreen="true" style="height:100%;width:100%; aspect-ratio: 16 / 9;"> </iframe>`;
-}
-
-
-function buildChapterLines(chapters, withHours = false) {
-  const chapterItems = normalizeChapters(chapters);
-  if (chapterItems.length === 0) {
-    return [];
-  }
-
-  return chapterItems.map((item) => {
-    const fromText = formatCompactTimestamp(item.from, withHours);
-    return `- \`${fromText}\` ${item.title}`;
-  });
-}
-
-
-function buildFolderTemplateContext(meta, created = formatLocalDate()) {
-  return {
-    created: sanitizeFolderTemplateValue(created),
-    upload_date: sanitizeFolderTemplateValue(meta?.uploadDate || ""),
-    author: sanitizeFolderTemplateValue(meta?.author || ""),
-    bvid: sanitizeFolderTemplateValue(meta?.bvid || "")
-  };
-}
-
-
-function buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml) {
-  const enabled = getEnabledFrontmatterFields(settings);
-  const fixedPropertyLines = getFixedFrontmatterPropertyLines(
-    settings,
-    buildFrontmatterTemplateContext(meta, created, tagsCsv, tagsYaml)
-  );
-  if (enabled.length === 0 && fixedPropertyLines.length === 0) {
+// === subtitle-cache.js ===
+function normalizeSubtitleUrlForCache(url) {
+  const text = String(url || "").trim();
+  if (!text) {
     return "";
   }
 
-  const fieldLines = {
-    title: `title: "${escapeYaml(meta.title)}"`,
-    url: `url: "${escapeYaml(cleanVideoUrl())}"`,
-    bvid: `bvid: "${escapeYaml(meta.bvid)}"`,
-    cid: `cid: "${escapeYaml(meta.cid)}"`,
-    author: `author: "${escapeYaml(meta.author || "unknown")}"`,
-    upload_date: `upload_date: "${escapeYaml(meta.uploadDate || "unknown")}"`,
-    subtitle_lang: `subtitle_lang: "${escapeYaml(meta.selectedSubtitleLang || "unknown")}"`,
-    created: `created: "${created}"`,
-    tags: `tags: ${tagsYaml}`
-  };
-
-  const lines = enabled.map((field) => fieldLines[field]).filter(Boolean);
-  lines.push(...fixedPropertyLines);
-  if (lines.length === 0) {
-    return "";
+  try {
+    const parsed = new URL(text);
+    const path = parsed.pathname.replace(/[^\w/.-]+/g, "_");
+    return `${parsed.hostname}${path}`;
+  } catch {
+    return text.replace(/[^\w/.-]+/g, "_");
   }
-
-  return ["---", ...lines, "---"].join("\n");
 }
 
-
-function buildFrontmatterTemplateContext(meta, created, tagsCsv, tagsYaml) {
-  return {
-    title: String(meta?.title || "").trim(),
-    url: String(cleanVideoUrl() || "").trim(),
-    bvid: String(meta?.bvid || "").trim(),
-    cid: String(meta?.cid || "").trim(),
-    author: String(meta?.author || "unknown").trim(),
-    upload_date: String(meta?.uploadDate || "unknown").trim(),
-    subtitle_lang: String(meta?.selectedSubtitleLang || "unknown").trim(),
-    created: String(created || "").trim(),
-    tags: String(tagsCsv || "").trim(),
-    tags_csv: String(tagsCsv || "").trim(),
-    tags_yaml: String(tagsYaml || "").trim()
-  };
+async function loadSubtitleFromCache(cacheKey) {
+  try {
+    const result = await chrome.storage.local.get(cacheKey);
+    return result[cacheKey]?.body || null;
+  } catch {
+    return null;
+  }
 }
 
-
-function buildHotCommentLines(comments) {
-  const items = normalizeHotComments(comments, 20);
-  if (items.length === 0) {
-    return [];
+async function saveSubtitleToCache(cacheKey, body) {
+  try {
+    await chrome.storage.local.set({
+      [cacheKey]: {
+        body,
+        timestamp: Date.now()
+      }
+    });
+  } catch (error) {
+    logWarn("[BOC] failed to save subtitle cache", error);
   }
-
-  return items.flatMap((item, index) => [
-    `${index + 1}. ${item.uname}（赞 ${item.like}）`,
-    item.message,
-    ""
-  ]).slice(0, -1);
 }
 
-
-function buildMarkdown(meta, body, settings) {
-  const created = formatLocalDate();
-  const tags = (settings.tags || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const tagsCsv = tags.join(", ");
-  const tagsYaml =
-    tags.length === 0 ? "[]" : `[${tags.map((tag) => `"${tag.replace(/"/g, '\\"')}"`).join(", ")}]`;
-
-  const compactWithHours = shouldShowHoursInNote(meta, body);
-  const chapterLines = buildChapterLines(meta.chapters || [], compactWithHours);
-  const subtitleSectionLines = buildSubtitleSectionLines(
-    body,
-    meta.chapters || [],
-    settings,
-    compactWithHours
-  );
-  const frontMatter = buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml);
-
-  const page = extractPageIndex(location.href);
-  const embedIframe = buildBilibiliEmbedIframe(meta, page);
-  const intro = String(meta.description || "").trim();
-  const noteSectionContext = buildNotePlaceholderTemplateContext(meta, intro);
-  const noteSections = groupNotePlaceholderSections(settings, noteSectionContext);
-
-  const lines = [];
-  if (frontMatter) {
-    lines.push(frontMatter, "");
+async function clearSubtitleCacheByKey(cacheKey) {
+  try {
+    await chrome.storage.local.remove(cacheKey);
+  } catch (error) {
+    logWarn("[BOC] failed to clear subtitle cache by key", { cacheKey, error });
   }
-  lines.push(embedIframe, "");
-  pushOptionalLines(lines, noteSections.before_intro);
-
-  if (intro) {
-    lines.push("## 简介", "", intro, "");
-  }
-
-  pushOptionalLines(lines, noteSections.before_chapters);
-
-  if (chapterLines.length > 0) {
-    lines.push("## 章节", "", ...chapterLines, "");
-  }
-
-  pushOptionalLines(lines, noteSections.before_subtitle);
-  lines.push("## 字幕", "", ...subtitleSectionLines);
-
-  const hotCommentLines = buildHotCommentLines(
-    settings?.includeHotCommentsInNote ? meta?.hotComments || [] : []
-  );
-  if (hotCommentLines.length > 0) {
-    lines.push("", "## 评论", "", ...hotCommentLines);
-  }
-
-  return lines.join("\n");
 }
 
-
-function buildNoteFilename(meta) {
-  const includeDate = state.settings?.includeDateInFilename !== false;
-  const baseParts = [];
-
-  if (includeDate) {
-    baseParts.push(formatLocalDate());
+function buildSubtitleSourceKey(subtitleId, subtitleUrl, lang) {
+  const id = String(subtitleId || "").trim();
+  if (id) {
+    return `id_${id}`;
   }
 
-  baseParts.push(meta.title || meta.bvid || "bilibili-subtitle");
-
-  if (Number(meta.pageCount) > 1) {
-    baseParts.push(`P${Number(meta.pageIndex) > 0 ? Number(meta.pageIndex) : 1}`);
-    const pageTitle = String(meta.pageTitle || "").trim();
-    if (pageTitle) {
-      baseParts.push(pageTitle);
-    }
+  const normalizedUrl = normalizeSubtitleUrlForCache(subtitleUrl);
+  if (normalizedUrl) {
+    return `url_${normalizedUrl}`;
   }
 
-  const baseName = sanitizeFileName(baseParts.filter(Boolean).join("-"));
-  return `${baseName || "bilibili-subtitle"}.md`;
+  return `lang_${String(lang || "").trim().toLowerCase() || "unknown"}`;
 }
-
-
-function buildNotePlaceholderLines(item, templateContext = {}) {
-  const title = String(item?.title || "").trim();
-  if (!title) {
-    return [];
-  }
-  const content = resolveFrontmatterTemplateValue(item?.content, templateContext).trim();
-  const lines = [`## ${title}`, ""];
-  if (content) {
-    lines.push(content, "");
-  }
-  return lines;
-}
-
-
-function buildNotePlaceholderTemplateContext(meta, description) {
-  return {
-    title: String(meta?.title || "").trim(),
-    author: String(meta?.author || "").trim(),
-    url: String(cleanVideoUrl() || "").trim(),
-    upload_date: String(meta?.uploadDate || "").trim(),
-    description: String(description || "").trim()
-  };
-}
-
-
-function buildSrt(body) {
-  return body
-    .map((item, index) => {
-      const from = formatTimestamp(item.from, true);
-      const to = formatTimestamp(item.to, true);
-      const text = (item.content || "").trim();
-      return `${index + 1}\n${from} --> ${to}\n${text}`;
-    })
-    .join("\n\n");
-}
-
 
 function buildSubtitleCandidates(subtitles, preferred) {
   const tracks = subtitles || [];
@@ -805,352 +651,7 @@ function buildSubtitleCandidates(subtitles, preferred) {
   return list;
 }
 
-
-function buildSubtitlePreview(body, settings) {
-  const compactWithHours = shouldShowHoursInSubtitle(body);
-  return (body || [])
-    .map((item) => {
-      const text = String(item?.content || "").trim();
-      if (!text) {
-        return "";
-      }
-      if (settings.includeTimestampInBody) {
-        return `\`${formatCompactTimestamp(item.from, compactWithHours)}\` ${text}`;
-      }
-      return text;
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
-
-function buildSubtitleSectionLines(body, chapters, settings, withHours) {
-  const subtitleItems = (body || [])
-    .map((item, index) => ({
-      ...item,
-      _index: index,
-      text: String(item?.content || "").trim()
-    }))
-    .filter((item) => item.text);
-  if (subtitleItems.length === 0) {
-    return ["（暂无字幕）"];
-  }
-
-  const chapterItems = normalizeChapters(chapters);
-  if (chapterItems.length === 0) {
-    return subtitleItems.map((item) => formatSubtitleLine(item, settings, withHours));
-  }
-
-  const lines = [];
-  const usedIndexes = new Set();
-
-  chapterItems.forEach((chapter, idx) => {
-    const start = Number(chapter.from || 0) || 0;
-    const next = chapterItems[idx + 1];
-    const chapterTo = Number(chapter.to || 0) || 0;
-    let end = Infinity;
-    if (next && Number(next.from) > start) {
-      end = Number(next.from);
-    } else if (chapterTo > start) {
-      end = chapterTo;
-    }
-
-    const sectionItems = subtitleItems.filter((item) => {
-      const from = Number(item.from || 0) || 0;
-      const inStart = from + 0.001 >= start;
-      const inEnd = end === Infinity ? true : from < end;
-      return inStart && inEnd;
-    });
-
-    if (sectionItems.length === 0) {
-      return;
-    }
-
-    const chapterStamp = settings.includeTimestampInBody
-      ? ` \`${formatCompactTimestamp(start, withHours)}\``
-      : "";
-    lines.push(`### ${chapter.title}${chapterStamp}`, "");
-    sectionItems.forEach((item) => {
-      usedIndexes.add(item._index);
-      lines.push(formatSubtitleLine(item, settings, withHours));
-    });
-    lines.push("");
-  });
-
-  const remaining = subtitleItems.filter((item) => !usedIndexes.has(item._index));
-  if (remaining.length > 0) {
-    lines.push("### 其他片段", "");
-    remaining.forEach((item) => {
-      lines.push(formatSubtitleLine(item, settings, withHours));
-    });
-    lines.push("");
-  }
-
-  if (lines.length === 0) {
-    return subtitleItems.map((item) => formatSubtitleLine(item, settings, withHours));
-  }
-
-  while (lines.length > 0 && !lines[lines.length - 1]) {
-    lines.pop();
-  }
-  return lines;
-}
-
-
-function buildTxt(body, settings) {
-  const withHours = shouldShowHoursInSubtitle(body);
-  return (body || [])
-    .map((item) => {
-      const text = String(item?.content || "").trim();
-      if (!text) {
-        return "";
-      }
-      if (!settings?.includeTimestampInBody) {
-        return text;
-      }
-      return `${formatCompactTimestamp(item.from, withHours)} ${text}`;
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-
-function escapeYaml(value) {
-  return String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"');
-}
-
-
-function formatCompactTimestamp(seconds, withHours) {
-  const safe = Math.max(0, Math.floor(Number(seconds) || 0));
-  const hour = Math.floor(safe / 3600);
-  const minute = Math.floor((safe % 3600) / 60);
-  const second = safe % 60;
-
-  if (withHours) {
-    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(
-      second
-    ).padStart(2, "0")}`;
-  }
-
-  const totalMinutes = Math.floor(safe / 60);
-  return `${String(totalMinutes).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
-}
-
-
-function formatFixedPropertyYamlLine(key, type, value, templateContext = {}) {
-  const normalizedType = normalizeFixedPropertyType(type);
-  const resolvedValue = resolveFrontmatterTemplateValue(value, templateContext).trim();
-
-  if (!resolvedValue) {
-    return "";
-  }
-
-  if (normalizedType === "number") {
-    const num = Number(resolvedValue);
-    if (!Number.isFinite(num)) {
-      return "";
-    }
-    return `${key}: ${resolvedValue}`;
-  }
-
-  if (normalizedType === "checkbox") {
-    const normalizedValue = resolvedValue.toLowerCase();
-    if (normalizedValue !== "true" && normalizedValue !== "false") {
-      return "";
-    }
-    return `${key}: ${normalizedValue}`;
-  }
-
-  if (normalizedType === "list") {
-    const items = parseFrontmatterArrayItems(resolvedValue);
-    return `${key}: [${items.map((item) => `"${escapeYaml(item)}"`).join(", ")}]`;
-  }
-
-  if (normalizedType === "date") {
-    if (!isYamlDateValue(resolvedValue)) {
-      return "";
-    }
-    return `${key}: ${resolvedValue}`;
-  }
-
-  return `${key}: "${escapeYaml(resolvedValue)}"`;
-}
-
-
-function formatSubtitleLine(item, settings, withHours) {
-  const text = String(item?.content || "").trim();
-  if (!text) {
-    return "";
-  }
-  if (!settings.includeTimestampInBody) {
-    return text;
-  }
-  return `\`${formatCompactTimestamp(item.from, withHours)}\` ${text}`;
-}
-
-
-function formatTimestamp(seconds, forSrt = false) {
-  const safe = Number(seconds) || 0;
-  const msTotal = Math.max(0, Math.floor(safe * 1000));
-  const hour = Math.floor(msTotal / 3600000);
-  const minute = Math.floor((msTotal % 3600000) / 60000);
-  const second = Math.floor((msTotal % 60000) / 1000);
-  const ms = msTotal % 1000;
-
-  const hh = String(hour).padStart(2, "0");
-  const mm = String(minute).padStart(2, "0");
-  const ss = String(second).padStart(2, "0");
-  if (!forSrt) {
-    return `${hh}:${mm}:${ss}.${String(ms).padStart(3, "0")}`;
-  }
-
-  return `${hh}:${mm}:${ss},${String(ms).padStart(3, "0")}`;
-}
-
-
-function getEnabledFrontmatterFields(settings) {
-  const defaultFields = Array.isArray(DEFAULT_SETTINGS.frontmatterFields)
-    ? DEFAULT_SETTINGS.frontmatterFields
-    : [];
-  const raw = Array.isArray(settings?.frontmatterFields) ? settings.frontmatterFields : defaultFields;
-  const allowed = new Set(defaultFields);
-  const unique = [];
-  raw.forEach((item) => {
-    const key = String(item || "").trim();
-    if (!key || !allowed.has(key) || unique.includes(key)) {
-      return;
-    }
-    unique.push(key);
-  });
-  return unique;
-}
-
-
-function getFixedFrontmatterPropertyLines(settings, templateContext = {}) {
-  const customPropertyKeyPattern = /^[\p{L}\p{N}_\-\s]+$/u;
-  const systemFields = new Set(
-    (Array.isArray(DEFAULT_SETTINGS.frontmatterFields) ? DEFAULT_SETTINGS.frontmatterFields : []).map((field) =>
-      String(field).toLowerCase()
-    )
-  );
-  const rows = Array.isArray(settings?.fixedFrontmatterProperties) ? settings.fixedFrontmatterProperties : [];
-  const seenKeys = new Set();
-  const lines = [];
-
-  rows.forEach((item) => {
-    const key = String(item?.key || "").trim();
-    const type = normalizeFixedPropertyType(item?.type);
-    const value = item?.value;
-    const lowerKey = key.toLowerCase();
-    if (!key || isFixedPropertyRowEffectivelyEmpty(type, value)) {
-      return;
-    }
-    if (!customPropertyKeyPattern.test(key)) {
-      return;
-    }
-    if (systemFields.has(lowerKey) || seenKeys.has(lowerKey)) {
-      return;
-    }
-    seenKeys.add(lowerKey);
-    const yamlLine = formatFixedPropertyYamlLine(key, type, value, templateContext);
-    if (yamlLine) {
-      lines.push(yamlLine);
-    }
-  });
-
-  return lines;
-}
-
-
-function groupNotePlaceholderSections(settings, templateContext = {}) {
-  const groups = {
-    before_intro: [],
-    before_chapters: [],
-    before_subtitle: []
-  };
-  const rows = normalizeNotePlaceholderSections(settings?.notePlaceholderSections);
-  rows.forEach((item) => {
-    const renderedLines = buildNotePlaceholderLines(item, templateContext);
-    if (!renderedLines.length) {
-      return;
-    }
-    groups[item.position].push(...renderedLines);
-  });
-  return groups;
-}
-
-
-function isAiSubtitle(item) {
-  const lan = String(item?.lan || "").toLowerCase();
-  // B站 AI 自动字幕的 lan 以 "ai-" 开头
-  return lan.startsWith("ai-");
-}
-
-
-function isYamlDateValue(value) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
-}
-
-
-function normalizeChapters(chapters) {
-  const normalized = (chapters || [])
-    .map((item) => ({
-      title: String(item?.title || "").trim(),
-      from: Number(item?.from || 0) || 0,
-      to: Number(item?.to || 0) || 0,
-      source: String(item?.source || "")
-    }))
-    .filter((item) => item.title && item.from >= 0)
-    .sort((a, b) => a.from - b.from);
-
-  const unique = [];
-  const seen = new Set();
-  normalized.forEach((item) => {
-    const key = `${Math.floor(item.from * 10)}|${item.title.toLowerCase()}`;
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    unique.push(item);
-  });
-
-  return unique;
-}
-
-
-function normalizeFolder(input) {
-  return String(input || "").trim().replace(/^\/+|\/+$/g, "");
-}
-
-
-function normalizeHotComments(comments, limit = 20) {
-  if (!Array.isArray(comments)) {
-    return [];
-  }
-
-  return comments
-    .map((item) => ({
-      uname: String(item?.uname || "匿名").trim() || "匿名",
-      like: Number(item?.like || 0) || 0,
-      message: String(item?.message || "").trim().slice(0, 500)
-    }))
-    .filter((item) => item.message)
-    .slice(0, limit);
-}
-
-
-
-
+// === subtitle-selection.js ===
 function normalizeSubtitleTracks(subtitles) {
   return [...(subtitles || [])].sort((a, b) => {
     const p = subtitlePriority(a) - subtitlePriority(b);
@@ -1298,146 +799,28 @@ function validateSubtitleByDuration(body, videoDuration) {
 }
 
 
-function normalizeSubtitleUrlForCache(url) {
-  const text = String(url || "").trim();
-  if (!text) {
+function isAiSubtitle(item) {
+  const lan = String(item?.lan || "").toLowerCase();
+  // B站 AI 自动字幕的 lan 以 "ai-" 开头
+  return lan.startsWith("ai-");
+}
+
+
+function normalizeSubtitleUrl(url) {
+  if (!url) {
     return "";
   }
 
-  try {
-    const parsed = new URL(text);
-    const path = parsed.pathname.replace(/[^\w/.-]+/g, "_");
-    return `${parsed.hostname}${path}`;
-  } catch {
-    return text.replace(/[^\w/.-]+/g, "_");
-  }
-}
-
-async function loadSubtitleFromCache(cacheKey) {
-  try {
-    const result = await chrome.storage.local.get(cacheKey);
-    return result[cacheKey]?.body || null;
-  } catch {
-    return null;
-  }
-}
-
-async function saveSubtitleToCache(cacheKey, body) {
-  try {
-    await chrome.storage.local.set({
-      [cacheKey]: {
-        body,
-        timestamp: Date.now()
-      }
-    });
-  } catch (error) {
-    logWarn("[BOC] failed to save subtitle cache", error);
-  }
-}
-
-async function clearSubtitleCacheByKey(cacheKey) {
-  try {
-    await chrome.storage.local.remove(cacheKey);
-  } catch (error) {
-    logWarn("[BOC] failed to clear subtitle cache by key", { cacheKey, error });
-  }
-}
-
-async function clearSubtitleCache(bvid, cid, lang) {
-  const cacheKey = getSubtitleCacheKey({ bvid, cid, lang });
-  try {
-    await chrome.storage.local.remove(cacheKey);
-    logInfo("[BOC] cleared subtitle cache", { cacheKey });
-  } catch (error) {
-    logWarn("[BOC] failed to clear subtitle cache", error);
-  }
-}
-
-
-function resolveFolderTemplate(template, meta) {
-  const normalized = normalizeFolder(template);
-  if (!normalized) {
-    return "";
+  if (url.startsWith("//")) {
+    return `https:${url}`;
   }
 
-  const allowedKeys = new Set(["created", "upload_date", "author", "bvid"]);
-  const context = buildFolderTemplateContext(meta);
-  const resolved = String(normalized).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, rawKey) => {
-    const key = String(rawKey || "").trim().toLowerCase();
-    if (!allowedKeys.has(key)) {
-      return "";
-    }
-    return context[key] || "";
-  });
-
-  return resolved
-    .split("/")
-    .map((segment) => sanitizeFolderTemplateValue(segment))
-    .filter(Boolean)
-    .join("/");
-}
-
-
-function pushOptionalLines(targetLines, extraLines) {
-  if (!Array.isArray(extraLines) || !extraLines.length) {
-    return;
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
   }
-  targetLines.push(...extraLines);
+
+  return `https://${url.replace(/^\/+/, "")}`;
 }
-
-
-function resolveFrontmatterTemplateValue(value, templateContext = {}) {
-  return String(value || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, rawKey) => {
-    const key = String(rawKey || "").trim().toLowerCase();
-    if (!key) {
-      return "";
-    }
-    const resolved = templateContext[key];
-    return resolved == null ? "" : String(resolved);
-  });
-}
-
-
-function parseFrontmatterArrayItems(value) {
-  return String(value || "")
-    .split(/[，,]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-
-
-
-
-function shouldShowHoursInSubtitle(body) {
-  const maxTo = (body || []).reduce((max, item) => {
-    const to = Number(item?.to || 0);
-    return Number.isFinite(to) && to > max ? to : max;
-  }, 0);
-  return maxTo >= 3600;
-}
-
-
-function shouldShowHoursInNote(meta, body) {
-  const subtitleMaxTo = (body || []).reduce((max, item) => {
-    const to = Number(item?.to || 0);
-    return Number.isFinite(to) && to > max ? to : max;
-  }, 0);
-  const chapterMaxTo = normalizeChapters(meta?.chapters || []).reduce((max, item) => {
-    const from = Number(item?.from || 0) || 0;
-    const to = Number(item?.to || 0) || 0;
-    return Math.max(max, from, to);
-  }, 0);
-  const duration = Number(meta?.videoDuration || 0) || 0;
-  return Math.max(subtitleMaxTo, chapterMaxTo, duration) >= 3600;
-}
-
-
-function sanitizeFileName(value) {
-  return value.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim().slice(0, 120);
-}
-
-
 
 
 function mapSubtitleTracks(subtitles, source = "unknown") {
@@ -1476,6 +859,216 @@ function normalizeChapterTime(value) {
 
   // 某些接口会返回毫秒级时间戳，这里统一转换成秒。
   return num > 60 * 60 * 24 ? num / 1000 : num;
+}
+
+
+function normalizeChapters(chapters) {
+  const normalized = (chapters || [])
+    .map((item) => ({
+      title: String(item?.title || "").trim(),
+      from: Number(item?.from || 0) || 0,
+      to: Number(item?.to || 0) || 0,
+      source: String(item?.source || "")
+    }))
+    .filter((item) => item.title && item.from >= 0)
+    .sort((a, b) => a.from - b.from);
+
+  const unique = [];
+  const seen = new Set();
+  normalized.forEach((item) => {
+    const key = `${Math.floor(item.from * 10)}|${item.title.toLowerCase()}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    unique.push(item);
+  });
+
+  return unique;
+}
+
+// === string-utils.js ===
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+
+function escapeYaml(value) {
+  return String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+
+function formatCompactTimestamp(seconds, withHours) {
+  const safe = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hour = Math.floor(safe / 3600);
+  const minute = Math.floor((safe % 3600) / 60);
+  const second = safe % 60;
+
+  if (withHours) {
+    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(
+      second
+    ).padStart(2, "0")}`;
+  }
+
+  const totalMinutes = Math.floor(safe / 60);
+  return `${String(totalMinutes).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
+}
+
+
+function formatTimestamp(seconds, forSrt = false) {
+  const safe = Number(seconds) || 0;
+  const msTotal = Math.max(0, Math.floor(safe * 1000));
+  const hour = Math.floor(msTotal / 3600000);
+  const minute = Math.floor((msTotal % 3600000) / 60000);
+  const second = Math.floor((msTotal % 60000) / 1000);
+  const ms = msTotal % 1000;
+
+  const hh = String(hour).padStart(2, "0");
+  const mm = String(minute).padStart(2, "0");
+  const ss = String(second).padStart(2, "0");
+  if (!forSrt) {
+    return `${hh}:${mm}:${ss}.${String(ms).padStart(3, "0")}`;
+  }
+
+  return `${hh}:${mm}:${ss},${String(ms).padStart(3, "0")}`;
+}
+
+
+function pushOptionalLines(targetLines, extraLines) {
+  if (!Array.isArray(extraLines) || !extraLines.length) {
+    return;
+  }
+  targetLines.push(...extraLines);
+}
+
+
+function resolveFrontmatterTemplateValue(value, templateContext = {}) {
+  return String(value || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, rawKey) => {
+    const key = String(rawKey || "").trim().toLowerCase();
+    if (!key) {
+      return "";
+    }
+    const resolved = templateContext[key];
+    return resolved == null ? "" : String(resolved);
+  });
+}
+
+
+function parseFrontmatterArrayItems(value) {
+  return String(value || "")
+    .split(/[，,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+
+function sanitizeFileName(value) {
+  return value.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+// === video-probe.js ===
+function findReaderPlayerHost(video) {
+  if (!video) {
+    return null;
+  }
+
+  return (
+    video.closest(".bpx-player-container") ||
+    video.closest(".bpx-player-video-area") ||
+    video.closest("#bilibili-player") ||
+    video.parentElement
+  );
+}
+
+function isIgnoredReaderVideoCandidate(video) {
+  if (!video) {
+    return true;
+  }
+  const host = findReaderPlayerHost(video);
+  const blockedSelector = [
+    "[data-boc-reader-hidden='1']",
+    ".bpx-player-mini-warp",
+    ".bpx-player-mini-close",
+    ".bpx-player-ending-panel",
+    ".bpx-player-ending-related",
+    "[class*='mini-player']",
+    "[class*='picture-in-picture']",
+    "[class*='adcard']",
+    ".ad-report",
+    "[class*='ad-report']",
+    ".video-page-card-small",
+    ".video-page-special-card-small",
+    ".feed-card",
+    ".bili-video-card"
+  ].join(", ");
+  return Boolean(video.closest(blockedSelector) || host?.closest?.(blockedSelector));
+}
+
+function getRuntimeVideoElement() {
+  if (state.reader.readingVideoEl?.isConnected) {
+    const currentHost = findReaderPlayerHost(state.reader.readingVideoEl);
+    const currentRect = state.reader.readingVideoEl.getBoundingClientRect();
+    if (
+      currentHost?.isConnected &&
+      currentRect.width > 120 &&
+      currentRect.height > 68 &&
+      !isIgnoredReaderVideoCandidate(state.reader.readingVideoEl)
+    ) {
+      return state.reader.readingVideoEl;
+    }
+  }
+
+  const candidates = Array.from(document.querySelectorAll("video")).filter(
+    (item) => item.isConnected && !isIgnoredReaderVideoCandidate(item)
+  );
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const visible = candidates
+    .map((item) => {
+      const rect = item.getBoundingClientRect();
+      const host = findReaderPlayerHost(item);
+      const inPlayer = Boolean(
+        host &&
+          (host.matches?.("#bilibili-player, .bpx-player-container, .bpx-player-video-area") ||
+            host.querySelector?.(".bpx-player-video-area"))
+      );
+      const area = Math.max(0, rect.width) * Math.max(0, rect.height);
+      const score =
+        area +
+        (inPlayer ? 1000000 : 0) +
+        (!item.paused ? 20000 : 0) +
+        Number(item.readyState || 0) * 2000 +
+        (item.currentSrc ? 10000 : 0) +
+        (item === state.reader.readingVideoEl ? 500 : 0);
+      return { item, rect, score };
+    })
+    .filter(({ rect }) => rect.width > 240 && rect.height > 120)
+    .sort((a, b) => b.score - a.score)[0];
+
+  return visible?.item || candidates[0] || null;
+}
+
+// === bili-api.js ===
+function normalizeHotComments(comments, limit = 20) {
+  if (!Array.isArray(comments)) {
+    return [];
+  }
+
+  return comments
+    .map((item) => ({
+      uname: String(item?.uname || "匿名").trim() || "匿名",
+      like: Number(item?.like || 0) || 0,
+      message: String(item?.message || "").trim().slice(0, 500)
+    }))
+    .filter((item) => item.message)
+    .slice(0, limit);
 }
 
 
@@ -1613,38 +1206,498 @@ async function fetchHotComments(count = 20) {
   );
 }
 
+// === note-rendering.js ===
+// extension/note-rendering.js
+// Note/export rendering logic (Markdown, SRT, TXT, frontmatter, chapters, subtitles, comments).
 
-function normalizeSubtitleUrl(url) {
-  if (!url) {
+
+
+
+
+
+
+
+function buildBilibiliEmbedIframe(meta, page = 1) {
+  const safeAid = encodeURIComponent(String(meta?.aid || "").trim());
+  const safeBvid = encodeURIComponent(String(meta?.bvid || "").trim());
+  const safeCid = encodeURIComponent(String(meta?.cid || "").trim());
+  const safePage = Number(page) > 0 ? Number(page) : 1;
+
+  return `<iframe src="https://player.bilibili.com/player.html?aid=${safeAid}&bvid=${safeBvid}&cid=${safeCid}&page=${safePage}&autoplay=0" scrolling="no" border="0" frameborder="no" framespacing="0" allow="fullscreen; picture-in-picture" allowfullscreen="true" style="height:100%;width:100%; aspect-ratio: 16 / 9;"> </iframe>`;
+}
+
+function buildChapterLines(chapters, withHours = false) {
+  const chapterItems = normalizeChapters(chapters);
+  if (chapterItems.length === 0) {
+    return [];
+  }
+
+  return chapterItems.map((item) => {
+    const fromText = formatCompactTimestamp(item.from, withHours);
+    return `- \`${fromText}\` ${item.title}`;
+  });
+}
+
+function buildFolderTemplateContext(meta, created = formatLocalDate()) {
+  return {
+    created: sanitizeFolderTemplateValue(created),
+    upload_date: sanitizeFolderTemplateValue(meta?.uploadDate || ""),
+    author: sanitizeFolderTemplateValue(meta?.author || ""),
+    bvid: sanitizeFolderTemplateValue(meta?.bvid || "")
+  };
+}
+
+function buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml) {
+  const enabled = getEnabledFrontmatterFields(settings);
+  const fixedPropertyLines = getFixedFrontmatterPropertyLines(
+    settings,
+    buildFrontmatterTemplateContext(meta, created, tagsCsv, tagsYaml)
+  );
+  if (enabled.length === 0 && fixedPropertyLines.length === 0) {
     return "";
   }
 
-  if (url.startsWith("//")) {
-    return `https:${url}`;
+  const fieldLines = {
+    title: `title: "${escapeYaml(meta.title)}"`,
+    url: `url: "${escapeYaml(cleanVideoUrl())}"`,
+    bvid: `bvid: "${escapeYaml(meta.bvid)}"`,
+    cid: `cid: "${escapeYaml(meta.cid)}"`,
+    author: `author: "${escapeYaml(meta.author || "unknown")}"`,
+    upload_date: `upload_date: "${escapeYaml(meta.uploadDate || "unknown")}"`,
+    subtitle_lang: `subtitle_lang: "${escapeYaml(meta.selectedSubtitleLang || "unknown")}"`,
+    created: `created: "${created}"`,
+    tags: `tags: ${tagsYaml}`
+  };
+
+  const lines = enabled.map((field) => fieldLines[field]).filter(Boolean);
+  lines.push(...fixedPropertyLines);
+  if (lines.length === 0) {
+    return "";
   }
 
-  if (url.startsWith("http://") || url.startsWith("https://")) {
-    return url;
+  return ["---", ...lines, "---"].join("\n");
+}
+
+function buildFrontmatterTemplateContext(meta, created, tagsCsv, tagsYaml) {
+  return {
+    title: String(meta?.title || "").trim(),
+    url: String(cleanVideoUrl() || "").trim(),
+    bvid: String(meta?.bvid || "").trim(),
+    cid: String(meta?.cid || "").trim(),
+    author: String(meta?.author || "unknown").trim(),
+    upload_date: String(meta?.uploadDate || "unknown").trim(),
+    subtitle_lang: String(meta?.selectedSubtitleLang || "unknown").trim(),
+    created: String(created || "").trim(),
+    tags: String(tagsCsv || "").trim(),
+    tags_csv: String(tagsCsv || "").trim(),
+    tags_yaml: String(tagsYaml || "").trim()
+  };
+}
+
+function buildHotCommentLines(comments) {
+  const items = normalizeHotComments(comments, 20);
+  if (items.length === 0) {
+    return [];
   }
 
-  return `https://${url.replace(/^\/+/, "")}`;
+  return items.flatMap((item, index) => [
+    `${index + 1}. ${item.uname}（赞 ${item.like}）`,
+    item.message,
+    ""
+  ]).slice(0, -1);
+}
+
+function buildMarkdown(meta, body, settings) {
+  const created = formatLocalDate();
+  const tags = (settings.tags || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const tagsCsv = tags.join(", ");
+  const tagsYaml =
+    tags.length === 0 ? "[]" : `[${tags.map((tag) => `"${tag.replace(/"/g, '\\"')}"`).join(", ")}]`;
+
+  const compactWithHours = shouldShowHoursInNote(meta, body);
+  const chapterLines = buildChapterLines(meta.chapters || [], compactWithHours);
+  const subtitleSectionLines = buildSubtitleSectionLines(
+    body,
+    meta.chapters || [],
+    settings,
+    compactWithHours
+  );
+  const frontMatter = buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml);
+
+  const page = extractPageIndex(location.href);
+  const embedIframe = buildBilibiliEmbedIframe(meta, page);
+  const intro = String(meta.description || "").trim();
+  const noteSectionContext = buildNotePlaceholderTemplateContext(meta, intro);
+  const noteSections = groupNotePlaceholderSections(settings, noteSectionContext);
+
+  const lines = [];
+  if (frontMatter) {
+    lines.push(frontMatter, "");
+  }
+  lines.push(embedIframe, "");
+  pushOptionalLines(lines, noteSections.before_intro);
+
+  if (intro) {
+    lines.push("## 简介", "", intro, "");
+  }
+
+  pushOptionalLines(lines, noteSections.before_chapters);
+
+  if (chapterLines.length > 0) {
+    lines.push("## 章节", "", ...chapterLines, "");
+  }
+
+  pushOptionalLines(lines, noteSections.before_subtitle);
+  lines.push("## 字幕", "", ...subtitleSectionLines);
+
+  const hotCommentLines = buildHotCommentLines(
+    settings?.includeHotCommentsInNote ? meta?.hotComments || [] : []
+  );
+  if (hotCommentLines.length > 0) {
+    lines.push("", "## 评论", "", ...hotCommentLines);
+  }
+
+  return lines.join("\n");
+}
+
+function buildNoteFilename(meta) {
+  const includeDate = state.settings?.includeDateInFilename !== false;
+  const baseParts = [];
+
+  if (includeDate) {
+    baseParts.push(formatLocalDate());
+  }
+
+  baseParts.push(meta.title || meta.bvid || "bilibili-subtitle");
+
+  if (Number(meta.pageCount) > 1) {
+    baseParts.push(`P${Number(meta.pageIndex) > 0 ? Number(meta.pageIndex) : 1}`);
+    const pageTitle = String(meta.pageTitle || "").trim();
+    if (pageTitle) {
+      baseParts.push(pageTitle);
+    }
+  }
+
+  const baseName = sanitizeFileName(baseParts.filter(Boolean).join("-"));
+  return `${baseName || "bilibili-subtitle"}.md`;
+}
+
+function buildNotePlaceholderLines(item, templateContext = {}) {
+  const title = String(item?.title || "").trim();
+  if (!title) {
+    return [];
+  }
+  const content = resolveFrontmatterTemplateValue(item?.content, templateContext).trim();
+  const lines = [`## ${title}`, ""];
+  if (content) {
+    lines.push(content, "");
+  }
+  return lines;
+}
+
+function buildNotePlaceholderTemplateContext(meta, description) {
+  return {
+    title: String(meta?.title || "").trim(),
+    author: String(meta?.author || "").trim(),
+    url: String(cleanVideoUrl() || "").trim(),
+    upload_date: String(meta?.uploadDate || "").trim(),
+    description: String(description || "").trim()
+  };
+}
+
+function buildSrt(body) {
+  return body
+    .map((item, index) => {
+      const from = formatTimestamp(item.from, true);
+      const to = formatTimestamp(item.to, true);
+      const text = (item.content || "").trim();
+      return `${index + 1}\n${from} --> ${to}\n${text}`;
+    })
+    .join("\n\n");
+}
+
+function buildSubtitlePreview(body, settings) {
+  const compactWithHours = shouldShowHoursInSubtitle(body);
+  return (body || [])
+    .map((item) => {
+      const text = String(item?.content || "").trim();
+      if (!text) {
+        return "";
+      }
+      if (settings.includeTimestampInBody) {
+        return `\`${formatCompactTimestamp(item.from, compactWithHours)}\` ${text}`;
+      }
+      return text;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildSubtitleSectionLines(body, chapters, settings, withHours) {
+  const subtitleItems = (body || [])
+    .map((item, index) => ({
+      ...item,
+      _index: index,
+      text: String(item?.content || "").trim()
+    }))
+    .filter((item) => item.text);
+  if (subtitleItems.length === 0) {
+    return ["（暂无字幕）"];
+  }
+
+  const chapterItems = normalizeChapters(chapters);
+  if (chapterItems.length === 0) {
+    return subtitleItems.map((item) => formatSubtitleLine(item, settings, withHours));
+  }
+
+  const lines = [];
+  const usedIndexes = new Set();
+
+  chapterItems.forEach((chapter, idx) => {
+    const start = Number(chapter.from || 0) || 0;
+    const next = chapterItems[idx + 1];
+    const chapterTo = Number(chapter.to || 0) || 0;
+    let end = Infinity;
+    if (next && Number(next.from) > start) {
+      end = Number(next.from);
+    } else if (chapterTo > start) {
+      end = chapterTo;
+    }
+
+    const sectionItems = subtitleItems.filter((item) => {
+      const from = Number(item.from || 0) || 0;
+      const inStart = from + 0.001 >= start;
+      const inEnd = end === Infinity ? true : from < end;
+      return inStart && inEnd;
+    });
+
+    if (sectionItems.length === 0) {
+      return;
+    }
+
+    const chapterStamp = settings.includeTimestampInBody
+      ? ` \`${formatCompactTimestamp(start, withHours)}\``
+      : "";
+    lines.push(`### ${chapter.title}${chapterStamp}`, "");
+    sectionItems.forEach((item) => {
+      usedIndexes.add(item._index);
+      lines.push(formatSubtitleLine(item, settings, withHours));
+    });
+    lines.push("");
+  });
+
+  const remaining = subtitleItems.filter((item) => !usedIndexes.has(item._index));
+  if (remaining.length > 0) {
+    lines.push("### 其他片段", "");
+    remaining.forEach((item) => {
+      lines.push(formatSubtitleLine(item, settings, withHours));
+    });
+    lines.push("");
+  }
+
+  if (lines.length === 0) {
+    return subtitleItems.map((item) => formatSubtitleLine(item, settings, withHours));
+  }
+
+  while (lines.length > 0 && !lines[lines.length - 1]) {
+    lines.pop();
+  }
+  return lines;
+}
+
+function buildTxt(body, settings) {
+  const withHours = shouldShowHoursInSubtitle(body);
+  return (body || [])
+    .map((item) => {
+      const text = String(item?.content || "").trim();
+      if (!text) {
+        return "";
+      }
+      if (!settings?.includeTimestampInBody) {
+        return text;
+      }
+      return `${formatCompactTimestamp(item.from, withHours)} ${text}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatFixedPropertyYamlLine(key, type, value, templateContext = {}) {
+  const normalizedType = normalizeFixedPropertyType(type);
+  const resolvedValue = resolveFrontmatterTemplateValue(value, templateContext).trim();
+
+  if (!resolvedValue) {
+    return "";
+  }
+
+  if (normalizedType === "number") {
+    const num = Number(resolvedValue);
+    if (!Number.isFinite(num)) {
+      return "";
+    }
+    return `${key}: ${resolvedValue}`;
+  }
+
+  if (normalizedType === "checkbox") {
+    const normalizedValue = resolvedValue.toLowerCase();
+    if (normalizedValue !== "true" && normalizedValue !== "false") {
+      return "";
+    }
+    return `${key}: ${normalizedValue}`;
+  }
+
+  if (normalizedType === "list") {
+    const items = parseFrontmatterArrayItems(resolvedValue);
+    return `${key}: [${items.map((item) => `"${escapeYaml(item)}"`).join(", ")}]`;
+  }
+
+  if (normalizedType === "date") {
+    if (!isYamlDateValue(resolvedValue)) {
+      return "";
+    }
+    return `${key}: ${resolvedValue}`;
+  }
+
+  return `${key}: "${escapeYaml(resolvedValue)}"`;
+}
+
+function formatSubtitleLine(item, settings, withHours) {
+  const text = String(item?.content || "").trim();
+  if (!text) {
+    return "";
+  }
+  if (!settings.includeTimestampInBody) {
+    return text;
+  }
+  return `\`${formatCompactTimestamp(item.from, withHours)}\` ${text}`;
+}
+
+function getEnabledFrontmatterFields(settings) {
+  const defaultFields = Array.isArray(DEFAULT_SETTINGS.frontmatterFields)
+    ? DEFAULT_SETTINGS.frontmatterFields
+    : [];
+  const raw = Array.isArray(settings?.frontmatterFields) ? settings.frontmatterFields : defaultFields;
+  const allowed = new Set(defaultFields);
+  const unique = [];
+  raw.forEach((item) => {
+    const key = String(item || "").trim();
+    if (!key || !allowed.has(key) || unique.includes(key)) {
+      return;
+    }
+    unique.push(key);
+  });
+  return unique;
+}
+
+function getFixedFrontmatterPropertyLines(settings, templateContext = {}) {
+  const customPropertyKeyPattern = /^[\p{L}\p{N}_\-\s]+$/u;
+  const systemFields = new Set(
+    (Array.isArray(DEFAULT_SETTINGS.frontmatterFields) ? DEFAULT_SETTINGS.frontmatterFields : []).map((field) =>
+      String(field).toLowerCase()
+    )
+  );
+  const rows = Array.isArray(settings?.fixedFrontmatterProperties) ? settings.fixedFrontmatterProperties : [];
+  const seenKeys = new Set();
+  const lines = [];
+
+  rows.forEach((item) => {
+    const key = String(item?.key || "").trim();
+    const type = normalizeFixedPropertyType(item?.type);
+    const value = item?.value;
+    const lowerKey = key.toLowerCase();
+    if (!key || isFixedPropertyRowEffectivelyEmpty(type, value)) {
+      return;
+    }
+    if (!customPropertyKeyPattern.test(key)) {
+      return;
+    }
+    if (systemFields.has(lowerKey) || seenKeys.has(lowerKey)) {
+      return;
+    }
+    seenKeys.add(lowerKey);
+    const yamlLine = formatFixedPropertyYamlLine(key, type, value, templateContext);
+    if (yamlLine) {
+      lines.push(yamlLine);
+    }
+  });
+
+  return lines;
+}
+
+function groupNotePlaceholderSections(settings, templateContext = {}) {
+  const groups = {
+    before_intro: [],
+    before_chapters: [],
+    before_subtitle: []
+  };
+  const rows = normalizeNotePlaceholderSections(settings?.notePlaceholderSections);
+  rows.forEach((item) => {
+    const renderedLines = buildNotePlaceholderLines(item, templateContext);
+    if (!renderedLines.length) {
+      return;
+    }
+    groups[item.position].push(...renderedLines);
+  });
+  return groups;
+}
+
+function isYamlDateValue(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
+}
+
+function normalizeFolder(input) {
+  return String(input || "").trim().replace(/^\/+|\/+$/g, "");
+}
+
+function resolveFolderTemplate(template, meta) {
+  const normalized = normalizeFolder(template);
+  if (!normalized) {
+    return "";
+  }
+
+  const allowedKeys = new Set(["created", "upload_date", "author", "bvid"]);
+  const context = buildFolderTemplateContext(meta);
+  const resolved = String(normalized).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, rawKey) => {
+    const key = String(rawKey || "").trim().toLowerCase();
+    if (!allowedKeys.has(key)) {
+      return "";
+    }
+    return context[key] || "";
+  });
+
+  return resolved
+    .split("/")
+    .map((segment) => sanitizeFolderTemplateValue(segment))
+    .filter(Boolean)
+    .join("/");
 }
 
 
-function buildSubtitleSourceKey(subtitleId, subtitleUrl, lang) {
-  const id = String(subtitleId || "").trim();
-  if (id) {
-    return `id_${id}`;
-  }
 
-  const normalizedUrl = normalizeSubtitleUrlForCache(subtitleUrl);
-  if (normalizedUrl) {
-    return `url_${normalizedUrl}`;
-  }
-
-  return `lang_${String(lang || "").trim().toLowerCase() || "unknown"}`;
+function shouldShowHoursInSubtitle(body) {
+  const maxTo = (body || []).reduce((max, item) => {
+    const to = Number(item?.to || 0);
+    return Number.isFinite(to) && to > max ? to : max;
+  }, 0);
+  return maxTo >= 3600;
 }
 
+function shouldShowHoursInNote(meta, body) {
+  const subtitleMaxTo = (body || []).reduce((max, item) => {
+    const to = Number(item?.to || 0);
+    return Number.isFinite(to) && to > max ? to : max;
+  }, 0);
+  const chapterMaxTo = normalizeChapters(meta?.chapters || []).reduce((max, item) => {
+    const from = Number(item?.from || 0) || 0;
+    const to = Number(item?.to || 0) || 0;
+    return Math.max(max, from, to);
+  }, 0);
+  const duration = Number(meta?.videoDuration || 0) || 0;
+  return Math.max(subtitleMaxTo, chapterMaxTo, duration) >= 3600;
+}
 
 function sanitizeFolderTemplateValue(value) {
   return String(value || "")
@@ -1762,90 +1815,6 @@ function rebuildDerivedContent() {
   state.clip.srt = body.length ? buildSrt(body) : "";
   state.clip.txt = body.length ? buildTxt(body, state.settings) : "";
   byId("boc-preview").value = body.length ? buildSubtitlePreview(body, state.settings) : "";
-}
-
-// === video-probe.js ===
-function findReaderPlayerHost(video) {
-  if (!video) {
-    return null;
-  }
-
-  return (
-    video.closest(".bpx-player-container") ||
-    video.closest(".bpx-player-video-area") ||
-    video.closest("#bilibili-player") ||
-    video.parentElement
-  );
-}
-
-function isIgnoredReaderVideoCandidate(video) {
-  if (!video) {
-    return true;
-  }
-  const host = findReaderPlayerHost(video);
-  const blockedSelector = [
-    "[data-boc-reader-hidden='1']",
-    ".bpx-player-mini-warp",
-    ".bpx-player-mini-close",
-    ".bpx-player-ending-panel",
-    ".bpx-player-ending-related",
-    "[class*='mini-player']",
-    "[class*='picture-in-picture']",
-    "[class*='adcard']",
-    ".ad-report",
-    "[class*='ad-report']",
-    ".video-page-card-small",
-    ".video-page-special-card-small",
-    ".feed-card",
-    ".bili-video-card"
-  ].join(", ");
-  return Boolean(video.closest(blockedSelector) || host?.closest?.(blockedSelector));
-}
-
-function getRuntimeVideoElement() {
-  if (state.reader.readingVideoEl?.isConnected) {
-    const currentHost = findReaderPlayerHost(state.reader.readingVideoEl);
-    const currentRect = state.reader.readingVideoEl.getBoundingClientRect();
-    if (
-      currentHost?.isConnected &&
-      currentRect.width > 120 &&
-      currentRect.height > 68 &&
-      !isIgnoredReaderVideoCandidate(state.reader.readingVideoEl)
-    ) {
-      return state.reader.readingVideoEl;
-    }
-  }
-
-  const candidates = Array.from(document.querySelectorAll("video")).filter(
-    (item) => item.isConnected && !isIgnoredReaderVideoCandidate(item)
-  );
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  const visible = candidates
-    .map((item) => {
-      const rect = item.getBoundingClientRect();
-      const host = findReaderPlayerHost(item);
-      const inPlayer = Boolean(
-        host &&
-          (host.matches?.("#bilibili-player, .bpx-player-container, .bpx-player-video-area") ||
-            host.querySelector?.(".bpx-player-video-area"))
-      );
-      const area = Math.max(0, rect.width) * Math.max(0, rect.height);
-      const score =
-        area +
-        (inPlayer ? 1000000 : 0) +
-        (!item.paused ? 20000 : 0) +
-        Number(item.readyState || 0) * 2000 +
-        (item.currentSrc ? 10000 : 0) +
-        (item === state.reader.readingVideoEl ? 500 : 0);
-      return { item, rect, score };
-    })
-    .filter(({ rect }) => rect.width > 240 && rect.height > 120)
-    .sort((a, b) => b.score - a.score)[0];
-
-  return visible?.item || candidates[0] || null;
 }
 
 // === player-ai.js ===
@@ -5540,7 +5509,7 @@ async function fetchSubtitleBundle(bvid, cid, aid = "") {
   }
 }
 
-// Re-exported helpers from "./formatters.js"
+// Re-exported helpers from the subtitle source modules
 { fetchSubtitleBody, validateSubtitleByDuration, buildSubtitleSourceKey, clearSubtitleCacheByKey, saveSubtitleToCache, loadSubtitleFromCache, normalizeSubtitleUrlForCache, buildSubtitleInfoRequests, mapSubtitleTracks, normalizeSubtitleTracks, pickPreferredSubtitle, subtitlePriority, readRuntimeVideoDuration };
 
 // === subtitle-fetcher.js ===

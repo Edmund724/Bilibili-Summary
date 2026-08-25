@@ -1,4 +1,4 @@
-import { fetchHotComments } from "./formatters.js";
+import { fetchHotComments } from "./bili-api.js";
 import { rebuildDerivedContent } from "./subtitle.js";
 import { state } from "./state.js";
 import { logWarn } from "./reader-shell.js";

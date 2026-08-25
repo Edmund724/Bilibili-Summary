@@ -20,7 +20,7 @@ import {
   generateConversationId,
   extractPageIndexFromContextUrl
 } from "./conversation.js";
-import { escapeHtml, sanitizeFileName } from "./formatters.js";
+import { escapeHtml, sanitizeFileName } from "./string-utils.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";

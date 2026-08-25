@@ -5,7 +5,7 @@ import {
   isSupportedBilibiliPage,
   sleep
 } from "./shared-defaults.js";
-import { escapeHtml, sanitizeFileName } from "./formatters.js";
+import { escapeHtml, sanitizeFileName } from "./string-utils.js";
 
 const el = {
   status: document.getElementById("status"),

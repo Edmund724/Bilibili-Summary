@@ -19,9 +19,11 @@ import {
 } from "./subtitle.js";
 import {
   escapeHtml,
-  formatCompactTimestamp,
+  formatCompactTimestamp
+} from "./string-utils.js";
+import {
   shouldShowHoursInNote
-} from "./formatters.js";
+} from "./note-rendering.js";
 import {
   resetPlayerAiQuickActionRetryCount,
   schedulePlayerAiQuickActionSync

@@ -10,11 +10,9 @@ import {
   isReaderMode,
   stripReaderModeUrl
 } from "./url-utils.js";
-import {
-  escapeHtml,
-  buildSubtitlePreview,
-  isAiSubtitle
-} from "./formatters.js";
+import { escapeHtml } from "./string-utils.js";
+import { buildSubtitlePreview } from "./note-rendering.js";
+import { isAiSubtitle } from "./subtitle-selection.js";
 import { DEFAULT_SETTINGS } from "./shared-defaults.js";
 import {
   ids,

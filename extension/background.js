@@ -29,19 +29,19 @@ import {
   isSupportedBilibiliPage,
   sleep
 } from "./shared-defaults.js";
+import { formatCompactTimestamp } from "./string-utils.js";
+import { normalizeSubtitleUrlForCache } from "./subtitle-cache.js";
+import { buildSubtitleInfoRequests } from "./bili-api.js";
 import {
   normalizeChapters,
   subtitlePriority,
-  formatCompactTimestamp,
   mapSubtitleTracks,
   normalizeSubtitleUrl,
-  buildSubtitleInfoRequests,
-  normalizeSubtitleUrlForCache,
   pickPreferredSubtitle as pickPreferredSubtitleTrack,
   mapChaptersFromPlayerData,
   normalizeChapterTime,
   normalizeSubtitleTracks
-} from "./formatters.js";
+} from "./subtitle-selection.js";
 
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 

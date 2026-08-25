@@ -11,10 +11,10 @@ import {
 } from "./subtitle.js";
 import {
   normalizeChapters,
-  buildSubtitleCandidates,
   normalizeSubtitleTracks,
   pickPreferredSubtitle
-} from "./formatters.js";
+} from "./subtitle-selection.js";
+import { buildSubtitleCandidates } from "./subtitle-cache.js";
 import {
   extractOid,
   hasExplicitPageParam,
