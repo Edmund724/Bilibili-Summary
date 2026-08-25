@@ -72,7 +72,8 @@ import {
   readRuntimeVideoDuration
 } from "./bili-api.js";
 import {
-  readVideoDescription
+  readVideoDescription,
+  applyNoSubtitleState
 } from "./subtitle-ui.js";
 import { refreshDerivedContent } from "./note-build.js";
 

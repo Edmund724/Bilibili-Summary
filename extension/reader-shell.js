@@ -10,7 +10,7 @@ import {
   sleep
 } from "./shared-defaults.js";
 import { isReaderMode, isWatchlaterPage, cleanVideoUrl } from "./url-utils.js";
-import { byId, sendRuntimeMessage } from "./runtime.js";
+import { byId, sendRuntimeMessage, getSettings } from "./runtime.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "./video-probe.js";
 import { getErrorMessage, isStaleRunError } from "./error-helpers.js";
 import {
@@ -18,7 +18,8 @@ import {
   getReadingTranscriptPlaceholderText
 } from "./subtitle.js";
 import {
-  normalizeChapters
+  normalizeChapters,
+  isAiSubtitle
 } from "./subtitle-selection.js";
 import {
   escapeHtml,
