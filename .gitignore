@@ -1,11 +1,26 @@
+# OS
 .DS_Store
-release/
-.claude/
+
+# Dependencies
+node_modules/
+
+# Build / generated artifacts
+/release/
+/dist/
+/build/
+
+# Generated extension files
+/extension/content-classic.js
+
+# Local agent / store assets
 AGENTS.md
 PRIVACY_POLICY_zh-CN.md
 WEBSTORE_LISTING_zh-CN.md
-extension/content-classic.js
-.scratch/
-formatters-processed.js
-architecture-review-20250824-211600.html
 docs/agents/domain.md
+
+# Local / agent / IDE
+.env
+.scratch/
+
+# Generated reports / scratch outputs that may land in the root
+architecture-review-*.html
