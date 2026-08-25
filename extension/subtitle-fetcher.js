@@ -1,5 +1,4 @@
 import { setMessage } from "./message.js";
-import { BOC_VERSION } from "./version.js";
 import { DEFAULT_SETTINGS, normalizeDownloadFormat } from "./shared-defaults.js";
 import { state, clipState, readerState } from "./state.js";
 import { extractBvid, extractPageIndex, computeCurrentClipSignature } from "./url-utils.js";
@@ -71,8 +70,6 @@ import {
   readVideoDescription
 } from "./subtitle-ui.js";
 import { refreshDerivedContent } from "./note-build.js";
-
-export { BOC_VERSION };
 
 export async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh) {
   let lastError = null;

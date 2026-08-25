@@ -1,4 +1,5 @@
-import { loadSubtitle, BOC_VERSION } from "./subtitle-fetcher.js";
+import { BOC_VERSION } from "./version.js";
+import { loadSubtitle } from "./subtitle-fetcher.js";
 import { buildSubtitlePreview } from "./note-rendering.js";
 import { isAiSubtitle } from "./subtitle-selection.js";
 import { sanitizeFileName } from "./string-utils.js";

@@ -1,5 +1,5 @@
+import { BOC_VERSION } from "./version.js";
 import {
-  BOC_VERSION,
   tryLoadSubtitleCandidates,
   resetClipState,
   refreshClip,
