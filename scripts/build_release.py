@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import shutil
+import subprocess
 import zipfile
 from pathlib import Path
 
@@ -108,6 +109,15 @@ def main():
         raise SystemExit("manifest.json is missing a version")
 
     RELEASE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Rebuild content-classic.js through the esbuild IIFE build before
+    # build_variant() copies the extension dir into release variants.
+    print("Building content-classic.js ...", flush=True)
+    subprocess.run(
+        ["node", str(ROOT / "scripts" / "build-content-classic.js")],
+        cwd=ROOT,
+        check=True,
+    )
 
     built = [
         build_variant(manifest, "chrome", version),
