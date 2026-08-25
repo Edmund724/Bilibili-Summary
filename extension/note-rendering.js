@@ -10,7 +10,7 @@ import {
 } from "./shared-defaults.js";
 import { escapeYaml, formatCompactTimestamp, formatTimestamp, sanitizeFileName, resolveFrontmatterTemplateValue, parseFrontmatterArrayItems, pushOptionalLines } from "./string-utils.js";
 import { normalizeChapters } from "./subtitle-selection.js";
-import { normalizeHotComments } from "./bili-api.js";
+import { normalizeHotComments } from "./bili-api-shared.js";
 import { extractPageIndex, cleanVideoUrl } from "./url-utils.js";
 import { state } from "./state.js";
 

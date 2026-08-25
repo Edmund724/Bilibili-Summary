@@ -1,13 +1,8 @@
 import { state, clipState, uiState } from "./state.js";
 import { DEFAULT_SETTINGS } from "./shared-defaults.js";
-import { ensureUiReady } from "./panel.js";
+import { ensureUiReady, setStatus, setMessage } from "./ui-renderer.js";
 import { enforceNormalPageStateIfNeeded } from "./reader-page-frame.js";
-import {
-  resetClipState,
-  refreshClip,
-  setStatus,
-  setMessage
-} from "./panel.js";
+import { resetClipState, refreshClip } from "./subtitle-fetcher.js";
 import {
   enterReaderMode,
   renderReadingStatus,

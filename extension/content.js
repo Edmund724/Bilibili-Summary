@@ -11,7 +11,7 @@ import {
   schedulePlayerAiQuickActionSync
 } from "./player-ai.js";
 
-import { ensureUiReady } from "./panel.js";
+import { ensureUiReady } from "./ui-renderer.js";
 import {
   clearReaderModePageState,
   bindNormalPageStateGuard

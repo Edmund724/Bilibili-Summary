@@ -2,29 +2,15 @@ import { sleep, formatLocalDate } from "./shared-defaults.js";
 import { toReadableText, getErrorMessage, isRetryableNetworkError } from "./error-helpers.js";
 import { logInfo, logWarn } from "./reader-shell.js";
 import { state } from "./state.js";
-import {
-  fetchJson,
-  fetchSubtitleBody,
-  readRuntimeVideoDuration
-} from "./bili-api.js";
+import { fetchJson } from "./bili-api.js";
 import {
   buildSubtitleInfoRequests,
   buildBiliApiError
 } from "./bili-api-shared.js";
-import {
-  buildSubtitleSourceKey,
-  clearSubtitleCacheByKey,
-  saveSubtitleToCache,
-  loadSubtitleFromCache,
-  normalizeSubtitleUrlForCache
-} from "./subtitle-cache.js";
+import { buildSubtitleSourceKey } from "./subtitle-cache.js";
 import {
   mapChaptersFromPlayerData,
-  validateSubtitleByDuration,
-  mapSubtitleTracks,
-  normalizeSubtitleTracks,
-  pickPreferredSubtitle,
-  subtitlePriority
+  mapSubtitleTracks
 } from "./subtitle-selection.js";
 
 export const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
@@ -156,6 +142,3 @@ export async function fetchSubtitleBundle(bvid, cid, aid = "") {
     throw primaryError;
   }
 }
-
-// Re-exported helpers from the subtitle source modules
-export { fetchSubtitleBody, validateSubtitleByDuration, buildSubtitleSourceKey, clearSubtitleCacheByKey, saveSubtitleToCache, loadSubtitleFromCache, normalizeSubtitleUrlForCache, buildSubtitleInfoRequests, mapSubtitleTracks, normalizeSubtitleTracks, pickPreferredSubtitle, subtitlePriority, readRuntimeVideoDuration };

@@ -11,14 +11,9 @@ import {
   getRuntimeVideoElement
 } from "./video-probe.js";
 
-import {
-  getPopupPayload,
-  refreshClip,
-  loadSubtitle,
-  setStatus,
-  renderSubtitleSelect,
-  ensureUiReady
-} from "./panel.js";
+import { getPopupPayload } from "./subtitle-ui.js";
+import { refreshClip, loadSubtitle } from "./subtitle-fetcher.js";
+import { setStatus, renderSubtitleSelect, ensureUiReady } from "./ui-renderer.js";
 
 import { removePlayerAiQuickActionButton } from "./player-ai.js";
 

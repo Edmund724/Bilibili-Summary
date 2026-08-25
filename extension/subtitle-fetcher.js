@@ -12,9 +12,15 @@ import {
 import {
   normalizeChapters,
   normalizeSubtitleTracks,
-  pickPreferredSubtitle
+  pickPreferredSubtitle,
+  validateSubtitleByDuration
 } from "./subtitle-selection.js";
-import { buildSubtitleCandidates } from "./subtitle-cache.js";
+import {
+  buildSubtitleCandidates,
+  clearSubtitleCacheByKey,
+  saveSubtitleToCache,
+  loadSubtitleFromCache
+} from "./subtitle-cache.js";
 import {
   extractOid,
   hasExplicitPageParam,
@@ -59,13 +65,11 @@ import {
   retryAsync,
   fetchVideoMeta,
   fetchSubtitleBundle,
-  getSubtitleCacheKey,
-  fetchSubtitleBody,
-  validateSubtitleByDuration,
-  clearSubtitleCacheByKey,
-  saveSubtitleToCache,
-  loadSubtitleFromCache
+  getSubtitleCacheKey
 } from "./subtitle-fetch.js";
+import {
+  fetchSubtitleBody
+} from "./bili-api.js";
 import {
   readVideoDescription
 } from "./subtitle-ui.js";

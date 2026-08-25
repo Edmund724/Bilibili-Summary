@@ -1,33 +1,13 @@
 import { state, clipState } from "./state.js";
 import { formatLocalDate } from "./shared-defaults.js";
-import { extractBvid, cleanVideoUrl } from "./url-utils.js";
 import { byId } from "./runtime.js";
-import {
-  normalizeSubtitleTracks,
-  pickPreferredSubtitle,
-  normalizeChapters,
-  mapSubtitleTracks,
-  mapChaptersFromPlayerData
-} from "./subtitle-selection.js";
+import { normalizeChapters } from "./subtitle-selection.js";
 import {
   buildSubtitlePreview,
   buildMarkdown,
   buildSrt,
   buildTxt
 } from "./note-rendering.js";
-
-export { extractBvid, cleanVideoUrl };
-export {
-  normalizeSubtitleTracks,
-  pickPreferredSubtitle,
-  normalizeChapters,
-  buildSubtitlePreview,
-  mapSubtitleTracks,
-  mapChaptersFromPlayerData,
-  buildMarkdown,
-  buildSrt,
-  buildTxt
-};
 
 export function readVideoTitle() {
   const h1 = document.querySelector("h1.video-title");

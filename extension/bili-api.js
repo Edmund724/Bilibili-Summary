@@ -3,9 +3,7 @@ import { toReadableText } from "./error-helpers.js";
 import { state } from "./state.js";
 import { getRuntimeVideoElement } from "./video-probe.js";
 import { logInfo } from "./logging.js";
-import { normalizeHotComments, buildSubtitleInfoRequests, buildBiliApiError, isRetryableError } from "./bili-api-shared.js";
-
-export { normalizeHotComments, buildSubtitleInfoRequests, buildBiliApiError, isRetryableError };
+import { normalizeHotComments } from "./bili-api-shared.js";
 
 
 export function readRuntimeVideoDuration() {

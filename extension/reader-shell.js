@@ -15,9 +15,11 @@ import { findReaderPlayerHost, getRuntimeVideoElement } from "./video-probe.js";
 import { getErrorMessage, isStaleRunError } from "./error-helpers.js";
 import {
   getReadingTranscriptItems,
-  getReadingTranscriptPlaceholderText,
-  normalizeChapters
+  getReadingTranscriptPlaceholderText
 } from "./subtitle.js";
+import {
+  normalizeChapters
+} from "./subtitle-selection.js";
 import {
   escapeHtml,
   formatCompactTimestamp
