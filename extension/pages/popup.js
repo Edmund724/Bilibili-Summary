@@ -87,10 +87,13 @@ function bindEvents() {
 
     if (isReaderModeUrl(tab?.url || "")) {
       setStatus("正在退出阅读视图...");
-      const closeResp = await sendToContent({ type: "popup-close-reading-view" });
-      if (!closeResp?.ok) {
-        setStatus(`退出失败：${closeResp?.error || "未知错误"}`, true);
-        setMessage(`退出失败：${closeResp?.error || "未知错误"}`);
+      const resp = await sendToRuntime({
+        type: "close-reading-view-tab",
+        tabId: tab.id
+      });
+      if (!resp?.ok) {
+        setStatus(`退出失败：${resp?.error || "未知错误"}`, true);
+        setMessage(`退出失败：${resp?.error || "未知错误"}`);
         return;
       }
       setMessage("已退出阅读视图，回到普通模式。");

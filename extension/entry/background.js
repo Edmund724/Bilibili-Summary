@@ -122,6 +122,24 @@ function handleOpenReadingViewTab(message, sender, sendResponse) {
   return true;
 }
 
+function handleCloseReadingViewTab(message, sender, sendResponse) {
+  const tabId = Number(message.tabId || 0) || 0;
+  if (!tabId) {
+    sendResponse({ ok: false, error: "缺少标签页信息" });
+    return false;
+  }
+
+  triggerReaderModeCloseInTab(tabId)
+    .then((closed) => {
+      if (!closed) {
+        throw new Error("退出阅读视图失败，请刷新浏览器网页重试");
+      }
+      sendResponse({ ok: true });
+    })
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
 function handleFetchJson(message, sender, sendResponse) {
   const url = typeof message.url === "string" ? message.url : "";
   if (!url) {
@@ -361,6 +379,7 @@ const messageHandlers = new Map([
   ["open-options", handleOpenOptions],
   ["player-ai-quick-action", handlePlayerAiQuickAction],
   ["open-reading-view-tab", handleOpenReadingViewTab],
+  ["close-reading-view-tab", handleCloseReadingViewTab],
   ["fetch-json", handleFetchJson],
   ["ai-providers-list", handleAiProvidersList],
   ["ai-presets-list", handleAiPresetsList],
@@ -528,6 +547,43 @@ async function triggerReaderModeInTab(tabId, readerUrl = "", retries = 12, delay
   }
 
   return false;
+}
+
+async function triggerReaderModeCloseInTab(tabId, retries = 12, delayMs = 300) {
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    if (attempt > 0) {
+      await sleep(delayMs);
+    }
+
+    try {
+      const response = await sendMessageToTab(tabId, {
+        type: "popup-close-reading-view"
+      });
+      if (response?.ok) {
+        return true;
+      }
+    } catch (error) {
+      // 忽略瞬时失败（消息端口被提前关闭等），下方会通过 URL 二次确认。
+    }
+
+    if (await isTabReaderModeOff(tabId)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function isTabReaderModeOff(tabId) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab?.url) {
+    return false;
+  }
+  try {
+    return new URL(tab.url).searchParams.get("boc_reader") !== "1";
+  } catch {
+    return false;
+  }
 }
 
 
