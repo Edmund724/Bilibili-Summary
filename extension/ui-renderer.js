@@ -33,11 +33,13 @@ import {
 } from "./reading-view-adapter.js";
 import {
   refreshClip,
+  loadSubtitle
+} from "./subtitle-fetcher.js";
+import {
   onSubtitleChange,
-  loadSubtitle,
   copyMarkdown,
   downloadSubtitle
-} from "./subtitle-fetcher.js";
+} from "./subtitle-ui.js";
 
 export { setMessage };
 

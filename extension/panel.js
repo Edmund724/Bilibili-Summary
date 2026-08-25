@@ -1,22 +1,27 @@
 import {
   BOC_VERSION,
-  CACHE_KEY_PREFIX,
-  retryAsync,
-  fetchVideoMeta,
   tryLoadSubtitleCandidates,
-  getSubtitleCacheKey,
   resetClipState,
   refreshClip,
+  loadSubtitle
+} from "./subtitle-fetcher.js";
+
+import {
+  CACHE_KEY_PREFIX,
+  fetchSubtitleBundle,
+  fetchVideoMeta,
+  retryAsync,
+  getSubtitleCacheKey
+} from "./subtitle-fetch.js";
+import {
   onSubtitleChange,
-  loadSubtitle,
   getPopupPayload,
   applyNoSubtitleState,
   readVideoDescription,
-  fetchSubtitleBundle,
-  refreshDerivedContent,
   copyMarkdown,
   downloadSubtitle
-} from "./subtitle-fetcher.js";
+} from "./subtitle-ui.js";
+import { refreshDerivedContent } from "./note-build.js";
 
 import {
   buildUiHtml,
@@ -73,12 +78,12 @@ export {
   getSubtitleCacheKey,
   resetClipState,
   refreshClip,
-  onSubtitleChange,
   loadSubtitle,
+  fetchSubtitleBundle,
+  onSubtitleChange,
   getPopupPayload,
   applyNoSubtitleState,
   readVideoDescription,
-  fetchSubtitleBundle,
   refreshDerivedContent,
   copyMarkdown,
   downloadSubtitle,

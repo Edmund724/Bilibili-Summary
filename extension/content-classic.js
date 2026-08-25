@@ -4675,6 +4675,147 @@ function pickDurationFromPages(pages, pageIndex, fallbackDuration = 0) {
   return Number(fallbackDuration || 0) || 0;
 }
 
+// === note-build.js ===
+async function refreshDerivedContent({ refreshComments = false } = {}) {
+  if (state.settings?.includeHotCommentsInNote) {
+    const shouldFetchComments =
+      refreshComments || !Array.isArray(state.clip.hotComments) || state.clip.hotComments.length === 0;
+    if (shouldFetchComments) {
+      try {
+        state.clip.hotComments = await fetchHotComments(20);
+      } catch (error) {
+        state.clip.hotComments = [];
+        logWarn("[BOC] failed to fetch hot comments for note export", error);
+      }
+    }
+  }
+
+  rebuildDerivedContent();
+}
+
+// === subtitle-ui.js ===
+async function onSubtitleChange(event) {
+  const value = event.target.value;
+  const option = event.target.options[event.target.selectedIndex];
+  const lang = option?.dataset.lang || "unknown";
+  const subtitleId = option?.dataset.id || "";
+  if (!value) {
+    return;
+  }
+
+  try {
+    setBusyState(true);
+    setStatus(`正在切换字幕：${lang}`);
+    setMessage("");
+    await loadSubtitle(value, lang, state.clip.fetchRunId, subtitleId);
+    setStatus("字幕切换完成。");
+  } catch (error) {
+    if (isStaleRunError(error)) {
+      return;
+    }
+    setStatus(`切换字幕失败：${getErrorMessage(error)}`);
+  } finally {
+    setBusyState(false);
+  }
+}
+
+async function copyMarkdown() {
+  state.settings = await getSettings();
+  await refreshDerivedContent();
+  if (!state.clip.markdown) {
+    setMessage("没有可复制的内容，请先刷新抓取。");
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(state.clip.markdown);
+    setMessage("Markdown 已复制到剪贴板。");
+  } catch (error) {
+    setMessage(`复制失败：${getErrorMessage(error)}`);
+  }
+}
+
+async function downloadSubtitle() {
+  state.settings = await getSettings();
+  rebuildDerivedContent();
+  const format = normalizeDownloadFormat(state.settings?.downloadFormat);
+  const content = format === "txt" ? state.clip.txt : state.clip.srt;
+  if (!content) {
+    setMessage("没有可下载的字幕，请先刷新抓取。");
+    return;
+  }
+
+  const safeTitle = sanitizeFileName(state.clip.title || state.clip.bvid || "bilibili-subtitle");
+  const langSuffix = sanitizeFileName(state.clip.selectedSubtitleLang || "subtitle") || "subtitle";
+  const filename = `${safeTitle}.${langSuffix}.${format}`;
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+
+  setMessage(`已下载：${filename}`);
+}
+
+function getPopupPayload() {
+  const subtitleOptions = (state.clip.subtitles || []).map((item) => {
+    const label = item.lanDoc || item.lan || "unknown";
+    const isAi = isAiSubtitle(item);
+    const selectedById =
+      state.clip.selectedSubtitleId && String(item.id) === String(state.clip.selectedSubtitleId);
+    const selectedByUrl = item.subtitleUrl === state.clip.selectedSubtitleUrl;
+    return {
+      id: String(item.id || ""),
+      url: item.subtitleUrl,
+      lang: label,
+      isAi,
+      selected: selectedById || selectedByUrl
+    };
+  });
+
+  return {
+    contentVersion: BOC_VERSION,
+    url: cleanVideoUrl(),
+    title: state.clip.title || "",
+    author: state.clip.author || "",
+    uploadDate: state.clip.uploadDate || "",
+    tags: String(state.settings?.tags || ""),
+    status: state.ui.statusText || "",
+    message: state.ui.messageText || "",
+    subtitlePreview: buildSubtitlePreview(state.clip.subtitleBody || [], state.settings || DEFAULT_SETTINGS),
+    markdown: state.clip.markdown || "",
+    srt: state.clip.srt || "",
+    txt: state.clip.txt || "",
+    downloadFormat: normalizeDownloadFormat(state.settings?.downloadFormat),
+    subtitleOptions
+  };
+}
+
+function applyNoSubtitleState() {
+  state.clip.selectedSubtitleId = "";
+  state.clip.selectedSubtitleUrl = "";
+  state.clip.selectedSubtitleLang = "";
+  state.clip.subtitleBody = [];
+  state.clip.subtitleFetchState = "empty";
+  state.clip.hotComments = [];
+  state.clip.markdown = "";
+  state.clip.srt = "";
+  state.clip.txt = "";
+  byId(ids.preview).value = "";
+}
+
+function readVideoDescription() {
+  const descNode = document.querySelector(
+    ".desc-info-text, .video-desc .desc-info-text, .video-info-detail .text, .basic-desc-info"
+  );
+  return descNode?.textContent?.trim() || "";
+}
+
 // === ui-renderer.js ===
 { setMessage };
 
@@ -5023,8 +5164,7 @@ function setStatus(text) {
   byId(ids.status).textContent = state.ui.statusText;
 }
 
-// === subtitle-fetcher.js ===
-const BOC_VERSION = "1.1.4";
+// === subtitle-fetch.js ===
 const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
 
 async function retryAsync(task, retries = 1, delayMs = 180) {
@@ -5082,6 +5222,84 @@ async function fetchVideoMeta(bvid) {
     }))
   };
 }
+
+function getSubtitleCacheKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "" }) {
+  const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
+  return `${CACHE_KEY_PREFIX}${bvid}_${cid}_${sourceKey}`;
+}
+
+async function fetchSubtitleBundle(bvid, cid, aid = "") {
+  const requests = buildSubtitleInfoRequests({ bvid, cid, aid });
+  const fetchByRequest = async (request) => {
+    logInfo("[BOC] fetch subtitles list", {
+      source: request.source,
+      url: request.url,
+      bvid,
+      cid,
+      aid
+    });
+
+    const payload = await fetchJson(request.url);
+    logInfo("[BOC] subtitles API raw response", { source: request.source, payload });
+    if (payload.code !== 0) {
+      throw buildBiliApiError(payload, "无法获取字幕列表");
+    }
+
+    const chapters = mapChaptersFromPlayerData(payload.data);
+    const subtitles = mapSubtitleTracks(payload.data?.subtitle?.subtitles || [], request.source);
+    const withUrl = subtitles.filter((item) => item.subtitleUrl);
+    return { source: request.source, chapters, withUrl };
+  };
+
+  if (requests.length === 0) {
+    return { tracks: [], chapters: [] };
+  }
+
+  const primaryRequest = requests[0];
+  try {
+    const primaryResult = await fetchByRequest(primaryRequest);
+    if (primaryResult.withUrl.length > 0) {
+      return { tracks: primaryResult.withUrl, chapters: primaryResult.chapters };
+    }
+    // 主来源成功但无字幕：直接判定无字幕，不再跨源兜底。
+    return { tracks: [], chapters: primaryResult.chapters };
+  } catch (primaryError) {
+    logWarn("[BOC] subtitles API request failed", {
+      source: primaryRequest.source,
+      message: getErrorMessage(primaryError)
+    });
+
+    // 仅当主来源请求失败时才尝试次来源。
+    if (requests.length > 1) {
+      const secondaryRequest = requests[1];
+      try {
+        const secondaryResult = await fetchByRequest(secondaryRequest);
+        if (secondaryResult.withUrl.length > 0) {
+          logWarn("[BOC] primary subtitles source failed, using fallback source", {
+            primary: primaryRequest.source,
+            fallback: secondaryRequest.source
+          });
+          return { tracks: secondaryResult.withUrl, chapters: secondaryResult.chapters };
+        }
+        return { tracks: [], chapters: secondaryResult.chapters };
+      } catch (secondaryError) {
+        logWarn("[BOC] fallback subtitles source failed", {
+          source: secondaryRequest.source,
+          message: getErrorMessage(secondaryError)
+        });
+        throw secondaryError;
+      }
+    }
+
+    throw primaryError;
+  }
+}
+
+// Re-exported helpers from "./formatters.js"
+{ fetchSubtitleBody, validateSubtitleByDuration, buildSubtitleSourceKey, clearSubtitleCacheByKey, saveSubtitleToCache, loadSubtitleFromCache, normalizeSubtitleUrlForCache, buildSubtitleInfoRequests, mapSubtitleTracks, normalizeSubtitleTracks, pickPreferredSubtitle, subtitlePriority, readRuntimeVideoDuration };
+
+// === subtitle-fetcher.js ===
+const BOC_VERSION = "1.1.4";
 
 async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh) {
   let lastError = null;
@@ -5393,31 +5611,6 @@ async function refreshClip() {
   }
 }
 
-async function onSubtitleChange(event) {
-  const value = event.target.value;
-  const option = event.target.options[event.target.selectedIndex];
-  const lang = option?.dataset.lang || "unknown";
-  const subtitleId = option?.dataset.id || "";
-  if (!value) {
-    return;
-  }
-
-  try {
-    setBusyState(true);
-    setStatus(`正在切换字幕：${lang}`);
-    setMessage("");
-    await loadSubtitle(value, lang, state.clip.fetchRunId, subtitleId);
-    setStatus("字幕切换完成。");
-  } catch (error) {
-    if (isStaleRunError(error)) {
-      return;
-    }
-    setStatus(`切换字幕失败：${getErrorMessage(error)}`);
-  } finally {
-    setBusyState(false);
-  }
-}
-
 async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, subtitleId = "", forceRefresh = false) {
   if (!url) {
     throw new Error("字幕 URL 为空。");
@@ -5490,192 +5683,6 @@ async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, subtitleId
   }
 }
 
-function getSubtitleCacheKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "" }) {
-  const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
-  return `${CACHE_KEY_PREFIX}${bvid}_${cid}_${sourceKey}`;
-}
-
-function getPopupPayload() {
-  const subtitleOptions = (state.clip.subtitles || []).map((item) => {
-    const label = item.lanDoc || item.lan || "unknown";
-    const isAi = isAiSubtitle(item);
-    const selectedById =
-      state.clip.selectedSubtitleId && String(item.id) === String(state.clip.selectedSubtitleId);
-    const selectedByUrl = item.subtitleUrl === state.clip.selectedSubtitleUrl;
-    return {
-      id: String(item.id || ""),
-      url: item.subtitleUrl,
-      lang: label,
-      isAi,
-      selected: selectedById || selectedByUrl
-    };
-  });
-
-  return {
-    contentVersion: BOC_VERSION,
-    url: cleanVideoUrl(),
-    title: state.clip.title || "",
-    author: state.clip.author || "",
-    uploadDate: state.clip.uploadDate || "",
-    tags: String(state.settings?.tags || ""),
-    status: state.ui.statusText || "",
-    message: state.ui.messageText || "",
-    subtitlePreview: buildSubtitlePreview(state.clip.subtitleBody || [], state.settings || DEFAULT_SETTINGS),
-    markdown: state.clip.markdown || "",
-    srt: state.clip.srt || "",
-    txt: state.clip.txt || "",
-    downloadFormat: normalizeDownloadFormat(state.settings?.downloadFormat),
-    subtitleOptions
-  };
-}
-
-async function copyMarkdown() {
-  state.settings = await getSettings();
-  await refreshDerivedContent();
-  if (!state.clip.markdown) {
-    setMessage("没有可复制的内容，请先刷新抓取。");
-    return;
-  }
-
-  try {
-    await navigator.clipboard.writeText(state.clip.markdown);
-    setMessage("Markdown 已复制到剪贴板。");
-  } catch (error) {
-    setMessage(`复制失败：${getErrorMessage(error)}`);
-  }
-}
-
-async function downloadSubtitle() {
-  state.settings = await getSettings();
-  rebuildDerivedContent();
-  const format = normalizeDownloadFormat(state.settings?.downloadFormat);
-  const content = format === "txt" ? state.clip.txt : state.clip.srt;
-  if (!content) {
-    setMessage("没有可下载的字幕，请先刷新抓取。");
-    return;
-  }
-
-  const safeTitle = sanitizeFileName(state.clip.title || state.clip.bvid || "bilibili-subtitle");
-  const langSuffix = sanitizeFileName(state.clip.selectedSubtitleLang || "subtitle") || "subtitle";
-  const filename = `${safeTitle}.${langSuffix}.${format}`;
-  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-
-  setMessage(`已下载：${filename}`);
-}
-
-function applyNoSubtitleState() {
-  state.clip.selectedSubtitleId = "";
-  state.clip.selectedSubtitleUrl = "";
-  state.clip.selectedSubtitleLang = "";
-  state.clip.subtitleBody = [];
-  state.clip.subtitleFetchState = "empty";
-  state.clip.hotComments = [];
-  state.clip.markdown = "";
-  state.clip.srt = "";
-  state.clip.txt = "";
-  byId(ids.preview).value = "";
-}
-
-function readVideoDescription() {
-  const descNode = document.querySelector(
-    ".desc-info-text, .video-desc .desc-info-text, .video-info-detail .text, .basic-desc-info"
-  );
-  return descNode?.textContent?.trim() || "";
-}
-
-async function fetchSubtitleBundle(bvid, cid, aid = "") {
-  const requests = buildSubtitleInfoRequests({ bvid, cid, aid });
-  const fetchByRequest = async (request) => {
-    logInfo("[BOC] fetch subtitles list", {
-      source: request.source,
-      url: request.url,
-      bvid,
-      cid,
-      aid
-    });
-
-    const payload = await fetchJson(request.url);
-    logInfo("[BOC] subtitles API raw response", { source: request.source, payload });
-    if (payload.code !== 0) {
-      throw buildBiliApiError(payload, "无法获取字幕列表");
-    }
-
-    const chapters = mapChaptersFromPlayerData(payload.data);
-    const subtitles = mapSubtitleTracks(payload.data?.subtitle?.subtitles || [], request.source);
-    const withUrl = subtitles.filter((item) => item.subtitleUrl);
-    return { source: request.source, chapters, withUrl };
-  };
-
-  if (requests.length === 0) {
-    return { tracks: [], chapters: [] };
-  }
-
-  const primaryRequest = requests[0];
-  try {
-    const primaryResult = await fetchByRequest(primaryRequest);
-    if (primaryResult.withUrl.length > 0) {
-      return { tracks: primaryResult.withUrl, chapters: primaryResult.chapters };
-    }
-    // 主来源成功但无字幕：直接判定无字幕，不再跨源兜底。
-    return { tracks: [], chapters: primaryResult.chapters };
-  } catch (primaryError) {
-    logWarn("[BOC] subtitles API request failed", {
-      source: primaryRequest.source,
-      message: getErrorMessage(primaryError)
-    });
-
-    // 仅当主来源请求失败时才尝试次来源。
-    if (requests.length > 1) {
-      const secondaryRequest = requests[1];
-      try {
-        const secondaryResult = await fetchByRequest(secondaryRequest);
-        if (secondaryResult.withUrl.length > 0) {
-          logWarn("[BOC] primary subtitles source failed, using fallback source", {
-            primary: primaryRequest.source,
-            fallback: secondaryRequest.source
-          });
-          return { tracks: secondaryResult.withUrl, chapters: secondaryResult.chapters };
-        }
-        return { tracks: [], chapters: secondaryResult.chapters };
-      } catch (secondaryError) {
-        logWarn("[BOC] fallback subtitles source failed", {
-          source: secondaryRequest.source,
-          message: getErrorMessage(secondaryError)
-        });
-        throw secondaryError;
-      }
-    }
-
-    throw primaryError;
-  }
-}
-
-async function refreshDerivedContent({ refreshComments = false } = {}) {
-  if (state.settings?.includeHotCommentsInNote) {
-    const shouldFetchComments =
-      refreshComments || !Array.isArray(state.clip.hotComments) || state.clip.hotComments.length === 0;
-    if (shouldFetchComments) {
-      try {
-        state.clip.hotComments = await fetchHotComments(20);
-      } catch (error) {
-        state.clip.hotComments = [];
-        logWarn("[BOC] failed to fetch hot comments for note export", error);
-      }
-    }
-  }
-
-  rebuildDerivedContent();
-}
-
 // === panel.js ===
 {
   BOC_VERSION,
@@ -5686,12 +5693,12 @@ async function refreshDerivedContent({ refreshComments = false } = {}) {
   getSubtitleCacheKey,
   resetClipState,
   refreshClip,
-  onSubtitleChange,
   loadSubtitle,
+  fetchSubtitleBundle,
+  onSubtitleChange,
   getPopupPayload,
   applyNoSubtitleState,
   readVideoDescription,
-  fetchSubtitleBundle,
   refreshDerivedContent,
   copyMarkdown,
   downloadSubtitle,
