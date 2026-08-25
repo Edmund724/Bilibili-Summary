@@ -25,22 +25,15 @@ import {
   normalizeAiPresetPrompts,
   normalizeDefaultModel,
   normalizeBaseUrl,
-  formatLocalDate,
   isSupportedBilibiliPage,
   sleep
 } from "./shared-defaults.js";
 import { formatCompactTimestamp } from "./string-utils.js";
-import { normalizeSubtitleUrlForCache } from "./subtitle-cache.js";
-import { buildSubtitleInfoRequests } from "./bili-api-shared.js";
+import { getSubtitleCacheKey, loadSubtitleFromCache } from "./subtitle-cache.js";
+import { fetchVideoMeta, fetchSubtitleBundle, fetchSubtitleBody, fetchHotComments, bgFetchJson, isBiliUrl } from "./bili-gateway.js";
 import { extractBvidFromUrl, extractPageIndexFromUrl, buildCanonicalVideoUrl } from "./video-id-shared.js";
 import {
-  normalizeChapters,
-  subtitlePriority,
-  mapSubtitleTracks,
-  normalizeSubtitleUrl,
   pickPreferredSubtitle as pickPreferredSubtitleTrack,
-  mapChaptersFromPlayerData,
-  normalizeChapterTime,
   normalizeSubtitleTracks
 } from "./subtitle-selection.js";
 
@@ -136,7 +129,7 @@ function handleFetchJson(message, sender, sendResponse) {
     return false;
   }
 
-  const isBiliRequest = /(?:api\.bilibili\.com|hdslb\.com)/.test(url);
+  const isBiliRequest = isBiliUrl(url);
   const headers = new Headers();
   if (isBiliRequest) {
     headers.set("Accept", "application/json, text/plain, */*");
@@ -649,64 +642,6 @@ function normalizeAiContextRef(ref) {
   };
 }
 
-function createBiliHeaders(url) {
-  const headers = new Headers();
-  const isBiliRequest = /(?:api\.bilibili\.com|hdslb\.com)/.test(String(url || ""));
-  if (isBiliRequest) {
-    headers.set("Accept", "application/json, text/plain, */*");
-    headers.set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
-    headers.set("Cache-Control", "no-cache");
-    headers.set("Pragma", "no-cache");
-  }
-  return headers;
-}
-
-async function fetchJsonForAi(url) {
-  const headers = createBiliHeaders(url);
-  const options = {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store"
-  };
-  if (headers.size > 0) {
-    options.headers = headers;
-  }
-  if (/(?:api\.bilibili\.com|hdslb\.com)/.test(String(url || ""))) {
-    options.referrer = "https://www.bilibili.com/";
-    options.referrerPolicy = "strict-origin-when-cross-origin";
-  }
-
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.json();
-}
-
-async function fetchBiliVideoMetaByBvid(bvid) {
-  const payload = await fetchJsonForAi(`https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`);
-  if (payload?.code !== 0) {
-    throw new Error(String(payload?.message || "无法获取视频信息"));
-  }
-
-  const data = payload.data || {};
-  const pages = Array.isArray(data.pages) ? data.pages : [];
-  return {
-    aid: String(data.aid || "").trim(),
-    title: String(data.title || "").trim(),
-    author: String(data.owner?.name || "").trim(),
-    uploadDate: Number(data.pubdate) > 0 ? formatLocalDate(Number(data.pubdate) * 1000) : "",
-    defaultCid: String(data.cid || "").trim(),
-    defaultDuration: Number(data.duration || 0) || 0,
-    pages: pages.map((item) => ({
-      cid: String(item?.cid || "").trim(),
-      page: Number(item?.page || 0) || 0,
-      part: String(item?.part || "").trim(),
-      duration: Number(item?.duration || 0) || 0
-    }))
-  };
-}
-
 function pickPageForAiContext(pages, ref) {
   const safePages = Array.isArray(pages) ? pages : [];
   const targetCid = String(ref?.cid || "").trim();
@@ -722,47 +657,6 @@ function pickPageForAiContext(pages, ref) {
   if (byPage) {
     return byPage;
   }
-}
-
-async function fetchBiliSubtitleBundle({ bvid, cid, aid }) {
-  const requests = buildSubtitleInfoRequests({ bvid, cid, aid });
-  for (const request of requests) {
-    let payload = null;
-    try {
-      payload = await fetchJsonForAi(request.url);
-    } catch {
-      continue;
-    }
-    if (payload?.code !== 0) {
-      continue;
-    }
-    const tracks = mapSubtitleTracks(payload.data?.subtitle?.subtitles || [], request.source).filter((item) => item.subtitleUrl);
-    return {
-      tracks,
-      chapters: mapChaptersFromPlayerData(payload.data)
-    };
-  }
-  throw new Error("无法获取字幕列表");
-}
-
-async function fetchBiliSubtitleBody(url) {
-  const payload = await fetchJsonForAi(url);
-  return Array.isArray(payload?.body) ? payload.body : [];
-}
-
-async function fetchBiliHotComments(aid, count = 18) {
-  const safeAid = Number(aid || 0) || 0;
-  if (!safeAid) {
-    return [];
-  }
-  const url = `https://api.bilibili.com/x/v2/reply/main?type=1&oid=${safeAid}&mode=3&ps=${count}&pn=1`;
-  const payload = await fetchJsonForAi(url).catch(() => null);
-  const replies = Array.isArray(payload?.data?.replies) ? payload.data.replies : [];
-  return replies.slice(0, count).map((item) => ({
-    uname: item?.member?.uname || "匿名",
-    like: item?.like || 0,
-    message: String(item?.content?.message || "").slice(0, 500)
-  }));
 }
 
 function shouldShowHoursInAiNote(meta, body) {
@@ -868,14 +762,14 @@ async function resolveAiSidepanelContext(contextRef) {
   }
 
   const settings = await getMergedSettings();
-  const videoMeta = await fetchBiliVideoMetaByBvid(ref.bvid);
+  const videoMeta = await fetchVideoMeta(bgFetchJson, ref.bvid);
   const page = pickPageForAiContext(videoMeta.pages, ref);
   const cid = String(page?.cid || ref.cid || videoMeta.defaultCid || "").trim();
   if (!cid) {
     throw new Error("无法定位原视频分P");
   }
   const aid = String(videoMeta.aid || ref.aid || "").trim();
-  const subtitleBundle = await fetchBiliSubtitleBundle({ bvid: ref.bvid, cid, aid });
+  const subtitleBundle = await fetchSubtitleBundle(bgFetchJson, { bvid: ref.bvid, cid, aid });
   const tracks = normalizeSubtitleTracks(subtitleBundle.tracks || []);
   if (!tracks.length) {
     throw new Error("原视频暂时没有可用字幕");
@@ -885,13 +779,23 @@ async function resolveAiSidepanelContext(contextRef) {
     previousUrl: ref.selectedSubtitleUrl,
     previousLang: ref.subtitleLang
   }) || tracks[0];
-  const body = await fetchBiliSubtitleBody(selectedTrack.subtitleUrl);
+  const cacheKey = getSubtitleCacheKey({
+    bvid: ref.bvid,
+    cid,
+    subtitleId: selectedTrack.id,
+    subtitleUrl: selectedTrack.subtitleUrl,
+    lang: selectedTrack.lanDoc || selectedTrack.lan
+  });
+  const cachedBody = await loadSubtitleFromCache(cacheKey);
+  const body = Array.isArray(cachedBody) && cachedBody.length > 0
+    ? cachedBody
+    : await fetchSubtitleBody(bgFetchJson, selectedTrack.subtitleUrl);
   if (!body.length) {
     throw new Error("原视频字幕为空");
   }
 
   const pageIndex = Number(page?.page || extractPageIndexFromUrl(ref.url) || 1) || 1;
-  const hotComments = await fetchBiliHotComments(aid);
+  const hotComments = await fetchHotComments(bgFetchJson, aid);
   const title = String(videoMeta.title || ref.title || "").trim();
   const author = String(videoMeta.author || ref.author || "").trim();
   const uploadDate = String(videoMeta.uploadDate || ref.uploadDate || "").trim();
@@ -940,7 +844,7 @@ async function resolveAiSidepanelPageRef(contextRef) {
     };
   }
 
-  const videoMeta = await fetchBiliVideoMetaByBvid(ref.bvid);
+  const videoMeta = await fetchVideoMeta(bgFetchJson, ref.bvid);
   const page = pickPageForAiContext(videoMeta.pages, ref);
   const pageIndex = Number(page?.page || ref.pageIndex || extractPageIndexFromUrl(ref.url) || 1) || 1;
   return {

@@ -1,5 +1,12 @@
 import { logWarn } from "./logging.js";
 
+export const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
+
+export function getSubtitleCacheKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "" }) {
+  const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
+  return `${CACHE_KEY_PREFIX}${bvid}_${cid}_${sourceKey}`;
+}
+
 export function normalizeSubtitleUrlForCache(url) {
   const text = String(url || "").trim();
   if (!text) {

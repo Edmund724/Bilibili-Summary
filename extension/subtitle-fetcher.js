@@ -19,7 +19,8 @@ import {
   buildSubtitleCandidates,
   clearSubtitleCacheByKey,
   saveSubtitleToCache,
-  loadSubtitleFromCache
+  loadSubtitleFromCache,
+  getSubtitleCacheKey
 } from "./subtitle-cache.js";
 import {
   extractOid,
@@ -64,8 +65,7 @@ import {
 import {
   retryAsync,
   fetchVideoMeta,
-  fetchSubtitleBundle,
-  getSubtitleCacheKey
+  fetchSubtitleBundle
 } from "./subtitle-fetch.js";
 import {
   fetchSubtitleBody,

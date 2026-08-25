@@ -3,7 +3,7 @@ import { toReadableText } from "./error-helpers.js";
 import { state } from "./state.js";
 import { getRuntimeVideoElement } from "./video-probe.js";
 import { logInfo } from "./logging.js";
-import { normalizeHotComments } from "./bili-api-shared.js";
+import { fetchSubtitleBody as gatewayFetchSubtitleBody, fetchHotComments as gatewayFetchHotComments, isBiliUrl } from "./bili-gateway.js";
 
 
 export function readRuntimeVideoDuration() {
@@ -17,11 +17,12 @@ export function readRuntimeVideoDuration() {
 
 export async function fetchSubtitleBody(url) {
   logInfo("[BOC] fetch subtitle body", { url });
-  return fetchJsonInBackground(url);
+  const body = await gatewayFetchSubtitleBody(contentFetchJson, url);
+  return { body };
 }
 
 export async function fetchJson(url) {
-  if (typeof url === "string" && url.startsWith("https://api.bilibili.com/")) {
+  if (isBiliUrl(url)) {
     return fetchJsonInBackground(url);
   }
 
@@ -35,6 +36,15 @@ export async function fetchJson(url) {
   }
 
   return response.json();
+}
+
+// Content-side transport seam for bili-gateway: routes B站 requests
+// (api.bilibili.com / hdslb.com) through the background service worker
+// (sendRuntimeMessage "fetch-json") so they carry the B站 request headers and
+// bypass page CORS, falling back to a direct in-page fetch for other URLs.
+// Injected into bili-gateway as `transport`.
+export async function contentFetchJson(url) {
+  return fetchJson(url);
 }
 
 export async function fetchJsonInBackground(url) {
@@ -74,19 +84,5 @@ export async function fetchHotComments(count = 20) {
     return [];
   }
 
-  const url = `https://api.bilibili.com/x/v2/reply/main?type=1&oid=${aid}&mode=3&ps=${safeCount}&pn=1`;
-  const resp = await sendRuntimeMessage({ type: "fetch-json", url });
-  if (!resp?.ok) {
-    throw new Error(resp?.error || "评论接口失败");
-  }
-
-  const replies = Array.isArray(resp?.data?.data?.replies) ? resp.data.data.replies : [];
-  return normalizeHotComments(
-    replies.map((item) => ({
-      uname: item?.member?.uname || "匿名",
-      like: item?.like || 0,
-      message: item?.content?.message || ""
-    })),
-    safeCount
-  );
+  return gatewayFetchHotComments(contentFetchJson, aid, safeCount);
 }
