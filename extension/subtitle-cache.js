@@ -1,3 +1,5 @@
+import { logWarn } from "./logging.js";
+
 export function normalizeSubtitleUrlForCache(url) {
   const text = String(url || "").trim();
   if (!text) {

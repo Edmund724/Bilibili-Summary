@@ -1,4 +1,5 @@
 import { state } from "./state.js";
+import { logInfo, logWarn, shouldDebugLog } from "./logging.js";
 import {
   normalizeReaderTheme,
   normalizeReaderFontScale,
@@ -72,21 +73,7 @@ export function maybeRefreshReaderSubtitleInBackground() {
   });
 }
 
-export function shouldDebugLog() {
-  return Boolean(state.settings?.enableDebugLogs);
-}
-
-export function logInfo(...args) {
-  if (shouldDebugLog()) {
-    console.info(...args);
-  }
-}
-
-export function logWarn(...args) {
-  if (shouldDebugLog()) {
-    console.warn(...args);
-  }
-}
+export { logInfo, logWarn, shouldDebugLog };
 
 export function installReaderDebugHelpers() {
   const snapshotReader = (label = "manual") => createReaderDebugSnapshot(label);

@@ -2,6 +2,7 @@ import { sendRuntimeMessage, isExtensionContextInvalidated } from "./runtime.js"
 import { toReadableText } from "./error-helpers.js";
 import { state } from "./state.js";
 import { getRuntimeVideoElement } from "./video-probe.js";
+import { logInfo } from "./logging.js";
 
 
 export function normalizeHotComments(comments, limit = 20) {

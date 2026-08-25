@@ -5,7 +5,8 @@ import {
   DEFAULT_SETTINGS,
   formatLocalDate,
   normalizeFixedPropertyType,
-  isFixedPropertyRowEffectivelyEmpty
+  isFixedPropertyRowEffectivelyEmpty,
+  normalizeNotePlaceholderSections
 } from "./shared-defaults.js";
 import { escapeYaml, formatCompactTimestamp, formatTimestamp, sanitizeFileName, resolveFrontmatterTemplateValue, parseFrontmatterArrayItems, pushOptionalLines } from "./string-utils.js";
 import { normalizeChapters } from "./subtitle-selection.js";
@@ -469,28 +470,6 @@ export function resolveFolderTemplate(template, meta) {
     .map((segment) => sanitizeFolderTemplateValue(segment))
     .filter(Boolean)
     .join("/");
-}
-
-export function normalizeNotePlaceholderSections(items) {
-  const allowedPositions = new Set(["before_intro", "before_chapters", "before_subtitle"]);
-  if (!Array.isArray(items)) {
-    return [];
-  }
-  return items
-    .map((item) => {
-      const title = String(item?.title || "").trim();
-      const position = allowedPositions.has(String(item?.position || "").trim())
-        ? String(item?.position || "").trim()
-        : "before_intro";
-      const content = String(item?.content || "").trim();
-      return {
-        title,
-        position,
-        content
-      };
-    })
-    .filter((item) => item.title)
-    .slice(0, 5);
 }
 
 export function shouldShowHoursInSubtitle(body) {

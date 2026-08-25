@@ -564,6 +564,29 @@ function isRetryableNetworkError(error) {
   );
 }
 
+// === logging.js ===
+// extension/logging.js
+// Debug-gated logging helpers. Single source of truth for logInfo / logWarn
+// so modules can be self-contained without importing the DOM-heavy reader-shell.js.
+
+
+
+function shouldDebugLog() {
+  return Boolean(state.settings?.enableDebugLogs);
+}
+
+function logInfo(...args) {
+  if (shouldDebugLog()) {
+    console.info(...args);
+  }
+}
+
+function logWarn(...args) {
+  if (shouldDebugLog()) {
+    console.warn(...args);
+  }
+}
+
 // === subtitle-cache.js ===
 function normalizeSubtitleUrlForCache(url) {
   const text = String(url || "").trim();
@@ -1674,8 +1697,6 @@ function resolveFolderTemplate(template, meta) {
     .filter(Boolean)
     .join("/");
 }
-
-
 
 function shouldShowHoursInSubtitle(body) {
   const maxTo = (body || []).reduce((max, item) => {
@@ -3268,21 +3289,7 @@ function maybeRefreshReaderSubtitleInBackground() {
   });
 }
 
-function shouldDebugLog() {
-  return Boolean(state.settings?.enableDebugLogs);
-}
-
-function logInfo(...args) {
-  if (shouldDebugLog()) {
-    console.info(...args);
-  }
-}
-
-function logWarn(...args) {
-  if (shouldDebugLog()) {
-    console.warn(...args);
-  }
-}
+{ logInfo, logWarn, shouldDebugLog };
 
 function installReaderDebugHelpers() {
   const snapshotReader = (label = "manual") => createReaderDebugSnapshot(label);
