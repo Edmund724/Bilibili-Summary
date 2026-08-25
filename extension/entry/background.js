@@ -269,7 +269,7 @@ function handleAiProvidersModels(message, sender, sendResponse) {
         console.log("[ai-providers-models] responding", payload);
         sendResponse(payload);
       } catch (err) {
-        console.error("[ai-providers-models] sendResponse failed", err);
+        console.error("[ai-providers-models] sendResponse failed", err?.message || err);
       }
     };
 
@@ -312,7 +312,7 @@ function handleAiProvidersModels(message, sender, sendResponse) {
       })
       .then((models) => respond({ ok: true, models }))
       .catch((error) => {
-        console.error("[ai-providers-models] fetch error", error);
+        console.error("[ai-providers-models] fetch error", error?.name, error?.message || error);
         if (error?.name === "AbortError") {
           respond({ ok: false, error: "请求超时，请检查 baseUrl 或稍后重试" });
         } else {
@@ -326,7 +326,7 @@ function handleAiProvidersModels(message, sender, sendResponse) {
       respond({ ok: false, error: "请求超时，请检查 baseUrl 或稍后重试" });
     }, 16000);
   } catch (error) {
-    console.error("[ai-providers-models] handler error", error);
+    console.error("[ai-providers-models] handler error", error?.message || error);
     sendResponse({ ok: false, error: error?.message || String(error) });
   }
   return true;
