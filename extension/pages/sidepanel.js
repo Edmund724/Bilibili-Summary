@@ -13,14 +13,15 @@ import {
 } from "../ai/conversation.js";
 import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
 import { renderMarkdown, renderInline, stripThinkBlocks, sanitizeMarkdownHeadingText, isTimestampOnlyInlineCode } from "../ui/markdown.js";
-import { linkifyAssistantTimestamps, unwrapTimestampInlineCode } from "../ui/timestamp-nav.js";
+import { linkifyAssistantTimestamps } from "../ui/timestamp-nav.js";
+import { normalizeMarkdownForSectionPaste } from "../notes/paste.js";
+import { createChatRuntime } from "./sidepanel-chat-runtime.js";
 import { createConversationStore } from "./sidepanel-conversation-store.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
 const MAX_SAVED_CONVERSATIONS = 60;
 const NON_VIDEO_CONTEXT_MESSAGE = "当前页非 B 站视频页面，<br>无法获取当前页面信息作为对话上下文，<br>仅支持 AI 对话。";
-const STREAM_SLOW_NOTICE_MS = 15000;
 
 const els = {
   header: document.querySelector(".sp-header"),
@@ -52,10 +53,6 @@ const DEFAULT_AI_PREFS = {
 let contextData = null;
 let currentContextKey = "";
 let providers = [];
-let activePort = null;
-let activeAssistantNode = null;
-let activeUserPrompt = "";
-let thinkingNode = null;
 let chatHistory = [];
 let suggestionsNode = null;
 let aiPrefs = { ...DEFAULT_AI_PREFS };
@@ -70,8 +67,6 @@ let shouldAutoScrollMessages = true;
 let liveContextSyncTimer = 0;
 let liveContextSyncForceRefresh = false;
 let modelSelectMeasureCanvas = null;
-let streamSlowNoticeTimer = 0;
-let streamFirstTokenReceived = false;
 let initCompleted = false;
 
 const conversationStore = createConversationStore({
@@ -102,6 +97,41 @@ const conversationStore = createConversationStore({
   storage: chrome.storage.local,
   conversationsStorageKey: CONVERSATIONS_STORAGE_KEY,
   maxSavedConversations: MAX_SAVED_CONVERSATIONS
+});
+
+const chatRuntime = createChatRuntime({
+  // ---- DOM 容器 / 元素引用（sidepanel 模块级 `els`）----
+  messages: els.messages,
+  input: els.input,
+  stopBtn: els.stopBtn,
+  // ---- conversation-store 窄接口（05 产出实例）----
+  store: conversationStore,
+  // ---- 会话状态访问器（sidepanel 模块级变量）----
+  getChatHistory: () => chatHistory,
+  getCurrentConversationMeta: () => currentConversationMeta,
+  setCurrentConversationMeta: (v) => { currentConversationMeta = v; },
+  getCurrentContextKey: () => currentContextKey,
+  setCurrentConversationId: (v) => { currentConversationId = v; },
+  getContextData: () => contextData,
+  getAiPrefs: () => aiPrefs,
+  // ---- 布局 / UI 回调（DOM 布局留在 sidepanel）----
+  setStreamingUiState,
+  showConversationContextNotice,
+  removeConversationContextNotice,
+  hidePresetPopover,
+  hideHistoryPopover,
+  removeCenteredState,
+  removeSuggestions,
+  resetConversationView,
+  autosizeInput,
+  shouldAutoScrollMessagesEnabled: () => shouldAutoScrollMessages,
+  setShouldAutoScrollMessages: (v) => { shouldAutoScrollMessages = v; },
+  // ---- AI 域 / 上下文 / 传输辅助（sidepanel 本地）----
+  ensureCurrentContextForSend,
+  getProviderId: () => els.modelSelect.value,
+  getTimestampNavDeps,
+  normalizeMarkdownForSectionPaste,
+  connectPort: () => chrome.runtime.connect({ name: "offscreen-chat" })
 });
 
 init().catch((err) => {
@@ -140,7 +170,7 @@ function bindEvents() {
   els.input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
-      sendMessage();
+      chatRuntime.sendMessage();
     }
   });
   els.input.addEventListener("input", autosizeInput);
@@ -161,7 +191,7 @@ function bindEvents() {
     void conversationStore.clearAll();
   });
   els.stopBtn?.addEventListener("click", () => {
-    stopActiveStream();
+    chatRuntime.stopActiveStream();
   });
   els.presetAddBtn.addEventListener("click", addPresetPrompt);
   els.presetInput.addEventListener("keydown", (e) => {
@@ -283,7 +313,7 @@ function renderModelSelect(preferredProviderId = "") {
 async function refreshProvidersAndPrefsAfterExternalChange() {
   const previousProviderId = String(els.modelSelect?.value || localStorage.getItem(SELECTED_PROVIDER_KEY) || "").trim();
   await loadProvidersAndPrefs({ preferredProviderId: previousProviderId });
-  if (activePort) {
+  if (chatRuntime.isStreaming()) {
     return;
   }
   renderHistoryList();
@@ -353,7 +383,7 @@ async function runPlayerAiQuickActionPrompt(prompt) {
   await startNewConversation();
   els.input.value = text;
   autosizeInput();
-  await sendMessage();
+  await chatRuntime.sendMessage();
 }
 
 function updateModelSelectWidth() {
@@ -454,7 +484,7 @@ async function loadContextState({ forceRefresh = false, silent = false } = {}) {
     return true;
   }
 
-  if (activePort || activeUserPrompt) {
+  if (chatRuntime.isStreaming() || chatRuntime.hasPendingUserPrompt()) {
     renderHistoryList();
     updateContextChip();
     return true;
@@ -478,7 +508,7 @@ function applyContextPayload(payload) {
   currentContextKey = nextKey;
   updateContextChip();
 
-  if (contextChanged && !activePort && !activeUserPrompt) {
+  if (contextChanged && !chatRuntime.isStreaming() && !chatRuntime.hasPendingUserPrompt()) {
     restartChat({ keepContext: true });
   } else {
     renderSuggestions();
@@ -598,7 +628,7 @@ function renderSuggestions() {
     btn.addEventListener("click", () => {
       els.input.value = btn.textContent || "";
       autosizeInput();
-      sendMessage();
+      chatRuntime.sendMessage();
     });
   });
 }
@@ -779,7 +809,7 @@ function scheduleLiveContextSync(forceRefresh = false) {
 
 async function syncLiveContextState(forceRefresh = false) {
   const ok = await loadContextState({ forceRefresh, silent: true }).catch(() => false);
-  if (currentConversationMeta?.pinnedContext || activePort || activeUserPrompt) {
+  if (currentConversationMeta?.pinnedContext || chatRuntime.isStreaming() || chatRuntime.hasPendingUserPrompt()) {
     updateContextChip();
     return;
   }
@@ -896,13 +926,13 @@ function renderConversationMessages() {
   }
   chatHistory.forEach((message, index) => {
     if (message.role === "user") {
-      appendUserMessage(message.content, false);
+      chatRuntime.appendUserMessage(message.content, false);
       return;
     }
     const node = document.createElement("div");
     node.className = "sp-msg sp-msg-assistant";
     node.dataset.raw = String(message.content || "");
-    renderAssistantMessage(node, String(message.content || ""), {
+    chatRuntime.renderAssistantMessage(node, String(message.content || ""), {
       userPrompt: findPreviousUserPrompt(index)
     });
     els.messages.appendChild(node);
@@ -934,322 +964,6 @@ async function ensureCurrentContextForSend() {
   return true;
 }
 
-async function sendMessage() {
-  const text = els.input.value.trim();
-  if (!text || activePort) {
-    return;
-  }
-  hidePresetPopover();
-  hideHistoryPopover();
-
-  const providerId = els.modelSelect.value;
-  if (!providerId) {
-    resetConversationView("请先在设置页配置并启用一个 AI 平台。");
-    return;
-  }
-
-  const hasContext = await ensureCurrentContextForSend();
-  if (!hasContext) {
-    return;
-  }
-  if (!currentConversationMeta?.pinnedContext && currentConversationMeta?.contextKey && currentConversationMeta.contextKey !== currentContextKey) {
-    currentConversationId = "";
-    currentConversationMeta = null;
-  }
-
-  suggestionsNode?.remove();
-  suggestionsNode = null;
-  removeCenteredState();
-
-  appendUserMessage(text);
-  els.input.value = "";
-  autosizeInput();
-  setStreamingUiState(true);
-  activeUserPrompt = text;
-  activeAssistantNode = appendAssistantPlaceholder();
-  startStreamSlowNoticeTimer();
-  streamFirstTokenReceived = false;
-
-  const port = chrome.runtime.connect({ name: "offscreen-chat" });
-  activePort = port;
-
-  port.onMessage.addListener((msg) => {
-    if (!msg) return;
-    if (msg.type === "reasoning") {
-      handleFirstStreamToken();
-      if (!thinkingNode) thinkingNode = createThinkingNode(activeAssistantNode);
-      appendThinkingText(thinkingNode, msg.data);
-    } else if (msg.type === "token") {
-      handleFirstStreamToken();
-      thinkingNode = null;
-      appendToken(activeAssistantNode, msg.data);
-    } else if (msg.type === "done") {
-      finalizeAssistant(activeAssistantNode);
-    } else if (msg.type === "stopped") {
-      handleAssistantStopped(activeAssistantNode, msg.reason || "已停止生成");
-    } else if (msg.type === "error") {
-      showAssistantError(activeAssistantNode, msg.error || "未知错误");
-    } else if (msg.type === "notice") {
-      showConversationContextNotice(msg.data, 4000);
-    }
-  });
-
-  port.onDisconnect.addListener(() => {
-    activePort = null;
-    clearStreamRuntimeState();
-    setStreamingUiState(false);
-  });
-
-  port.postMessage({
-    action: "chat",
-    providerId,
-    context: {
-      ...contextData,
-      aiSystemPrompt: aiPrefs.aiSystemPrompt,
-      chatHistory
-    },
-    prompt: text,
-    history: chatHistory
-  });
-}
-
-function appendUserMessage(text, shouldScroll = true) {
-  const node = document.createElement("div");
-  node.className = "sp-msg sp-msg-user";
-  node.textContent = text;
-  els.messages.appendChild(node);
-  if (shouldScroll) {
-    shouldAutoScrollMessages = true;
-    scrollToBottom(true);
-  }
-}
-
-function appendAssistantPlaceholder() {
-  const node = document.createElement("div");
-  node.className = "sp-msg sp-msg-assistant";
-  node.dataset.raw = "";
-  const cursor = document.createElement("span");
-  cursor.className = "sp-msg-cursor";
-  node.appendChild(cursor);
-  els.messages.appendChild(node);
-  shouldAutoScrollMessages = true;
-  scrollToBottom(true);
-  return node;
-}
-
-function createThinkingNode(assistantNode) {
-  if (!assistantNode) {
-    return null;
-  }
-  const node = document.createElement("div");
-  node.className = "sp-thinking";
-  const label = document.createElement("span");
-  label.className = "sp-thinking-label";
-  label.textContent = "思考中…";
-  const text = document.createElement("div");
-  text.className = "sp-thinking-text";
-  node.appendChild(label);
-  node.appendChild(text);
-  assistantNode.prepend(node);
-  return node;
-}
-
-function appendThinkingText(node, text) {
-  if (!node) {
-    return;
-  }
-  const textNode = node.querySelector(".sp-thinking-text");
-  if (!textNode) {
-    return;
-  }
-  const MAX_DISPLAY_CHARS = 4000;
-  const acc = (textNode.dataset.acc || "") + String(text || "");
-  textNode.dataset.acc = acc;
-  if (acc.length > MAX_DISPLAY_CHARS) {
-    textNode.textContent = acc.slice(0, MAX_DISPLAY_CHARS) + "\n…（思考内容过长，已截断显示）";
-  } else {
-    textNode.textContent = acc;
-  }
-  textNode.scrollTop = textNode.scrollHeight;
-}
-
-function appendToken(node, token) {
-  if (!node) {
-    return;
-  }
-  const raw = (node.dataset.raw || "") + String(token || "");
-  node.dataset.raw = raw;
-  node.innerHTML = renderMarkdown(raw) + '<span class="sp-msg-cursor"></span>';
-  scrollToBottom();
-}
-
-function finalizeAssistant(node) {
-  if (!node) {
-    return;
-  }
-  clearStreamRuntimeState();
-  const raw = node.dataset.raw || "";
-  renderAssistantMessage(node, raw, { userPrompt: activeUserPrompt });
-  if (activeUserPrompt && raw) {
-    chatHistory.push({ role: "user", content: activeUserPrompt });
-    chatHistory.push({ role: "assistant", content: raw });
-    activeUserPrompt = "";
-    void conversationStore.persistCurrent();
-  }
-  if (activePort) {
-    try { activePort.disconnect(); } catch {}
-    activePort = null;
-  }
-  setStreamingUiState(false);
-  els.input.focus();
-  scrollToBottom();
-}
-
-function showAssistantError(node, error) {
-  if (!node) {
-    return;
-  }
-  clearStreamRuntimeState();
-  node.innerHTML = "";
-  const err = document.createElement("div");
-  err.className = "sp-msg-error";
-  err.textContent = `错误：${error}`;
-  node.appendChild(err);
-  activeUserPrompt = "";
-  if (activePort) {
-    try { activePort.disconnect(); } catch {}
-    activePort = null;
-  }
-  setStreamingUiState(false);
-  els.input.focus();
-  scrollToBottom();
-}
-
-function handleAssistantStopped(node, reason) {
-  if (!node) {
-    return;
-  }
-  clearStreamRuntimeState();
-  const raw = String(node.dataset.raw || "");
-  if (raw.trim()) {
-    renderAssistantMessage(node, raw, { userPrompt: activeUserPrompt });
-    const stopped = document.createElement("div");
-    stopped.className = "sp-msg-stopped";
-    stopped.textContent = reason || "已停止生成";
-    node.appendChild(stopped);
-    if (activeUserPrompt) {
-      chatHistory.push({ role: "user", content: activeUserPrompt });
-      chatHistory.push({ role: "assistant", content: raw });
-      activeUserPrompt = "";
-      void conversationStore.persistCurrent();
-    }
-  } else {
-    node.innerHTML = "";
-    const stopped = document.createElement("div");
-    stopped.className = "sp-msg-stopped";
-    stopped.textContent = reason || "已停止生成";
-    node.appendChild(stopped);
-    activeUserPrompt = "";
-  }
-  if (activePort) {
-    try { activePort.disconnect(); } catch {}
-    activePort = null;
-  }
-  setStreamingUiState(false);
-  els.input.focus();
-  scrollToBottom();
-}
-
-function stopActiveStream() {
-  if (!activePort) {
-    return;
-  }
-  if (els.stopBtn) {
-    els.stopBtn.disabled = true;
-    els.stopBtn.textContent = "停止中...";
-  }
-  try {
-    activePort.postMessage({ action: "stop" });
-  } catch {
-    try { activePort.disconnect(); } catch {}
-    activePort = null;
-  }
-}
-
-function startStreamSlowNoticeTimer() {
-  clearStreamRuntimeState();
-  streamFirstTokenReceived = false;
-  streamSlowNoticeTimer = window.setTimeout(() => {
-    if (!activePort || streamFirstTokenReceived) {
-      return;
-    }
-    showConversationContextNotice("模型响应较慢，可能正在思考，请稍候…", 0);
-  }, STREAM_SLOW_NOTICE_MS);
-}
-
-function handleFirstStreamToken() {
-  if (streamFirstTokenReceived) {
-    return;
-  }
-  streamFirstTokenReceived = true;
-  clearStreamRuntimeState();
-}
-
-function clearStreamRuntimeState() {
-  if (streamSlowNoticeTimer) {
-    window.clearTimeout(streamSlowNoticeTimer);
-    streamSlowNoticeTimer = 0;
-  }
-  streamFirstTokenReceived = false;
-  removeConversationContextNotice();
-}
-
-function renderAssistantMessage(node, raw, { userPrompt = "" } = {}) {
-  if (!node) {
-    return;
-  }
-  node.innerHTML = "";
-  const cleanedRaw = stripThinkBlocks(raw);
-  const pasteReadyRaw = normalizeMarkdownForSectionPaste(cleanedRaw);
-
-  const content = document.createElement("div");
-  content.className = "sp-msg-assistant-body";
-  content.innerHTML = renderMarkdown(cleanedRaw);
-  linkifyAssistantTimestamps(content, getTimestampNavDeps());
-  node.appendChild(content);
-
-  const actions = document.createElement("div");
-  actions.className = "sp-msg-actions";
-  const copyBtn = document.createElement("button");
-  copyBtn.type = "button";
-  copyBtn.className = "sp-msg-copy-btn";
-  copyBtn.setAttribute("aria-label", "复制回复");
-  copyBtn.setAttribute("title", "复制回复");
-  copyBtn.innerHTML = `
-    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-      <rect x="9" y="9" width="10" height="10" rx="2"></rect>
-      <path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1"></path>
-    </svg>
-  `;
-  copyBtn.addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(pasteReadyRaw);
-      copyBtn.disabled = true;
-      window.setTimeout(() => {
-        copyBtn.disabled = false;
-      }, 500);
-    } catch {
-      copyBtn.disabled = true;
-      window.setTimeout(() => {
-        copyBtn.disabled = false;
-      }, 500);
-    }
-  });
-  actions.appendChild(copyBtn);
-
-  node.appendChild(actions);
-}
-
 function buildConversationTurns(messages) {
   const turns = [];
   let pendingPrompt = "";
@@ -1273,10 +987,6 @@ function buildConversationTurns(messages) {
     }
   });
   return turns;
-}
-
-export function escapeWikiLinkTarget(value) {
-  return String(value || "").replace(/\]/g, "\\]");
 }
 
 function confirmOverwriteNote(filepath) {
@@ -1324,38 +1034,6 @@ function confirmOverwriteNote(filepath) {
     document.body.appendChild(overlay);
     overlay.querySelector(".sp-confirm-primary")?.focus();
   });
-}
-
-export function normalizeMarkdownForSectionPaste(raw, baseLevel = 2) {
-  const shift = Math.max(0, Number(baseLevel) || 0);
-  const lines = String(raw || "").split("\n");
-  const normalized = [];
-  let inFence = false;
-
-  lines.forEach((line) => {
-    if (/^\s*```/.test(line)) {
-      inFence = !inFence;
-      normalized.push(line);
-      return;
-    }
-
-    if (inFence) {
-      normalized.push(line);
-      return;
-    }
-
-    const pasteLine = unwrapTimestampInlineCode(line);
-    const headingMatch = pasteLine.match(/^(\s*)(#{1,3})(\s+.*)$/);
-    if (!headingMatch) {
-      normalized.push(pasteLine);
-      return;
-    }
-
-    const [, indent, hashes, suffix] = headingMatch;
-    normalized.push(`${indent}${"#".repeat(hashes.length + shift)}${suffix}`);
-  });
-
-  return normalized.join("\n");
 }
 
 function getTimestampNavDeps() {
@@ -1406,15 +1084,7 @@ function delay(ms) {
 }
 
 function restartChat({ keepContext = false } = {}) {
-  clearStreamRuntimeState();
-  if (activePort) {
-    try { activePort.disconnect(); } catch {}
-    activePort = null;
-  }
-
-  activeAssistantNode = null;
-  activeUserPrompt = "";
-  thinkingNode = null;
+  chatRuntime.resetStreamState();
   chatHistory = [];
   currentConversationId = "";
   currentConversationMeta = null;
@@ -1430,6 +1100,11 @@ function restartChat({ keepContext = false } = {}) {
 
 function removeCenteredState() {
   els.messages.querySelectorAll(".sp-center-error").forEach((node) => node.remove());
+}
+
+function removeSuggestions() {
+  suggestionsNode?.remove();
+  suggestionsNode = null;
 }
 
 function showConversationContextError(message) {
