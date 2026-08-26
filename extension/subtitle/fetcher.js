@@ -4,6 +4,7 @@ import { state, clipState } from "../core/state.js";
 import { extractBvid, computeCurrentClipSignature } from "../bilibili/url-utils.js";
 import { getSettings, byId } from "../core/runtime.js";
 import { ensureRunActive, isStaleRunError, getErrorMessage, toReadableText } from "../shared/error-helpers.js";
+import { logInfo, logWarn } from "../shared/logging.js";
 import {
   readVideoTitle,
   readVideoAuthor,
