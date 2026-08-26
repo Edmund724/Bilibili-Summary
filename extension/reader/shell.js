@@ -49,12 +49,13 @@ import {
   bindReaderHeaderActionsHover
 } from "./player-host.js";
 import {
+  alignReaderViewportToPlayer,
+  applyInlineHostPresentation,
   cleanupReaderFloatingArtifacts,
   applyReaderPageFocus,
   clearReaderPageFocus,
   moveReadingMainInline,
-  restoreReadingMainInline,
-  alignReaderViewportToPlayer
+  restoreReadingMainInline
 } from "./page-frame.js";
 import {
   startReadingViewSync,
@@ -313,6 +314,14 @@ export function settleReaderModePresentation() {
   return true;
 }
 
+export function closeReaderCleanup() {
+  if (state.reader.readingControlsRecoveryTimer) {
+    window.clearTimeout(state.reader.readingControlsRecoveryTimer);
+    state.reader.readingControlsRecoveryTimer = 0;
+  }
+  state.reader.readingControlsRecoveryInFlight = false;
+}
+
 export function closeReadingView() {
   cleanupReaderFloatingArtifacts();
   readerState.setViewOpen(false);
@@ -497,24 +506,7 @@ export function applyReadingViewPresentation() {
   if (main) {
     main.style.display = state.reader.readingTranscriptVisible ? "" : "none";
   }
-  const inlineHost = document.getElementById("boc-reading-inline-host");
-  if (inlineHost) {
-    const leftContainer = document.querySelector(".left-container");
-    const bgColor = leftContainer ? getComputedStyle(leftContainer).backgroundColor : "";
-    if (state.reader.readingTranscriptVisible) {
-      inlineHost.style.border = "";
-      inlineHost.style.background = "";
-      inlineHost.style.marginTop = "";
-      inlineHost.style.boxShadow = "";
-      inlineHost.style.borderRadius = "";
-    } else {
-      inlineHost.style.border = "none";
-      inlineHost.style.background = bgColor;
-      inlineHost.style.marginTop = "0";
-      inlineHost.style.boxShadow = "none";
-      inlineHost.style.borderRadius = "0";
-    }
-  }
+  applyInlineHostPresentation();
 }
 
 export function updateReaderChapterPresence(hasChapters) {

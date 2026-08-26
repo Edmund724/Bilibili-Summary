@@ -144,6 +144,28 @@ export function clearReaderPageFocus() {
   });
 }
 
+export function applyInlineHostPresentation() {
+  const inlineHost = document.getElementById("boc-reading-inline-host");
+  if (!inlineHost) {
+    return;
+  }
+  const leftContainer = document.querySelector(".left-container");
+  const bgColor = leftContainer ? getComputedStyle(leftContainer).backgroundColor : "";
+  if (state.reader.readingTranscriptVisible) {
+    inlineHost.style.border = "";
+    inlineHost.style.background = "";
+    inlineHost.style.marginTop = "";
+    inlineHost.style.boxShadow = "";
+    inlineHost.style.borderRadius = "";
+  } else {
+    inlineHost.style.border = "none";
+    inlineHost.style.background = bgColor;
+    inlineHost.style.marginTop = "0";
+    inlineHost.style.boxShadow = "none";
+    inlineHost.style.borderRadius = "0";
+  }
+}
+
 export function moveReadingMainInline() {
   if (!isReaderMode()) {
     return;
@@ -192,21 +214,7 @@ export function moveReadingMainInline() {
   if (readingMain.parentElement !== inlineHost) {
     inlineHost.appendChild(readingMain);
   }
-  const leftContainer = document.querySelector(".left-container");
-  const bgColor = leftContainer ? getComputedStyle(leftContainer).backgroundColor : "";
-  if (state.reader.readingTranscriptVisible) {
-    inlineHost.style.border = "";
-    inlineHost.style.background = "";
-    inlineHost.style.marginTop = "";
-    inlineHost.style.boxShadow = "";
-    inlineHost.style.borderRadius = "";
-  } else {
-    inlineHost.style.border = "none";
-    inlineHost.style.background = bgColor;
-    inlineHost.style.marginTop = "0";
-    inlineHost.style.boxShadow = "none";
-    inlineHost.style.borderRadius = "0";
-  }
+  applyInlineHostPresentation();
   updateReadingTranscriptTailSpacer();
 }
 
@@ -350,14 +358,6 @@ export function findReaderContentHost(playerHost = state.reader.readingPlayerHos
   }
 
   return playerHost?.parentElement || titleNode?.parentElement || null;
-}
-
-export function moveRootToReaderContentHost() {
-  return;
-}
-
-export function restoreRootMount() {
-  return;
 }
 
 export function dismissReaderMiniPlayer(playerHost = state.reader.readingPlayerHost) {

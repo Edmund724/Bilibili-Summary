@@ -12,7 +12,13 @@ import {
   dismissReaderMiniPlayer,
   getReaderMainWidthLimit
 } from "./page-frame.js";
-import { ensureReaderPlayerControlsRecovered, ids, logWarn, updateReadingTranscriptTailSpacer } from "./shell.js";
+import {
+  closeReaderCleanup,
+  ensureReaderPlayerControlsRecovered,
+  ids,
+  logWarn,
+  updateReadingTranscriptTailSpacer
+} from "./shell.js";
 import { syncReadingViewPlayback } from "./transcript-sync.js";
 
 export function clearNativeReaderFloatingStyles(playerHost = state.reader.readingPlayerHost) {
@@ -314,11 +320,7 @@ export function cleanupReaderPlayerHost() {
   restoreReaderPlayerContainer();
   unbindReaderPlayerControlsHover();
   unbindReaderHeaderActionsHover();
-  if (state.reader.readingControlsRecoveryTimer) {
-    window.clearTimeout(state.reader.readingControlsRecoveryTimer);
-    state.reader.readingControlsRecoveryTimer = 0;
-  }
-  state.reader.readingControlsRecoveryInFlight = false;
+  closeReaderCleanup();
   const readingView = byId(ids.readingView);
   readingView?.style.removeProperty("--boc-reader-player-rendered-width");
   readingView?.style.removeProperty("--boc-reader-player-rendered-height");

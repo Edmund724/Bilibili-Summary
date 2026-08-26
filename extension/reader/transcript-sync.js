@@ -10,7 +10,7 @@ import {
   stopReaderPlayerObserver,
   unbindReaderPlayerControlsHover
 } from "./player-host.js";
-import { ids, renderReadingStatus } from "./shell.js";
+import { closeReaderCleanup, ids, renderReadingStatus } from "./shell.js";
 
 export function startReadingViewSync() {
   if (state.reader.readingSyncTimer) {
@@ -34,11 +34,7 @@ export function stopReadingViewSync() {
     window.clearTimeout(state.reader.readingControlsHideTimer);
     state.reader.readingControlsHideTimer = 0;
   }
-  if (state.reader.readingControlsRecoveryTimer) {
-    window.clearTimeout(state.reader.readingControlsRecoveryTimer);
-    state.reader.readingControlsRecoveryTimer = 0;
-  }
-  state.reader.readingControlsRecoveryInFlight = false;
+  closeReaderCleanup();
   if (state.reader.readingPlayerMountTimer) {
     window.clearTimeout(state.reader.readingPlayerMountTimer);
     state.reader.readingPlayerMountTimer = 0;
