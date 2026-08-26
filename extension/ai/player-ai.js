@@ -1,8 +1,8 @@
-import { setMessage } from "../ui/ui-message.js";
+import { setMessage } from "../ui/ui-renderer.js";
 import { buildPlayerAiQuickActionIconSvg } from "../ui/icons.js";
 import {
   isReaderMode
-} from "../bilibili/url-utils.js";
+} from "../bilibili/video-id-shared.js";
 import {
   sendRuntimeMessage,
   getSettings

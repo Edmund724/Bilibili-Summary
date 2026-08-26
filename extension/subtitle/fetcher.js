@@ -1,7 +1,7 @@
-import { setMessage } from "../ui/ui-message.js";
+import { setMessage } from "../ui/ui-renderer.js";
 import { DEFAULT_SETTINGS, normalizeDownloadFormat, sleep } from "../core/shared-defaults.js";
 import { state, clipState } from "../core/state.js";
-import { extractBvid, computeCurrentClipSignature } from "../bilibili/url-utils.js";
+import { extractBvid, computeCurrentClipSignature } from "../bilibili/video-id-shared.js";
 import { getSettings, byId } from "../core/runtime.js";
 import { ensureRunActive, isStaleRunError, getErrorMessage, toReadableText, isRetryableNetworkError } from "../shared/error-helpers.js";
 import { logInfo, logWarn } from "../shared/logging.js";
@@ -9,7 +9,8 @@ import { isReaderViewOpen } from "../reader/index.js";
 import {
   readVideoTitle,
   readVideoAuthor,
-  readUploadDate
+  readUploadDate,
+  refreshDerivedContent
 } from "./core.js";
 import {
   normalizeChapters,
@@ -43,7 +44,6 @@ import {
   readVideoDescription,
   applyNoSubtitleState
 } from "./ui.js";
-import { refreshDerivedContent } from "../notes/build.js";
 
 // The fetcher is always loaded at startup through the message-handler / entry
 // chain, so registering here is the only wiring needed: the reader side can

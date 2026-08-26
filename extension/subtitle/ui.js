@@ -1,17 +1,16 @@
-import { BOC_VERSION } from "../shared/version.js";
+import { BOC_VERSION } from "../core/shared-defaults.js";
 import { loadSubtitle } from "./fetcher.js";
 import { buildSubtitlePreview } from "../notes/render.js";
 import { isAiSubtitle } from "./selection.js";
 import { sanitizeFileName } from "../shared/string-utils.js";
-import { cleanVideoUrl } from "../bilibili/url-utils.js";
+import { cleanVideoUrl } from "../bilibili/video-id-shared.js";
 import { getSettings, byId } from "../core/runtime.js";
 import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
 import { DEFAULT_SETTINGS, normalizeDownloadFormat } from "../core/shared-defaults.js";
 import { state, clipState } from "../core/state.js";
-import { setMessage } from "../ui/ui-message.js";
+import { setMessage } from "../ui/ui-renderer.js";
 import { ids } from "../reader/index.js";
-import { refreshDerivedContent } from "../notes/build.js";
-import { rebuildDerivedContent } from "./core.js";
+import { refreshDerivedContent, rebuildDerivedContent } from "./core.js";
 import { setBusyState, setStatus } from "../ui/ui-renderer.js";
 
 export async function onSubtitleChange(event) {

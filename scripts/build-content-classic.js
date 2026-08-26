@@ -8,11 +8,11 @@ const entry = path.join(extensionRoot, "entry", "content.js");
 const outfile = path.join(extensionRoot, "entry", "content-classic.js");
 
 // Version-consistency guard: fail fast before invoking esbuild if the
-// BOC_VERSION literal in extension/version.js drifts from manifest.json's
-// "version". This guards the runtime probe that compares
+// BOC_VERSION literal in extension/core/shared-defaults.js drifts from
+// manifest.json's "version". This guards the runtime probe that compares
 // __BOC_CONTENT_SCRIPT_LOADED__ against chrome.runtime.getManifest().version.
 const manifestPath = path.join(__dirname, "..", "extension", "manifest.json");
-const versionJsPath = path.join(__dirname, "..", "extension", "shared", "version.js");
+const versionJsPath = path.join(__dirname, "..", "extension", "core", "shared-defaults.js");
 
 const manifestVersion = JSON.parse(fs.readFileSync(manifestPath, "utf8")).version;
 const versionJsText = fs.readFileSync(versionJsPath, "utf8");

@@ -2,6 +2,12 @@
 // Shared defaults and pure normalizers across extension contexts.
 // This module consolidates the common defaults previously duplicated across pages.
 
+// ===== Version =====
+// Single source of truth for the extension version; consumed by the content
+// script and the background side panel. Kept in sync with manifest.json's
+// "version" by scripts/build-content-classic.js' guard.
+export const BOC_VERSION = "1.1.4";
+
 // ===== AI Prompts =====
 export const DEFAULT_PLAYER_AI_QUICK_PROMPT = "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。";
 

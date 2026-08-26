@@ -11,7 +11,7 @@ import {
 import { escapeYaml, formatCompactTimestamp, formatTimestamp, sanitizeFileName, resolveFrontmatterTemplateValue, parseFrontmatterArrayItems, pushOptionalLines } from "../shared/string-utils.js";
 import { normalizeChapters } from "../subtitle/selection.js";
 import { normalizeHotComments } from "../bilibili/bili-api-shared.js";
-import { extractPageIndex, cleanVideoUrl } from "../bilibili/url-utils.js";
+import { extractPageIndex, cleanVideoUrl } from "../bilibili/video-id-shared.js";
 import { state } from "../core/state.js";
 
 export function buildBilibiliEmbedIframe(meta, page = 1) {

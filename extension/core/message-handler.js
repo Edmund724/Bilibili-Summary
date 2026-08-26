@@ -30,7 +30,7 @@ import {
 import {
   isReaderMode,
   stripReaderModeUrl
-} from "../bilibili/url-utils.js";
+} from "../bilibili/video-id-shared.js";
 
 import {
   getCurrentAid,

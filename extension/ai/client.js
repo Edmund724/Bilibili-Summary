@@ -1,8 +1,15 @@
 // 编排：拼请求 → fetch → 解析 SSE → 通过 port 把 token / reasoning 回吐给 side panel。
 
-import { OPENAI_COMPAT } from "./providers.js";
 import { buildMessages, clipSubtitleForContext } from "./context.js";
 import { parseSsePayload } from "./sse-parser.js";
+
+// OpenAI 兼容协议常量。
+// 覆盖 OpenAI / DeepSeek / Qwen / Zhipu / Kimi / MiniMax / Mimo / Opencode Go / OpenRouter / Stepfun / Ollama（OpenAI 兼容模式）等。
+// （原 extension/ai/providers.js 唯一的导出，浅模块合并后内联于此。）
+const OPENAI_COMPAT = {
+  listModels: "/models",
+  chatPath: "/chat/completions"
+};
 
 const MAX_STREAM_RETRIES = 2;
 

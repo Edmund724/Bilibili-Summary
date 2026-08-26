@@ -1,4 +1,3 @@
-import { setMessage } from "./ui-message.js";
 import { state, uiState } from "../core/state.js";
 import {
   byId,
@@ -9,7 +8,7 @@ import {
   cleanVideoUrl,
   isReaderMode,
   stripReaderModeUrl
-} from "../bilibili/url-utils.js";
+} from "../bilibili/video-id-shared.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { READING_HEADER_ICONS } from "./icons.js";
 import { buildSubtitlePreview } from "../notes/render.js";
@@ -44,8 +43,6 @@ import {
   copyMarkdown,
   downloadSubtitle
 } from "../subtitle/ui.js";
-
-export { setMessage };
 
 export function buildUiHtml() {
   return `
@@ -390,4 +387,9 @@ export function setBusyState(disabled) {
 export function setStatus(text) {
   uiState.setStatusText(String(text || ""));
   byId(ids.status).textContent = state.ui.statusText;
+}
+
+export function setMessage(text) {
+  uiState.setMessageText(String(text || ""));
+  byId(ids.message).textContent = state.ui.messageText;
 }

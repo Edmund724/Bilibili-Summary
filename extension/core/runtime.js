@@ -10,7 +10,7 @@ import {
 } from "../reader/index.js";
 import { resetClipState, refreshClip } from "../subtitle/fetcher.js";
 import { schedulePlayerAiQuickActionSync } from "../ai/player-ai.js";
-import { computeCurrentClipSignature, isReaderMode } from "../bilibili/url-utils.js";
+import { computeCurrentClipSignature, isReaderMode } from "../bilibili/video-id-shared.js";
 import { getErrorMessage, isStaleRunError, toReadableText } from "../shared/error-helpers.js";
 
 export function replaceReaderModeUrl(nextUrl) {

@@ -118,7 +118,7 @@ def main():
         raise SystemExit("manifest.json is missing a version")
 
     # Version-consistency guard: the extension version lives in three places
-    # (manifest.json, extension/shared/version.js via build-content-classic.js,
+    # (manifest.json, extension/core/shared-defaults.js via build-content-classic.js,
     # and package.json). Fail fast if package.json drifts from manifest.json
     # before stamping release folders with a stale version.
     package_version = load_package_version().strip()

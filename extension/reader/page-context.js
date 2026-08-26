@@ -12,7 +12,7 @@
 // Callers are responsible for writing the returned values into state.
 
 import { getRuntimeVideoElement as defaultGetVideo } from "../bilibili/video-probe.js";
-import { extractPageIndex } from "../bilibili/url-utils.js";
+import { extractPageIndex } from "../bilibili/video-id-shared.js";
 
 // ===== URL primitives =====
 

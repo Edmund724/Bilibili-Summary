@@ -19,14 +19,13 @@ vi.mock("../../extension/reader/presenter.js", () => ({
   subscribeSubtitleRefresh: vi.fn(),
   notifyReaderPresenter: vi.fn()
 }));
-vi.mock("../../extension/ui/ui-message.js", () => ({
-  setMessage: vi.fn()
-}));
+// ui-message.js 已合入 ui-renderer.js，setMessage 直接从 ui-renderer mock。
 vi.mock("../../extension/ui/ui-renderer.js", () => ({
   renderMeta: vi.fn(),
   renderSubtitleSelect: vi.fn(),
   setBusyState: vi.fn(),
-  setStatus: vi.fn()
+  setStatus: vi.fn(),
+  setMessage: vi.fn()
 }));
 vi.mock("../../extension/subtitle/fetcher.js", async (importOriginal) => {
   const actual = await importOriginal();
@@ -48,15 +47,14 @@ vi.mock("../../extension/bilibili/gateway.js", async (importOriginal) => {
 vi.mock("../../extension/reader/page-context.js", () => ({
   resolvePageContext: vi.fn(() => ({ pageIndex: 1, cid: "101", cidSource: "test", pageTitle: "P1", duration: 300 }))
 }));
-vi.mock("../../extension/notes/build.js", () => ({
-  refreshDerivedContent: vi.fn(async () => {})
-}));
+// notes/build.js 已合入 subtitle/core.js，refreshDerivedContent 的 mock 改挂到 core.js。
 // core.js 引入 notes/render.js 链、ui.js 引入 notes/render.js / reader/index.js 链，
 // cache.js 引入真实 logging.js——这些均非本回路目标，mock 掉以保持信号精确。
 vi.mock("../../extension/subtitle/core.js", () => ({
   readVideoTitle: vi.fn(() => "测试标题"),
   readVideoAuthor: vi.fn(() => "测试作者"),
-  readUploadDate: vi.fn(() => "2026-01-01")
+  readUploadDate: vi.fn(() => "2026-01-01"),
+  refreshDerivedContent: vi.fn(async () => {})
 }));
 vi.mock("../../extension/subtitle/ui.js", () => ({
   applyNoSubtitleState: vi.fn(),
