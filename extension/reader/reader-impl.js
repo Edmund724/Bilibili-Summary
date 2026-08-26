@@ -55,8 +55,10 @@ import * as pageContext from "./page-context.js";
 // These were state.reader fields before issue 06; no module outside
 // extension/reader/ reads or writes them, so they are hoisted here.
 // Issue 07 removed the corresponding dead fields from state.js.
+// readingVideoEl is not hoisted here: it is a cross-module shared field
+// (video-probe reads, fetcher nulls it, reader writes it when binding or
+// unbinding the video), so state.reader stays its single source of truth.
 let syncTimer = 0;                 // readingSyncTimer
-let videoEl = null;                // readingVideoEl (written by reader only; external code reads state.reader.readingVideoEl)
 let playerHost = null;             // readingPlayerHost
 let mainOriginalParent = null;     // readingMainOriginalParent
 let mainOriginalNextSibling = null;// readingMainOriginalNextSibling
@@ -868,7 +870,7 @@ export function createReaderDebugSnapshot(label = "manual") {
 
   const playerHostNode = playerHost || findReaderPlayerHost(getRuntimeVideoElement());
   const wrapNode = getReaderPlayerWrapNode(playerHostNode);
-  const video = videoEl || getRuntimeVideoElement();
+  const video = state.reader.readingVideoEl || getRuntimeVideoElement();
   const hostChain = [];
   let current = playerHostNode;
   let depth = 0;
@@ -1566,7 +1568,7 @@ export async function ensureReaderPlayerMounted({ retries = 1, delayMs = 100, fo
     const playerHostCandidate = findReaderPlayerHost(video);
     if (video && playerHostCandidate) {
       const previousHost = playerHost;
-      const previousVideo = videoEl;
+      const previousVideo = state.reader.readingVideoEl;
       video.controls = false;
       video.removeAttribute("controls");
       video.disablePictureInPicture = true;
@@ -1698,7 +1700,7 @@ export function layoutReaderPlayerHost() {
       return;
     }
 
-    const video = videoEl;
+    const video = state.reader.readingVideoEl;
     let renderedWidth = rect.width;
     let renderedHeight = rect.height;
     if (Number(video?.videoWidth) > 0 && Number(video?.videoHeight) > 0) {
@@ -1743,7 +1745,7 @@ export function layoutReaderPlayerHost() {
     return;
   }
 
-  const video = videoEl;
+  const video = state.reader.readingVideoEl;
   const aspectRatio =
     Number(video?.videoWidth) > 0 && Number(video?.videoHeight) > 0
       ? Number(video.videoWidth) / Number(video.videoHeight)
@@ -1813,7 +1815,7 @@ export function startReaderPlayerObserver() {
     }
     const nextVideo = getRuntimeVideoElement();
     const nextHost = findReaderPlayerHost(nextVideo);
-    if (nextVideo && nextHost && (nextVideo !== videoEl || nextHost !== playerHost)) {
+    if (nextVideo && nextHost && (nextVideo !== state.reader.readingVideoEl || nextHost !== playerHost)) {
       queueEnsureReaderPlayerMounted();
     }
     if (document.querySelector(".bpx-player-mini-close, .bpx-player-mini-warp")) {
@@ -1836,24 +1838,24 @@ export function stopReaderPlayerObserver() {
 
 export function bindReadingViewVideo(video = getRuntimeVideoElement()) {
   if (!video) {
-    if (videoEl && videoEl.__bocReadingSyncHandler) {
-      const prev = videoEl;
+    if (state.reader.readingVideoEl && state.reader.readingVideoEl.__bocReadingSyncHandler) {
+      const prev = state.reader.readingVideoEl;
       prev.removeEventListener("timeupdate", prev.__bocReadingSyncHandler);
       prev.removeEventListener("seeked", prev.__bocReadingSyncHandler);
       prev.removeEventListener("loadedmetadata", prev.__bocReadingSyncHandler);
       delete prev.__bocReadingSyncHandler;
     }
-    videoEl = null;
+    state.reader.readingVideoEl = null;
     videoEventsBound = false;
     return null;
   }
 
-  if (videoEl === video && videoEventsBound) {
+  if (state.reader.readingVideoEl === video && videoEventsBound) {
     return video;
   }
 
-  if (videoEl && videoEl.__bocReadingSyncHandler) {
-    const prev = videoEl;
+  if (state.reader.readingVideoEl && state.reader.readingVideoEl.__bocReadingSyncHandler) {
+    const prev = state.reader.readingVideoEl;
     prev.removeEventListener("timeupdate", prev.__bocReadingSyncHandler);
     prev.removeEventListener("seeked", prev.__bocReadingSyncHandler);
     prev.removeEventListener("loadedmetadata", prev.__bocReadingSyncHandler);
@@ -1883,7 +1885,7 @@ export function bindReadingViewVideo(video = getRuntimeVideoElement()) {
   video.addEventListener("seeked", syncHandler);
   video.addEventListener("loadedmetadata", syncHandler);
   video.__bocReadingSyncHandler = syncHandler;
-  videoEl = video;
+  state.reader.readingVideoEl = video;
   playerHost = findReaderPlayerHost(video) || playerHost;
   videoEventsBound = true;
   return video;
@@ -2329,8 +2331,8 @@ export function stopReadingViewSync() {
   }
   stopReaderPlayerObserver();
   unbindReaderPlayerControlsHover();
-  if (videoEl && videoEl.__bocReadingSyncHandler) {
-    const video = videoEl;
+  if (state.reader.readingVideoEl && state.reader.readingVideoEl.__bocReadingSyncHandler) {
+    const video = state.reader.readingVideoEl;
     video.removeEventListener("timeupdate", video.__bocReadingSyncHandler);
     video.removeEventListener("seeked", video.__bocReadingSyncHandler);
     video.removeEventListener("loadedmetadata", video.__bocReadingSyncHandler);
@@ -2352,13 +2354,13 @@ export function syncReadingViewPlayback(forceScroll = false) {
   const runtimeHost = findReaderPlayerHost(runtimeVideo);
   if (runtimeVideo && runtimeHost) {
     const playerChanged =
-      runtimeVideo !== videoEl || runtimeHost !== playerHost;
+      runtimeVideo !== state.reader.readingVideoEl || runtimeHost !== playerHost;
     if (playerChanged) {
       queueEnsureReaderPlayerMounted();
     }
   }
 
-  const video = bindReadingViewVideo(runtimeVideo || videoEl);
+  const video = bindReadingViewVideo(runtimeVideo || state.reader.readingVideoEl);
   if (!video) {
     renderReadingStatus("当前页面没有找到可联动的视频播放器。");
     return;

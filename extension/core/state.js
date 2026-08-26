@@ -14,7 +14,8 @@ import { DEFAULT_SETTINGS } from "./shared-defaults.js";
 // Reader namespace. Issue 06 hoisted reader-internal bookkeeping into
 // reader-impl.js module closure; issue 07 removed the now-dead fields. The
 // remaining fields are settings/shared flags plus a few cross-module
-// bookkeeping fields: readingVideoEl (video-probe reads, fetcher writes),
+// bookkeeping fields: readingVideoEl (video-probe reads, fetcher writes null,
+// reader-impl writes the element when binding/unbinding),
 // readingManualScrollPauseUntil / readingProgrammaticScrollUntil
 // (ui-renderer/message-handler read and write), readingDocumentClickBound
 // (ui-renderer sets).
