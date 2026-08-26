@@ -110,10 +110,10 @@ async function init() {
     input?.addEventListener("input", () => input.classList.remove("input-error"));
   });
   elements.defaultModel?.addEventListener("change", async () => {
-    const payload = collectFormPayload();
-    await sendRuntimeMessage({ type: "save-settings", settings: payload });
+    const defaultModel = String(elements.defaultModel?.value || "").trim();
+    await sendRuntimeMessage({ type: "save-settings", settings: { defaultModel } });
     const providers = await loadAiProviders();
-    renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, providers, { defaultModel: payload.defaultModel, onRenderDefaultModel: (list) => renderDefaultModelSelect(elements.defaultModel, list, payload.defaultModel) });
+    renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, providers, { defaultModel, onRenderDefaultModel: (list) => renderDefaultModelSelect(elements.defaultModel, list, defaultModel) });
   });
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === "sync" && "defaultModel" in changes) {

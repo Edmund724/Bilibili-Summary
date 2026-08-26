@@ -48,6 +48,20 @@ describe("saveSettings 部分保存", () => {
     await saveSettings({ readerLineHeight: "relaxed" });
     expect(extractSetPayload()).toEqual({ readerLineHeight: "relaxed" });
   });
+
+  it("payload 含 aiSystemPrompt: undefined 时，set 收到的 payload 不含该 key", async () => {
+    const { saveSettings } = await loadModule();
+    await saveSettings({ aiSystemPrompt: undefined, defaultModel: "glm-4" });
+    const payload = extractSetPayload();
+    expect(payload).toEqual({ defaultModel: "glm-4" });
+    expect(payload).not.toHaveProperty("aiSystemPrompt");
+  });
+
+  it("options 场景回归：只传 { defaultModel } 不写入其它 key", async () => {
+    const { saveSettings } = await loadModule();
+    await saveSettings({ defaultModel: "x" });
+    expect(extractSetPayload()).toEqual({ defaultModel: "x" });
+  });
 });
 
 describe("saveSettings 全量保存", () => {

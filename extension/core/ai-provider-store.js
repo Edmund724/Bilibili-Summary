@@ -62,6 +62,11 @@ export async function getMergedSettings(timeoutMs = 5000) {
 export async function saveSettings(settings) {
   const payload = settings && typeof settings === "object" ? settings : {};
   const syncPayload = { ...payload };
+  // 值为 undefined 的 key 视为缺失，不写入存储，
+  // 避免部分保存时把空值覆盖到其它设置项。
+  for (const key of Object.keys(syncPayload)) {
+    if (syncPayload[key] === undefined) delete syncPayload[key];
+  }
   // 只归一化 payload 中实际存在的 key；缺失的 key 不写入，
   // 避免部分保存（如只传 aiThinkingLevel）把其它设置覆盖成默认值。
   if ("downloadFormat" in syncPayload) syncPayload.downloadFormat = normalizeDownloadFormat(syncPayload.downloadFormat);
