@@ -481,8 +481,8 @@ function measureTextWidth(text, style) {
 
 function getModelSelectMaxWidth() {
   const toolbar = els.toolbar;
-  if (!toolbar || !els.newChatBtn || !els.thinkingToggle || !els.presetBtn) {
-    return 172;
+  if (!toolbar || !els.thinkingToggle || !els.presetBtn) {
+    return 232;
   }
   const style = window.getComputedStyle(toolbar);
   const gap = Number.parseFloat(style.columnGap || style.gap || "0") || 0;
@@ -490,10 +490,7 @@ function getModelSelectMaxWidth() {
   const paddingRight = Number.parseFloat(style.paddingRight || "0") || 0;
   const contentWidth = toolbar.clientWidth - paddingLeft - paddingRight;
   const siblingWidth =
-    els.newChatBtn.offsetWidth +
-    els.thinkingToggle.offsetWidth +
-    els.presetBtn.offsetWidth +
-    gap * 3;
+    els.thinkingToggle.offsetWidth + els.presetBtn.offsetWidth + gap * 2;
   return Math.max(92, Math.floor(contentWidth - siblingWidth));
 }
 
