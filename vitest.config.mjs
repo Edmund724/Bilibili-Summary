@@ -10,6 +10,13 @@ export default defineConfig({
     },
     include: ["tests/**/*.test.js"],
     setupFiles: ["tests/setup.js"],
-    clearMocks: true
+    clearMocks: true,
+    testTimeout: 10000,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html"],
+      include: ["extension/**/*.js"],
+      exclude: ["extension/entry/content-classic.js", "extension/icons/**"]
+    }
   }
 });
