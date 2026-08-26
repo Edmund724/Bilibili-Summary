@@ -9,7 +9,7 @@ import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
 import { DEFAULT_SETTINGS, normalizeDownloadFormat } from "../core/shared-defaults.js";
 import { state, clipState } from "../core/state.js";
 import { setMessage } from "../ui/ui-message.js";
-import { ids } from "../reader/shell.js";
+import { ids } from "../reader/index.js";
 import { refreshDerivedContent } from "../notes/build.js";
 import { rebuildDerivedContent } from "./core.js";
 import { setBusyState, setStatus } from "../ui/ui-renderer.js";

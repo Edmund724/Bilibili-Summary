@@ -1,4 +1,5 @@
-// Page-frame helpers for the reader: layout sizing, page-state guards,
+// Page-frame helpers for the reader (implementation detail — see ./index.js facade):
+// layout sizing, page-state guards,
 // focus/keep-tree management, player host alignment, multi-page (p数) page
 // resolution, and small DOM utilities used by reader.js.
 import { state, uiState } from "../core/state.js";

@@ -23,16 +23,14 @@ import {
   renderReadingInfoPanel,
   closeReadingView,
   renderReadingView,
-  logWarn
-} from "../reader/shell.js";
-import {
-  updateReaderFollowState,
+  logWarn,
   syncReadingViewPlayback,
+  updateReaderFollowState,
   stopReadingViewSync,
   noteManualReaderInteraction,
   onReadingChapterClick,
   onReadingTranscriptClick
-} from "../reader/transcript-sync.js";
+} from "../reader/index.js";
 import {
   refreshClip,
   loadSubtitle

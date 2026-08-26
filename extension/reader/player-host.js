@@ -1,4 +1,4 @@
-// Reader player host module.
+// Reader player host module (implementation detail — see ./index.js facade).
 // Owns the lifecycle of the embedded player host inside reader mode: mount/dismount,
 // layout, mini-player dismissal, native control recovery, and header hover affordances.
 

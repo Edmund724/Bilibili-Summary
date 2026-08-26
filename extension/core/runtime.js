@@ -1,14 +1,13 @@
 import { state, clipState, uiState } from "./state.js";
 import { DEFAULT_SETTINGS } from "./shared-defaults.js";
 import { ensureUiReady, setStatus, setMessage } from "../ui/ui-renderer.js";
-import { enforceNormalPageStateIfNeeded } from "../reader/page-frame.js";
-import { resetClipState, refreshClip } from "../subtitle/fetcher.js";
 import {
   enterReaderMode,
   renderReadingStatus,
   waitForVideoMetadata,
-  shouldDebugLog
-} from "../reader/shell.js";
+  enforceNormalPageStateIfNeeded
+} from "../reader/index.js";
+import { resetClipState, refreshClip } from "../subtitle/fetcher.js";
 import { schedulePlayerAiQuickActionSync } from "../ai/player-ai.js";
 import { computeCurrentClipSignature, isReaderMode } from "../bilibili/url-utils.js";
 import { getErrorMessage, isStaleRunError, toReadableText } from "../shared/error-helpers.js";

@@ -1,6 +1,6 @@
 import { sleep } from "../core/shared-defaults.js";
 import { getErrorMessage, isRetryableNetworkError } from "../shared/error-helpers.js";
-import { logInfo, logWarn } from "../reader/shell.js";
+import { logInfo, logWarn } from "../shared/logging.js";
 import { contentFetchJson } from "../bilibili/bili-api.js";
 import {
   fetchVideoMeta as gatewayFetchVideoMeta,

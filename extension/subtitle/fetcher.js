@@ -26,7 +26,6 @@ import { resolvePageContext } from "../reader/page-context.js";
 import {
   logInfo,
   logWarn,
-  shouldDebugLog,
   ids,
   hydrateReaderStateFromSettings,
   applyReadingViewPresentation,
@@ -35,7 +34,7 @@ import {
   renderReaderPanels,
   renderReadingInfoPanel,
   bindReaderStepperControl
-} from "../reader/shell.js";
+} from "../reader/index.js";
 import { notifyReaderPresenter } from "../reader/presenter.js";
 import {
   renderMeta,

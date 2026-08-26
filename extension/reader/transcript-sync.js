@@ -1,3 +1,6 @@
+// Reader transcript sync (implementation detail — see ./index.js facade).
+// Owns playback-follow scrolling: reading-view sync start/stop, manual-scroll
+// interaction tracking, and chapter/transcript click handling.
 import { state, readerState } from "../core/state.js";
 import { byId } from "../core/runtime.js";
 import { getRuntimeVideoElement, findReaderPlayerHost } from "../bilibili/video-probe.js";

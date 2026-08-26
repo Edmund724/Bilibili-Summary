@@ -19,14 +19,11 @@ import { removePlayerAiQuickActionButton } from "../ai/player-ai.js";
 
 import {
   updateReaderFollowState,
-  syncReadingViewPlayback
-} from "../reader/transcript-sync.js";
-
-import {
+  syncReadingViewPlayback,
   enterReaderMode,
   closeReadingView,
   logWarn
-} from "../reader/shell.js";
+} from "../reader/index.js";
 
 import {
   isReaderMode,

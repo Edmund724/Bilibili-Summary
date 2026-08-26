@@ -1,4 +1,7 @@
 import { state, readerState, uiState } from "../core/state.js";
+// Reader shell (implementation detail — see ./index.js facade).
+// Owns reading-view lifecycle orchestration: entering/exiting reader mode,
+// reading-view rendering, settings application/persistence, and reader DOM ids.
 import { logInfo, logWarn, shouldDebugLog } from "../shared/logging.js";
 import {
   normalizeReaderTheme,
@@ -111,7 +114,7 @@ export function bindReaderPresenter() {
   });
 }
 
-export { logInfo, logWarn, shouldDebugLog };
+export { logInfo, logWarn, shouldDebugLog } from "../shared/logging.js";
 
 export function installReaderDebugHelpers() {
   const snapshotReader = (label = "manual") => createReaderDebugSnapshot(label);

@@ -13,10 +13,6 @@ import {
 
 import { ensureUiReady } from "../ui/ui-renderer.js";
 import {
-  clearReaderModePageState,
-  bindNormalPageStateGuard
-} from "../reader/page-frame.js";
-import {
   logInfo,
   installReaderDebugHelpers,
   bindSettingsWatcher,
@@ -24,8 +20,10 @@ import {
   hydrateReaderStateFromSettings,
   applyReadingViewPresentation,
   enterReaderMode,
-  renderReadingStatus
-} from "../reader/shell.js";
+  renderReadingStatus,
+  clearReaderModePageState,
+  bindNormalPageStateGuard
+} from "../reader/index.js";
 
 import { bindRuntimeEvents } from "../core/message-handler.js";
 
