@@ -21,7 +21,6 @@ import {
   sleep
 } from "../core/shared-defaults.js";
 import { isReaderMode, isWatchlaterPage, cleanVideoUrl } from "../bilibili/url-utils.js";
-import { byId, sendRuntimeMessage, getSettings } from "../core/runtime.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
 import {
@@ -42,12 +41,12 @@ import {
   shouldShowHoursInNote
 } from "../notes/render.js";
 import {
-  resetPlayerAiQuickActionRetryCount,
-  schedulePlayerAiQuickActionSync
-} from "../ai/player-ai.js";
-import { isVisibleReaderControl } from "../ai/player-ai.js";
-import { refreshClip } from "../subtitle/fetcher.js";
-import { subscribeReaderPresenter } from "./presenter.js";
+  subscribeReaderPresenter,
+  requestSubtitleRefresh,
+  persistReaderSettingsThroughSeam,
+  loadReaderSettingsThroughSeam,
+  requestPlayerAiSync
+} from "./presenter.js";
 import * as pageContext from "./page-context.js";
 
 // ===== reader-domain private bookkeeping (module-level closure state) =====
@@ -80,6 +79,34 @@ let documentClickBound = false;    // readingDocumentClickBound
 let manualScrollPauseUntil = 0;    // readingManualScrollPauseUntil
 let programmaticScrollUntil = 0;   // readingProgrammaticScrollUntil
 
+// Local replacement for core/runtime.js's byId: reading the reader DOM ids is
+// a reader-internal concern. Keeping it here (document.getElementById + throw)
+// removes reader-impl.js's static import of core/runtime.js, which would
+// otherwise form an import cycle back through subtitle/fetcher.js.
+function getReaderElement(id) {
+  const node = document.getElementById(id);
+  if (!node) {
+    throw new Error(`Missing node: ${id}`);
+  }
+  return node;
+}
+
+// Local copy of ai/player-ai.js's isVisibleReaderControl (a pure DOM check).
+// reader-impl.js must not import ai/player-ai.js (it would pull
+// core/runtime.js back into the reader dependency graph), so this helper
+// lives here with identical semantics.
+function isVisibleReaderControl(node) {
+  if (!node || typeof node.getBoundingClientRect !== "function") {
+    return false;
+  }
+  const rect = node.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) {
+    return false;
+  }
+  const style = window.getComputedStyle(node);
+  return style.display !== "none" && style.visibility !== "hidden" && style.pointerEvents !== "none";
+}
+
 // ===== shell.js (reader shell) =====
 
 export function maybeRefreshReaderSubtitleInBackground() {
@@ -87,7 +114,7 @@ export function maybeRefreshReaderSubtitleInBackground() {
     return;
   }
   waitForVideoMetadata().then(() => {
-    refreshClip().catch((error) => {
+    requestSubtitleRefresh().catch((error) => {
       if (!isStaleRunError(error)) {
         renderReadingStatus(`字幕加载失败：${getErrorMessage(error)}`);
       }
@@ -138,8 +165,7 @@ export function installReaderDebugHelpers() {
     snapshotReader
   };
   globalThis.__BOC_FORCE_SYNC_PLAYER_AI__ = () => {
-    resetPlayerAiQuickActionRetryCount();
-    schedulePlayerAiQuickActionSync(0);
+    requestPlayerAiSync(0, { resetRetry: true });
   };
 }
 
@@ -206,12 +232,12 @@ export function bindSettingsWatcher() {
       return;
     }
 
-    getSettings()
+    loadReaderSettingsThroughSeam()
       .then((settings) => {
         state.setSettings(settings);
         hydrateReaderStateFromSettings(settings);
         applyReadingViewPresentation();
-        schedulePlayerAiQuickActionSync();
+        requestPlayerAiSync();
       })
       .catch((error) => {
         logWarn("[BOC] failed to refresh settings after storage change", error);
@@ -219,7 +245,7 @@ export function bindSettingsWatcher() {
   });
 }
 export function renderReadingSubtitleSelect() {
-  const select = byId(ids.readingSubtitleSelect);
+  const select = getReaderElement(ids.readingSubtitleSelect);
   const subtitles = state.clip.subtitles || [];
 
   if (subtitles.length === 0) {
@@ -248,7 +274,7 @@ export function renderReadingSubtitleSelect() {
   select.disabled = false;
 }
 export async function enterReaderMode() {
-  const readingView = byId(ids.readingView);
+  const readingView = getReaderElement(ids.readingView);
   state.reader.setViewOpen(true);
   state.reader.setNativePageMode(true);
   document.body.setAttribute("data-boc-reading-active", "1");
@@ -318,7 +344,7 @@ export function finishEnterReaderMode() {
   bindReaderHeaderActionsHover();
 }
 
-export function openReaderViewShell(readingView = byId(ids.readingView)) {
+export function openReaderViewShell(readingView = getReaderElement(ids.readingView)) {
   if (!readingView) {
     return;
   }
@@ -386,7 +412,7 @@ export function closeReadingView() {
     window.clearTimeout(playerRetryTimer);
     playerRetryTimer = 0;
   }
-  const readingView = byId(ids.readingView);
+  const readingView = getReaderElement(ids.readingView);
   readingView.classList.remove("open", "reader-page");
   readingView.setAttribute("aria-hidden", "true");
   readingView.setAttribute("data-boc-reader-ready", "0");
@@ -428,9 +454,9 @@ export function closeReadingView() {
 
 export function renderReadingView() {
   const titleNode = document.querySelector(".boc-reading-title");
-  const metaNode = byId(ids.readingMeta);
-  const chapterList = byId(ids.readingChapterList);
-  const transcriptList = byId(ids.readingTranscriptList);
+  const metaNode = getReaderElement(ids.readingMeta);
+  const chapterList = getReaderElement(ids.readingChapterList);
+  const transcriptList = getReaderElement(ids.readingTranscriptList);
   const chapters = normalizeChapters(state.clip.chapters || []);
   const body = Array.isArray(state.clip.subtitleBody) ? state.clip.subtitleBody : [];
   const transcriptItems = getReadingTranscriptItems();
@@ -527,7 +553,7 @@ export function hydrateReaderStateFromSettings(settings = state.settings) {
 }
 
 export function applyReadingViewPresentation() {
-  const readingView = byId(ids.readingView);
+  const readingView = getReaderElement(ids.readingView);
   readingView.dataset.theme = state.reader.readingTheme;
   readingView.dataset.fontScale = state.reader.readingFontScale;
   readingView.dataset.letterSpacing = state.reader.readingLetterSpacing;
@@ -549,7 +575,7 @@ export function applyReadingViewPresentation() {
   document.body.dataset.bocReaderContentWidth = state.reader.readingContentWidth;
   document.body.dataset.bocReaderChapterVisibility = state.reader.readingChapterVisible ? "auto" : "hide";
   document.body.dataset.bocReaderTranscriptVisible = state.reader.readingTranscriptVisible ? "1" : "0";
-  const readingChapterVisibleEl = byId(ids.readingChapterVisible);
+  const readingChapterVisibleEl = getReaderElement(ids.readingChapterVisible);
   if (readingChapterVisibleEl) {
     readingChapterVisibleEl.checked = state.reader.readingChapterVisible;
   }
@@ -562,7 +588,7 @@ export function applyReadingViewPresentation() {
 
 export function updateReaderChapterPresence(hasChapters) {
   const value = hasChapters ? "1" : "0";
-  const readingView = byId(ids.readingView);
+  const readingView = getReaderElement(ids.readingView);
   readingView.dataset.hasChapters = value;
   document.documentElement.dataset.bocReaderHasChapters = value;
   document.body.dataset.bocReaderHasChapters = value;
@@ -682,22 +708,22 @@ export function renderReaderStepperState(node, settingKey) {
 }
 
 export function renderReaderPanels() {
-  const settingsPanel = byId(ids.readingSettingsPanel);
-  const settingsBtn = byId(ids.readingSettingsBtn);
+  const settingsPanel = getReaderElement(ids.readingSettingsPanel);
+  const settingsBtn = getReaderElement(ids.readingSettingsBtn);
   settingsPanel.hidden = !state.reader.readingSettingsExpanded;
   settingsBtn.classList.toggle("is-active", state.reader.readingSettingsExpanded);
-  byId(ids.readingAutoScroll).checked = state.reader.readingAutoScroll;
-  byId(ids.readingTranscriptVisible).checked = state.reader.readingTranscriptVisible;
-  renderReaderStepperState(byId(ids.readingFontScaleSelect), "readerFontScale");
-  renderReaderStepperState(byId(ids.readingLetterSpacingSelect), "readerLetterSpacing");
-  renderReaderStepperState(byId(ids.readingLineHeightSelect), "readerLineHeight");
-  renderReaderStepperState(byId(ids.readingContentWidthSelect), "readerContentWidth");
+  getReaderElement(ids.readingAutoScroll).checked = state.reader.readingAutoScroll;
+  getReaderElement(ids.readingTranscriptVisible).checked = state.reader.readingTranscriptVisible;
+  renderReaderStepperState(getReaderElement(ids.readingFontScaleSelect), "readerFontScale");
+  renderReaderStepperState(getReaderElement(ids.readingLetterSpacingSelect), "readerLetterSpacing");
+  renderReaderStepperState(getReaderElement(ids.readingLineHeightSelect), "readerLineHeight");
+  renderReaderStepperState(getReaderElement(ids.readingContentWidthSelect), "readerContentWidth");
 }
 
 export function renderReadingInfoPanel() {
-  const summaryNode = byId(ids.readingInfoSummary);
-  const descriptionNode = byId(ids.readingInfoDescription);
-  const descriptionBtn = byId(ids.readingDescriptionBtn);
+  const summaryNode = getReaderElement(ids.readingInfoSummary);
+  const descriptionNode = getReaderElement(ids.readingInfoDescription);
+  const descriptionBtn = getReaderElement(ids.readingDescriptionBtn);
   const summaryItems = buildReadingSummaryItems();
   const description = String(state.clip.description || "").trim();
 
@@ -787,9 +813,7 @@ export function updateReaderPreferences(next, { persist = true } = {}) {
 }
 
 export function persistReaderSettings() {
-  sendRuntimeMessage({ type: "save-settings", settings: state.settings }).catch((error) => {
-    logWarn("[BOC] failed to persist reader settings", error);
-  });
+  persistReaderSettingsThroughSeam();
 }
 
 export function buildReadingMetaLine() {
@@ -815,7 +839,7 @@ export function buildReadingMetaLine() {
 }
 
 export function renderReadingStatus(text) {
-  byId(ids.readingStatus).textContent = String(text || "");
+  getReaderElement(ids.readingStatus).textContent = String(text || "");
 }
 
 export function setReadingViewReady(ready) {
@@ -1124,7 +1148,7 @@ export function cleanupReaderFloatingArtifacts(playerHostArg = playerHost) {
 export function applyReaderPageFocus() {
   clearReaderPageFocus();
 
-  const root = byId(ids.root);
+  const root = getReaderElement(ids.root);
   const video = getRuntimeVideoElement();
   const playerHostNode = findReaderPlayerHost(video);
   const titleNode = findReaderTitleContainer();
@@ -1687,9 +1711,9 @@ export function layoutReaderPlayerHost() {
     return;
   }
 
-  const readingView = byId(ids.readingView);
+  const readingView = getReaderElement(ids.readingView);
   const playerHostNode = playerHost;
-  const slot = byId(ids.readingPlayerSlot);
+  const slot = getReaderElement(ids.readingPlayerSlot);
   if (!playerHostNode) {
     return;
   }
@@ -1793,7 +1817,7 @@ export function cleanupReaderPlayerHost() {
   unbindReaderPlayerControlsHover();
   unbindReaderHeaderActionsHover();
   closeReaderCleanup();
-  const readingView = byId(ids.readingView);
+  const readingView = getReaderElement(ids.readingView);
   readingView?.style.removeProperty("--boc-reader-player-rendered-width");
   readingView?.style.removeProperty("--boc-reader-player-rendered-height");
   const playerHostNode = playerHost;
@@ -2379,8 +2403,8 @@ export function syncReadingViewPlayback(forceScroll = false) {
 }
 
 export function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll = false) {
-  const transcriptList = byId(ids.readingTranscriptList);
-  const chapterList = byId(ids.readingChapterList);
+  const transcriptList = getReaderElement(ids.readingTranscriptList);
+  const chapterList = getReaderElement(ids.readingChapterList);
   const nextTranscript = transcriptList.querySelector(`[data-index="${subtitleIndex}"]`);
   const nextChapter = chapterList.querySelector(`[data-index="${chapterIndex}"]`);
   const currentTranscript = transcriptList.querySelector(".boc-reading-item.is-active");
@@ -2435,7 +2459,7 @@ export function scrollReadingTranscriptItemIntoView(node) {
     return;
   }
 
-  const transcriptList = byId(ids.readingTranscriptList);
+  const transcriptList = getReaderElement(ids.readingTranscriptList);
   const inlineHost = document.getElementById("boc-reading-inline-host");
   const listRect = transcriptList.getBoundingClientRect();
   const itemRect = node.getBoundingClientRect();

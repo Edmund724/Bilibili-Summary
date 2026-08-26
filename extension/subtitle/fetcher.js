@@ -23,19 +23,7 @@ import {
   getSubtitleCacheKey
 } from "./cache.js";
 import { resolvePageContext } from "../reader/page-context.js";
-import {
-  logInfo,
-  logWarn,
-  ids,
-  hydrateReaderStateFromSettings,
-  applyReadingViewPresentation,
-  closeReadingView,
-  updateReaderPreferences,
-  renderReaderPanels,
-  renderReadingInfoPanel,
-  bindReaderStepperControl
-} from "../reader/index.js";
-import { notifyReaderPresenter } from "../reader/presenter.js";
+import { notifyReaderPresenter, subscribeSubtitleRefresh } from "../reader/presenter.js";
 import {
   renderMeta,
   renderSubtitleSelect,
@@ -56,6 +44,11 @@ import {
   applyNoSubtitleState
 } from "./ui.js";
 import { refreshDerivedContent } from "../notes/build.js";
+
+// The fetcher is always loaded at startup through the message-handler / entry
+// chain, so registering here is the only wiring needed: the reader side can
+// trigger a re-fetch through the presenter seam's requestSubtitleRefresh().
+subscribeSubtitleRefresh(refreshClip);
 
 export async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh) {
   let lastError = null;
@@ -133,7 +126,7 @@ export function resetClipState() {
 
   renderMeta();
   renderSubtitleSelect();
-  byId(ids.preview).value = "";
+  byId("boc-preview").value = "";
   setMessage("");
   if (state.reader.readingViewOpen) {
     notifyReaderPresenter("rerender");

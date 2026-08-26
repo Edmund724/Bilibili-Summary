@@ -1,13 +1,19 @@
 // Reader facade (issue 05).
 //
 // The reader domain's public, stable interface. External modules import reader
-// capabilities ONLY from this file (plus the two established seams:
+// capabilities ONLY from this file (plus the established seams:
 // ./page-context.js for pure multi-page resolution, ./presenter.js for the
-// fetcher → reader notification channel).
+// bidirectional reader ↔ subtitle-fetcher channel).
 //
 // ./reader-impl.js is the single deep implementation module that consolidates
 // the former shell.js / page-frame.js / player-host.js / transcript-sync.js
 // (issue 06). External code must not import it directly.
+//
+// Import-cycle note (issue 08): reader-impl.js deliberately imports nothing
+// from core/runtime.js — it reads its own DOM ids through a local helper and
+// delegates settings persistence/loading to content.js through the presenter
+// seam. This keeps the reader domain free of any static import path back
+// through subtitle/fetcher.js.
 
 // 进入阅读模式
 export { enterReaderMode } from "./reader-impl.js";

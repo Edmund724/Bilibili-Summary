@@ -1,6 +1,5 @@
 import { state, clipState } from "../core/state.js";
 import { formatLocalDate } from "../core/shared-defaults.js";
-import { byId } from "../core/runtime.js";
 import { normalizeChapters } from "./selection.js";
 import {
   buildSubtitlePreview,
@@ -103,5 +102,9 @@ export function rebuildDerivedContent() {
   clipState.setMarkdown(body.length ? buildMarkdown(state, body, state.settings) : "");
   clipState.setSrt(body.length ? buildSrt(body) : "");
   clipState.setTxt(body.length ? buildTxt(body, state.settings) : "");
-  byId("boc-preview").value = body.length ? buildSubtitlePreview(body, state.settings) : "";
+  const previewNode = document.getElementById("boc-preview");
+  if (!previewNode) {
+    throw new Error(`Missing node: boc-preview`);
+  }
+  previewNode.value = body.length ? buildSubtitlePreview(body, state.settings) : "";
 }

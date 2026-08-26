@@ -7,11 +7,28 @@ import { NORMAL_PAGE_URL, READER_MODE_URL, resetModuleState, setLocationUrl } fr
 
 let state;
 let shell;
+let presenter;
 
 async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state;
+  presenter = await import("../../extension/reader/presenter.js");
   shell = await import("../../extension/reader/reader-impl.js");
+  // 模拟 content.js 的接线：reader-impl 经 presenter seam 持久化/读取设置，
+  // 底层仍是 chrome.runtime.sendMessage（tests/setup.js 的 stub）。
+  presenter.subscribeReaderSettingsPersist(() => {
+    globalThis.chrome.runtime.sendMessage(
+      { type: "save-settings", settings: state.settings },
+      () => {}
+    );
+  });
+  presenter.subscribeReaderSettingsLoad(() =>
+    new Promise((resolve) => {
+      globalThis.chrome.runtime.sendMessage({ type: "get-settings" }, (resp) => {
+        resolve(resp?.ok ? { ...(resp.settings || {}) } : {});
+      });
+    })
+  );
 }
 
 function mountSettingsSkeleton() {
