@@ -5,6 +5,7 @@ import { extractBvid, computeCurrentClipSignature } from "../bilibili/url-utils.
 import { getSettings, byId } from "../core/runtime.js";
 import { ensureRunActive, isStaleRunError, getErrorMessage, toReadableText, isRetryableNetworkError } from "../shared/error-helpers.js";
 import { logInfo, logWarn } from "../shared/logging.js";
+import { isReaderViewOpen } from "../reader/index.js";
 import {
   readVideoTitle,
   readVideoAuthor,
@@ -178,7 +179,7 @@ export function resetClipState() {
   renderSubtitleSelect();
   byId("boc-preview").value = "";
   setMessage("");
-  if (state.reader.readingViewOpen) {
+  if (isReaderViewOpen()) {
     notifyReaderPresenter("rerender");
     notifyReaderPresenter("status", "请先点击“刷新抓取”加载当前视频字幕。");
   }
@@ -192,7 +193,7 @@ export async function refreshClip() {
     setMessage("");
     setStatus("正在抓取视频信息...");
     clipState.setSubtitleFetchState("loading");
-    if (state.reader.readingViewOpen) {
+    if (isReaderViewOpen()) {
       notifyReaderPresenter("rerender");
     }
     state.setSettings(await getSettings());
@@ -278,7 +279,7 @@ export async function refreshClip() {
       applyNoSubtitleState();
       renderMeta();
       renderSubtitleSelect();
-      if (state.reader.readingViewOpen) {
+      if (isReaderViewOpen()) {
         notifyReaderPresenter("subtitle-ready", "当前视频无字幕。");
       }
       setStatus("当前视频无字幕。");
@@ -298,7 +299,7 @@ export async function refreshClip() {
       applyNoSubtitleState();
       renderMeta();
       renderSubtitleSelect();
-      if (state.reader.readingViewOpen) {
+      if (isReaderViewOpen()) {
         notifyReaderPresenter("subtitle-ready", "当前视频无字幕。");
       }
       setStatus("当前视频无字幕。");
@@ -347,7 +348,7 @@ export async function refreshClip() {
     clipState.setSubtitleFetchState("ready");
     renderMeta();
     renderSubtitleSelect();
-    if (state.reader.readingViewOpen) {
+    if (isReaderViewOpen()) {
       notifyReaderPresenter("subtitle-ready");
     }
     setStatus("抓取完成，可以复制或下载字幕。");
@@ -358,7 +359,7 @@ export async function refreshClip() {
     clipState.setSubtitleFetchState("error");
     resetClipState();
     clipState.setSubtitleFetchState("error");
-    if (state.reader.readingViewOpen) {
+    if (isReaderViewOpen()) {
       notifyReaderPresenter("rerender");
     }
     if (error?.code === "SUBTITLE_DURATION_MISMATCH") {
@@ -406,7 +407,7 @@ export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, sub
         clipState.setSubtitleBody(cachedBody);
         clipState.setSubtitleFetchState("ready");
         await refreshDerivedContent();
-        if (state.reader.readingViewOpen) {
+        if (isReaderViewOpen()) {
           notifyReaderPresenter("subtitle-ready");
         }
         return;
@@ -438,7 +439,7 @@ export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, sub
   clipState.setSubtitleBody(body);
   clipState.setSubtitleFetchState("ready");
   await refreshDerivedContent();
-  if (state.reader.readingViewOpen) {
+  if (isReaderViewOpen()) {
     notifyReaderPresenter("subtitle-ready");
   }
 }

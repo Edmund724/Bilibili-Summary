@@ -5,7 +5,8 @@ import {
   enterReaderMode,
   renderReadingStatus,
   waitForVideoMetadata,
-  enforceNormalPageStateIfNeeded
+  enforceNormalPageStateIfNeeded,
+  isReaderViewOpen
 } from "../reader/index.js";
 import { resetClipState, refreshClip } from "../subtitle/fetcher.js";
 import { schedulePlayerAiQuickActionSync } from "../ai/player-ai.js";
@@ -49,7 +50,7 @@ export function startUrlWatcher() {
     resetClipState();
     schedulePlayerAiQuickActionSync();
     const shouldEnterReaderMode = isReaderMode(nextUrl);
-    if (!state.reader.readingViewOpen && shouldEnterReaderMode) {
+    if (!isReaderViewOpen() && shouldEnterReaderMode) {
       document.documentElement.setAttribute("data-boc-reader-mode", "1");
       document.body.setAttribute("data-boc-reader-mode", "1");
       renderReadingStatus("检测到阅读视图跳转，正在打开阅读模式...");
@@ -58,7 +59,7 @@ export function startUrlWatcher() {
       });
       return;
     }
-    if (state.reader.readingViewOpen || shouldEnterReaderMode) {
+    if (isReaderViewOpen() || shouldEnterReaderMode) {
       renderReadingStatus("检测到视频变化，正在自动刷新字幕...");
       waitForVideoMetadata().then(() => {
         refreshClip().catch((error) => {

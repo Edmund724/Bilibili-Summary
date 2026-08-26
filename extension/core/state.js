@@ -16,9 +16,7 @@ import { DEFAULT_SETTINGS } from "./shared-defaults.js";
 // remaining fields are settings/shared flags plus a few cross-module
 // bookkeeping fields: readingVideoEl (video-probe reads, fetcher writes null,
 // reader-impl writes the element when binding/unbinding),
-// readingManualScrollPauseUntil / readingProgrammaticScrollUntil
-// (ui-renderer/message-handler read and write), readingDocumentClickBound
-// (ui-renderer sets).
+// readingDocumentClickBound (ui-renderer sets).
 const readerState = {
   readingViewOpen: false,
   readingNativePageMode: false,
@@ -37,8 +35,6 @@ const readerState = {
   readingNextScrollBehavior: "smooth",
   readingVideoEl: null,
   readingDocumentClickBound: false,
-  readingManualScrollPauseUntil: 0,
-  readingProgrammaticScrollUntil: 0,
   readingViewReady: false,
   setViewOpen(value) { this.readingViewOpen = value; },
   setNativePageMode(value) { this.readingNativePageMode = value; },

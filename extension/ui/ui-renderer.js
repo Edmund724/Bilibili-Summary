@@ -29,7 +29,10 @@ import {
   stopReadingViewSync,
   noteManualReaderInteraction,
   onReadingChapterClick,
-  onReadingTranscriptClick
+  onReadingTranscriptClick,
+  isReaderViewOpen,
+  resetManualScrollPause,
+  isProgrammaticScrolling
 } from "../reader/index.js";
 import {
   refreshClip,
@@ -214,7 +217,7 @@ export function bindUiEvents() {
   readingAutoScroll.addEventListener("change", (event) => {
     state.reader.setAutoScroll(Boolean(event.target.checked));
     if (state.reader.readingAutoScroll) {
-      state.reader.readingManualScrollPauseUntil = 0;
+      resetManualScrollPause();
       syncReadingViewPlayback(true);
     }
     updateReaderFollowState();
@@ -287,7 +290,7 @@ export function bindUiEvents() {
   }
 
   const handleReaderManualScroll = () => {
-    if (Date.now() <= state.reader.readingProgrammaticScrollUntil) {
+    if (isProgrammaticScrolling()) {
       return;
     }
     noteManualReaderInteraction();
@@ -300,7 +303,7 @@ export function bindUiEvents() {
   chapterList.addEventListener("click", onReadingChapterClick);
   transcriptList.addEventListener("click", onReadingTranscriptClick);
   readingView.addEventListener("transitionend", () => {
-    if (!state.reader.readingViewOpen) {
+    if (!isReaderViewOpen()) {
       stopReadingViewSync();
     }
   });

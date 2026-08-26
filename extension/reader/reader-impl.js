@@ -7,8 +7,8 @@
 // state.reader; the facade ./index.js re-exports the public functions.
 //
 // Settings/shared flags (readingViewOpen, readingTheme, ...) and fields that
-// external modules read or write (readingVideoEl, readingManualScrollPauseUntil,
-// readingProgrammaticScrollUntil, readingDocumentClickBound) stay in state.reader.
+// external modules read or write (readingVideoEl, readingDocumentClickBound)
+// stay in state.reader.
 import { state, uiState } from "../core/state.js";
 import { logInfo, logWarn, shouldDebugLog } from "../shared/logging.js";
 import {
@@ -75,7 +75,6 @@ let headerHoverHost = null;        // readingHeaderHoverHost
 let headerHideTimer = 0;           // readingHeaderHideTimer
 let videoEventsBound = false;      // readingVideoEventsBound
 let layoutBound = false;           // readingLayoutBound
-let documentClickBound = false;    // readingDocumentClickBound
 let manualScrollPauseUntil = 0;    // readingManualScrollPauseUntil
 let programmaticScrollUntil = 0;   // readingProgrammaticScrollUntil
 
@@ -105,6 +104,24 @@ function isVisibleReaderControl(node) {
   }
   const style = window.getComputedStyle(node);
   return style.display !== "none" && style.visibility !== "hidden" && style.pointerEvents !== "none";
+}
+
+// ===== reader facade accessors for closure state =====
+
+export function isReaderViewOpen() {
+  return state.reader.readingViewOpen;
+}
+
+export function isManualScrollPaused() {
+  return Date.now() < manualScrollPauseUntil;
+}
+
+export function resetManualScrollPause() {
+  manualScrollPauseUntil = 0;
+}
+
+export function isProgrammaticScrolling() {
+  return Date.now() <= programmaticScrollUntil;
 }
 
 // ===== shell.js (reader shell) =====

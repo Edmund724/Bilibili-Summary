@@ -65,5 +65,11 @@ export { installReaderDebugHelpers } from "./reader-impl.js";
 export { bindSettingsWatcher } from "./reader-impl.js";
 // reader 私有 DOM id 表（供 UI 模板与少量外部 DOM 操作使用）
 export { ids } from "./reader-impl.js";
+// 阅读视图开关状态查询
+export { isReaderViewOpen } from "./reader-impl.js";
+// 阅读视图手动滚动暂停状态查询与重置
+export { isManualScrollPaused, resetManualScrollPause } from "./reader-impl.js";
+// 阅读视图程序化滚动状态查询
+export { isProgrammaticScrolling } from "./reader-impl.js";
 // 日志（reader 域与外部共用，非 reader 专属能力）
 export { logInfo, logWarn } from "../shared/logging.js";

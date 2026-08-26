@@ -56,7 +56,7 @@ setters, and do **not** add copies of them to the setter table:
 
 ```
 readingVideoEl
-readingDocumentClickBound      readingManualScrollPauseUntil   readingProgrammaticScrollUntil
+readingDocumentClickBound
 ```
 
 ## Future note

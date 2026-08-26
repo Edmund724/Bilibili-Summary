@@ -22,7 +22,9 @@ import {
   syncReadingViewPlayback,
   enterReaderMode,
   closeReadingView,
-  logWarn
+  logWarn,
+  isReaderViewOpen,
+  resetManualScrollPause
 } from "../reader/index.js";
 
 import {
@@ -92,7 +94,7 @@ export function bindRuntimeEvents() {
         document.documentElement.setAttribute("data-boc-reader-mode", "1");
         document.body.setAttribute("data-boc-reader-mode", "1");
       }
-      if (!state.reader.readingViewOpen) {
+      if (!isReaderViewOpen()) {
         enterReaderMode().catch((error) => {
           logWarn("[BOC] reading mode trigger failed", error);
         });
@@ -189,8 +191,8 @@ export function bindRuntimeEvents() {
       if (!wasPaused) {
         video.play().catch(() => {});
       }
-      if (state.reader.readingViewOpen) {
-        state.reader.readingManualScrollPauseUntil = 0;
+      if (isReaderViewOpen()) {
+        resetManualScrollPause();
         state.reader.setNextScrollBehavior("auto");
         updateReaderFollowState();
         syncReadingViewPlayback(true);

@@ -13,6 +13,7 @@ import {
   getRuntimeVideoElement
 } from "../bilibili/video-probe.js";
 import { state, playerAiState } from "../core/state.js";
+import { isReaderViewOpen } from "../reader/index.js";
 
 const PLAYER_AI_ICON_VARIANT = "badge";
 
@@ -96,7 +97,7 @@ function schedulePlayerAiQuickActionRetry() {
 function syncPlayerAiQuickActionButton() {
   const existing = document.getElementById("boc-player-ai-quick-action");
   const existingWrap = existing?.closest(".boc-player-ai-wrap");
-  if (!state.settings?.enablePlayerAiQuickAction || state.reader.readingViewOpen || isReaderMode()) {
+  if (!state.settings?.enablePlayerAiQuickAction || isReaderViewOpen() || isReaderMode()) {
     removePlayerAiQuickActionButton();
     return;
   }
@@ -173,7 +174,7 @@ function bindPlayerAiQuickActionCursorSync(wrap) {
     wrap.classList.remove("is-active");
   };
   const showForCursorActivity = () => {
-    if (!wrap.isConnected || state.reader.readingViewOpen || isReaderMode()) {
+    if (!wrap.isConnected || isReaderViewOpen() || isReaderMode()) {
       wrap.classList.remove("is-active");
       return;
     }
@@ -341,7 +342,7 @@ async function handlePlayerAiQuickActionClick(event) {
   event.stopPropagation();
   if (
     state.playerAi.playerAiQuickActionSubmitting ||
-    state.reader.readingViewOpen ||
+    isReaderViewOpen() ||
     isReaderMode() ||
     Date.now() < state.playerAi.playerAiQuickActionSuppressedUntil
   ) {
