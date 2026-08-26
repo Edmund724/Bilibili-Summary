@@ -30,11 +30,14 @@ body {
   flex-shrink: 0;
 }
 
+/* 标题加长后防止超长视频名把「历史对话」等按钮挤变形 */
+.sp-header .sp-toolbar-btn {
+  flex-shrink: 0;
+}
+
 .sp-context-chip {
-  flex: 0 1 144px;
-  width: 144px;
+  flex: 1 1 auto;
   min-width: 0;
-  max-width: 144px;
   padding: 6px 10px;
   border: 0;
   background: #f7f8fb;
@@ -131,6 +134,7 @@ body {
 }
 
 .sp-icon-btn {
+  flex-shrink: 0;
   width: 32px;
   height: 32px;
   border: 0;
