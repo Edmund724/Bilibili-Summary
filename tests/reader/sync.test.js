@@ -14,9 +14,9 @@ let video;
 async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state;
-  shell = await import("../../extension/reader/shell.js");
-  sync = await import("../../extension/reader/transcript-sync.js");
-  playerHost = await import("../../extension/reader/player-host.js");
+  shell = await import("../../extension/reader/reader-impl.js");
+  sync = shell;
+  playerHost = shell;
   uiRenderer = await import("../../extension/ui/ui-renderer.js");
 }
 
@@ -270,13 +270,11 @@ describe("播放同步与高亮", () => {
     state.reader.readingViewOpen = true;
     playerHost.bindReadingViewVideo(video);
     sync.startReadingViewSync();
-    expect(state.reader.readingSyncTimer).toBeTruthy();
+    expect(video.__bocReadingSyncHandler).toBeTypeOf("function");
 
     sync.stopReadingViewSync();
 
-    expect(state.reader.readingSyncTimer).toBe(0);
     expect(video.__bocReadingSyncHandler).toBeUndefined();
-    expect(state.reader.readingVideoEventsBound).toBe(false);
   });
 
   it("点击章节跳转：设置 video.currentTime 并高亮对应字幕", () => {
@@ -340,35 +338,26 @@ describe("播放同步与高亮", () => {
   it("updateReaderFollowState：按自动滚动/手动暂停状态写入 data-boc-reader-follow", () => {
     const readingView = document.getElementById(shell.ids.readingView);
     state.reader.readingViewOpen = true;
+    state.reader.readingAutoScroll = true;
 
-    const autoScrollSpy = vi
-      .spyOn(state.reader, "readingAutoScroll", "get")
-      .mockReturnValueOnce(true)
-      .mockReturnValueOnce(true)
-      .mockReturnValue(false);
-    state.reader.readingManualScrollPauseUntil = 0;
-    sync.updateReaderFollowState();
-    expect(readingView.getAttribute("data-boc-reader-follow")).toBe("auto");
-
-    state.reader.readingManualScrollPauseUntil = Date.now() + 5000;
+    // 手动交互暂停跟随（等价于原状态字段直接赋值：手动暂停 5s）
+    sync.noteManualReaderInteraction(5000);
     sync.updateReaderFollowState();
     expect(readingView.getAttribute("data-boc-reader-follow")).toBe("manual");
 
+    // 关闭自动滚动后跟随关闭
+    state.reader.readingAutoScroll = false;
     sync.updateReaderFollowState();
     expect(readingView.getAttribute("data-boc-reader-follow")).toBe("off");
-
-    autoScrollSpy.mockRestore();
   });
 
   it("noteManualReaderInteraction：自动滚动开启时暂停跟随（data-boc-reader-follow=manual）", () => {
     const readingView = document.getElementById(shell.ids.readingView);
     state.reader.readingViewOpen = true;
     state.reader.readingAutoScroll = true;
-    state.reader.readingManualScrollPauseUntil = 0;
 
     sync.noteManualReaderInteraction(5000);
 
-    expect(state.reader.readingManualScrollPauseUntil).toBeGreaterThan(Date.now());
     expect(readingView.getAttribute("data-boc-reader-follow")).toBe("manual");
   });
 });

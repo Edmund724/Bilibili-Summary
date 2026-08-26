@@ -5,61 +5,59 @@
 // ./page-context.js for pure multi-page resolution, ./presenter.js for the
 // fetcher → reader notification channel).
 //
-// The modules below (./shell.js, ./page-frame.js, ./player-host.js,
-// ./transcript-sync.js) are implementation details of the reader domain:
-// they remain standalone files and keep their own exports, but external code
-// must not import them directly. Internal wiring among them stays as-is and
-// may be consolidated in a later step.
+// ./reader-impl.js is the single deep implementation module that consolidates
+// the former shell.js / page-frame.js / player-host.js / transcript-sync.js
+// (issue 06). External code must not import it directly.
 
 // 进入阅读模式
-export { enterReaderMode } from "./shell.js";
+export { enterReaderMode } from "./reader-impl.js";
 // 退出阅读模式（关闭阅读视图并清理页面状态）
-export { closeReadingView } from "./shell.js";
+export { closeReadingView } from "./reader-impl.js";
 // 渲染阅读视图主体（章节/字幕/信息面板）
-export { renderReadingView } from "./shell.js";
+export { renderReadingView } from "./reader-impl.js";
 // 渲染阅读视图状态栏文案
-export { renderReadingStatus } from "./shell.js";
+export { renderReadingStatus } from "./reader-impl.js";
 // 设置阅读视图就绪标记（data-boc-reader-ready / aria-busy）
-export { setReadingViewReady } from "./shell.js";
+export { setReadingViewReady } from "./reader-impl.js";
 // 应用阅读排版与可见性设置到 DOM
-export { applyReadingViewPresentation } from "./shell.js";
+export { applyReadingViewPresentation } from "./reader-impl.js";
 // 从设置初始化阅读状态
-export { hydrateReaderStateFromSettings } from "./shell.js";
+export { hydrateReaderStateFromSettings } from "./reader-impl.js";
 // 更新阅读偏好（状态 + DOM + 可选持久化）
-export { updateReaderPreferences } from "./shell.js";
+export { updateReaderPreferences } from "./reader-impl.js";
 // 渲染阅读设置面板（开关/步进器状态）
-export { renderReaderPanels } from "./shell.js";
+export { renderReaderPanels } from "./reader-impl.js";
 // 渲染阅读信息面板（摘要/简介）
-export { renderReadingInfoPanel } from "./shell.js";
+export { renderReadingInfoPanel } from "./reader-impl.js";
 // 构建设置面板中的阅读步进器控件 HTML
-export { buildReaderStepperControl } from "./shell.js";
+export { buildReaderStepperControl } from "./reader-impl.js";
 // 为步进器控件绑定点击交互
-export { bindReaderStepperControl } from "./shell.js";
+export { bindReaderStepperControl } from "./reader-impl.js";
 // 等待视频元数据（时长可用）就绪
-export { waitForVideoMetadata } from "./shell.js";
+export { waitForVideoMetadata } from "./reader-impl.js";
 // 注册 reader 侧渲染回调以响应 presenter 通知（subtitle-fetcher 数据就绪/重置/状态）
-export { bindReaderPresenter } from "./shell.js";
+export { bindReaderPresenter } from "./reader-impl.js";
 // 阅读视图的播放同步：开始/停止/立即同步一次/交互挂起标记
-export { startReadingViewSync } from "./transcript-sync.js";
-export { stopReadingViewSync } from "./transcript-sync.js";
-export { syncReadingViewPlayback } from "./transcript-sync.js";
-export { noteManualReaderInteraction } from "./transcript-sync.js";
-export { updateReaderFollowState } from "./transcript-sync.js";
+export { startReadingViewSync } from "./reader-impl.js";
+export { stopReadingViewSync } from "./reader-impl.js";
+export { syncReadingViewPlayback } from "./reader-impl.js";
+export { noteManualReaderInteraction } from "./reader-impl.js";
+export { updateReaderFollowState } from "./reader-impl.js";
 // 阅读视图内的点击处理：章节 / 字幕项
-export { onReadingChapterClick } from "./transcript-sync.js";
-export { onReadingTranscriptClick } from "./transcript-sync.js";
+export { onReadingChapterClick } from "./reader-impl.js";
+export { onReadingTranscriptClick } from "./reader-impl.js";
 // 播放器宿主挂载观察（阅读模式期间）
-export { startReaderPlayerObserver } from "./player-host.js";
-export { stopReaderPlayerObserver } from "./player-host.js";
+export { startReaderPlayerObserver } from "./reader-impl.js";
+export { stopReaderPlayerObserver } from "./reader-impl.js";
 // 页面级状态守卫（非阅读页清理阅读模式标记）
-export { enforceNormalPageStateIfNeeded } from "./page-frame.js";
-export { bindNormalPageStateGuard } from "./page-frame.js";
-export { clearReaderModePageState } from "./page-frame.js";
+export { enforceNormalPageStateIfNeeded } from "./reader-impl.js";
+export { bindNormalPageStateGuard } from "./reader-impl.js";
+export { clearReaderModePageState } from "./reader-impl.js";
 // 阅读模式调试辅助（__BOC_READER_DEBUG_SNAPSHOT__ 等）
-export { installReaderDebugHelpers } from "./shell.js";
+export { installReaderDebugHelpers } from "./reader-impl.js";
 // 阅读模式下的设置变更监听（chrome.storage.onChanged）
-export { bindSettingsWatcher } from "./shell.js";
+export { bindSettingsWatcher } from "./reader-impl.js";
 // reader 私有 DOM id 表（供 UI 模板与少量外部 DOM 操作使用）
-export { ids } from "./shell.js";
+export { ids } from "./reader-impl.js";
 // 日志（reader 域与外部共用，非 reader 专属能力）
 export { logInfo, logWarn } from "../shared/logging.js";

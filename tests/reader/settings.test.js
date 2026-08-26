@@ -11,7 +11,7 @@ let shell;
 async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state;
-  shell = await import("../../extension/reader/shell.js");
+  shell = await import("../../extension/reader/reader-impl.js");
 }
 
 function mountSettingsSkeleton() {

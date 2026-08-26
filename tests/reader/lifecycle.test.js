@@ -8,12 +8,14 @@ import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
 let state;
 let shell;
 let pageFrame;
+let impl;
 
 async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state;
-  shell = await import("../../extension/reader/shell.js");
-  pageFrame = await import("../../extension/reader/page-frame.js");
+  shell = await import("../../extension/reader/reader-impl.js");
+  pageFrame = shell;
+  impl = shell;
   return { state, shell, pageFrame };
 }
 
@@ -199,6 +201,13 @@ function mockPlayerRects() {
   }
 }
 
+// 通过视频元素上挂载的同步 handler 判断播放同步是否在运行
+// （内部同步定时器/绑定标志已收成 reader-impl 模块级闭包，不再暴露在 state.reader）
+function syncRunning() {
+  const video = document.querySelector("video");
+  return Boolean(video?.__bocReadingSyncHandler);
+}
+
 beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
@@ -208,16 +217,14 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  // 清理 enterReaderMode 注册的播放器观察者，避免 jsdom MutationObserver 在清理后回调
+  // 清理 enterReaderMode 注册的播放器观察者/定时器，避免 jsdom MutationObserver 在清理后回调
   try {
-    state.reader.readingPlayerObserver?.disconnect?.();
-    state.reader.readingPlayerObserver = null;
+    impl.stopReadingViewSync();
+    impl.stopReaderPlayerObserver();
     window.clearTimeout(state.reader.readingPlayerRetryTimer);
     state.reader.readingPlayerRetryTimer = 0;
     window.clearTimeout(state.reader.readingMiniDismissTimer);
     state.reader.readingMiniDismissTimer = 0;
-    window.clearInterval(state.reader.readingSyncTimer);
-    state.reader.readingSyncTimer = 0;
   } catch {
     // ignore
   }
@@ -272,9 +279,8 @@ describe("reader 生命周期", () => {
 
     // 播放器挂载绑定 stub 视频
     const video = document.querySelector("video");
-    expect(state.reader.readingVideoEl).toBe(video);
-    expect(state.reader.readingVideoEventsBound).toBe(true);
-    expect(state.reader.readingSyncTimer).toBeTruthy();
+    expect(video.__bocReadingSyncHandler).toBeTypeOf("function");
+    expect(syncRunning()).toBe(true);
 
     // 关闭视图以清掉 interval/重试/controls-recovery 等定时器，避免污染后续测试
     shell.closeReadingView();
@@ -294,11 +300,10 @@ describe("reader 生命周期", () => {
 
     await shell.enterReaderMode();
 
-    // 播放器挂载成功后会绑定 readingVideoEl 与同步定时器
+    // 播放器挂载成功后会绑定视频同步 handler 与同步定时器
     const video = document.querySelector("video");
-    expect(state.reader.readingVideoEl).toBe(video);
-    expect(state.reader.readingVideoEventsBound).toBe(true);
-    expect(state.reader.readingSyncTimer).toBeTruthy();
+    expect(video.__bocReadingSyncHandler).toBeTypeOf("function");
+    expect(syncRunning()).toBe(true);
 
     shell.closeReadingView();
 
@@ -312,9 +317,9 @@ describe("reader 生命周期", () => {
     expect(document.documentElement.getAttribute("data-boc-reader-theme")).toBe(null);
     expect(document.body.getAttribute("data-boc-reader-theme")).toBe(null);
 
-    // 同步已停止
-    expect(state.reader.readingSyncTimer).toBe(0);
-    expect(state.reader.readingVideoEventsBound).toBe(false);
+    // 同步已停止：interval 清除、视频事件监听移除
+    expect(syncRunning()).toBe(false);
+    expect(video.__bocReadingSyncHandler).toBeUndefined();
 
     // 让 alignReaderViewportToPlayer 的 120ms 定时器等在 DOM 尚存时跑完
     await new Promise((resolve) => setTimeout(resolve, 150));
