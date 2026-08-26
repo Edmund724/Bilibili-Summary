@@ -6,16 +6,6 @@
 
 > 注意：仅支持获取"有字幕轨"的 B 站视频字幕（播放器里有「字幕」选项，通常表示作者上传了外挂字幕或平台提供了 AI 字幕）；没有字幕轨的视频无法获取字幕。
 
-## 变更日志
-
-### 2025-08-24
-
-- **content script 架构重构（T10）**：`extension/content.js` 从 458 行缩减到 96 行，变为纯粹的初始化编排器，仅保留 `init()` 调用链、`isSupportedUrl()` 判断以及对各模块的聚合 import。
-- 新增 `extension/messages.js`，迁出 `chrome.runtime.onMessage` 监听器；并修复其中 `fetchHotComments`、`getCurrentAid`、`buildMarkdown` 缺失 import 导致的运行时 `ReferenceError`。
-- `extension/panel.js` 迁入并导出 `ensureUiReady()`；`extension/reader.js` 迁入 `clearReaderModePageState()`、`shouldForceNormalPageState()`、`enforceNormalPageStateIfNeeded()`、`bindNormalPageStateGuard()`。
-- 打破 `router.js -> content.js -> router.js` 的循环依赖：`router.js` 改为直接从 `panel.js` 和 `reader.js` 导入所需函数。
-- 视频页、稍后再看页、阅读视图、播放器 AI 按钮四条路径保持原有调用链，仅模块边界被重新组织。
-
 ## 功能
 
 ### AI 侧边栏
@@ -86,76 +76,56 @@
 
 ## 安装方式
 
-### Chrome / Edge
+### 方式一：下载打包版本（推荐）
 
-1. 使用 `git clone` 下载源码（例如 `git clone https://github.com/Edmund724/Bilibili-Summary.git`）
-2. 进入克隆后的源码目录 `Bilibili-Summary`
-3. 打开扩展管理页：
+1. 前往 [Releases](https://github.com/Edmund724/Bilibili-Summary/releases) 下载最新版本的 zip 包
+2. 解压到任意目录
+
+### 方式二：从源码构建
+
+```bash
+git clone https://github.com/Edmund724/Bilibili-Summary.git
+cd Bilibili-Summary
+npm install
+npm run build          # 生成 content-classic.js
+npm run build:release  # 生成 Chrome / Firefox 打包到 release/
+```
+
+### Chrome / Edge 加载
+
+1. 解压下载的 Chrome zip 包（或使用源码目录中的 `extension/` 文件夹）
+2. 打开扩展管理页：
    - Chrome：`chrome://extensions/`
    - Edge：`edge://extensions/`
-4. 开启"开发者模式"
-5. 点击"加载已解压的扩展程序"
-6. 选择克隆后的扩展目录
+3. 开启"开发者模式"
+4. 点击"加载已解压的扩展程序"，选择解压后的文件夹
 
-### Firefox
+### Firefox 加载
 
-1. 使用 `git clone` 下载源码（例如 `git clone https://github.com/Edmund724/Bilibili-Summary.git`）
-2. 进入克隆后的源码目录 `Bilibili-Summary`
-3. 打开 Firefox 附加组件管理页：`about:addons`
-4. 点击右上角齿轮图标 → "调试附加组件"
-5. 点击"临时加载附加组件..."
-6. 选择克隆后文件夹中的 `manifest.json` 文件
+1. 解压下载的 Firefox zip 包（或使用源码目录中的 `extension/` 文件夹）
+2. 打开 Firefox 附加组件管理页：`about:addons`
+3. 点击右上角齿轮图标 → "调试附加组件"
+4. 点击"临时加载附加组件..."，选择文件夹中的 `manifest.json` 文件
 
 ## 项目结构
 
-- `README.md` / `LICENSE`：项目说明与许可证
-- `extension/`：插件源码
-  - `manifest.json`：扩展清单
-  - `entry/`：扩展入口（`background.js`、`content.js`、`content.css`、`offscreen.js` 等）
-  - `ai/`：AI 客户端、SSE 流式解析与播放器 AI 按钮
-  - `bilibili/`：B 站 API 网关与视频 ID 解析
-  - `core/`：核心状态、运行时与消息处理
-  - `notes/`：笔记/导出渲染（Markdown、SRT、TXT）
-  - `subtitle/`：字幕抓取、缓存与处理
-  - `reader/`：阅读视图（`index.js` 为统一入口，含生命周期/同步/布局模块）
-  - `ui/`：UI 渲染（面板渲染、Markdown、时间戳导航等）
-  - `shared/`：跨模块共享工具（DOM、日志、字符串处理等）
-  - `pages/`：弹出面板、侧边栏与设置页（popup/sidepanel/options）
-  - `icons/`：扩展图标
-
-### Content script 架构说明
-
-`content.js` 现在是 ES module，并在 `manifest.json` 里以 `content_scripts` 静态加载。  
-但 Chrome 的 `chrome.scripting.executeScript` 只能注入经典脚本，不能直接注入 ES module；扩展里的刷新/恢复流程又必须走这条动态注入路径。所以当前架构是：
-
-- 静态加载：`manifest.json` -> `content.js`（module）
-- 动态注入：`background.js` / `popup.js` -> `content-classic.js`（classic bundle）
-- `content-classic.js` 是把 `shared-defaults.js` 和 `content.js` 合并后的经典脚本，专门用于 `executeScript` 注入
-
-这个限制是 Chrome Extension API 层面的，不是暂时 bug。后续拆分模块时，content 主入口仍需保持一个经典脚本注入路径。
-
-#### 构建 `content-classic.js`
-
-修改 `extension/shared-defaults.js` 或 `extension/content.js` 后，需要重新生成 `extension/content-classic.js`：
-
-```bash
-node scripts/build-content-classic.js
+```
+extension/
+├── manifest.json          # 扩展清单
+├── entry/                 # 入口（background、content、offscreen）
+├── ai/                    # AI 客户端、SSE 流式解析、播放器 AI 按钮
+├── bilibili/              # B 站 API 网关与视频 ID 解析
+├── core/                  # 核心状态、运行时、消息处理
+├── notes/                 # 笔记/导出渲染（Markdown、SRT、TXT）
+├── subtitle/              # 字幕抓取、缓存与处理
+├── reader/                # 阅读视图（生命周期/同步/布局）
+├── ui/                    # UI 渲染（面板、Markdown、时间戳导航）
+├── shared/                # 跨模块工具（DOM、日志、字符串处理等）
+├── pages/                 # popup / sidepanel / options 页面
+└── icons/                 # 扩展图标
 ```
 
-或在 `package.json` 脚本里执行：
-
-```bash
-npm run build:content-classic
-```
-
-生成规则：
-- 以 `extension/shared-defaults.js` 和 `extension/content.js` 为输入
-- 自动内联依赖并移除 `import` / `export` 语法
-- 输出为兼容 `chrome.scripting.executeScript` 的经典脚本
-
-> `extension/content-classic.js` 是生成产物，已加入 `.gitignore`，请勿手动编辑。
-
-`extension/content-classic.js` 是生成文件，不要手动编辑。
+> `extension/entry/content-classic.js` 是构建产物，由 `npm run build` 生成，已加入 `.gitignore`，请勿手动编辑。修改 `shared-defaults.js` 或 `content.js` 后需重新构建。
 
 ## 使用方式
 
