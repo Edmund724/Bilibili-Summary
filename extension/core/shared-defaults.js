@@ -377,6 +377,7 @@ export const DEFAULT_SETTINGS = {
   readerLineHeight: "tight",
   readerContentWidth: "medium",
   readerChapterVisibility: "show",
+  readerChapterVisible: true,
   readerTranscriptVisible: true,
   frontmatterFields: [
     "title",
