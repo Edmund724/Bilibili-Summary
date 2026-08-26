@@ -100,7 +100,7 @@ export function normalizePlayerAiQuickPrompt(value) {
 }
 
 export function normalizeAiSystemPrompt(value) {
-  var normalized = toString(value).trim();
+  const normalized = toString(value).trim();
   if (normalized === LEGACY_DEFAULT_AI_SYSTEM_PROMPT) {
     return DEFAULT_AI_SYSTEM_PROMPT;
   }
@@ -157,12 +157,12 @@ export function normalizeBaseUrl(value) {
 
 // ===== Frontmatter normalizers =====
 export function normalizeFixedPropertyType(value) {
-  var type = toString(value).trim().toLowerCase();
+  const type = toString(value).trim().toLowerCase();
   return type === "number" || type === "checkbox" || type === "list" || type === "date" ? type : "text";
 }
 
 export function normalizeFixedPropertyValue(type, value) {
-  var normalizedType = normalizeFixedPropertyType(type);
+  const normalizedType = normalizeFixedPropertyType(type);
   if (normalizedType === "checkbox") {
     return toString(value).trim().toLowerCase();
   }
@@ -190,18 +190,18 @@ export function normalizeFixedFrontmatterProperties(value) {
 
 // ===== Frontmatter / note-section validation =====
 export function validateFixedFrontmatterProperties(items) {
-  var systemFrontmatterFields = SYSTEM_FRONTMATTER_FIELDS;
-  var customPropertyKeyPattern = /^[\p{L}\p{N}_\-\s]+$/u;
-  var frontmatterDateValueRe = /^\d{4}-\d{2}-\d{2}$/;
-  var seenKeys = new Set();
-  var rows = Array.isArray(items) ? items : [];
-  for (var i = 0; i < rows.length; i++) {
-    var item = rows[i];
-    var key = String(item?.key || "").trim();
-    var type = normalizeFixedPropertyType(item?.type);
-    var value = item?.value;
-    var lowerKey = key.toLowerCase();
-    var valueText = typeof value === "string" ? value.trim() : "";
+  const systemFrontmatterFields = SYSTEM_FRONTMATTER_FIELDS;
+  const customPropertyKeyPattern = /^[\p{L}\p{N}_\-\s]+$/u;
+  const frontmatterDateValueRe = /^\d{4}-\d{2}-\d{2}$/;
+  const seenKeys = new Set();
+  const rows = Array.isArray(items) ? items : [];
+  for (let i = 0; i < rows.length; i++) {
+    const item = rows[i];
+    const key = String(item?.key || "").trim();
+    const type = normalizeFixedPropertyType(item?.type);
+    const value = item?.value;
+    const lowerKey = key.toLowerCase();
+    const valueText = typeof value === "string" ? value.trim() : "";
 
     if (!key && isFixedPropertyRowEffectivelyEmpty(type, value)) {
       continue;
@@ -212,7 +212,7 @@ export function validateFixedFrontmatterProperties(items) {
     if (!customPropertyKeyPattern.test(key)) {
       return { ok: false, row: item.row, message: "属性名仅支持中文、英文、数字、空格、下划线和短横线" };
     }
-    var hasTemplateToken = containsFrontmatterTemplateToken(valueText);
+    const hasTemplateToken = containsFrontmatterTemplateToken(valueText);
 
     if (type === "number") {
       if (!valueText) {
@@ -225,7 +225,7 @@ export function validateFixedFrontmatterProperties(items) {
       if (!valueText) {
         return { ok: false, row: item.row, message: "请填写复选框类型的属性值" };
       }
-      var normalizedCheckboxValue = valueText.toLowerCase();
+      const normalizedCheckboxValue = valueText.toLowerCase();
       if (!hasTemplateToken && normalizedCheckboxValue !== "true" && normalizedCheckboxValue !== "false") {
         return { ok: false, row: item.row, message: "复选框类型的属性值只能填写 true 或 false" };
       }
@@ -252,22 +252,22 @@ export function validateFixedFrontmatterProperties(items) {
 }
 
 export function normalizeNoteSectionPosition(value) {
-  var key = toString(value).trim().toLowerCase();
+  const key = toString(value).trim().toLowerCase();
   return key === "before_chapters" || key === "before_subtitle" ? key : "before_intro";
 }
 
 export function validateNotePlaceholderSections(items) {
-  var allowedPositions = new Set(["before_intro", "before_chapters", "before_subtitle"]);
-  var maxSections = 5;
-  var rows = Array.isArray(items) ? items : [];
+  const allowedPositions = new Set(["before_intro", "before_chapters", "before_subtitle"]);
+  const maxSections = 5;
+  const rows = Array.isArray(items) ? items : [];
   if (rows.length > maxSections) {
     return { ok: false, message: "正文附加段落最多添加 " + maxSections + " 个" };
   }
-  for (var i = 0; i < rows.length; i++) {
-    var item = rows[i];
-    var title = String(item?.title || "").trim();
-    var position = normalizeNoteSectionPosition(item?.position);
-    var content = String(item?.content || "").trim();
+  for (let i = 0; i < rows.length; i++) {
+    const item = rows[i];
+    const title = String(item?.title || "").trim();
+    const position = normalizeNoteSectionPosition(item?.position);
+    const content = String(item?.content || "").trim();
     if (!title && !content) {
       continue;
     }
@@ -283,14 +283,14 @@ export function validateNotePlaceholderSections(items) {
 
 // ===== AI provider validation =====
 export function validateAiProviders(items) {
-  var seenIds = new Set();
-  for (var i = 0; i < items.length; i++) {
-    var item = items[i];
+  const seenIds = new Set();
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
     if (!item.baseUrl) {
       return { ok: false, message: "每个平台都需要填写 baseUrl" };
     }
     try {
-      var u = new URL(item.baseUrl);
+      const u = new URL(item.baseUrl);
       if (u.protocol !== "http:" && u.protocol !== "https:") {
         return { ok: false, message: "baseUrl 必须以 http(s):// 开头（" + item.baseUrl + "）" };
       }
@@ -318,13 +318,13 @@ function containsFrontmatterTemplateToken(value) {
 // ===== Date / URL utils =====
 export function formatLocalDate(value) {
   if (value === undefined) value = Date.now();
-  var date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
   return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
 }
 
 export function isSupportedBilibiliPage(url) {
   try {
-    var parsed = new URL(String(url || ""));
+    const parsed = new URL(String(url || ""));
     if (parsed.hostname !== "www.bilibili.com") {
       return false;
     }
@@ -346,9 +346,9 @@ export function normalizeNotePlaceholderSections(items) {
   }
   return items
     .map(function (item) {
-      var title = toString(item?.title).trim();
-      var content = toString(item?.content).trim();
-      var position = allowedPositions.has(toString(item?.position).trim())
+      const title = toString(item?.title).trim();
+      const content = toString(item?.content).trim();
+      const position = allowedPositions.has(toString(item?.position).trim())
         ? toString(item?.position).trim()
         : "before_intro";
       return {

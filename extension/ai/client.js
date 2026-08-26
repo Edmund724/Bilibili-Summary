@@ -53,8 +53,8 @@ async function drainSseStream({ response, port, signal, onActivity }) {
       const data = line.slice(5).trim();
       if (!data || data === "[DONE]") continue;
 
-      var events = parseSsePayload(data);
-      for (var i = 0; i < events.length; i++) {
+      const events = parseSsePayload(data);
+      for (let i = 0; i < events.length; i++) {
         onActivity?.();
         if (events[i].type === "reasoning") {
           port.postMessage({ type: "reasoning", data: events[i].data });

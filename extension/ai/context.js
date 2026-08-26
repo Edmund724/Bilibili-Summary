@@ -1,8 +1,8 @@
 // 把 content.js 传来的 context 拼成 chat messages，并提供建议 chip 模板。
 
 export function buildMessages({ context, userPrompt, history, systemPrompt }) {
-  var ctx = context || {};
-  var sections = [
+  const ctx = context || {};
+  const sections = [
     `你是一个 B 站视频助手。当前用户正在看一个视频，标题：「${ctx.title || "未知"}」`,
     `作者：${ctx.author || "未知"} | 上传日期：${ctx.uploadDate || "未知"}`
   ];
@@ -14,25 +14,25 @@ export function buildMessages({ context, userPrompt, history, systemPrompt }) {
   }
 
   if (Array.isArray(ctx.hotComments) && ctx.hotComments.length) {
-    var commentBlock = ctx.hotComments
+    const commentBlock = ctx.hotComments
       .map(function (c, i) { return `${i + 1}. ${c.uname || "匿名"}（赞 ${c.like || 0}）: ${c.message || ""}`; })
       .join("\n");
     sections.push(`以下是按热度排序的前 ${ctx.hotComments.length} 条热门评论：\n\n${commentBlock}`);
   }
 
-  var customSystemPrompt = String(systemPrompt || "").trim();
+  const customSystemPrompt = String(systemPrompt || "").trim();
   if (customSystemPrompt) {
     sections.push("以下是额外系统要求：\n" + customSystemPrompt);
   }
 
-  var historyMessages = [];
+  let historyMessages = [];
   if (Array.isArray(history)) {
     historyMessages = history.filter(function (m) {
       return m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string";
     });
   }
 
-  var messages = [
+  const messages = [
     { role: "system", content: sections.join("\n\n") },
     ...historyMessages,
     { role: "user", content: String(userPrompt || "") }
