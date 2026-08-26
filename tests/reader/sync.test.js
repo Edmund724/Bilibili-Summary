@@ -3,6 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
+import { mockPlayerRects, mountPlayerChain, mountReaderSkeleton } from "../helpers/reader-skeleton.js";
 
 let state;
 let shell;
@@ -20,102 +21,17 @@ async function loadReaderModules() {
   uiRenderer = await import("../../extension/ui/ui-renderer.js");
 }
 
-function mountMinimalSkeleton() {
+function mountExtraSkeleton() {
   const doc = document;
-  const readingView = doc.createElement("div");
-  readingView.id = shell.ids.readingView;
-  doc.body.appendChild(readingView);
-
-  const readingMeta = doc.createElement("div");
-  readingMeta.id = shell.ids.readingMeta;
-  readingView.appendChild(readingMeta);
-
-  const readingStatus = doc.createElement("div");
-  readingStatus.id = shell.ids.readingStatus;
-  readingView.appendChild(readingStatus);
-
-  const readingPlayerSlot = doc.createElement("div");
-  readingPlayerSlot.id = shell.ids.readingPlayerSlot;
-  readingView.appendChild(readingPlayerSlot);
-
-  const readingChapterList = doc.createElement("div");
-  readingChapterList.id = shell.ids.readingChapterList;
-  readingView.appendChild(readingChapterList);
-
-  const readingTranscriptList = doc.createElement("div");
-  readingTranscriptList.id = shell.ids.readingTranscriptList;
-  readingView.appendChild(readingTranscriptList);
-
-  const readingAutoScroll = doc.createElement("input");
-  readingAutoScroll.type = "checkbox";
-  readingAutoScroll.checked = false;
-  readingAutoScroll.id = shell.ids.readingAutoScroll;
-  readingView.appendChild(readingAutoScroll);
-
-  const readingChapterVisible = doc.createElement("input");
-  readingChapterVisible.type = "checkbox";
-  readingChapterVisible.checked = true;
-  readingChapterVisible.id = shell.ids.readingChapterVisible;
-  readingView.appendChild(readingChapterVisible);
-
-  const readingTranscriptVisible = doc.createElement("input");
-  readingTranscriptVisible.type = "checkbox";
-  readingTranscriptVisible.checked = true;
-  readingTranscriptVisible.id = shell.ids.readingTranscriptVisible;
-  readingView.appendChild(readingTranscriptVisible);
-
-  const readingInfoSummary = doc.createElement("div");
-  readingInfoSummary.id = shell.ids.readingInfoSummary;
-  readingView.appendChild(readingInfoSummary);
-
-  const readingInfoDescription = doc.createElement("div");
-  readingInfoDescription.id = shell.ids.readingInfoDescription;
-  readingView.appendChild(readingInfoDescription);
-
-  const readingDescriptionBtn = doc.createElement("button");
-  readingDescriptionBtn.id = shell.ids.readingDescriptionBtn;
-  readingView.appendChild(readingDescriptionBtn);
-
-  const readingSubtitleSelect = doc.createElement("select");
-  readingSubtitleSelect.id = shell.ids.readingSubtitleSelect;
-  readingView.appendChild(readingSubtitleSelect);
-
-  const readingChapterVisibilitySelect = doc.createElement("select");
-  readingChapterVisibilitySelect.id = shell.ids.readingChapterVisibilitySelect;
-  readingView.appendChild(readingChapterVisibilitySelect);
-
-  const readingSettingsPanel = doc.createElement("div");
-  readingSettingsPanel.id = shell.ids.readingSettingsPanel;
-  readingView.appendChild(readingSettingsPanel);
-
-  const readingSettingsBtn = doc.createElement("button");
-  readingSettingsBtn.id = shell.ids.readingSettingsBtn;
-  readingView.appendChild(readingSettingsBtn);
-
-  const readingFontScaleSelect = doc.createElement("div");
-  readingFontScaleSelect.id = shell.ids.readingFontScaleSelect;
-  readingView.appendChild(readingFontScaleSelect);
-
-  const readingLetterSpacingSelect = doc.createElement("div");
-  readingLetterSpacingSelect.id = shell.ids.readingLetterSpacingSelect;
-  readingView.appendChild(readingLetterSpacingSelect);
-
-  const readingLineHeightSelect = doc.createElement("div");
-  readingLineHeightSelect.id = shell.ids.readingLineHeightSelect;
-  readingView.appendChild(readingLineHeightSelect);
-
-  const readingContentWidthSelect = doc.createElement("div");
-  readingContentWidthSelect.id = shell.ids.readingContentWidthSelect;
-  readingView.appendChild(readingContentWidthSelect);
 
   // bindUiEvents 需要的额外节点（阅读视图相关）
   const readingThemeSelect = doc.createElement("button");
   readingThemeSelect.id = shell.ids.readingThemeSelect;
-  readingView.appendChild(readingThemeSelect);
+  doc.body.querySelector(`#${shell.ids.readingView}`).appendChild(readingThemeSelect);
 
   const readingCloseBtn = doc.createElement("button");
   readingCloseBtn.id = shell.ids.readingCloseBtn;
-  readingView.appendChild(readingCloseBtn);
+  doc.body.querySelector(`#${shell.ids.readingView}`).appendChild(readingCloseBtn);
 
   // 经典面板（bindUiEvents 通过 byId 访问）
   const panel = doc.createElement("div");
@@ -134,48 +50,7 @@ function mountMinimalSkeleton() {
     panel.appendChild(node);
   });
 
-  const playerWrap = doc.createElement("div");
-  playerWrap.id = "playerWrap";
-  const bilibiliPlayer = doc.createElement("div");
-  bilibiliPlayer.id = "bilibili-player";
-  const playerContainer = doc.createElement("div");
-  playerContainer.className = "bpx-player-container";
-  const playerVideoArea = doc.createElement("div");
-  playerVideoArea.className = "bpx-player-video-area";
-  const playerPrimaryArea = doc.createElement("div");
-  playerPrimaryArea.className = "bpx-player-primary-area";
-  video = doc.createElement("video");
-  Object.defineProperty(video, "duration", { value: 600, configurable: true });
-  Object.defineProperty(video, "videoWidth", { value: 1920, configurable: true });
-  Object.defineProperty(video, "videoHeight", { value: 1080, configurable: true });
-  Object.defineProperty(video, "paused", { value: true, configurable: true });
-  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
-
-  playerPrimaryArea.appendChild(video);
-  playerVideoArea.appendChild(playerPrimaryArea);
-  playerContainer.appendChild(playerVideoArea);
-  bilibiliPlayer.appendChild(playerContainer);
-  playerWrap.appendChild(bilibiliPlayer);
-  doc.body.appendChild(playerWrap);
-
-  // 所有需要“可见”判定的节点补矩形
-  [
-    ".bpx-player-primary-area",
-    ".bpx-player-video-area",
-    ".bpx-player-container",
-    "#bilibili-player",
-    "#playerWrap",
-    "#boc-reading-inline-host",
-    video
-  ].forEach((node) => {
-    if (node && typeof node !== "string") {
-      node.getBoundingClientRect = () => ({
-        x: 0, y: 0, top: 0, left: 0, right: 800, bottom: 450, width: 800, height: 450, toJSON: () => ({})
-      });
-    }
-  });
-
-  return { readingView, video };
+  return { readingThemeSelect, readingCloseBtn, panel };
 }
 
 function setStateClip() {
@@ -195,7 +70,10 @@ beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
   await loadReaderModules();
-  mountMinimalSkeleton();
+  mountReaderSkeleton(shell.ids);
+  mountExtraSkeleton();
+  video = mountPlayerChain();
+  mockPlayerRects();
   setStateClip();
   // 大多数用例聚焦高亮切换本身；自动滚动路径单独覆盖
   state.reader.readingAutoScroll = false;

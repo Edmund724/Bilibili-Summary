@@ -4,6 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NORMAL_PAGE_URL, READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
+import { mountReaderSkeleton } from "../helpers/reader-skeleton.js";
 
 let state;
 let shell;
@@ -31,86 +32,6 @@ async function loadReaderModules() {
   );
 }
 
-function mountSettingsSkeleton() {
-  const doc = document;
-  const readingView = doc.createElement("div");
-  readingView.id = shell.ids.readingView;
-  doc.body.appendChild(readingView);
-
-  const readingStatus = doc.createElement("div");
-  readingStatus.id = shell.ids.readingStatus;
-  readingView.appendChild(readingStatus);
-
-  const readingChapterList = doc.createElement("div");
-  readingChapterList.id = shell.ids.readingChapterList;
-  readingView.appendChild(readingChapterList);
-
-  const readingTranscriptList = doc.createElement("div");
-  readingTranscriptList.id = shell.ids.readingTranscriptList;
-  readingView.appendChild(readingTranscriptList);
-
-  const readingAutoScroll = doc.createElement("input");
-  readingAutoScroll.type = "checkbox";
-  readingAutoScroll.id = shell.ids.readingAutoScroll;
-  readingView.appendChild(readingAutoScroll);
-
-  const readingTranscriptVisible = doc.createElement("input");
-  readingTranscriptVisible.type = "checkbox";
-  readingTranscriptVisible.id = shell.ids.readingTranscriptVisible;
-  readingView.appendChild(readingTranscriptVisible);
-
-  const readingChapterVisible = doc.createElement("input");
-  readingChapterVisible.type = "checkbox";
-  readingChapterVisible.id = shell.ids.readingChapterVisible;
-  readingView.appendChild(readingChapterVisible);
-
-  const readingSettingsPanel = doc.createElement("div");
-  readingSettingsPanel.id = shell.ids.readingSettingsPanel;
-  readingView.appendChild(readingSettingsPanel);
-
-  const readingSettingsBtn = doc.createElement("button");
-  readingSettingsBtn.id = shell.ids.readingSettingsBtn;
-  readingView.appendChild(readingSettingsBtn);
-
-  const readingFontScaleSelect = doc.createElement("div");
-  readingFontScaleSelect.id = shell.ids.readingFontScaleSelect;
-  readingView.appendChild(readingFontScaleSelect);
-
-  const readingLetterSpacingSelect = doc.createElement("div");
-  readingLetterSpacingSelect.id = shell.ids.readingLetterSpacingSelect;
-  readingView.appendChild(readingLetterSpacingSelect);
-
-  const readingLineHeightSelect = doc.createElement("div");
-  readingLineHeightSelect.id = shell.ids.readingLineHeightSelect;
-  readingView.appendChild(readingLineHeightSelect);
-
-  const readingContentWidthSelect = doc.createElement("div");
-  readingContentWidthSelect.id = shell.ids.readingContentWidthSelect;
-  readingView.appendChild(readingContentWidthSelect);
-
-  const readingInfoSummary = doc.createElement("div");
-  readingInfoSummary.id = shell.ids.readingInfoSummary;
-  readingView.appendChild(readingInfoSummary);
-
-  const readingInfoDescription = doc.createElement("div");
-  readingInfoDescription.id = shell.ids.readingInfoDescription;
-  readingView.appendChild(readingInfoDescription);
-
-  const readingDescriptionBtn = doc.createElement("button");
-  readingDescriptionBtn.id = shell.ids.readingDescriptionBtn;
-  readingView.appendChild(readingDescriptionBtn);
-
-  const readingSubtitleSelect = doc.createElement("select");
-  readingSubtitleSelect.id = shell.ids.readingSubtitleSelect;
-  readingView.appendChild(readingSubtitleSelect);
-
-  const readingChapterVisibilitySelect = doc.createElement("select");
-  readingChapterVisibilitySelect.id = shell.ids.readingChapterVisibilitySelect;
-  readingView.appendChild(readingChapterVisibilitySelect);
-
-  return { readingView };
-}
-
 function makeStepper(node) {
   // 与 buildReaderStepperControl 生成的按钮结构一致
   const btn = document.createElement("button");
@@ -120,11 +41,28 @@ function makeStepper(node) {
   node.appendChild(btn);
 }
 
+// 给 4 个 stepper 控件各补一个按钮，让 renderReaderPanels 的
+// renderReaderStepperState 有可操作节点。
+function seedStepperButtons() {
+  [
+    shell.ids.readingFontScaleSelect,
+    shell.ids.readingLetterSpacingSelect,
+    shell.ids.readingLineHeightSelect,
+    shell.ids.readingContentWidthSelect
+  ].forEach((id) => {
+    const node = document.getElementById(id);
+    if (node) {
+      makeStepper(node);
+    }
+  });
+}
+
 beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
   await loadReaderModules();
-  mountSettingsSkeleton();
+  mountReaderSkeleton(shell.ids);
+  seedStepperButtons();
 });
 
 afterEach(() => {
