@@ -12,7 +12,6 @@
 //   - delay(ms)                              pure; promise sleep via window.setTimeout
 //   - waitForTabComplete(tabId, timeoutMs=15000)  polls chrome.tabs.get until "complete"
 //   - sendMessageToActiveTab(tabId, message, retries=12)  retry-wrapped tabs.sendMessage
-//   - truncate(value, max)                   pure; suffix with "..." beyond max chars
 //
 // NOTE: the module header deliberately avoids the words "import"/"from" (they
 // would trip the validate-tree-imports.mjs export resolution on this file's own
@@ -52,9 +51,4 @@ export async function sendMessageToActiveTab(tabId, message, retries = 12) {
     }
   }
   throw lastError || new Error("无法连接视频页面");
-}
-
-export function truncate(value, max) {
-  const s = String(value || "");
-  return s.length > max ? s.slice(0, max) + "..." : s;
 }

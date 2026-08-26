@@ -1,4 +1,4 @@
-// extension/pages/options-rows.js
+// extension/ui/options-rows.js
 // 选项页三类行构建器（固定属性 / 笔记段落 / AI 平台）与纯验证逻辑。
 // 行构建器只依赖参数与回调，不直接访问 DOM 全局；验证函数不触碰 DOM。
 

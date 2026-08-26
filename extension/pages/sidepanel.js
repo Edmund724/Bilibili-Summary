@@ -11,10 +11,10 @@
 //   3. 滚动与布局更新、popover toggle、autosizeInput、modelSelect 宽度、通知显示
 //   4. 对 02-07 模块的编排调用（loadContextState、player AI 快捷动作、上下文
 //      同步调度、新对话/刷新等页面级流程）
-// 页面级 transport 辅助（delay / waitForTabComplete / sendMessageToActiveTab /
-// truncate）由 ../shared/tab-utils.js 提供（08 新增共享模块，同时供
-// ui/timestamp-nav.js 的 seek 流程复用）；sendRuntimeMessage 由 ../core/runtime.js
-// 提供（core 域）。
+// 页面级 transport 辅助（delay / waitForTabComplete / sendMessageToActiveTab）
+// 由 ../shared/tab-utils.js 提供（08 新增共享模块，同时供
+// ui/timestamp-nav.js 的 seek 流程复用）；truncate 由 ../shared/string-utils.js
+// 提供；sendRuntimeMessage 由 ../core/runtime.js 提供（core 域）。
 
 import {
   DEFAULT_INITIAL_QUICK_PROMPTS,
@@ -32,8 +32,8 @@ import {
   buildConversationTitleDisplay,
   MAX_SAVED_CONVERSATIONS
 } from "../ai/conversation.js";
-import { escapeHtml } from "../shared/string-utils.js";
-import { sendMessageToActiveTab, truncate, waitForTabComplete } from "../shared/tab-utils.js";
+import { escapeHtml, truncate } from "../shared/string-utils.js";
+import { sendMessageToActiveTab, waitForTabComplete } from "../shared/tab-utils.js";
 import { sendRuntimeMessage } from "../core/runtime.js";
 import { renderMarkdown, stripThinkBlocks } from "../ui/markdown.js";
 import { linkifyAssistantTimestamps } from "../ui/timestamp-nav.js";

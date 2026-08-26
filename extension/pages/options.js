@@ -25,7 +25,7 @@ import {
   addAiProviderRow,
   collectAiProviders,
   setTestSuccessHandler
-} from "./options-rows.js";
+} from "../ui/options-rows.js";
 
 const NOTE_SECTION_POSITIONS = new Set(["before_intro", "before_chapters", "before_subtitle"]);
 
