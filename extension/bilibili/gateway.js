@@ -1,4 +1,4 @@
-// extension/bili-gateway.js
+// extension/bilibili/gateway.js
 // One deep B站 (Bilibili) fetch+map gateway, shared by the content script and the
 // background service worker. It centralizes the request/response orchestration that
 // previously lived in both subtitle-fetch.js and background.js, behind a transport seam.
@@ -10,17 +10,17 @@
 //   - background side: bgFetchJson (direct fetch with B站 headers)
 // so both sides share one implementation and avoid behavior drift.
 
-import { formatLocalDate } from "./core/shared-defaults.js";
-import { toReadableText } from "./shared/error-helpers.js";
+import { formatLocalDate } from "../core/shared-defaults.js";
+import { toReadableText } from "../shared/error-helpers.js";
 import {
   buildSubtitleInfoRequests,
   buildBiliApiError,
   normalizeHotComments
-} from "./bilibili/bili-api-shared.js";
+} from "./bili-api-shared.js";
 import {
   mapChaptersFromPlayerData,
   mapSubtitleTracks
-} from "./subtitle/selection.js";
+} from "../subtitle/selection.js";
 
 // True for B站 request hosts (API + subtitle/CDN) that need the B站 request headers
 // and should be routed through the background fetch handler. Shared by the transports.

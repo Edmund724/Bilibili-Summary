@@ -30,7 +30,7 @@ import {
 } from "../core/shared-defaults.js";
 import { formatCompactTimestamp } from "../shared/string-utils.js";
 import { getSubtitleCacheKey, loadSubtitleFromCache } from "../subtitle/cache.js";
-import { fetchVideoMeta, fetchSubtitleBundle, fetchSubtitleBody, fetchHotComments, bgFetchJson, isBiliUrl } from "../bili-gateway.js";
+import { fetchVideoMeta, fetchSubtitleBundle, fetchSubtitleBody, fetchHotComments, bgFetchJson, isBiliUrl } from "../bilibili/gateway.js";
 import { extractBvidFromUrl, extractPageIndexFromUrl, buildCanonicalVideoUrl } from "../bilibili/video-id-shared.js";
 import {
   pickPreferredSubtitle as pickPreferredSubtitleTrack,

@@ -28,11 +28,15 @@ vi.mock("../../extension/ui/ui-renderer.js", () => ({
   setBusyState: vi.fn(),
   setStatus: vi.fn()
 }));
-vi.mock("../../extension/subtitle/fetch.js", () => ({
-  retryAsync: vi.fn((fn) => fn()),
-  fetchVideoMeta: vi.fn(),
-  fetchSubtitleBundle: vi.fn()
-}));
+vi.mock("../../extension/subtitle/fetcher.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    retryAsync: vi.fn((fn) => fn()),
+    fetchVideoMeta: vi.fn(),
+    fetchSubtitleBundle: vi.fn()
+  };
+});
 vi.mock("../../extension/bilibili/bili-api.js", () => ({
   fetchSubtitleBody: vi.fn(),
   readRuntimeVideoDuration: vi.fn(() => 300)
@@ -122,7 +126,7 @@ describe("tryLoadSubtitleCandidates 日志路径", () => {
 
     // 让 fetchVideoMeta 抛错，使 refreshClip 在 logInfo 出现之前就失败——若
     // 错误路径依赖未定义的 logInfo，这里会 reject 而不是 resolve。
-    const fetchMetaMock = (await import("../../extension/subtitle/fetch.js")).fetchVideoMeta;
+    const fetchMetaMock = (await import("../../extension/subtitle/fetcher.js")).fetchVideoMeta;
     fetchMetaMock.mockRejectedValue(new Error("meta down"));
 
     await expect(fetcher.refreshClip()).resolves.toBeUndefined();

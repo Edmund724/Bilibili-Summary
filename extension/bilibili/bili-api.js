@@ -3,7 +3,7 @@ import { toReadableText } from "../shared/error-helpers.js";
 import { state } from "../core/state.js";
 import { getRuntimeVideoElement } from "./video-probe.js";
 import { logInfo } from "../shared/logging.js";
-import { fetchSubtitleBody as gatewayFetchSubtitleBody, fetchHotComments as gatewayFetchHotComments, isBiliUrl } from "../bili-gateway.js";
+import { fetchSubtitleBody as gatewayFetchSubtitleBody, fetchHotComments as gatewayFetchHotComments, isBiliUrl } from "./gateway.js";
 
 
 export function readRuntimeVideoDuration() {
