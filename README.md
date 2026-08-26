@@ -45,7 +45,7 @@
 
 ![Bilibili-Summary 功能演示](docs/images/feature-demo-v2.png)
 
-![Bilibili-Summary AI 侧边栏演示](docs/images/33.png)
+![Bilibili-Summary AI 侧边栏演示](docs/images/ai-sidebar-demo.png)
 
 ## AI 配置与平台支持
 
