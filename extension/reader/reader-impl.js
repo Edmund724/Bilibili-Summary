@@ -1,8 +1,11 @@
-// Reader implementation (issue 06).
+// Reader LAYOUT module (issue 06+).
 //
-// Single deep module consolidating the former shallow modules shell.js,
-// page-frame.js, player-host.js and transcript-sync.js (all of which imported
-// each other in a cycle). All reader-domain bookkeeping that is private to the
+// The base layer of the reader domain: page-frame (DOM focus/pruning/inline
+// host) + player-host (player mount/controls/observer) + the shared module
+// closure, ids table and accessor seam. The two modules that depend on it live
+// in ./sync.js (SYNC) and ./lifecycle.js (LIFECYCLE); the dependency graph is
+// acyclic (SYNC → LAYOUT, LIFECYCLE → SYNC + LAYOUT), so this module must not
+// import either of them. All reader-domain bookkeeping that is private to the
 // reader domain lives here as module-level closure variables instead of
 // state.reader; the facade ./index.js re-exports the public functions.
 //
@@ -10,43 +13,11 @@
 // external modules read or write (readingVideoEl, readingDocumentClickBound)
 // stay in state.reader.
 import { state, uiState } from "../core/state.js";
-import { logInfo, logWarn, shouldDebugLog } from "../shared/logging.js";
-import {
-  normalizeReaderTheme,
-  normalizeReaderFontScale,
-  normalizeReaderLetterSpacing,
-  normalizeReaderLineHeight,
-  normalizeReaderContentWidth,
-  normalizeReaderTranscriptVisible,
-  sleep
-} from "../core/shared-defaults.js";
-import { isReaderMode, isWatchlaterPage, cleanVideoUrl } from "../bilibili/video-id-shared.js";
+import { logInfo, logWarn } from "../shared/logging.js";
+import { getReaderElement, isVisibleReaderControl } from "../shared/dom-utils.js";
+import { sleep } from "../core/shared-defaults.js";
+import { isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
-import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
-import {
-  getReadingTranscriptItems,
-  getReadingTranscriptPlaceholderText,
-  findActiveSubtitleIndex,
-  findActiveChapterIndex
-} from "../subtitle/core.js";
-import {
-  normalizeChapters,
-  isAiSubtitle
-} from "../subtitle/selection.js";
-import {
-  escapeHtml,
-  formatCompactTimestamp
-} from "../shared/string-utils.js";
-import {
-  shouldShowHoursInNote
-} from "../notes/render.js";
-import {
-  subscribeReaderPresenter,
-  requestSubtitleRefresh,
-  persistReaderSettingsThroughSeam,
-  loadReaderSettingsThroughSeam,
-  requestPlayerAiSync
-} from "./presenter.js";
 import * as pageContext from "./page-context.js";
 
 // ===== reader-domain private bookkeeping (module-level closure state) =====
@@ -124,35 +95,10 @@ export const ids = {
   readingTranscriptTailSpacer: "boc-reading-tail-spacer"
 };
 
-// Local replacement for core/runtime.js's byId: reading the reader DOM ids is
-// a reader-internal concern. Keeping it here (document.getElementById + throw)
-// removes reader-impl.js's static import of core/runtime.js, which would
-// otherwise form an import cycle back through subtitle/fetcher.js.
-// Exported for the reader-internal modules (sync.js today; shared/dom-utils.js
-// in a later extraction commit).
-export function getReaderElement(id) {
-  const node = document.getElementById(id);
-  if (!node) {
-    throw new Error(`Missing node: ${id}`);
-  }
-  return node;
-}
-
-// Local copy of ai/player-ai.js's isVisibleReaderControl (a pure DOM check).
-// reader-impl.js must not import ai/player-ai.js (it would pull
-// core/runtime.js back into the reader dependency graph), so this helper
-// lives here with identical semantics.
-function isVisibleReaderControl(node) {
-  if (!node || typeof node.getBoundingClientRect !== "function") {
-    return false;
-  }
-  const rect = node.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) {
-    return false;
-  }
-  const style = window.getComputedStyle(node);
-  return style.display !== "none" && style.visibility !== "hidden" && style.pointerEvents !== "none";
-}
+// getReaderElement / isVisibleReaderControl live in ../shared/dom-utils.js:
+// reading reader DOM ids is a reader-internal concern, and keeping that helper
+// out of core/runtime.js keeps the reader modules free of a static import back
+// through subtitle/fetcher.js (same rationale as the former local copy here).
 
 // ===== reader facade accessors for closure state =====
 //

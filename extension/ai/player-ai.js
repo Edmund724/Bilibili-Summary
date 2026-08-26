@@ -14,6 +14,7 @@ import {
   getRuntimeVideoElement
 } from "../bilibili/video-probe.js";
 import { state, playerAiState } from "../core/state.js";
+import { isVisibleReaderControl } from "../shared/dom-utils.js";
 import { isReaderViewOpen } from "../reader/index.js";
 
 let playerAiQuickActionRetryCount = 0;
@@ -328,16 +329,4 @@ async function handlePlayerAiQuickActionClick(event) {
       button.disabled = false;
     }
   }
-}
-
-function isVisibleReaderControl(node) {
-  if (!node || typeof node.getBoundingClientRect !== "function") {
-    return false;
-  }
-  const rect = node.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) {
-    return false;
-  }
-  const style = window.getComputedStyle(node);
-  return style.display !== "none" && style.visibility !== "hidden" && style.pointerEvents !== "none";
 }

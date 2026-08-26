@@ -15,6 +15,7 @@
 // closure in the base layer as the single source of truth.
 import { state, uiState } from "../core/state.js";
 import { logInfo, logWarn, shouldDebugLog } from "../shared/logging.js";
+import { getReaderElement } from "../shared/dom-utils.js";
 import {
   normalizeReaderTheme,
   normalizeReaderFontScale,
@@ -51,7 +52,6 @@ import {
 // LAYOUT functions this module drives (from reader-impl.js):
 import {
   ids,
-  getReaderElement,
   getPlayerHost,
   getPlayerRetryTimer,
   setPlayerRetryTimer,

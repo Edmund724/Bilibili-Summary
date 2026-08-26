@@ -17,12 +17,12 @@
 // (registerSyncAdapter), keeping the dependency graph acyclic: SYNC → LAYOUT.
 import { state } from "../core/state.js";
 import { formatCompactTimestamp } from "../shared/string-utils.js";
+import { getReaderElement } from "../shared/dom-utils.js";
 import { findActiveSubtitleIndex, findActiveChapterIndex } from "../subtitle/core.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
 
 import {
   ids,
-  getReaderElement,
   getPlayerHost,
   bindReadingViewVideo,
   queueEnsureReaderPlayerMounted,
