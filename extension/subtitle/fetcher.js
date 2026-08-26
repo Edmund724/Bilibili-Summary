@@ -316,7 +316,6 @@ export async function refreshClip() {
       setStatus("抓取失败：未找到与当前视频时长匹配的字幕轨，可能该视频无可用字幕。");
       return;
     }
-    console.error("[BOC][t01-diag] refreshClip error", error);
     setStatus(`抓取失败：${getErrorMessage(error)}`);
   } finally {
     if (runId === state.clip.fetchRunId) {

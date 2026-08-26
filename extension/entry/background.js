@@ -36,6 +36,7 @@ import {
   pickPreferredSubtitle as pickPreferredSubtitleTrack,
   normalizeSubtitleTracks
 } from "../subtitle/selection.js";
+import { buildSubtitleSectionLines, shouldShowHoursInNote } from "../notes/render.js";
 
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 
@@ -147,43 +148,8 @@ function handleFetchJson(message, sender, sendResponse) {
     return false;
   }
 
-  const isBiliRequest = isBiliUrl(url);
-  const headers = new Headers();
-  if (isBiliRequest) {
-    headers.set("Accept", "application/json, text/plain, */*");
-    headers.set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
-    headers.set("Cache-Control", "no-cache");
-    headers.set("Pragma", "no-cache");
-  }
-
-  const fetchOptions = {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store"
-  };
-  if (headers.size > 0) {
-    fetchOptions.headers = headers;
-  }
-  if (isBiliRequest) {
-    fetchOptions.referrer = "https://www.bilibili.com/";
-    fetchOptions.referrerPolicy = "strict-origin-when-cross-origin";
-  }
-
-  fetch(url, fetchOptions)
-    .then(async (response) => {
-      if (!response.ok) {
-        sendResponse({ ok: false, error: `HTTP ${response.status}` });
-        return;
-      }
-
-      const text = await response.text();
-      try {
-        const data = JSON.parse(text);
-        sendResponse({ ok: true, data });
-      } catch {
-        sendResponse({ ok: false, error: "Invalid JSON response" });
-      }
-    })
+  bgFetchJson(url)
+    .then((data) => sendResponse({ ok: true, data }))
     .catch((error) => sendResponse({ ok: false, error: error.message }));
   return true;
 }
@@ -277,21 +243,13 @@ function handleAiProvidersModels(message, sender, sendResponse) {
     let responded = false;
 
     const respond = (payload) => {
-      try {
-        if (responded) {
-          console.warn("[ai-providers-models] duplicate respond ignored");
-          return;
-        }
-        responded = true;
-        if (timer) { clearTimeout(timer); timer = null; }
-        console.log("[ai-providers-models] responding", payload);
-        sendResponse(payload);
-      } catch (err) {
-        console.error("[ai-providers-models] sendResponse failed", err?.message || err);
+      if (responded) {
+        return;
       }
+      responded = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      sendResponse(payload);
     };
-
-    console.log("[ai-providers-models] fetching", normalizedBaseUrl, "providerId", providerId, "hasApiKey", Boolean(apiKey));
 
     Promise.resolve()
       .then(async () => {
@@ -304,10 +262,8 @@ function handleAiProvidersModels(message, sender, sendResponse) {
         if (resolvedKey) headers["Authorization"] = `Bearer ${resolvedKey}`;
         const controller = new AbortController();
         timer = setTimeout(() => controller.abort(), 15000);
-        console.log("[ai-providers-models] requesting", `${normalizedBaseUrl}/v1/models`);
         return fetch(`${normalizedBaseUrl}/v1/models`, { headers, method: "GET", signal: controller.signal })
           .then((resp) => {
-            console.log("[ai-providers-models] response status", resp.status, resp.statusText);
             if (!resp.ok) {
               return resp.text().then((text) => {
                 throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`);
@@ -324,13 +280,11 @@ function handleAiProvidersModels(message, sender, sendResponse) {
                 if (item?.id) models.push(String(item.id));
               }
             }
-            console.log("[ai-providers-models] parsed models", models.length);
             return models;
           });
       })
       .then((models) => respond({ ok: true, models }))
       .catch((error) => {
-        console.error("[ai-providers-models] fetch error", error?.name, error?.message || error);
         if (error?.name === "AbortError") {
           respond({ ok: false, error: "请求超时，请检查 baseUrl 或稍后重试" });
         } else {
@@ -340,11 +294,9 @@ function handleAiProvidersModels(message, sender, sendResponse) {
 
     // Safety net: ensure we always respond within the timeout window.
     timer = setTimeout(() => {
-      console.warn("[ai-providers-models] safety net triggered");
       respond({ ok: false, error: "请求超时，请检查 baseUrl 或稍后重试" });
     }, 16000);
   } catch (error) {
-    console.error("[ai-providers-models] handler error", error?.message || error);
     sendResponse({ ok: false, error: error?.message || String(error) });
   }
   return true;
@@ -715,79 +667,9 @@ function pickPageForAiContext(pages, ref) {
   }
 }
 
-function shouldShowHoursInAiNote(meta, body) {
-  const subtitleMaxTo = (body || []).reduce((max, item) => Math.max(max, Number(item?.to || 0) || 0), 0);
-  const chapterMaxTo = (meta?.chapters || []).reduce((max, item) => Math.max(max, Number(item?.from || 0) || 0, Number(item?.to || 0) || 0), 0);
-  const duration = Number(meta?.videoDuration || 0) || 0;
-  return Math.max(subtitleMaxTo, chapterMaxTo, duration) >= 3600;
-}
-
-function buildAiSubtitleLine(item, includeTimestampInBody, withHours) {
-  const text = String(item?.content || "").trim();
-  if (!text) {
-    return "";
-  }
-  if (!includeTimestampInBody) {
-    return text;
-  }
-  return `\`${formatCompactTimestamp(item.from, withHours)}\` ${text}`;
-}
-
-function buildAiSubtitleSectionLines(body, chapters, includeTimestampInBody, withHours) {
-  const subtitleItems = (body || [])
-    .map((item, index) => ({ ...item, _index: index, text: String(item?.content || "").trim() }))
-    .filter((item) => item.text);
-  if (!subtitleItems.length) {
-    return ["（暂无字幕）"];
-  }
-
-  if (!Array.isArray(chapters) || !chapters.length) {
-    return subtitleItems.map((item) => buildAiSubtitleLine(item, includeTimestampInBody, withHours));
-  }
-
-  const lines = [];
-  const usedIndexes = new Set();
-  chapters.forEach((chapter, idx) => {
-    const start = Number(chapter.from || 0) || 0;
-    const next = chapters[idx + 1];
-    const chapterTo = Number(chapter.to || 0) || 0;
-    let end = Infinity;
-    if (next && Number(next.from) > start) {
-      end = Number(next.from);
-    } else if (chapterTo > start) {
-      end = chapterTo;
-    }
-    const sectionItems = subtitleItems.filter((item) => {
-      const from = Number(item.from || 0) || 0;
-      return from + 0.001 >= start && (end === Infinity ? true : from < end);
-    });
-    if (!sectionItems.length) {
-      return;
-    }
-    const chapterStamp = includeTimestampInBody ? ` \`${formatCompactTimestamp(start, withHours)}\`` : "";
-    lines.push(`### ${chapter.title}${chapterStamp}`, "");
-    sectionItems.forEach((item) => {
-      usedIndexes.add(item._index);
-      lines.push(buildAiSubtitleLine(item, includeTimestampInBody, withHours));
-    });
-    lines.push("");
-  });
-
-  const remaining = subtitleItems.filter((item) => !usedIndexes.has(item._index));
-  if (remaining.length) {
-    lines.push("### 其他片段", "");
-    remaining.forEach((item) => lines.push(buildAiSubtitleLine(item, includeTimestampInBody, withHours)));
-  }
-
-  while (lines.length && !lines[lines.length - 1]) {
-    lines.pop();
-  }
-  return lines;
-}
-
 function buildAiConversationMarkdown(meta, body, settings) {
   const includeTimestampInBody = settings?.includeTimestampInBody !== false;
-  const withHours = shouldShowHoursInAiNote(meta, body);
+  const withHours = shouldShowHoursInNote(meta, body);
   const lines = [];
   const chapters = Array.isArray(meta?.chapters) ? meta.chapters : [];
   if (chapters.length) {
@@ -798,7 +680,11 @@ function buildAiConversationMarkdown(meta, body, settings) {
     });
     lines.push("");
   }
-  lines.push("## 字幕", "", ...buildAiSubtitleSectionLines(body, chapters, includeTimestampInBody, withHours));
+  const subtitleLines = buildSubtitleSectionLines(body, chapters, { includeTimestampInBody }, withHours);
+  // render 版兜底：无字幕时返回 ["（暂无字幕）"]，章节分桶全空时回退为整段字幕列表。
+  if (subtitleLines.length > 0) {
+    lines.push("## 字幕", "", ...subtitleLines);
+  }
   return lines.join("\n");
 }
 

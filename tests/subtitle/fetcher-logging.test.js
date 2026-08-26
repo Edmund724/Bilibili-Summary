@@ -114,26 +114,17 @@ describe("tryLoadSubtitleCandidates 日志路径", () => {
     ).rejects.toThrow("network down");
   });
 
-  it("refreshClip 外层路径：console.error 不再报 logInfo is not defined（复现用户症状）", async () => {
+  it("refreshClip 外层路径：错误被安全捕获（复现用户症状）", async () => {
     // resetClipState（真实代码）通过 byId("boc-preview") 写空值，需该 DOM 节点。
     const preview = document.createElement("textarea");
     preview.id = "boc-preview";
     document.body.appendChild(preview);
 
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    // 让 fetchVideoMeta 抛错，使 refreshClip 在 logInfo 出现之前就失败——这
-    // 正是生产环境中让 logInfo 打到 console.error 的真实路径。
+    // 让 fetchVideoMeta 抛错，使 refreshClip 在 logInfo 出现之前就失败——若
+    // 错误路径依赖未定义的 logInfo，这里会 reject 而不是 resolve。
     const fetchMetaMock = (await import("../../extension/subtitle/fetch.js")).fetchVideoMeta;
     fetchMetaMock.mockRejectedValue(new Error("meta down"));
 
     await expect(fetcher.refreshClip()).resolves.toBeUndefined();
-
-    expect(errorSpy).toHaveBeenCalledWith(
-      "[BOC][t01-diag] refreshClip error",
-      expect.any(Error)
-    );
-    const reported = errorSpy.mock.calls[0][1];
-    expect(reported.message).not.toContain("logInfo");
   });
 });

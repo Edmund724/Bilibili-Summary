@@ -15,6 +15,8 @@ import {
   normalizeBaseUrl,
   formatLocalDate
 } from "../core/shared-defaults.js";
+import { escapeHtml } from "../shared/string-utils.js";
+import { sendRuntimeMessage } from "../core/runtime.js";
 
 const SYSTEM_FRONTMATTER_FIELDS = new Set(DEFAULT_SETTINGS.frontmatterFields.map((field) => String(field).toLowerCase()));
 const CUSTOM_PROPERTY_KEY_PATTERN = /^[\p{L}\p{N}_\-\s]+$/u;
@@ -336,7 +338,7 @@ function addFixedPropertyRow(item = {}) {
     <div class="fixed-property-fields">
       <div class="fixed-property-field fixed-property-field-type">${buildFixedPropertyTypePicker(type)}</div>
       <div class="fixed-property-field fixed-property-field-key">
-        <input class="fixed-property-key" type="text" placeholder="属性名" value="${escapeAttribute(item.key)}" />
+        <input class="fixed-property-key" type="text" placeholder="属性名" value="${escapeHtml(item.key)}" />
       </div>
       <div class="fixed-property-field fixed-property-field-value">
         <div class="fixed-property-value-slot">${buildFixedPropertyValueControl(type, item.value)}</div>
@@ -444,10 +446,10 @@ function addNoteSectionRow(item = {}, { skipLimit = false } = {}) {
         </select>
       </div>
       <div class="note-section-field note-section-field-title">
-        <input class="note-section-title" type="text" placeholder="段落标题，例：总结" value="${escapeAttribute(item.title)}" />
+        <input class="note-section-title" type="text" placeholder="段落标题，例：总结" value="${escapeHtml(item.title)}" />
       </div>
       <div class="note-section-field note-section-field-content">
-        <input class="note-section-content" type="text" placeholder="默认内容（可空）" value="${escapeAttribute(item.content)}" />
+        <input class="note-section-content" type="text" placeholder="默认内容（可空）" value="${escapeHtml(item.content)}" />
       </div>
       <div class="note-section-field note-section-field-remove">
         <button class="note-section-remove" type="button" aria-label="删除段落" title="删除段落">
@@ -660,7 +662,7 @@ function buildFixedPropertyValueControl(type, value) {
           : normalizedType === "date"
             ? "YYYY-MM-DD 或 {{upload_date}}"
           : "属性值";
-  return `<input class="fixed-property-value" type="text" placeholder="${placeholder}" value="${escapeAttribute(value)}" />`;
+  return `<input class="fixed-property-value" type="text" placeholder="${placeholder}" value="${escapeHtml(value)}" />`;
 }
 
 function buildFixedPropertyTypePicker(type) {
@@ -744,10 +746,6 @@ function closeAllFixedPropertyMenus() {
   });
 }
 
-function escapeAttribute(value) {
-  return String(value || "").replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
-}
-
 function normalizeApiKey(value) {
   return String(value || "").trim().replace(/^Bearer\s+/i, "").trim();
 }
@@ -756,18 +754,6 @@ function normalizeApiKey(value) {
 function setBusy(isBusy) {
   elements.saveBtn.disabled = isBusy;
   elements.saveBtn.textContent = isBusy ? "处理中..." : "保存设置";
-}
-
-function sendRuntimeMessage(message) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(message, (resp) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(resp);
-    });
-  });
 }
 
 // ===== AI 模型平台 =====
@@ -800,7 +786,7 @@ function renderDefaultModelSelect(items, defaultModel = "") {
   elements.defaultModel.innerHTML = '<option value="">未设置</option>' + list
     .map((item) => {
       const label = String(item.model || item.name || "").trim();
-      return `<option value="${escapeAttribute(item.id)}">${escapeAttribute(label)}</option>`;
+      return `<option value="${escapeHtml(item.id)}">${escapeHtml(label)}</option>`;
     })
     .join("");
   if (defaultModel && list.some((item) => item.id === defaultModel)) {
@@ -830,12 +816,12 @@ function addAiProviderRow(item = {}) {
   row.dataset.currentPresetId = presetId;
   row.innerHTML = `
     <select class="ai-provider-preset" title="平台">
-      ${aiPresets.map((p) => `<option value="${escapeAttribute(p.id)}" ${p.id === presetId ? "selected" : ""}>${escapeAttribute(p.name)}</option>`).join("")}
+      ${aiPresets.map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === presetId ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}
     </select>
-    <input class="ai-provider-baseurl" type="text" placeholder="baseUrl（如 https://api.openai.com/v1）" value="${escapeAttribute(baseUrl)}" />
+    <input class="ai-provider-baseurl" type="text" placeholder="baseUrl（如 https://api.openai.com/v1）" value="${escapeHtml(baseUrl)}" />
     <input class="ai-provider-apikey" type="password" placeholder="${hasSavedKey ? "已保存" : (requiresKey ? "API Key" : "API Key（可选）")}" autocomplete="off" />
     <div class="ai-provider-model-wrapper">
-      <input class="ai-provider-model" type="text" placeholder="模型名（如 gpt-4o-mini）" value="${escapeAttribute(model)}" />
+      <input class="ai-provider-model" type="text" placeholder="模型名（如 gpt-4o-mini）" value="${escapeHtml(model)}" />
       <button type="button" class="ai-provider-model-toggle" title="从 baseUrl 拉取可用模型" aria-label="从 baseUrl 拉取可用模型">
         <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
           <path d="M6 9l6 6 6-6"></path>

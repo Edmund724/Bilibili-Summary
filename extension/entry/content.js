@@ -48,28 +48,10 @@ function isSupportedUrl() {
 
 function init() {
   logInfo(`[BOC] content script loaded, version=${BOC_VERSION}`);
-  try {
-    sessionStorage.setItem("__BOC_URL_DIAG__", JSON.stringify({
-      href: location.href,
-      origin: location.origin,
-      pathname: location.pathname,
-      search: location.search,
-      hash: location.hash,
-      version: BOC_VERSION,
-      timestamp: Date.now()
-    }));
-  } catch {
-    // ignore
-  }
-
   if (!isSupportedUrl()) {
     return;
   }
 
-  console.log("[BOC][t01-diag] init start", {
-    href: location.href,
-    userAgent: navigator.userAgent
-  });
   ensureUiReady({ forceRecreate: true });
   installReaderDebugHelpers();
 

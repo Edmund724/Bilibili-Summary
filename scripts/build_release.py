@@ -18,6 +18,11 @@ def load_manifest():
         return json.load(fh)
 
 
+def load_package_version():
+    with (ROOT / "package.json").open("r", encoding="utf-8") as fh:
+        return json.load(fh).get("version") or ""
+
+
 def dump_manifest(path: Path, data: dict):
     path.write_text(
         json.dumps(data, ensure_ascii=False, indent=2) + "\n",
@@ -111,6 +116,17 @@ def main():
     version = str(manifest.get("version") or "").strip()
     if not version:
         raise SystemExit("manifest.json is missing a version")
+
+    # Version-consistency guard: the extension version lives in three places
+    # (manifest.json, extension/shared/version.js via build-content-classic.js,
+    # and package.json). Fail fast if package.json drifts from manifest.json
+    # before stamping release folders with a stale version.
+    package_version = load_package_version().strip()
+    if package_version != version:
+        raise SystemExit(
+            f"Version mismatch: manifest.json has \"version\": {version}, "
+            f"but package.json has \"version\": {package_version!r}"
+        )
 
     RELEASE_DIR.mkdir(parents=True, exist_ok=True)
 
