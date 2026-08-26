@@ -285,13 +285,12 @@ export function createChatRuntime(deps) {
   // =========================================================================
   // appendToken
   // =========================================================================
-  // 流式渲染优化：流式过程中仅按帧批量把原文写入一个文本节点（每帧最多一次
-  // 写入，不再逐 token 全量 renderMarkdown + innerHTML，避免长回复 O(n²)）。
-  // markdown 的最终渲染由 finalizeAssistant / handleAssistantStopped 出口完成，
-  // 结果与之前逐 token 渲染一致。光标 span 保留在文本节点之后——textContent
-  // 整体赋值会清掉光标，所以用独立文本节点并缓存引用。
+  // 流式渲染优化：流式过程中按帧批量做增量 markdown 渲染（每帧最多一次
+  // renderMarkdown + innerHTML，不再逐 token 全量渲染，避免长回复 O(n²)）。
+  // 流式期间即显示正确的 markdown 结构（换行/缩进/列表等），而不是等流结束
+  // 才由 finalizeAssistant / handleAssistantStopped 出口渲染。光标 span 保留
+  // 在渲染内容之后——innerHTML 整体赋值会清掉光标，所以每帧重建时重新接回。
   let tokenFlushFrame = 0;
-  const streamTextNodes = new WeakMap();
 
   function cancelTokenFlush() {
     if (!tokenFlushFrame) {
@@ -315,18 +314,11 @@ export function createChatRuntime(deps) {
     }
     const flush = () => {
       tokenFlushFrame = 0;
-      let text = streamTextNodes.get(node);
-      if (!text || !text.isConnected) {
-        // 首次写入（或节点被重建）：保留光标，其余（如思考节点）按旧行为清掉
-        const cursor = node.querySelector(".sp-msg-cursor");
-        text = document.createTextNode("");
-        node.replaceChildren(text);
-        if (cursor) {
-          node.appendChild(cursor);
-        }
-        streamTextNodes.set(node, text);
+      const cursor = node.querySelector(".sp-msg-cursor");
+      node.innerHTML = renderMarkdown(node.dataset.raw || "");
+      if (cursor) {
+        node.appendChild(cursor);
       }
-      text.data = node.dataset.raw || "";
       scrollToBottom();
     };
     if (typeof window.requestAnimationFrame === "function") {
