@@ -86,15 +86,7 @@ export function cleanVideoUrl(href = location.href) {
 }
 
 export function extractPageIndex(url) {
-  try {
-    const page = Number(new URL(url).searchParams.get("p") || "1");
-    if (!Number.isFinite(page) || page <= 0) {
-      return 1;
-    }
-    return page;
-  } catch {
-    return 1;
-  }
+  return extractPageIndexFromUrl(url);
 }
 
 // ===== from extension/background.js =====

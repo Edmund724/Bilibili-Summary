@@ -9,16 +9,14 @@
 // reimplementing it).
 //
 // Exported functions:
-//   - delay(ms)                              pure; promise sleep via window.setTimeout
+//   - sleep(ms)                                pure; promise sleep via window.setTimeout
 //   - waitForTabComplete(tabId, timeoutMs=15000)  polls chrome.tabs.get until "complete"
 //   - sendMessageToActiveTab(tabId, message, retries=12)  retry-wrapped tabs.sendMessage
 //
 // NOTE: the module header deliberately avoids the words "import"/"from" (they
 // would trip the validate-tree-imports.mjs export resolution on this file's own
 // parsed import statements).
-export function delay(ms) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
+import { sleep } from "../core/shared-defaults.js";
 
 export async function waitForTabComplete(tabId, timeoutMs = 15000) {
   const startedAt = Date.now();
@@ -27,7 +25,7 @@ export async function waitForTabComplete(tabId, timeoutMs = 15000) {
     if (tab?.status === "complete") {
       return true;
     }
-    await delay(250);
+    await sleep(250);
   }
   throw new Error("视频页面加载超时");
 }
@@ -47,7 +45,7 @@ export async function sendMessageToActiveTab(tabId, message, retries = 12) {
       });
     } catch (error) {
       lastError = error;
-      await delay(220);
+      await sleep(220);
     }
   }
   throw lastError || new Error("无法连接视频页面");

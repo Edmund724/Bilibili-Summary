@@ -154,19 +154,13 @@ export function bindRuntimeEvents() {
     }
 
     if (message.type === "sidepanel-get-hot-comments") {
-      const count = 20;
-      if (!count) {
-        sendResponse({ ok: true, comments: [] });
-        return false;
-      }
-
       if (!getCurrentAid()) {
         clipState.setHotComments([]);
         sendResponse({ ok: true, comments: [], note: "无法获取视频 aid" });
         return false;
       }
 
-      fetchHotComments(count)
+      fetchHotComments(20)
         .then((hotComments) => {
           clipState.setHotComments(hotComments);
           sendResponse({ ok: true, comments: hotComments });

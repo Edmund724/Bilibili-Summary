@@ -25,7 +25,7 @@ import {
   resolveConversationStorageKey,
   normalizeConversationTitle,
   doesConversationMatchCurrentContext,
-  extractPageIndexFromContextUrl,
+  extractPageIndexFromUrl,
   MAX_SAVED_CONVERSATIONS
 } from "../ai/conversation.js";
 
@@ -57,7 +57,7 @@ export function needsConversationPageHydration(conversation) {
   if (pageIndex > 1) {
     return true;
   }
-  const urlPageIndex = extractPageIndexFromContextUrl(conversation.contextUrl || conversation.contextRef?.url || "");
+  const urlPageIndex = extractPageIndexFromUrl(conversation.contextUrl || conversation.contextRef?.url || "");
   if (urlPageIndex > 1) {
     return true;
   }

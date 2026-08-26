@@ -2,7 +2,7 @@
 // 会话生命周期 + 上下文 key 计算的纯函数模块（Candidate 7 抽取）。
 // 作为经典脚本加载，不依赖任何外部状态或 Chrome API。
 
-import { extractBvid } from "../bilibili/video-id-shared.js";
+import { extractBvid, extractPageIndexFromUrl } from "../bilibili/video-id-shared.js";
 
 export const MAX_SAVED_CONVERSATIONS = 60;
 
@@ -54,7 +54,7 @@ export function normalizeConversations(value) {
         return null;
       }
       const contextTitle = String(item?.contextTitle || "").trim();
-      const contextRef = normalizeConversationContextRef(item?.contextRef || item?.contextSnapshot || item);
+      const contextRef = buildConversationContextRef(item?.contextRef || item?.contextSnapshot || item);
       const contextUrl = String(item?.contextUrl || "").trim();
       return {
         id,
@@ -108,10 +108,6 @@ export function buildConversationContextRef(context) {
     selectedSubtitleUrl: String(context.selectedSubtitleUrl || "").trim(),
     isVideoContext: context.isVideoContext !== false
   };
-}
-
-export function normalizeConversationContextRef(ref) {
-  return buildConversationContextRef(ref);
 }
 
 export function buildContextPlaceholder(ref) {
@@ -206,18 +202,8 @@ export function appendConversationPageSuffix(title, context) {
 }
 
 export function extractConversationPageSuffix(context) {
-  const pageIndex = Number(context?.pageIndex || context?.page || 0) || extractPageIndexFromContextUrl(context?.url);
+  const pageIndex = Number(context?.pageIndex || context?.page || 0) || extractPageIndexFromUrl(context?.url);
   return pageIndex > 1 ? `-P${pageIndex}` : "";
-}
-
-export function extractPageIndexFromContextUrl(url) {
-  try {
-    const parsed = new URL(String(url || "").trim());
-    const page = Number(parsed.searchParams.get("p") || "1");
-    return Number.isFinite(page) && page > 0 ? page : 1;
-  } catch {
-    return 1;
-  }
 }
 
 // ============ ID / 时间 ============
