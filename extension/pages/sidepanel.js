@@ -29,7 +29,8 @@ import {
   doesConversationMatchCurrentContext,
   doesTabMatchContextUrl,
   formatConversationTimestamp,
-  buildConversationTitleDisplay
+  buildConversationTitleDisplay,
+  MAX_SAVED_CONVERSATIONS
 } from "../ai/conversation.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { sendMessageToActiveTab, truncate, waitForTabComplete } from "../shared/tab-utils.js";
@@ -42,7 +43,6 @@ import { createConversationStore } from "./sidepanel-conversation-store.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
-const MAX_SAVED_CONVERSATIONS = 60;
 const NON_VIDEO_CONTEXT_MESSAGE = "当前页非 B 站视频页面，<br>无法获取当前页面信息作为对话上下文，<br>仅支持 AI 对话。";
 
 const els = {

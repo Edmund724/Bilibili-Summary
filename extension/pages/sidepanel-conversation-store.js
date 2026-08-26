@@ -25,7 +25,8 @@ import {
   resolveConversationStorageKey,
   normalizeConversationTitle,
   doesConversationMatchCurrentContext,
-  extractPageIndexFromContextUrl
+  extractPageIndexFromContextUrl,
+  MAX_SAVED_CONVERSATIONS
 } from "../ai/conversation.js";
 
 // ---------------------------------------------------------------------------
@@ -146,7 +147,7 @@ export function createConversationStore(deps) {
     // 存储抽象 + 常量
     storage = (typeof chrome !== "undefined" && chrome?.storage?.local) || undefined,
     conversationsStorageKey = "boc_ai_conversations_v1",
-    maxSavedConversations = 60
+    maxSavedConversations = MAX_SAVED_CONVERSATIONS
   } = deps;
 
   // 简单的守卫：调用方漏绑某个依赖时给出明确报错，而不是隐式读到 undefined。

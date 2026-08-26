@@ -14,7 +14,7 @@ import {
   isBiliUrl
 } from "../bilibili/gateway.js";
 import {
-  extractBvidFromUrl,
+  extractBvid,
   extractPageIndexFromUrl,
   buildCanonicalVideoUrl
 } from "../bilibili/video-id-shared.js";
@@ -38,7 +38,7 @@ function normalizeAiContextRef(ref) {
     url: String(value.url || "").trim(),
     author: String(value.author || "").trim(),
     uploadDate: String(value.uploadDate || "").trim(),
-    bvid: String(value.bvid || extractBvidFromUrl(value.url) || "").trim(),
+    bvid: String(value.bvid || extractBvid(value.url) || "").trim(),
     cid: String(value.cid || "").trim(),
     aid: String(value.aid || "").trim(),
     pageIndex: Number(value.pageIndex) > 0 ? Number(value.pageIndex) : 1,

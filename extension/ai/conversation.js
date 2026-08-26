@@ -2,6 +2,8 @@
 // 会话生命周期 + 上下文 key 计算的纯函数模块（Candidate 7 抽取）。
 // 作为经典脚本加载，不依赖任何外部状态或 Chrome API。
 
+import { extractBvid } from "../bilibili/video-id-shared.js";
+
 export const MAX_SAVED_CONVERSATIONS = 60;
 
 // ============ 上下文 key ============
@@ -269,7 +271,7 @@ export function doesTabMatchContextUrl(tabUrl, targetUrl) {
 
 export function extractVideoIdentity(url) {
   const text = String(url || "").trim();
-  const bvidMatch = text.match(/\/video\/(BV[0-9A-Za-z]+)/i) || text.match(/[?&]bvid=(BV[0-9A-Za-z]+)/i);
+  const bvid = extractBvid(text);
   let page = 1;
   try {
     page = Number(new URL(text).searchParams.get("p") || "1");
@@ -280,7 +282,7 @@ export function extractVideoIdentity(url) {
     page = 1;
   }
   return {
-    bvid: String(bvidMatch?.[1] || "").trim(),
+    bvid: String(bvid || "").trim(),
     page
   };
 }

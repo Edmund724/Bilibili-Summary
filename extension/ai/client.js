@@ -153,34 +153,3 @@ export async function streamChat({ provider, context, userPrompt, history, port,
   }
 }
 
-// 测试连接：拉一次 /models，验证 baseUrl + key。
-export async function testConnection({ baseUrl, apiKey }) {
-  const url = `${String(baseUrl || "").trim().replace(/\/+$/, "")}${OPENAI_COMPAT.listModels}`;
-  const headers = { Accept: "application/json" };
-  if (apiKey) {
-    headers["Authorization"] = `Bearer ${apiKey}`;
-  }
-  let response;
-  try {
-    response = await fetch(url, { method: "GET", headers, cache: "no-store" });
-  } catch (e) {
-    return { ok: false, error: `无法连接：${e?.message || e}` };
-  }
-  if (!response.ok) {
-    let detail = "";
-    try {
-      detail = (await response.text()).slice(0, 200);
-    } catch {}
-    return { ok: false, error: `HTTP ${response.status}${detail ? `: ${detail}` : ""}` };
-  }
-  let models = [];
-  try {
-    const data = await response.json();
-    if (Array.isArray(data?.data)) {
-      models = data.data.map((m) => m?.id).filter(Boolean);
-    }
-  } catch {
-    // /models 返回非 JSON 也算通：只验证了连通性
-  }
-  return { ok: true, models };
-}

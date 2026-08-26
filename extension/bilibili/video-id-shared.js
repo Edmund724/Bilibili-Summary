@@ -65,12 +65,6 @@ export function extractPageIndex(url) {
 
 // ===== from extension/background.js =====
 
-export function extractBvidFromUrl(url) {
-  const text = String(url || "").trim();
-  const match = text.match(/\/video\/(BV[0-9A-Za-z]+)/i) || text.match(/[?&]bvid=(BV[0-9A-Za-z]+)/i);
-  return match?.[1] || "";
-}
-
 export function extractPageIndexFromUrl(url) {
   try {
     const page = Number(new URL(String(url || "")).searchParams.get("p") || "1");
@@ -99,15 +93,15 @@ export function buildCanonicalVideoUrl(bvid, pageIndex = 1) {
 //
 // Fallback chain (preserves the original behavior exactly):
 //   bvid = context?.bvid
-//        || extractBvidFromUrl(context?.url)
-//        || extractBvidFromUrl(currentMetaContextUrl)
+//        || extractBvid(context?.url)
+//        || extractBvid(currentMetaContextUrl)
 //   if bvid -> "https://www.bilibili.com/video/${bvid}/"
 //   else      -> context?.url || currentMetaContextUrl  (stringified + trimmed)
 export function buildCanonicalVideoUrlFromContext(context, currentMetaContextUrl) {
   const bvid = String(
     context?.bvid ||
-      extractBvidFromUrl(context?.url) ||
-      extractBvidFromUrl(currentMetaContextUrl) ||
+      extractBvid(context?.url) ||
+      extractBvid(currentMetaContextUrl) ||
       ""
   ).trim();
   if (bvid) {
