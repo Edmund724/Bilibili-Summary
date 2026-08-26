@@ -5,45 +5,58 @@
 // ./page-context.js for pure multi-page resolution, ./presenter.js for the
 // bidirectional reader ↔ subtitle-fetcher channel).
 //
-// ./reader-impl.js is the single deep implementation module that consolidates
-// the former shell.js / page-frame.js / player-host.js / transcript-sync.js
-// (issue 06). External code must not import it directly.
+// Implementation modules behind the facade (issue 06+):
+//   ./reader-impl.js   LAYOUT    page-frame + player-host + shared closure/ids
+//   ./sync.js          SYNC      playback↔transcript sync (depends on LAYOUT)
+//   ./lifecycle.js     LIFECYCLE reader shell: lifecycle + settings
+//                               (depends on LAYOUT + SYNC)
+// The dependency graph is acyclic: SYNC → LAYOUT, LIFECYCLE → SYNC + LAYOUT.
+// External code must not import these directly.
 //
-// Import-cycle note (issue 08): reader-impl.js deliberately imports nothing
-// from core/runtime.js — it reads its own DOM ids through a local helper and
-// delegates settings persistence/loading to content.js through the presenter
-// seam. This keeps the reader domain free of any static import path back
-// through subtitle/fetcher.js.
+// Import-cycle note (issue 08): the reader implementation modules deliberately
+// import nothing from core/runtime.js — they read reader DOM ids through local
+// helpers and delegate settings persistence/loading to content.js through the
+// presenter seam. This keeps the reader domain free of any static import path
+// back through subtitle/fetcher.js.
+
+// ===== lifecycle.js (reader shell): lifecycle + settings =====
 
 // 进入阅读模式
-export { enterReaderMode } from "./reader-impl.js";
+export { enterReaderMode } from "./lifecycle.js";
 // 退出阅读模式（关闭阅读视图并清理页面状态）
-export { closeReadingView } from "./reader-impl.js";
+export { closeReadingView } from "./lifecycle.js";
 // 渲染阅读视图主体（章节/字幕/信息面板）
-export { renderReadingView } from "./reader-impl.js";
-// 渲染阅读视图状态栏文案
+export { renderReadingView } from "./lifecycle.js";
+// 渲染阅读视图状态栏文案（跨域共享，位于 LAYOUT 基座）
 export { renderReadingStatus } from "./reader-impl.js";
 // 设置阅读视图就绪标记（data-boc-reader-ready / aria-busy）
-export { setReadingViewReady } from "./reader-impl.js";
+export { setReadingViewReady } from "./lifecycle.js";
 // 应用阅读排版与可见性设置到 DOM
-export { applyReadingViewPresentation } from "./reader-impl.js";
+export { applyReadingViewPresentation } from "./lifecycle.js";
 // 从设置初始化阅读状态
-export { hydrateReaderStateFromSettings } from "./reader-impl.js";
+export { hydrateReaderStateFromSettings } from "./lifecycle.js";
 // 更新阅读偏好（状态 + DOM + 可选持久化）
-export { updateReaderPreferences } from "./reader-impl.js";
+export { updateReaderPreferences } from "./lifecycle.js";
 // 渲染阅读设置面板（开关/步进器状态）
-export { renderReaderPanels } from "./reader-impl.js";
+export { renderReaderPanels } from "./lifecycle.js";
 // 渲染阅读信息面板（摘要/简介）
-export { renderReadingInfoPanel } from "./reader-impl.js";
+export { renderReadingInfoPanel } from "./lifecycle.js";
 // 构建设置面板中的阅读步进器控件 HTML
-export { buildReaderStepperControl } from "./reader-impl.js";
+export { buildReaderStepperControl } from "./lifecycle.js";
 // 为步进器控件绑定点击交互
-export { bindReaderStepperControl } from "./reader-impl.js";
+export { bindReaderStepperControl } from "./lifecycle.js";
 // 等待视频元数据（时长可用）就绪
-export { waitForVideoMetadata } from "./reader-impl.js";
+export { waitForVideoMetadata } from "./lifecycle.js";
 // 注册 reader 侧渲染回调以响应 presenter 通知（subtitle-fetcher 数据就绪/重置/状态）
-export { bindReaderPresenter } from "./reader-impl.js";
-// 阅读视图的播放同步：开始/停止/立即同步一次/交互挂起标记（实现已移至 ./sync.js）
+export { bindReaderPresenter } from "./lifecycle.js";
+// 阅读模式调试辅助（__BOC_READER_DEBUG_SNAPSHOT__ 等）
+export { installReaderDebugHelpers } from "./lifecycle.js";
+// 阅读模式下的设置变更监听（chrome.storage.onChanged）
+export { bindSettingsWatcher } from "./lifecycle.js";
+
+// ===== reader-impl.js (LAYOUT): page-frame + player-host + shared closure =====
+
+// 阅读视图的播放器绑定（LAYOUT）
 export { bindReadingViewVideo } from "./reader-impl.js";
 // 播放器宿主挂载观察（阅读模式期间）
 export { startReaderPlayerObserver } from "./reader-impl.js";
@@ -52,10 +65,6 @@ export { stopReaderPlayerObserver } from "./reader-impl.js";
 export { enforceNormalPageStateIfNeeded } from "./reader-impl.js";
 export { bindNormalPageStateGuard } from "./reader-impl.js";
 export { clearReaderModePageState } from "./reader-impl.js";
-// 阅读模式调试辅助（__BOC_READER_DEBUG_SNAPSHOT__ 等）
-export { installReaderDebugHelpers } from "./reader-impl.js";
-// 阅读模式下的设置变更监听（chrome.storage.onChanged）
-export { bindSettingsWatcher } from "./reader-impl.js";
 // reader 私有 DOM id 表（供 UI 模板与少量外部 DOM 操作使用）
 export { ids } from "./reader-impl.js";
 // 阅读视图开关状态查询
@@ -68,6 +77,9 @@ export { isProgrammaticScrolling } from "./reader-impl.js";
 export { setVideoEventsBound, isVideoEventsBound, setManualScrollPaused, setProgrammaticScrollUntil } from "./reader-impl.js";
 // 日志（reader 域与外部共用，非 reader 专属能力）
 export { logInfo, logWarn } from "../shared/logging.js";
+
+// ===== sync.js (SYNC): playback↔transcript sync =====
+
 // 播放↔字幕同步域（原 transcript-sync.js 段，issue 06+）：定时器、滚动暂停、
 // 章节/字幕点击跳转与跟随状态均来自 ./sync.js（依赖 reader-impl.js 的 LAYOUT）。
 export { startReadingViewSync } from "./sync.js";

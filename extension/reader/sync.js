@@ -33,7 +33,6 @@ import {
   renderReadingStatus,
   isManualScrollPaused,
   resetManualScrollPause,
-  isProgrammaticScrolling,
   setManualScrollPaused,
   setProgrammaticScrollUntil,
   setVideoEventsBound,
