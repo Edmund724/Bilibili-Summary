@@ -150,7 +150,11 @@ function handleFetchJson(message, sender, sendResponse) {
 
   bgFetchJson(url)
     .then((data) => sendResponse({ ok: true, data }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
+    .catch((error) => {
+      // JSON 解析失败（200 但非 JSON 响应）时给用户稳定的可读文案，而非引擎原生 SyntaxError。
+      const message = error instanceof SyntaxError ? "Invalid JSON response" : error.message;
+      sendResponse({ ok: false, error: message });
+    });
   return true;
 }
 
