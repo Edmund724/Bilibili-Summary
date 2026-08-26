@@ -58,6 +58,7 @@ const els = {
   newChatBtn: document.getElementById("spNewChatBtn"),
   presetBtn: document.getElementById("spPresetBtn"),
   historyBtn: document.getElementById("spHistoryBtn"),
+  toolbar: document.querySelector(".sp-toolbar"),
   presetPopover: document.getElementById("spPresetPopover"),
   presetList: document.getElementById("spPresetList"),
   presetInput: document.getElementById("spPresetInput"),
@@ -443,7 +444,7 @@ async function runPlayerAiQuickActionPrompt(prompt) {
 }
 
 // ============================================================
-// modelSelect 宽度（canvas 测量 + header 布局计算，纯 UI 杂项）
+// modelSelect 宽度（canvas 测量 + toolbar 布局计算，纯 UI 杂项）
 // ============================================================
 function updateModelSelectWidth() {
   if (!els.modelSelect) {
@@ -479,21 +480,20 @@ function measureTextWidth(text, style) {
 }
 
 function getModelSelectMaxWidth() {
-  const header = els.header;
-  if (!header || !els.contextChip || !els.refreshBtn || !els.settingsBtn) {
+  const toolbar = els.toolbar;
+  if (!toolbar || !els.newChatBtn || !els.thinkingToggle || !els.presetBtn) {
     return 172;
   }
-  const style = window.getComputedStyle(header);
+  const style = window.getComputedStyle(toolbar);
   const gap = Number.parseFloat(style.columnGap || style.gap || "0") || 0;
   const paddingLeft = Number.parseFloat(style.paddingLeft || "0") || 0;
   const paddingRight = Number.parseFloat(style.paddingRight || "0") || 0;
-  const contentWidth = header.clientWidth - paddingLeft - paddingRight;
+  const contentWidth = toolbar.clientWidth - paddingLeft - paddingRight;
   const siblingWidth =
-    els.contextChip.offsetWidth +
+    els.newChatBtn.offsetWidth +
     els.thinkingToggle.offsetWidth +
-    els.refreshBtn.offsetWidth +
-    els.settingsBtn.offsetWidth +
-    gap * 4;
+    els.presetBtn.offsetWidth +
+    gap * 3;
   return Math.max(92, Math.floor(contentWidth - siblingWidth));
 }
 

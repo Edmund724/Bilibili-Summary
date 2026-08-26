@@ -9,12 +9,9 @@
   <body>
     <header class="sp-header">
         <button type="button" class="sp-context-chip" id="spContextChip" title="">加载中...</button>
-        <select id="spModelSelect" class="sp-model-select" aria-label="选择模型平台"></select>
-        <div class="sp-thinking-toggle" role="group" aria-label="思考档位">
-          <button type="button" class="sp-thinking-btn" data-level="off">Off</button>
-          <button type="button" class="sp-thinking-btn" data-level="low">Low</button>
-          <button type="button" class="sp-thinking-btn" data-level="high">High</button>
-        </div>
+        <button id="spHistoryBtn" type="button" class="sp-toolbar-btn" title="历史对话">
+          <span>历史对话</span>
+        </button>
         <button id="spRefreshBtn" type="button" class="sp-icon-btn" title="刷新当前视频上下文" aria-label="刷新上下文">
           <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
             <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
@@ -42,11 +39,14 @@
           </svg>
           <span>开启新对话</span>
         </button>
+        <select id="spModelSelect" class="sp-model-select" aria-label="选择模型平台"></select>
+        <div class="sp-thinking-toggle" role="group" aria-label="思考档位">
+          <button type="button" class="sp-thinking-btn" data-level="off">Off</button>
+          <button type="button" class="sp-thinking-btn" data-level="low">Low</button>
+          <button type="button" class="sp-thinking-btn" data-level="high">High</button>
+        </div>
         <button id="spPresetBtn" type="button" class="sp-toolbar-btn" title="预设提示词">
           <span>预设提示词</span>
-        </button>
-        <button id="spHistoryBtn" type="button" class="sp-toolbar-btn" title="历史对话">
-          <span>历史对话</span>
         </button>
       </div>
       <div id="spPresetPopover" class="sp-preset-popover" hidden>
