@@ -5,14 +5,20 @@ This document defines how the extension's shared state is read and written. It l
 
 ## Namespaces
 
-There are four namespaces, each exposed two ways (they are the **same** object):
+There are three namespaces, each exposed two ways (they are the **same** object):
 
-| Namespace         | Structured alias  | Business object   |
-| ----------------- | ----------------- | ----------------- |
-| `readerState`     | `state.reader`     | reader state      |
-| `clipState`       | `state.clip`       | clip/subtitle state |
-| `playerAiState`   | `state.playerAi`   | player-AI UI state |
-| `uiState`         | `state.ui`         | UI/chrome state    |
+| Namespace       | Structured alias  | Business object   |
+| --------------- | ----------------- | ----------------- |
+| `clipState`     | `state.clip`       | clip/subtitle state |
+| `playerAiState` | `state.playerAi`   | player-AI UI state |
+| `uiState`       | `state.ui`         | UI/chrome state    |
+
+The reader namespace is exposed **only** as `state.reader` (the standalone `readerState` alias was
+removed in issue 07):
+
+| Namespace | Access path    | Business object |
+| --------- | -------------- | --------------- |
+| reader    | `state.reader` | reader state    |
 
 Plus a single flat settings object:
 
@@ -26,7 +32,7 @@ Business fields are written **only** through their `set<Field>(value)` method. D
 
 ```js
 // correct
-readerState.setTheme("dark");
+state.reader.setTheme("dark");
 clipState.setTitle("...");
 uiState.setStatusText("...");
 playerAiState.setSubmitting(true);
@@ -35,28 +41,22 @@ playerAiState.setSubmitting(true);
 state.reader.readingTheme = "dark";
 ```
 
-Because `state.reader` and `readerState` are the same object, reading `state.reader.<field>` on the
+Because `state.reader` is the reader namespace object, reading `state.reader.<field>` on the
 **right-hand side** of a setter call is fine and equivalent:
 
 ```js
-readerState.setSettingsExpanded(!state.reader.readingSettingsExpanded);
+state.reader.setSettingsExpanded(!state.reader.readingSettingsExpanded);
 ```
 
 ## Internal-field whitelist
 
-The following `readerState` fields have **no setter** and are intentionally written directly. They are
+The following `state.reader` fields have **no setter** and are intentionally written directly. They are
 internal DOM/timer/observer/bound-state bookkeeping, not business fields. Do **not** convert these to
 setters, and do **not** add copies of them to the setter table:
 
 ```
-readingRootOriginalParent      readingSyncTimer               readingVideoEl
-readingPlayerHost              readingMainOriginalParent      readingMainOriginalNextSibling
-readingPlayerAdjustedNodes     readingPlayerObserver          readingPlayerMountTimer
-readingPlayerRetryTimer        readingMiniDismissTimer        readingControlsHideTimer
-readingControlsRecoveryTimer   readingControlsRecoveryInFlight  readingControlsLastRecoverAt
-readingControlsHoverHost       readingHeaderHoverHost         readingHeaderHideTimer
-readingVideoEventsBound        readingLayoutBound             readingDocumentClickBound
-readingManualScrollPauseUntil   readingProgrammaticScrollUntil
+readingVideoEl                 readingPlayerRetryTimer         readingMiniDismissTimer
+readingDocumentClickBound      readingManualScrollPauseUntil   readingProgrammaticScrollUntil
 ```
 
 ## Future note

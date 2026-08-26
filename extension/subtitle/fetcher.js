@@ -1,6 +1,6 @@
 import { setMessage } from "../ui/ui-message.js";
 import { DEFAULT_SETTINGS, normalizeDownloadFormat } from "../core/shared-defaults.js";
-import { state, clipState, readerState } from "../core/state.js";
+import { state, clipState } from "../core/state.js";
 import { extractBvid, computeCurrentClipSignature } from "../bilibili/url-utils.js";
 import { getSettings, byId } from "../core/runtime.js";
 import { ensureRunActive, isStaleRunError, getErrorMessage, toReadableText } from "../shared/error-helpers.js";
@@ -127,8 +127,8 @@ export function resetClipState() {
   clipState.setTxt("");
   clipState.setCurrentClipSignature(computeCurrentClipSignature());
   notifyReaderPresenter("reset");
-  readerState.setActiveSubtitleIndex(-1);
-  readerState.setActiveChapterIndex(-1);
+  state.reader.setActiveSubtitleIndex(-1);
+  state.reader.setActiveChapterIndex(-1);
   state.reader.readingVideoEl = null;
 
   renderMeta();

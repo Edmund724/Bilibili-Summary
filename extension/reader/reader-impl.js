@@ -9,7 +9,7 @@
 // Settings/shared flags (readingViewOpen, readingTheme, ...) and fields that
 // external modules read or write (readingVideoEl, readingManualScrollPauseUntil,
 // readingProgrammaticScrollUntil, readingDocumentClickBound) stay in state.reader.
-import { state, readerState, uiState } from "../core/state.js";
+import { state, uiState } from "../core/state.js";
 import { logInfo, logWarn, shouldDebugLog } from "../shared/logging.js";
 import {
   normalizeReaderTheme,
@@ -54,7 +54,7 @@ import * as pageContext from "./page-context.js";
 //
 // These were state.reader fields before issue 06; no module outside
 // extension/reader/ reads or writes them, so they are hoisted here.
-// Issue 07 will remove the now-dead fields from state.js.
+// Issue 07 removed the corresponding dead fields from state.js.
 let syncTimer = 0;                 // readingSyncTimer
 let videoEl = null;                // readingVideoEl (written by reader only; external code reads state.reader.readingVideoEl)
 let playerHost = null;             // readingPlayerHost
@@ -247,8 +247,8 @@ export function renderReadingSubtitleSelect() {
 }
 export async function enterReaderMode() {
   const readingView = byId(ids.readingView);
-  readerState.setViewOpen(true);
-  readerState.setNativePageMode(true);
+  state.reader.setViewOpen(true);
+  state.reader.setNativePageMode(true);
   document.body.setAttribute("data-boc-reading-active", "1");
   hydrateReaderStateFromSettings(state.settings);
   applyReadingViewPresentation();
@@ -373,13 +373,13 @@ export function closeReaderCleanup() {
 
 export function closeReadingView() {
   cleanupReaderFloatingArtifacts();
-  readerState.setViewOpen(false);
-  readerState.setNativePageMode(false);
-  readerState.setViewReady(false);
-  readerState.setSettingsExpanded(false);
+  state.reader.setViewOpen(false);
+  state.reader.setNativePageMode(false);
+  state.reader.setViewReady(false);
+  state.reader.setSettingsExpanded(false);
   manualScrollPauseUntil = 0;
   programmaticScrollUntil = 0;
-  readerState.setNextScrollBehavior("smooth");
+  state.reader.setNextScrollBehavior("smooth");
   if (playerRetryTimer) {
     window.clearTimeout(playerRetryTimer);
     playerRetryTimer = 0;
@@ -498,8 +498,8 @@ export function renderReadingView() {
   renderReaderPanels();
   applyReadingViewPresentation();
   updateReadingTranscriptTailSpacer();
-  readerState.setActiveSubtitleIndex(-1);
-  readerState.setActiveChapterIndex(-1);
+  state.reader.setActiveSubtitleIndex(-1);
+  state.reader.setActiveChapterIndex(-1);
 }
 
 export function updateReadingTranscriptTailSpacer() {
@@ -515,13 +515,13 @@ export function updateReadingTranscriptTailSpacer() {
 }
 
 export function hydrateReaderStateFromSettings(settings = state.settings) {
-  readerState.setTheme(normalizeReaderTheme(settings?.readerTheme));
-  readerState.setFontScale(normalizeReaderFontScale(settings?.readerFontScale));
-  readerState.setLetterSpacing(normalizeReaderLetterSpacing(settings?.readerLetterSpacing ?? settings?.readerLineHeight));
-  readerState.setLineHeight(normalizeReaderLineHeight(settings?.readerLineHeight));
-  readerState.setContentWidth(normalizeReaderContentWidth(settings?.readerContentWidth));
-  readerState.setChapterVisible(settings?.readerChapterVisible !== undefined ? Boolean(settings.readerChapterVisible) : true);
-  readerState.setTranscriptVisible(normalizeReaderTranscriptVisible(settings?.readerTranscriptVisible));
+  state.reader.setTheme(normalizeReaderTheme(settings?.readerTheme));
+  state.reader.setFontScale(normalizeReaderFontScale(settings?.readerFontScale));
+  state.reader.setLetterSpacing(normalizeReaderLetterSpacing(settings?.readerLetterSpacing ?? settings?.readerLineHeight));
+  state.reader.setLineHeight(normalizeReaderLineHeight(settings?.readerLineHeight));
+  state.reader.setContentWidth(normalizeReaderContentWidth(settings?.readerContentWidth));
+  state.reader.setChapterVisible(settings?.readerChapterVisible !== undefined ? Boolean(settings.readerChapterVisible) : true);
+  state.reader.setTranscriptVisible(normalizeReaderTranscriptVisible(settings?.readerTranscriptVisible));
 }
 
 export function applyReadingViewPresentation() {
@@ -756,15 +756,15 @@ export function buildReadingSummaryItems() {
 }
 
 export function updateReaderPreferences(next, { persist = true } = {}) {
-  readerState.setTheme(normalizeReaderTheme(next.readerTheme ?? state.reader.readingTheme));
-  readerState.setFontScale(normalizeReaderFontScale(next.readerFontScale ?? state.reader.readingFontScale));
-  readerState.setLetterSpacing(
+  state.reader.setTheme(normalizeReaderTheme(next.readerTheme ?? state.reader.readingTheme));
+  state.reader.setFontScale(normalizeReaderFontScale(next.readerFontScale ?? state.reader.readingFontScale));
+  state.reader.setLetterSpacing(
     normalizeReaderLetterSpacing(next.readerLetterSpacing ?? state.reader.readingLetterSpacing)
   );
-  readerState.setLineHeight(normalizeReaderLineHeight(next.readerLineHeight ?? state.reader.readingLineHeight));
-  readerState.setContentWidth(normalizeReaderContentWidth(next.readerContentWidth ?? state.reader.readingContentWidth));
-  readerState.setChapterVisible(next.readerChapterVisible !== undefined ? Boolean(next.readerChapterVisible) : state.reader.readingChapterVisible);
-  readerState.setTranscriptVisible(
+  state.reader.setLineHeight(normalizeReaderLineHeight(next.readerLineHeight ?? state.reader.readingLineHeight));
+  state.reader.setContentWidth(normalizeReaderContentWidth(next.readerContentWidth ?? state.reader.readingContentWidth));
+  state.reader.setChapterVisible(next.readerChapterVisible !== undefined ? Boolean(next.readerChapterVisible) : state.reader.readingChapterVisible);
+  state.reader.setTranscriptVisible(
     normalizeReaderTranscriptVisible(next.readerTranscriptVisible ?? state.reader.readingTranscriptVisible)
   );
   state.setSettings({
@@ -817,7 +817,7 @@ export function renderReadingStatus(text) {
 }
 
 export function setReadingViewReady(ready) {
-  readerState.setViewReady(Boolean(ready));
+  state.reader.setViewReady(Boolean(ready));
   const readingView = document.getElementById(ids.readingView);
   if (!readingView) {
     return;
@@ -1865,7 +1865,7 @@ export function bindReadingViewVideo(video = getRuntimeVideoElement()) {
         layoutReaderPlayerHost();
       }
       if (event?.type === "seeked") {
-        readerState.setNextScrollBehavior("auto");
+        state.reader.setNextScrollBehavior("auto");
         queueEnsureReaderPlayerControlsRecovered({
           reason: "seeked",
           delayMs: 140,
@@ -2400,8 +2400,8 @@ export function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll 
   if (shouldScroll && state.reader.readingAutoScroll) {
     if (Date.now() < manualScrollPauseUntil) {
       updateReaderFollowState();
-      readerState.setActiveSubtitleIndex(subtitleIndex);
-      readerState.setActiveChapterIndex(chapterIndex);
+      state.reader.setActiveSubtitleIndex(subtitleIndex);
+      state.reader.setActiveChapterIndex(chapterIndex);
       return;
     }
     if (nextTranscript) {
@@ -2412,8 +2412,8 @@ export function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll 
     }
   }
 
-  readerState.setActiveSubtitleIndex(subtitleIndex);
-  readerState.setActiveChapterIndex(chapterIndex);
+  state.reader.setActiveSubtitleIndex(subtitleIndex);
+  state.reader.setActiveChapterIndex(chapterIndex);
 }
 
 export function scrollReadingRailItemIntoView(node) {
@@ -2444,7 +2444,7 @@ export function scrollReadingTranscriptItemIntoView(node) {
 
   const behavior = state.reader.readingNextScrollBehavior === "auto" ? "auto" : "smooth";
   programmaticScrollUntil = Date.now() + (behavior === "auto" ? 120 : 800);
-  readerState.setNextScrollBehavior("smooth");
+  state.reader.setNextScrollBehavior("smooth");
   if (state.reader.readingNativePageMode && inlineHost && inlineHost.scrollHeight > inlineHost.clientHeight + 8) {
     const hostRect = inlineHost.getBoundingClientRect();
     const computed = window.getComputedStyle(node);
@@ -2485,7 +2485,7 @@ export function jumpReadingTarget(seconds) {
 
   const nextTime = Math.max(0, Number(seconds || 0) || 0);
   manualScrollPauseUntil = 0;
-  readerState.setNextScrollBehavior("auto");
+  state.reader.setNextScrollBehavior("auto");
   updateReaderFollowState();
   video.currentTime = nextTime;
   if (video.paused) {

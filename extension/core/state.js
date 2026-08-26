@@ -11,10 +11,17 @@ import { DEFAULT_SETTINGS } from "./shared-defaults.js";
  * supported; use the structured namespace (state.reader.readingViewOpen) instead.
  */
 
+// Reader namespace. Issue 06 hoisted reader-internal bookkeeping into
+// reader-impl.js module closure; issue 07 removed the now-dead fields. The
+// remaining fields are settings/shared flags plus a few cross-module
+// bookkeeping fields: readingVideoEl (video-probe reads, fetcher writes),
+// readingManualScrollPauseUntil / readingProgrammaticScrollUntil
+// (ui-renderer/message-handler read and write), readingDocumentClickBound
+// (ui-renderer sets). readingPlayerRetryTimer / readingMiniDismissTimer are
+// kept because tests/reader/lifecycle.test.js still clears them in afterEach.
 const readerState = {
   readingViewOpen: false,
   readingNativePageMode: false,
-  readingRootOriginalParent: null,
   readingAutoScroll: true,
   readingTheme: "light",
   readingFontScale: "m",
@@ -28,25 +35,9 @@ const readerState = {
   readingActiveSubtitleIndex: -1,
   readingActiveChapterIndex: -1,
   readingNextScrollBehavior: "smooth",
-  readingSyncTimer: 0,
   readingVideoEl: null,
-  readingPlayerHost: null,
-  readingMainOriginalParent: null,
-  readingMainOriginalNextSibling: null,
-  readingPlayerAdjustedNodes: [],
-  readingPlayerObserver: null,
-  readingPlayerMountTimer: 0,
   readingPlayerRetryTimer: 0,
   readingMiniDismissTimer: 0,
-  readingControlsHideTimer: 0,
-  readingControlsRecoveryTimer: 0,
-  readingControlsRecoveryInFlight: false,
-  readingControlsLastRecoverAt: 0,
-  readingControlsHoverHost: null,
-  readingHeaderHoverHost: null,
-  readingHeaderHideTimer: 0,
-  readingVideoEventsBound: false,
-  readingLayoutBound: false,
   readingDocumentClickBound: false,
   readingManualScrollPauseUntil: 0,
   readingProgrammaticScrollUntil: 0,
@@ -162,7 +153,6 @@ const uiState = {
 
 const stateTarget = {
   settings: { ...DEFAULT_SETTINGS },
-  normalPageStateObserver: null,
   readerState,
   clipState,
   playerAiState,
@@ -176,4 +166,4 @@ const stateTarget = {
 
 const state = stateTarget;
 
-export { state, readerState, clipState, playerAiState, uiState };
+export { state, clipState, playerAiState, uiState };

@@ -7,7 +7,7 @@ export {
   sendRuntimeMessage,
   startUrlWatcher
 } from "./runtime.js";
-export { clipState, playerAiState, readerState, state, uiState } from "./state.js";
+export { clipState, playerAiState, state, uiState } from "./state.js";
 export {
   DEFAULT_AI_SYSTEM_PROMPT,
   DEFAULT_INITIAL_QUICK_PROMPTS,

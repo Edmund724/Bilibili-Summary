@@ -1,5 +1,5 @@
 import { setMessage } from "./ui-message.js";
-import { state, uiState, readerState } from "../core/state.js";
+import { state, uiState } from "../core/state.js";
 import {
   byId,
   requestOpenOptions,
@@ -212,7 +212,7 @@ export function bindUiEvents() {
     closeReadingView();
   });
   readingAutoScroll.addEventListener("change", (event) => {
-    readerState.setAutoScroll(Boolean(event.target.checked));
+    state.reader.setAutoScroll(Boolean(event.target.checked));
     if (state.reader.readingAutoScroll) {
       state.reader.readingManualScrollPauseUntil = 0;
       syncReadingViewPlayback(true);
@@ -242,11 +242,11 @@ export function bindUiEvents() {
   });
   readingSettingsToggleBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    readerState.setSettingsExpanded(!state.reader.readingSettingsExpanded);
+    state.reader.setSettingsExpanded(!state.reader.readingSettingsExpanded);
     renderReaderPanels();
   });
   readingDescriptionBtn.addEventListener("click", () => {
-    readerState.setDescriptionExpanded(!state.reader.readingDescriptionExpanded);
+    state.reader.setDescriptionExpanded(!state.reader.readingDescriptionExpanded);
     renderReadingInfoPanel();
   });
   bindReaderStepperControl(readingFontScaleSelect, "readerFontScale");
@@ -279,7 +279,7 @@ export function bindUiEvents() {
         return;
       }
       if (!settingsPanel.contains(e.target) && !settingsBtnEl.contains(e.target)) {
-        readerState.setSettingsExpanded(false);
+        state.reader.setSettingsExpanded(false);
         renderReaderPanels();
       }
     });

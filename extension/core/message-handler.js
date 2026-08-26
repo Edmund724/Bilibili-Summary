@@ -1,4 +1,4 @@
-import { state, uiState, playerAiState, clipState, readerState } from "./state.js";
+import { state, uiState, playerAiState, clipState } from "./state.js";
 import { DEFAULT_SETTINGS } from "./shared-defaults.js";
 
 import {
@@ -191,7 +191,7 @@ export function bindRuntimeEvents() {
       }
       if (state.reader.readingViewOpen) {
         state.reader.readingManualScrollPauseUntil = 0;
-        readerState.setNextScrollBehavior("auto");
+        state.reader.setNextScrollBehavior("auto");
         updateReaderFollowState();
         syncReadingViewPlayback(true);
       }
