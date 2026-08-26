@@ -94,6 +94,42 @@ body {
   background-repeat: no-repeat;
 }
 
+/* 思考档位（off/low/high）：模型选择器旁的三态分段切换，参照 Kimi Code 模型选择器旁的思考切换 */
+.sp-thinking-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #f7f8fb;
+}
+
+.sp-thinking-btn {
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #6b7280;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.sp-thinking-btn:hover {
+  color: #1f2937;
+}
+
+.sp-thinking-btn.is-active {
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+
 .sp-icon-btn {
   width: 32px;
   height: 32px;

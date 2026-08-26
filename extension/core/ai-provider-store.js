@@ -21,7 +21,8 @@ import {
   normalizeAiSystemPrompt,
   normalizeAiInitialQuickPrompts,
   normalizeAiPresetPrompts,
-  normalizeDefaultModel
+  normalizeDefaultModel,
+  normalizeAiThinkingLevel
 } from "./shared-defaults.js";
 
 // ===== 设置归一化 + 存储 =====
@@ -53,6 +54,7 @@ export async function getMergedSettings(timeoutMs = 5000) {
   merged.aiInitialQuickPrompts = normalizeAiInitialQuickPrompts(merged.aiInitialQuickPrompts);
   merged.aiPresetPrompts = normalizeAiPresetPrompts(merged.aiPresetPrompts);
   merged.defaultModel = normalizeDefaultModel(merged.defaultModel);
+  merged.aiThinkingLevel = normalizeAiThinkingLevel(merged.aiThinkingLevel);
 
   return merged;
 }
@@ -79,6 +81,7 @@ export async function saveSettings(settings) {
   syncPayload.aiInitialQuickPrompts = normalizeAiInitialQuickPrompts(syncPayload.aiInitialQuickPrompts);
   syncPayload.aiPresetPrompts = normalizeAiPresetPrompts(syncPayload.aiPresetPrompts);
   syncPayload.defaultModel = normalizeDefaultModel(syncPayload.defaultModel);
+  syncPayload.aiThinkingLevel = normalizeAiThinkingLevel(syncPayload.aiThinkingLevel);
 
   await chrome.storage.sync.set(syncPayload);
 }

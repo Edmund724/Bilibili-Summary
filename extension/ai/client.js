@@ -13,6 +13,25 @@ const OPENAI_COMPAT = {
 
 const MAX_STREAM_RETRIES = 2;
 
+// 思考档位：off 不发任何参数；low / high 映射到 OpenAI 兼容的 reasoning_effort。
+export const AI_THINKING_LEVELS = ["off", "low", "high"];
+
+export function normalizeThinkingLevel(value) {
+  return AI_THINKING_LEVELS.includes(value) ? value : "off";
+}
+
+/**
+ * 构造 chat/completions 请求体（纯函数，便于单测）。
+ */
+export function buildChatRequestBody({ model, messages, thinkingLevel }) {
+  const body = { model, messages, stream: true };
+  const level = normalizeThinkingLevel(thinkingLevel);
+  if (level !== "off") {
+    body.reasoning_effort = level;
+  }
+  return body;
+}
+
 /**
  * 发送单条 SSE 数据块。
  */
@@ -67,7 +86,7 @@ async function drainSseStream({ response, port, signal, onActivity }) {
   return "done";
 }
 
-export async function streamChat({ provider, context, userPrompt, history, port, signal, onActivity }) {
+export async function streamChat({ provider, context, userPrompt, history, port, signal, onActivity, thinkingLevel }) {
   if (!port) return;
 
   const baseUrl = String(provider?.baseUrl || "").trim().replace(/\/+$/, "");
@@ -103,11 +122,11 @@ export async function streamChat({ provider, context, userPrompt, history, port,
       response = await fetch(`${baseUrl}${OPENAI_COMPAT.chatPath}`, {
         method: "POST",
         headers,
-        body: JSON.stringify({
+        body: JSON.stringify(buildChatRequestBody({
           model: provider.model,
           messages,
-          stream: true
-        }),
+          thinkingLevel
+        })),
         signal
       });
     } catch (e) {

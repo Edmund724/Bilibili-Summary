@@ -130,6 +130,11 @@ export function normalizeDefaultModel(value) {
   return toString(value).trim();
 }
 
+// 思考档位（off / low / high），off 为默认且不发任何思考参数
+export function normalizeAiThinkingLevel(value) {
+  return value === "low" || value === "high" ? value : "off";
+}
+
 // ===== AI platform presets =====
 export const PRESETS = [
   { id: "openai_compat", name: "OpenAI 兼容", baseUrl: "https://api.openai.com/v1", requiresKey: true },
@@ -395,7 +400,8 @@ export const DEFAULT_SETTINGS = {
   aiSystemPrompt: DEFAULT_AI_SYSTEM_PROMPT,
   aiInitialQuickPrompts: DEFAULT_INITIAL_QUICK_PROMPTS.slice(),
   aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice(),
-  defaultModel: ""
+  defaultModel: "",
+  aiThinkingLevel: "off"
 };
 
 const SYSTEM_FRONTMATTER_FIELDS = new Set(

@@ -21,7 +21,8 @@ import {
   DEFAULT_PRESET_PROMPTS,
   PLAYER_AI_QUICK_ACTION_STORAGE_KEY,
   normalizeAiInitialQuickPrompts,
-  normalizeAiPresetPrompts
+  normalizeAiPresetPrompts,
+  normalizeAiThinkingLevel
 } from "../core/shared-defaults.js";
 
 import {
@@ -42,6 +43,7 @@ import { createChatRuntime } from "./sidepanel-chat-runtime.js";
 import { createConversationStore } from "./sidepanel-conversation-store.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
+const THINKING_LEVEL_KEY = "boc_ai_thinking_level";
 const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
 const NON_VIDEO_CONTEXT_MESSAGE = "当前页非 B 站视频页面，<br>无法获取当前页面信息作为对话上下文，<br>仅支持 AI 对话。";
 
@@ -50,6 +52,8 @@ const els = {
   contextChip: document.getElementById("spContextChip"),
   refreshBtn: document.getElementById("spRefreshBtn"),
   modelSelect: document.getElementById("spModelSelect"),
+  thinkingToggle: document.querySelector(".sp-thinking-toggle"),
+  thinkingBtns: document.querySelectorAll(".sp-thinking-btn"),
   settingsBtn: document.getElementById("spSettingsBtn"),
   newChatBtn: document.getElementById("spNewChatBtn"),
   presetBtn: document.getElementById("spPresetBtn"),
@@ -86,6 +90,7 @@ let liveContextKey = "";
 let liveTabUrl = "";
 let contextNoticeTimer = 0;
 let shouldAutoScrollMessages = true;
+let aiThinkingLevel = "off";
 let liveContextSyncTimer = 0;
 let liveContextSyncForceRefresh = false;
 let modelSelectMeasureCanvas = null;
@@ -136,6 +141,8 @@ const chatRuntime = createChatRuntime({
   setCurrentConversationId: (v) => { currentConversationId = v; },
   getContextData: () => contextData,
   getAiPrefs: () => aiPrefs,
+  getThinkingLevel: () => aiThinkingLevel,
+  setThinkingLevel: (v) => { aiThinkingLevel = normalizeAiThinkingLevel(v); },
   // ---- 布局 / UI 回调（DOM 布局留在 sidepanel）----
   setStreamingUiState,
   showConversationContextNotice,
@@ -234,6 +241,11 @@ function bindEvents() {
     }
     updateModelSelectWidth();
   });
+  els.thinkingBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      void setThinkingLevel(btn.dataset.level || "off");
+    });
+  });
   window.addEventListener("resize", updateModelSelectWidth);
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("visibilitychange", () => {
@@ -259,7 +271,7 @@ function bindEvents() {
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (
       (areaName === "sync" &&
-        (changes.aiProviders || changes.aiSystemPrompt || changes.aiInitialQuickPrompts || changes.aiPresetPrompts || changes.defaultModel)) ||
+        (changes.aiProviders || changes.aiSystemPrompt || changes.aiInitialQuickPrompts || changes.aiPresetPrompts || changes.defaultModel || changes.aiThinkingLevel)) ||
       (areaName === "local" && changes.aiProviderKeys)
     ) {
       void refreshProvidersAndPrefsAfterExternalChange();
@@ -303,11 +315,15 @@ async function loadProvidersAndPrefs({ preferredProviderId = "" } = {}) {
     aiPresetPrompts: normalizeAiPresetPrompts(settingsResp?.settings?.aiPresetPrompts),
     defaultModel: String(settingsResp?.settings?.defaultModel || "").trim()
   };
+  aiThinkingLevel = normalizeAiThinkingLevel(
+    settingsResp?.settings?.aiThinkingLevel ?? localStorage.getItem(THINKING_LEVEL_KEY)
+  );
   if (!aiPrefs.aiPresetPrompts.length) {
     aiPrefs.aiPresetPrompts = DEFAULT_PRESET_PROMPTS.slice();
     void persistAiPresetPrompts();
   }
   renderModelSelect(preferredProviderId);
+  renderThinkingLevel();
   renderPresetPrompts();
 }
 
@@ -331,6 +347,23 @@ function renderModelSelect(preferredProviderId = "") {
   els.modelSelect.value = matchedProvider?.id || "";
   els.modelSelect.disabled = false;
   updateModelSelectWidth();
+}
+
+// ============================================================
+// 思考档位（off / low / high）— 三档分段按钮，选中态持久化到 sync 设置
+// ============================================================
+function renderThinkingLevel() {
+  els.thinkingBtns.forEach((btn) => {
+    btn.classList.toggle("is-active", btn.dataset.level === aiThinkingLevel);
+    btn.setAttribute("aria-pressed", btn.dataset.level === aiThinkingLevel ? "true" : "false");
+  });
+}
+
+async function setThinkingLevel(level) {
+  aiThinkingLevel = normalizeAiThinkingLevel(level);
+  renderThinkingLevel();
+  localStorage.setItem(THINKING_LEVEL_KEY, aiThinkingLevel);
+  await sendRuntimeMessage({ type: "save-settings", settings: { aiThinkingLevel } }).catch(() => null);
 }
 
 async function refreshProvidersAndPrefsAfterExternalChange() {
@@ -457,9 +490,10 @@ function getModelSelectMaxWidth() {
   const contentWidth = header.clientWidth - paddingLeft - paddingRight;
   const siblingWidth =
     els.contextChip.offsetWidth +
+    els.thinkingToggle.offsetWidth +
     els.refreshBtn.offsetWidth +
     els.settingsBtn.offsetWidth +
-    gap * 3;
+    gap * 4;
   return Math.max(92, Math.floor(contentWidth - siblingWidth));
 }
 

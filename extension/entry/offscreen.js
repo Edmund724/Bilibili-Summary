@@ -71,6 +71,7 @@ chrome.runtime.onConnect.addListener((port) => {
         context: msg.context || {},
         userPrompt: msg.prompt || "",
         history: Array.isArray(msg.history) ? msg.history : [],
+        thinkingLevel: msg.thinkingLevel,
         port,
         signal: activeAbortController.signal,
         onActivity: function () { armIdleTimeout(activeAbortController, port); }

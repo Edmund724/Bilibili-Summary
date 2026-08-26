@@ -51,6 +51,7 @@ const STREAM_SLOW_NOTICE_MS = 15000;
  *     setCurrentConversationId,    // (v) => { currentConversationId = v; }
  *     getContextData,              // () => contextData
  *     getAiPrefs,                  // () => aiPrefs  (for aiSystemPrompt)
+ *     getThinkingLevel,            // () => aiThinkingLevel  (off/low/high)
  *     // ---- layout / UI sidepanel callbacks (DOM layout stays in sidepanel) ----
  *     setStreamingUiState,               // (isStreaming, { stopping }) => void
  *     showConversationContextNotice,     // (message, autoHideMs) => void
@@ -200,6 +201,7 @@ export function createChatRuntime(deps) {
     port.postMessage({
       action: "chat",
       providerId,
+      thinkingLevel: deps.getThinkingLevel(),
       context: {
         ...deps.getContextData(),
         aiSystemPrompt: deps.getAiPrefs().aiSystemPrompt,
