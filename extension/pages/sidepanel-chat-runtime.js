@@ -285,14 +285,55 @@ export function createChatRuntime(deps) {
   // =========================================================================
   // appendToken
   // =========================================================================
+  // 流式渲染优化：流式过程中仅按帧批量把原文写入一个文本节点（每帧最多一次
+  // 写入，不再逐 token 全量 renderMarkdown + innerHTML，避免长回复 O(n²)）。
+  // markdown 的最终渲染由 finalizeAssistant / handleAssistantStopped 出口完成，
+  // 结果与之前逐 token 渲染一致。光标 span 保留在文本节点之后——textContent
+  // 整体赋值会清掉光标，所以用独立文本节点并缓存引用。
+  let tokenFlushFrame = 0;
+  const streamTextNodes = new WeakMap();
+
+  function cancelTokenFlush() {
+    if (!tokenFlushFrame) {
+      return;
+    }
+    if (typeof window.cancelAnimationFrame === "function") {
+      window.cancelAnimationFrame(tokenFlushFrame);
+    } else {
+      window.clearTimeout(tokenFlushFrame);
+    }
+    tokenFlushFrame = 0;
+  }
+
   function appendToken(node, token) {
     if (!node) {
       return;
     }
-    const raw = (node.dataset.raw || "") + String(token || "");
-    node.dataset.raw = raw;
-    node.innerHTML = renderMarkdown(raw) + '<span class="sp-msg-cursor"></span>';
-    scrollToBottom();
+    node.dataset.raw = (node.dataset.raw || "") + String(token || "");
+    if (tokenFlushFrame) {
+      return;
+    }
+    const flush = () => {
+      tokenFlushFrame = 0;
+      let text = streamTextNodes.get(node);
+      if (!text || !text.isConnected) {
+        // 首次写入（或节点被重建）：保留光标，其余（如思考节点）按旧行为清掉
+        const cursor = node.querySelector(".sp-msg-cursor");
+        text = document.createTextNode("");
+        node.replaceChildren(text);
+        if (cursor) {
+          node.appendChild(cursor);
+        }
+        streamTextNodes.set(node, text);
+      }
+      text.data = node.dataset.raw || "";
+      scrollToBottom();
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      tokenFlushFrame = window.requestAnimationFrame(flush);
+    } else {
+      tokenFlushFrame = window.setTimeout(flush, 16);
+    }
   }
 
   // =========================================================================
@@ -302,6 +343,7 @@ export function createChatRuntime(deps) {
     if (!node) {
       return;
     }
+    cancelTokenFlush();
     clearStreamRuntimeState();
     const raw = node.dataset.raw || "";
     renderAssistantMessage(node, raw, { userPrompt: activeUserPrompt });
@@ -327,6 +369,7 @@ export function createChatRuntime(deps) {
     if (!node) {
       return;
     }
+    cancelTokenFlush();
     clearStreamRuntimeState();
     node.innerHTML = "";
     const err = document.createElement("div");
@@ -350,6 +393,7 @@ export function createChatRuntime(deps) {
     if (!node) {
       return;
     }
+    cancelTokenFlush();
     clearStreamRuntimeState();
     const raw = String(node.dataset.raw || "");
     if (raw.trim()) {
