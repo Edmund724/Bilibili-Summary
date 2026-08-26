@@ -28,8 +28,7 @@ import {
   pickPageFromPages,
   pickCidFromPages,
   pickDurationFromPages,
-  pickPageIndexFromOid,
-  moveReadingMainInline
+  pickPageIndexFromOid
 } from "../reader/page-frame.js";
 import {
   logInfo,
@@ -38,24 +37,13 @@ import {
   ids,
   hydrateReaderStateFromSettings,
   applyReadingViewPresentation,
-  renderReadingView,
   closeReadingView,
   updateReaderPreferences,
   renderReaderPanels,
   renderReadingInfoPanel,
-  bindReaderStepperControl,
-  renderReadingStatus
+  bindReaderStepperControl
 } from "../reader/shell.js";
-import {
-  syncReadingViewPlayback,
-  updateReaderFollowState,
-  stopReadingViewSync,
-  startReadingViewSync
-} from "../reader/transcript-sync.js";
-import {
-  stopReaderPlayerObserver,
-  startReaderPlayerObserver
-} from "../reader/player-host.js";
+import { notifyReaderPresenter } from "../reader/presenter.js";
 import {
   renderMeta,
   renderSubtitleSelect,
@@ -146,19 +134,18 @@ export function resetClipState() {
   clipState.setSrt("");
   clipState.setTxt("");
   clipState.setCurrentClipSignature(computeCurrentClipSignature());
-  stopReadingViewSync();
+  notifyReaderPresenter("reset");
   readerState.setActiveSubtitleIndex(-1);
   readerState.setActiveChapterIndex(-1);
   state.reader.readingVideoEl = null;
-  stopReaderPlayerObserver();
 
   renderMeta();
   renderSubtitleSelect();
   byId(ids.preview).value = "";
   setMessage("");
   if (state.reader.readingViewOpen) {
-    renderReadingView();
-    renderReadingStatus("请先点击“刷新抓取”加载当前视频字幕。");
+    notifyReaderPresenter("rerender");
+    notifyReaderPresenter("status", "请先点击“刷新抓取”加载当前视频字幕。");
   }
 }
 
@@ -171,7 +158,7 @@ export async function refreshClip() {
     setStatus("正在抓取视频信息...");
     clipState.setSubtitleFetchState("loading");
     if (state.reader.readingViewOpen) {
-      renderReadingView();
+      notifyReaderPresenter("rerender");
     }
     state.setSettings(await getSettings());
     ensureRunActive(runId);
@@ -278,12 +265,7 @@ export async function refreshClip() {
       renderMeta();
       renderSubtitleSelect();
       if (state.reader.readingViewOpen) {
-        moveReadingMainInline();
-        renderReadingView();
-        renderReadingStatus("当前视频无字幕。");
-        startReadingViewSync();
-        startReaderPlayerObserver();
-        syncReadingViewPlayback(true);
+        notifyReaderPresenter("subtitle-ready", "当前视频无字幕。");
       }
       setStatus("当前视频无字幕。");
       return;
@@ -303,12 +285,7 @@ export async function refreshClip() {
       renderMeta();
       renderSubtitleSelect();
       if (state.reader.readingViewOpen) {
-        moveReadingMainInline();
-        renderReadingView();
-        renderReadingStatus("当前视频无字幕。");
-        startReadingViewSync();
-        startReaderPlayerObserver();
-        syncReadingViewPlayback(true);
+        notifyReaderPresenter("subtitle-ready", "当前视频无字幕。");
       }
       setStatus("当前视频无字幕。");
       return;
@@ -357,12 +334,7 @@ export async function refreshClip() {
     renderMeta();
     renderSubtitleSelect();
     if (state.reader.readingViewOpen) {
-      moveReadingMainInline();
-      renderReadingView();
-      renderReadingStatus("抓取完成，阅读视图已同步最新字幕。");
-      startReadingViewSync();
-      startReaderPlayerObserver();
-      syncReadingViewPlayback(true);
+      notifyReaderPresenter("subtitle-ready");
     }
     setStatus("抓取完成，可以复制或下载字幕。");
   } catch (error) {
@@ -373,7 +345,7 @@ export async function refreshClip() {
     resetClipState();
     clipState.setSubtitleFetchState("error");
     if (state.reader.readingViewOpen) {
-      renderReadingView();
+      notifyReaderPresenter("rerender");
     }
     if (error?.code === "SUBTITLE_DURATION_MISMATCH") {
       setStatus("抓取失败：未找到与当前视频时长匹配的字幕轨，可能该视频无可用字幕。");
@@ -422,8 +394,7 @@ export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, sub
         clipState.setSubtitleFetchState("ready");
         await refreshDerivedContent();
         if (state.reader.readingViewOpen) {
-          renderReadingView();
-          syncReadingViewPlayback(true);
+          notifyReaderPresenter("subtitle-ready");
         }
         return;
       }
@@ -455,8 +426,7 @@ export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, sub
   clipState.setSubtitleFetchState("ready");
   await refreshDerivedContent();
   if (state.reader.readingViewOpen) {
-    renderReadingView();
-    syncReadingViewPlayback(true);
+    notifyReaderPresenter("subtitle-ready");
   }
 }
 

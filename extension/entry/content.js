@@ -20,6 +20,7 @@ import {
   logInfo,
   installReaderDebugHelpers,
   bindSettingsWatcher,
+  bindReaderPresenter,
   hydrateReaderStateFromSettings,
   applyReadingViewPresentation,
   enterReaderMode,
@@ -76,6 +77,7 @@ function init() {
 
   bindRuntimeEvents();
   bindSettingsWatcher();
+  bindReaderPresenter();
   bindNormalPageStateGuard();
   bindPlayerAiQuickActionLayoutEvents();
   startUrlWatcher();
