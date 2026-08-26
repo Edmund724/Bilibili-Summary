@@ -20,6 +20,13 @@ export function replaceReaderModeUrl(nextUrl) {
   }
 
   try {
+    // Update clip signature BEFORE calling replaceState, because the patched
+    // history.replaceState dispatches boc:urlchange synchronously, which
+    // triggers handleUrlChange — if the signature hasn't been updated yet,
+    // it looks like a real URL change and resets all clip state (chapters,
+    // subtitles, etc.).
+    clipState.setCurrentUrl(targetUrl);
+    clipState.setCurrentClipSignature(computeCurrentClipSignature(targetUrl));
     history.replaceState(history.state, "", targetUrl);
     clipState.setCurrentUrl(location.href);
     clipState.setCurrentClipSignature(computeCurrentClipSignature(location.href));
