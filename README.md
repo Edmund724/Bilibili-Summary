@@ -110,13 +110,18 @@
 
 - `README.md` / `LICENSE`：项目说明与许可证
 - `extension/`：插件源码
-  - `ai/`：AI 提供商预设与流式处理
-  - `icons/`：扩展图标
-  - `background.js` / `content.js` / `content.css`：核心逻辑与样式
-  - `popup.html` / `popup.js` / `popup.css`：弹出面板
-  - `sidepanel.html` / `sidepanel.js` / `sidepanel.css`：AI 侧边栏
-  - `options.html` / `options.js` / `options.css`：设置页
   - `manifest.json`：扩展清单
+  - `entry/`：扩展入口（`background.js`、`content.js`、`content.css`、`offscreen.js` 等）
+  - `ai/`：AI 客户端、SSE 流式解析与播放器 AI 按钮
+  - `bilibili/`：B 站 API 网关与视频 ID 解析
+  - `core/`：核心状态、运行时与消息处理
+  - `notes/`：笔记/导出渲染（Markdown、SRT、TXT）
+  - `subtitle/`：字幕抓取、缓存与处理
+  - `reader/`：阅读视图（`index.js` 为统一入口，含生命周期/同步/布局模块）
+  - `ui/`：UI 渲染（面板渲染、Markdown、时间戳导航等）
+  - `shared/`：跨模块共享工具（DOM、日志、字符串处理等）
+  - `pages/`：弹出面板、侧边栏与设置页（popup/sidepanel/options）
+  - `icons/`：扩展图标
 
 ### Content script 架构说明
 
