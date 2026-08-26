@@ -13,7 +13,7 @@ async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state;
   presenter = await import("../../extension/reader/presenter.js");
-  shell = await import("../../extension/reader/reader-impl.js");
+  shell = await import("../../extension/reader/index.js");
   // 模拟 content.js 的接线：reader-impl 经 presenter seam 持久化/读取设置，
   // 底层仍是 chrome.runtime.sendMessage（tests/setup.js 的 stub）。
   presenter.subscribeReaderSettingsPersist(() => {

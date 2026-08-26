@@ -47,11 +47,13 @@ export { bindReaderPresenter } from "./reader-impl.js";
 export { startReadingViewSync } from "./reader-impl.js";
 export { stopReadingViewSync } from "./reader-impl.js";
 export { syncReadingViewPlayback } from "./reader-impl.js";
+export { bindReadingViewVideo } from "./reader-impl.js";
 export { noteManualReaderInteraction } from "./reader-impl.js";
 export { updateReaderFollowState } from "./reader-impl.js";
 // 阅读视图内的点击处理：章节 / 字幕项
 export { onReadingChapterClick } from "./reader-impl.js";
 export { onReadingTranscriptClick } from "./reader-impl.js";
+export { jumpReadingTarget } from "./reader-impl.js";
 // 播放器宿主挂载观察（阅读模式期间）
 export { startReaderPlayerObserver } from "./reader-impl.js";
 export { stopReaderPlayerObserver } from "./reader-impl.js";

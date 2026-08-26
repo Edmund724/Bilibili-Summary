@@ -13,7 +13,7 @@ let impl;
 async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state;
-  shell = await import("../../extension/reader/reader-impl.js");
+  shell = await import("../../extension/reader/index.js");
   pageFrame = shell;
   impl = shell;
   return { state, shell, pageFrame };
