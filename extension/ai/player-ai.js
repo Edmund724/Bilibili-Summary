@@ -47,21 +47,50 @@ export {
   isVisibleReaderControl
 };
 
+const PLAYER_CONTAINER_SELECTOR = ".bpx-player-container, #bilibili-player";
+
 function startPlayerAiQuickActionObserver() {
   if (state.playerAi.playerAiQuickActionObserver || !document.body) {
     return;
   }
 
-  const observer = new MutationObserver(() => {
+  const sync = () => {
     schedulePlayerAiQuickActionSync();
+  };
+  const observer = new MutationObserver(sync);
+
+  // 优先观察播放器容器；容器不存在时退回观察 body 的 childList（不带
+  // subtree/attributes，仅用于发现播放器挂载）。发现播放器后断开 body
+  // 观察并切换到容器，避免对整个页面 DOM 变化做回调。
+  const playerContainer = document.querySelector(PLAYER_CONTAINER_SELECTOR);
+  if (playerContainer) {
+    observer.observe(playerContainer, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["style", "class"]
+    });
+    playerAiState.setObserver(observer);
+    return;
+  }
+
+  const bodyObserver = new MutationObserver(() => {
+    const nextPlayerContainer = document.querySelector(PLAYER_CONTAINER_SELECTOR);
+    if (!nextPlayerContainer) {
+      return;
+    }
+    bodyObserver.disconnect();
+    observer.observe(nextPlayerContainer, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["style", "class"]
+    });
+    playerAiState.setObserver(observer);
+    sync();
   });
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["style", "class"]
-  });
-  playerAiState.setObserver(observer);
+  bodyObserver.observe(document.body, { childList: true });
+  playerAiState.setObserver(bodyObserver);
 }
 
 function bindPlayerAiQuickActionLayoutEvents() {

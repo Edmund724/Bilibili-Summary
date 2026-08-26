@@ -30,13 +30,17 @@ export function replaceReaderModeUrl(nextUrl) {
   }
 }
 
+const BOC_URL_CHANGE_EVENT = "boc:urlchange";
+let urlWatcherHandlerBound = false;
+let urlWatcherHistoryPatched = false;
+
 export function startUrlWatcher() {
   if (state.ui.urlWatcherStarted) {
     return;
   }
   uiState.setUrlWatcherStarted(true);
 
-  window.setInterval(() => {
+  const handleUrlChange = () => {
     const nextUrl = location.href;
     const nextSignature = computeCurrentClipSignature();
     if (nextSignature === state.clip.currentClipSignature) {
@@ -71,7 +75,31 @@ export function startUrlWatcher() {
       return;
     }
     setStatus("检测到页面变化，请点击“刷新抓取”加载当前视频字幕。");
-  }, 1200);
+  };
+
+  // URL 变化事件化：popstate/hashchange 加 history.pushState/replaceState
+  // 补丁（原始调用后派发自定义事件），取代原先的 1200ms 轮询。
+  if (!urlWatcherHandlerBound) {
+    window.addEventListener("popstate", handleUrlChange);
+    window.addEventListener("hashchange", handleUrlChange);
+    window.addEventListener(BOC_URL_CHANGE_EVENT, handleUrlChange);
+    urlWatcherHandlerBound = true;
+  }
+  if (!urlWatcherHistoryPatched) {
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+    history.pushState = function pushState(...args) {
+      const result = originalPushState.apply(this, args);
+      window.dispatchEvent(new Event(BOC_URL_CHANGE_EVENT));
+      return result;
+    };
+    history.replaceState = function replaceState(...args) {
+      const result = originalReplaceState.apply(this, args);
+      window.dispatchEvent(new Event(BOC_URL_CHANGE_EVENT));
+      return result;
+    };
+    urlWatcherHistoryPatched = true;
+  }
 }
 
 export function sendRuntimeMessage(message) {

@@ -37,7 +37,18 @@ export function isIgnoredReaderVideoCandidate(video) {
   return Boolean(video.closest(blockedSelector) || host?.closest?.(blockedSelector));
 }
 
+// 上次命中的视频元素的 WeakRef 快速缓存：getRuntimeVideoElement 在同步周期
+// 内会被调用 20+ 次，缓存命中可跳过整次 querySelectorAll("video")。
+let cachedVideoRef = null;
+
 export function getRuntimeVideoElement() {
+  if (cachedVideoRef) {
+    const cached = cachedVideoRef.deref();
+    if (cached?.isConnected && !isIgnoredReaderVideoCandidate(cached)) {
+      return cached;
+    }
+  }
+
   if (state.reader.readingVideoEl?.isConnected) {
     const currentHost = findReaderPlayerHost(state.reader.readingVideoEl);
     const currentRect = state.reader.readingVideoEl.getBoundingClientRect();
@@ -47,6 +58,7 @@ export function getRuntimeVideoElement() {
       currentRect.height > 68 &&
       !isIgnoredReaderVideoCandidate(state.reader.readingVideoEl)
     ) {
+      cachedVideoRef = new WeakRef(state.reader.readingVideoEl);
       return state.reader.readingVideoEl;
     }
   }
@@ -80,5 +92,9 @@ export function getRuntimeVideoElement() {
     .filter(({ rect }) => rect.width > 240 && rect.height > 120)
     .sort((a, b) => b.score - a.score)[0];
 
-  return visible?.item || candidates[0] || null;
+  const result = visible?.item || candidates[0] || null;
+  if (result) {
+    cachedVideoRef = new WeakRef(result);
+  }
+  return result;
 }
