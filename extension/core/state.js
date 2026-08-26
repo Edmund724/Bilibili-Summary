@@ -17,8 +17,7 @@ import { DEFAULT_SETTINGS } from "./shared-defaults.js";
 // bookkeeping fields: readingVideoEl (video-probe reads, fetcher writes),
 // readingManualScrollPauseUntil / readingProgrammaticScrollUntil
 // (ui-renderer/message-handler read and write), readingDocumentClickBound
-// (ui-renderer sets). readingPlayerRetryTimer / readingMiniDismissTimer are
-// kept because tests/reader/lifecycle.test.js still clears them in afterEach.
+// (ui-renderer sets).
 const readerState = {
   readingViewOpen: false,
   readingNativePageMode: false,
@@ -36,8 +35,6 @@ const readerState = {
   readingActiveChapterIndex: -1,
   readingNextScrollBehavior: "smooth",
   readingVideoEl: null,
-  readingPlayerRetryTimer: 0,
-  readingMiniDismissTimer: 0,
   readingDocumentClickBound: false,
   readingManualScrollPauseUntil: 0,
   readingProgrammaticScrollUntil: 0,

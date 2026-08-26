@@ -55,7 +55,7 @@ internal DOM/timer/observer/bound-state bookkeeping, not business fields. Do **n
 setters, and do **not** add copies of them to the setter table:
 
 ```
-readingVideoEl                 readingPlayerRetryTimer         readingMiniDismissTimer
+readingVideoEl
 readingDocumentClickBound      readingManualScrollPauseUntil   readingProgrammaticScrollUntil
 ```
 

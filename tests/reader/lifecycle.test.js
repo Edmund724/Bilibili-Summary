@@ -221,10 +221,6 @@ afterEach(() => {
   try {
     impl.stopReadingViewSync();
     impl.stopReaderPlayerObserver();
-    window.clearTimeout(state.reader.readingPlayerRetryTimer);
-    state.reader.readingPlayerRetryTimer = 0;
-    window.clearTimeout(state.reader.readingMiniDismissTimer);
-    state.reader.readingMiniDismissTimer = 0;
   } catch {
     // ignore
   }
