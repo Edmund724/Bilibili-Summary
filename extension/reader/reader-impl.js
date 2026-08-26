@@ -1105,7 +1105,7 @@ export function startReaderPlayerObserver() {
   });
   observer.observe(document.body, {
     childList: true,
-    subtree: true
+    subtree: false
   });
   playerObserver = observer;
 }
@@ -1387,9 +1387,9 @@ export function bindReaderPlayerControlsHover(playerHostArg = playerHost) {
     setReaderPlayerControlsVisible(false, playerHostArg);
   };
 
-  playerHostArg.addEventListener("mouseenter", showControls, true);
-  playerHostArg.addEventListener("mousemove", showControls, true);
-  playerHostArg.addEventListener("mouseleave", hideControls, true);
+  playerHostArg.addEventListener("mouseenter", showControls, { capture: true, passive: true });
+  playerHostArg.addEventListener("mousemove", showControls, { capture: true, passive: true });
+  playerHostArg.addEventListener("mouseleave", hideControls, { capture: true, passive: true });
   playerHostArg.__bocReaderControlsHoverBound = { showControls, hideControls };
   controlsHoverHost = playerHostArg;
 }

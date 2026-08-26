@@ -190,7 +190,7 @@ export function normalizeFixedFrontmatterProperties(value) {
 
 // ===== Frontmatter / note-section validation =====
 export function validateFixedFrontmatterProperties(items) {
-  var systemFrontmatterFields = new Set(DEFAULT_SETTINGS.frontmatterFields.map(function (field) { return String(field).toLowerCase(); }));
+  var systemFrontmatterFields = SYSTEM_FRONTMATTER_FIELDS;
   var customPropertyKeyPattern = /^[\p{L}\p{N}_\-\s]+$/u;
   var frontmatterDateValueRe = /^\d{4}-\d{2}-\d{2}$/;
   var seenKeys = new Set();
@@ -396,3 +396,7 @@ export const DEFAULT_SETTINGS = {
   aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice(),
   defaultModel: ""
 };
+
+const SYSTEM_FRONTMATTER_FIELDS = new Set(
+  DEFAULT_SETTINGS.frontmatterFields.map((field) => String(field).toLowerCase())
+);

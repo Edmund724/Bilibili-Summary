@@ -252,6 +252,7 @@ export function buildSubtitleSectionLines(body, chapters, settings, withHours) {
 
   const lines = [];
   const usedIndexes = new Set();
+  let subtitleCursor = 0;
 
   chapterItems.forEach((chapter, idx) => {
     const start = Number(chapter.from || 0) || 0;
@@ -264,12 +265,27 @@ export function buildSubtitleSectionLines(body, chapters, settings, withHours) {
       end = chapterTo;
     }
 
-    const sectionItems = subtitleItems.filter((item) => {
-      const from = Number(item.from || 0) || 0;
-      const inStart = from + 0.001 >= start;
+    // 推进游标跳过 from < start 的字幕（前一章已消费或未归入任何章节）
+    while (subtitleCursor < subtitleItems.length) {
+      const from = Number(subtitleItems[subtitleCursor].from || 0) || 0;
+      if (from + 0.001 >= start) {
+        break;
+      }
+      subtitleCursor++;
+    }
+
+    // 收集属于当前 chapter 的字幕
+    const sectionItems = [];
+    while (subtitleCursor < subtitleItems.length) {
+      const from = Number(subtitleItems[subtitleCursor].from || 0) || 0;
       const inEnd = end === Infinity ? true : from < end;
-      return inStart && inEnd;
-    });
+      if (!inEnd) {
+        break;
+      }
+      sectionItems.push(subtitleItems[subtitleCursor]);
+      usedIndexes.add(subtitleItems[subtitleCursor]._index);
+      subtitleCursor++;
+    }
 
     if (sectionItems.length === 0) {
       return;
@@ -280,7 +296,6 @@ export function buildSubtitleSectionLines(body, chapters, settings, withHours) {
       : "";
     lines.push(`### ${chapter.title}${chapterStamp}`, "");
     sectionItems.forEach((item) => {
-      usedIndexes.add(item._index);
       lines.push(formatSubtitleLine(item, settings, withHours));
     });
     lines.push("");
