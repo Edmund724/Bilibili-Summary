@@ -25,7 +25,7 @@ export function resetPlayerAiQuickActionRetryCount() {
 
 const PLAYER_CONTAINER_SELECTOR = ".bpx-player-container, #bilibili-player";
 
-function startPlayerAiQuickActionObserver() {
+export function startPlayerAiQuickActionObserver() {
   if (state.playerAi.playerAiQuickActionObserver || !document.body) {
     return;
   }
@@ -69,7 +69,7 @@ function startPlayerAiQuickActionObserver() {
   playerAiState.setObserver(bodyObserver);
 }
 
-function bindPlayerAiQuickActionLayoutEvents() {
+export function bindPlayerAiQuickActionLayoutEvents() {
   if (state.playerAi.playerAiQuickActionLayoutBound) {
     return;
   }
@@ -83,7 +83,7 @@ function bindPlayerAiQuickActionLayoutEvents() {
   playerAiState.setLayoutBound(true);
 }
 
-function schedulePlayerAiQuickActionSync(delayMs = 120) {
+export function schedulePlayerAiQuickActionSync(delayMs = 120) {
   if (state.playerAi.playerAiQuickActionSyncTimer) {
     window.clearTimeout(state.playerAi.playerAiQuickActionSyncTimer);
   }
@@ -150,7 +150,7 @@ function syncPlayerAiQuickActionButton() {
   playerAiQuickActionRetryCount = 0;
 }
 
-function removePlayerAiQuickActionButton() {
+export function removePlayerAiQuickActionButton() {
   if (state.playerAi.playerAiQuickActionRevealTimer) {
     window.clearTimeout(state.playerAi.playerAiQuickActionRevealTimer);
     playerAiState.setRevealTimer(0);
