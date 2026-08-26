@@ -62,26 +62,30 @@ export async function getMergedSettings(timeoutMs = 5000) {
 export async function saveSettings(settings) {
   const payload = settings && typeof settings === "object" ? settings : {};
   const syncPayload = { ...payload };
-  syncPayload.downloadFormat = normalizeDownloadFormat(syncPayload.downloadFormat);
-  syncPayload.includeHotCommentsInNote = normalizeIncludeHotCommentsInNote(syncPayload.includeHotCommentsInNote);
-  syncPayload.enablePlayerAiQuickAction = normalizeEnablePlayerAiQuickAction(syncPayload.enablePlayerAiQuickAction);
-  syncPayload.playerAiQuickPrompt = normalizePlayerAiQuickPrompt(syncPayload.playerAiQuickPrompt);
-  syncPayload.readerTheme = normalizeReaderTheme(syncPayload.readerTheme);
-  syncPayload.readerFontScale = normalizeReaderFontScale(syncPayload.readerFontScale);
-  syncPayload.readerLetterSpacing = normalizeReaderLetterSpacing(
-    syncPayload.readerLetterSpacing ?? syncPayload.readerLineHeight
-  );
-  syncPayload.readerLineHeight = normalizeReaderLineHeight(syncPayload.readerLineHeight);
-  syncPayload.readerContentWidth = normalizeReaderContentWidth(syncPayload.readerContentWidth);
-  syncPayload.readerChapterVisibility = normalizeReaderChapterVisibility(syncPayload.readerChapterVisibility);
-  syncPayload.readerTranscriptVisible = normalizeReaderTranscriptVisible(syncPayload.readerTranscriptVisible);
-  syncPayload.fixedFrontmatterProperties = normalizeFixedFrontmatterProperties(syncPayload.fixedFrontmatterProperties);
-  syncPayload.notePlaceholderSections = normalizeNotePlaceholderSections(syncPayload.notePlaceholderSections);
-  syncPayload.aiSystemPrompt = normalizeAiSystemPrompt(syncPayload.aiSystemPrompt);
-  syncPayload.aiInitialQuickPrompts = normalizeAiInitialQuickPrompts(syncPayload.aiInitialQuickPrompts);
-  syncPayload.aiPresetPrompts = normalizeAiPresetPrompts(syncPayload.aiPresetPrompts);
-  syncPayload.defaultModel = normalizeDefaultModel(syncPayload.defaultModel);
-  syncPayload.aiThinkingLevel = normalizeAiThinkingLevel(syncPayload.aiThinkingLevel);
+  // 只归一化 payload 中实际存在的 key；缺失的 key 不写入，
+  // 避免部分保存（如只传 aiThinkingLevel）把其它设置覆盖成默认值。
+  if ("downloadFormat" in syncPayload) syncPayload.downloadFormat = normalizeDownloadFormat(syncPayload.downloadFormat);
+  if ("includeHotCommentsInNote" in syncPayload) syncPayload.includeHotCommentsInNote = normalizeIncludeHotCommentsInNote(syncPayload.includeHotCommentsInNote);
+  if ("enablePlayerAiQuickAction" in syncPayload) syncPayload.enablePlayerAiQuickAction = normalizeEnablePlayerAiQuickAction(syncPayload.enablePlayerAiQuickAction);
+  if ("playerAiQuickPrompt" in syncPayload) syncPayload.playerAiQuickPrompt = normalizePlayerAiQuickPrompt(syncPayload.playerAiQuickPrompt);
+  if ("readerTheme" in syncPayload) syncPayload.readerTheme = normalizeReaderTheme(syncPayload.readerTheme);
+  if ("readerFontScale" in syncPayload) syncPayload.readerFontScale = normalizeReaderFontScale(syncPayload.readerFontScale);
+  if ("readerLetterSpacing" in syncPayload) {
+    syncPayload.readerLetterSpacing = normalizeReaderLetterSpacing(
+      syncPayload.readerLetterSpacing ?? syncPayload.readerLineHeight
+    );
+  }
+  if ("readerLineHeight" in syncPayload) syncPayload.readerLineHeight = normalizeReaderLineHeight(syncPayload.readerLineHeight);
+  if ("readerContentWidth" in syncPayload) syncPayload.readerContentWidth = normalizeReaderContentWidth(syncPayload.readerContentWidth);
+  if ("readerChapterVisibility" in syncPayload) syncPayload.readerChapterVisibility = normalizeReaderChapterVisibility(syncPayload.readerChapterVisibility);
+  if ("readerTranscriptVisible" in syncPayload) syncPayload.readerTranscriptVisible = normalizeReaderTranscriptVisible(syncPayload.readerTranscriptVisible);
+  if ("fixedFrontmatterProperties" in syncPayload) syncPayload.fixedFrontmatterProperties = normalizeFixedFrontmatterProperties(syncPayload.fixedFrontmatterProperties);
+  if ("notePlaceholderSections" in syncPayload) syncPayload.notePlaceholderSections = normalizeNotePlaceholderSections(syncPayload.notePlaceholderSections);
+  if ("aiSystemPrompt" in syncPayload) syncPayload.aiSystemPrompt = normalizeAiSystemPrompt(syncPayload.aiSystemPrompt);
+  if ("aiInitialQuickPrompts" in syncPayload) syncPayload.aiInitialQuickPrompts = normalizeAiInitialQuickPrompts(syncPayload.aiInitialQuickPrompts);
+  if ("aiPresetPrompts" in syncPayload) syncPayload.aiPresetPrompts = normalizeAiPresetPrompts(syncPayload.aiPresetPrompts);
+  if ("defaultModel" in syncPayload) syncPayload.defaultModel = normalizeDefaultModel(syncPayload.defaultModel);
+  if ("aiThinkingLevel" in syncPayload) syncPayload.aiThinkingLevel = normalizeAiThinkingLevel(syncPayload.aiThinkingLevel);
 
   await chrome.storage.sync.set(syncPayload);
 }
