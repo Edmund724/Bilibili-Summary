@@ -246,10 +246,6 @@ function buildNoteSectionPositionOptions(selectedPosition) {
     .join("");
 }
 
-function containsFrontmatterTemplateToken(value) {
-  return FRONTMATTER_TEMPLATE_TOKEN_RE.test(String(value || "").trim());
-}
-
 function readFixedPropertyValue(row, _type = normalizeFixedPropertyType(row.querySelector(".fixed-property-type")?.value)) {
   return String(row.querySelector(".fixed-property-value")?.value || "").trim();
 }

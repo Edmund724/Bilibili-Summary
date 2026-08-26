@@ -32,7 +32,13 @@ import {
 // True for B站 request hosts (API + subtitle/CDN) that need the B站 request headers
 // and should be routed through the background fetch handler. Shared by the transports.
 export function isBiliUrl(url) {
-  return /(?:api\.bilibili\.com|hdslb\.com)/.test(String(url || ""));
+  try {
+    const parsed = new URL(String(url || ""));
+    const host = parsed.hostname;
+    return host === "api.bilibili.com" || host.endsWith(".hdslb.com");
+  } catch {
+    return false;
+  }
 }
 
 // ===== transports =====
