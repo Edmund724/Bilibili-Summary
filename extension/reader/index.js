@@ -43,17 +43,8 @@ export { bindReaderStepperControl } from "./reader-impl.js";
 export { waitForVideoMetadata } from "./reader-impl.js";
 // 注册 reader 侧渲染回调以响应 presenter 通知（subtitle-fetcher 数据就绪/重置/状态）
 export { bindReaderPresenter } from "./reader-impl.js";
-// 阅读视图的播放同步：开始/停止/立即同步一次/交互挂起标记
-export { startReadingViewSync } from "./reader-impl.js";
-export { stopReadingViewSync } from "./reader-impl.js";
-export { syncReadingViewPlayback } from "./reader-impl.js";
+// 阅读视图的播放同步：开始/停止/立即同步一次/交互挂起标记（实现已移至 ./sync.js）
 export { bindReadingViewVideo } from "./reader-impl.js";
-export { noteManualReaderInteraction } from "./reader-impl.js";
-export { updateReaderFollowState } from "./reader-impl.js";
-// 阅读视图内的点击处理：章节 / 字幕项
-export { onReadingChapterClick } from "./reader-impl.js";
-export { onReadingTranscriptClick } from "./reader-impl.js";
-export { jumpReadingTarget } from "./reader-impl.js";
 // 播放器宿主挂载观察（阅读模式期间）
 export { startReaderPlayerObserver } from "./reader-impl.js";
 export { stopReaderPlayerObserver } from "./reader-impl.js";
@@ -73,5 +64,20 @@ export { isReaderViewOpen } from "./reader-impl.js";
 export { isManualScrollPaused, resetManualScrollPause } from "./reader-impl.js";
 // 阅读视图程序化滚动状态查询
 export { isProgrammaticScrolling } from "./reader-impl.js";
+// 阅读模式下的播放器宿主 / 布局闭包状态访问器（供 reader 域内部模块使用）
+export { setVideoEventsBound, isVideoEventsBound, setManualScrollPaused, setProgrammaticScrollUntil } from "./reader-impl.js";
 // 日志（reader 域与外部共用，非 reader 专属能力）
 export { logInfo, logWarn } from "../shared/logging.js";
+// 播放↔字幕同步域（原 transcript-sync.js 段，issue 06+）：定时器、滚动暂停、
+// 章节/字幕点击跳转与跟随状态均来自 ./sync.js（依赖 reader-impl.js 的 LAYOUT）。
+export { startReadingViewSync } from "./sync.js";
+export { stopReadingViewSync } from "./sync.js";
+export { syncReadingViewPlayback } from "./sync.js";
+export { setActiveReadingItems } from "./sync.js";
+export { scrollReadingRailItemIntoView } from "./sync.js";
+export { scrollReadingTranscriptItemIntoView } from "./sync.js";
+export { jumpReadingTarget } from "./sync.js";
+export { onReadingChapterClick } from "./sync.js";
+export { onReadingTranscriptClick } from "./sync.js";
+export { noteManualReaderInteraction } from "./sync.js";
+export { updateReaderFollowState } from "./sync.js";

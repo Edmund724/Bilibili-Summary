@@ -20,7 +20,7 @@ import {
   normalizeReaderTranscriptVisible,
   sleep
 } from "../core/shared-defaults.js";
-import { isReaderMode, isWatchlaterPage, cleanVideoUrl } from "../bilibili/url-utils.js";
+import { isReaderMode, isWatchlaterPage, cleanVideoUrl } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
 import {
@@ -57,7 +57,12 @@ import * as pageContext from "./page-context.js";
 // readingVideoEl is not hoisted here: it is a cross-module shared field
 // (video-probe reads, fetcher nulls it, reader writes it when binding or
 // unbinding the video), so state.reader stays its single source of truth.
-let syncTimer = 0;                 // readingSyncTimer
+//
+// syncTimer moved to sync.js with the sync domain. manualScrollPauseUntil /
+// programmaticScrollUntil stay declared here (base layer) and are written by
+// sync.js through the exported set* accessors below; this module reads them
+// exclusively through the exported is* accessors. Keeping the declarations
+// here makes both modules share one closure scope with no cross-module state.
 let playerHost = null;             // readingPlayerHost
 let mainOriginalParent = null;     // readingMainOriginalParent
 let mainOriginalNextSibling = null;// readingMainOriginalNextSibling
@@ -82,7 +87,9 @@ let programmaticScrollUntil = 0;   // readingProgrammaticScrollUntil
 // a reader-internal concern. Keeping it here (document.getElementById + throw)
 // removes reader-impl.js's static import of core/runtime.js, which would
 // otherwise form an import cycle back through subtitle/fetcher.js.
-function getReaderElement(id) {
+// Exported for the reader-internal modules (sync.js today; shared/dom-utils.js
+// in a later extraction commit).
+export function getReaderElement(id) {
   const node = document.getElementById(id);
   if (!node) {
     throw new Error(`Missing node: ${id}`);
@@ -107,9 +114,18 @@ function isVisibleReaderControl(node) {
 }
 
 // ===== reader facade accessors for closure state =====
+//
+// These accessors are the seam between the reader-impl (layout) closure and
+// the sync/lifecycle modules that depend on it. The scroll-pause variables
+// themselves moved to sync.js with the sync domain; the closure flags they
+// read (videoEventsBound) stay here.
 
 export function isReaderViewOpen() {
   return state.reader.readingViewOpen;
+}
+
+export function getPlayerHost() {
+  return playerHost;
 }
 
 export function isManualScrollPaused() {
@@ -122,6 +138,60 @@ export function resetManualScrollPause() {
 
 export function isProgrammaticScrolling() {
   return Date.now() <= programmaticScrollUntil;
+}
+
+// Writable accessors used by sync.js (its own closure variables):
+export function setManualScrollPaused(until) {
+  manualScrollPauseUntil = until;
+}
+
+export function setProgrammaticScrollUntil(until) {
+  programmaticScrollUntil = until;
+}
+
+export function setVideoEventsBound(bound) {
+  videoEventsBound = Boolean(bound);
+}
+
+export function isVideoEventsBound() {
+  return videoEventsBound;
+}
+
+// Timer/flag accessors used by sync.js's stopReadingViewSync to clear the
+// remaining layout timers it owns the lifecycle of.
+export function clearLayoutTimersForSyncStop() {
+  if (miniDismissTimer) {
+    window.clearTimeout(miniDismissTimer);
+    miniDismissTimer = 0;
+  }
+  if (controlsHideTimer) {
+    window.clearTimeout(controlsHideTimer);
+    controlsHideTimer = 0;
+  }
+  if (playerMountTimer) {
+    window.clearTimeout(playerMountTimer);
+    playerMountTimer = 0;
+  }
+  if (playerRetryTimer) {
+    window.clearTimeout(playerRetryTimer);
+    playerRetryTimer = 0;
+  }
+}
+
+// Seam to the sync domain: sync.js registers its function table here at module
+// load (registerSyncAdapter), so shell-segment functions can call sync-domain
+// functions synchronously while reader-impl.js keeps a one-way dependency
+// (reader-impl never imports sync.js, so no cycle can form). Removed in the
+// lifecycle extraction commit, where the shell segment moves to lifecycle.js
+// and imports ./sync.js directly.
+let syncAdapter = null;
+
+export function registerSyncAdapter(adapter) {
+  syncAdapter = adapter || null;
+}
+
+function callSync(name, ...args) {
+  return syncAdapter?.[name]?.(...args);
 }
 
 // ===== shell.js (reader shell) =====
@@ -145,7 +215,7 @@ export function bindReaderPresenter() {
   return subscribeReaderPresenter((kind, text) => {
     switch (kind) {
       case "reset":
-        stopReadingViewSync();
+        callSync("stopReadingViewSync");
         stopReaderPlayerObserver();
         break;
       case "subtitle-ready":
@@ -153,9 +223,9 @@ export function bindReaderPresenter() {
           moveReadingMainInline();
           renderReadingView();
           renderReadingStatus(String(text || "") || "抓取完成，阅读视图已同步最新字幕。");
-          startReadingViewSync();
+          callSync("startReadingViewSync");
           startReaderPlayerObserver();
-          syncReadingViewPlayback(true);
+          callSync("syncReadingViewPlayback", true);
         }
         break;
       case "rerender":
@@ -389,11 +459,11 @@ export function waitForVideoMetadata(timeoutMs = 5000) {
 }
 
 export function syncReaderModeAfterMount() {
-  startReadingViewSync();
+  callSync("startReadingViewSync");
   startReaderPlayerObserver();
   layoutReaderPlayerHost();
-  syncReadingViewPlayback(true);
-  updateReaderFollowState();
+  callSync("syncReadingViewPlayback", true);
+  callSync("updateReaderFollowState");
 }
 
 export function settleReaderModePresentation() {
@@ -422,9 +492,11 @@ export function closeReadingView() {
   state.reader.setNativePageMode(false);
   state.reader.setViewReady(false);
   state.reader.setSettingsExpanded(false);
-  manualScrollPauseUntil = 0;
-  programmaticScrollUntil = 0;
   state.reader.setNextScrollBehavior("smooth");
+  // Scroll deadlines moved to sync.js with the sync domain; reset them there
+  // so a later manual interaction is never swallowed by stale deadlines.
+  callSync("resetManualScrollPause");
+  callSync("setProgrammaticScrollUntil", 0);
   if (playerRetryTimer) {
     window.clearTimeout(playerRetryTimer);
     playerRetryTimer = 0;
@@ -452,7 +524,7 @@ export function closeReadingView() {
   document.body.removeAttribute("data-boc-reader-chapter-visibility");
   document.body.removeAttribute("data-boc-reader-has-chapters");
   restoreReadingMainInline();
-  stopReadingViewSync();
+  callSync("stopReadingViewSync");
   unbindReaderLayout();
   cleanupReaderPlayerHost();
   clearReaderPageFocus();
@@ -1258,10 +1330,10 @@ export function moveReadingMainInline() {
 
   if (!inlineHost.dataset.bocScrollBound) {
     const handleInlineHostManualScroll = () => {
-      if (Date.now() <= programmaticScrollUntil) {
+      if (isProgrammaticScrolling()) {
         return;
       }
-      noteManualReaderInteraction();
+      callSync("noteManualReaderInteraction");
     };
     inlineHost.addEventListener("scroll", handleInlineHostManualScroll);
     inlineHost.addEventListener("wheel", handleInlineHostManualScroll, { passive: true });
@@ -1919,7 +1991,9 @@ export function bindReadingViewVideo(video = getRuntimeVideoElement()) {
       if (latestHost && latestHost !== playerHost) {
         queueEnsureReaderPlayerMounted();
       }
-      syncReadingViewPlayback();
+      // Resolved at call time through the sync adapter, so this never
+      // creates a static reader-impl → sync.js cycle.
+      callSync("syncReadingViewPlayback");
     }
   };
   video.addEventListener("timeupdate", syncHandler);
@@ -2337,241 +2411,14 @@ export function restoreReaderPlayerContainer() {
   playerAdjustedNodes = [];
 }
 
-// ===== transcript-sync.js (playback sync) =====
-
-export function startReadingViewSync() {
-  if (syncTimer) {
-    window.clearInterval(syncTimer);
-  }
-  syncTimer = window.setInterval(() => {
-    syncReadingViewPlayback();
-  }, 250);
-}
-
-export function stopReadingViewSync() {
-  if (syncTimer) {
-    window.clearInterval(syncTimer);
-    syncTimer = 0;
-  }
-  if (miniDismissTimer) {
-    window.clearTimeout(miniDismissTimer);
-    miniDismissTimer = 0;
-  }
-  if (controlsHideTimer) {
-    window.clearTimeout(controlsHideTimer);
-    controlsHideTimer = 0;
-  }
-  closeReaderCleanup();
-  if (playerMountTimer) {
-    window.clearTimeout(playerMountTimer);
-    playerMountTimer = 0;
-  }
-  if (playerRetryTimer) {
-    window.clearTimeout(playerRetryTimer);
-    playerRetryTimer = 0;
-  }
-  stopReaderPlayerObserver();
-  unbindReaderPlayerControlsHover();
-  if (state.reader.readingVideoEl && state.reader.readingVideoEl.__bocReadingSyncHandler) {
-    const video = state.reader.readingVideoEl;
-    video.removeEventListener("timeupdate", video.__bocReadingSyncHandler);
-    video.removeEventListener("seeked", video.__bocReadingSyncHandler);
-    video.removeEventListener("loadedmetadata", video.__bocReadingSyncHandler);
-    delete video.__bocReadingSyncHandler;
-  }
-  videoEventsBound = false;
-}
-
-export function syncReadingViewPlayback(forceScroll = false) {
-  if (!state.reader.readingViewOpen) {
-    return;
-  }
-
-  if (state.reader.readingNativePageMode) {
-    layoutReaderPlayerHost();
-  }
-
-  const runtimeVideo = getRuntimeVideoElement();
-  const runtimeHost = findReaderPlayerHost(runtimeVideo);
-  if (runtimeVideo && runtimeHost) {
-    const playerChanged =
-      runtimeVideo !== state.reader.readingVideoEl || runtimeHost !== playerHost;
-    if (playerChanged) {
-      queueEnsureReaderPlayerMounted();
-    }
-  }
-
-  const video = bindReadingViewVideo(runtimeVideo || state.reader.readingVideoEl);
-  if (!video) {
-    renderReadingStatus("当前页面没有找到可联动的视频播放器。");
-    return;
-  }
-
-  const currentTime = Number(video.currentTime || 0) || 0;
-  const subtitleIndex = findActiveSubtitleIndex(currentTime);
-  const chapterIndex = findActiveChapterIndex(currentTime);
-  const changed =
-    subtitleIndex !== state.reader.readingActiveSubtitleIndex ||
-    chapterIndex !== state.reader.readingActiveChapterIndex;
-
-  setActiveReadingItems(subtitleIndex, chapterIndex, forceScroll || changed);
-  updateReaderFollowState();
-  renderReadingStatus(`当前进度 ${formatCompactTimestamp(currentTime, currentTime >= 3600)}`);
-}
-
-export function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll = false) {
-  const transcriptList = getReaderElement(ids.readingTranscriptList);
-  const chapterList = getReaderElement(ids.readingChapterList);
-  const nextTranscript = transcriptList.querySelector(`[data-index="${subtitleIndex}"]`);
-  const nextChapter = chapterList.querySelector(`[data-index="${chapterIndex}"]`);
-  const currentTranscript = transcriptList.querySelector(".boc-reading-item.is-active");
-  const currentChapter = chapterList.querySelector(".boc-reading-chapter.is-active");
-
-  if (currentTranscript && currentTranscript !== nextTranscript) {
-    currentTranscript.classList.remove("is-active");
-  }
-  if (currentChapter && currentChapter !== nextChapter) {
-    currentChapter.classList.remove("is-active");
-  }
-  if (nextTranscript) {
-    nextTranscript.classList.add("is-active");
-  }
-  if (nextChapter) {
-    nextChapter.classList.add("is-active");
-  }
-
-  if (shouldScroll && state.reader.readingAutoScroll) {
-    if (Date.now() < manualScrollPauseUntil) {
-      updateReaderFollowState();
-      state.reader.setActiveSubtitleIndex(subtitleIndex);
-      state.reader.setActiveChapterIndex(chapterIndex);
-      return;
-    }
-    if (nextTranscript) {
-      scrollReadingTranscriptItemIntoView(nextTranscript);
-    }
-    if (nextChapter) {
-      scrollReadingRailItemIntoView(nextChapter);
-    }
-  }
-
-  state.reader.setActiveSubtitleIndex(subtitleIndex);
-  state.reader.setActiveChapterIndex(chapterIndex);
-}
-
-export function scrollReadingRailItemIntoView(node) {
-  if (!node) {
-    return;
-  }
-  programmaticScrollUntil = Date.now() + 600;
-  node.scrollIntoView({
-    behavior: "smooth",
-    block: "nearest",
-    inline: "nearest"
-  });
-}
-
-export function scrollReadingTranscriptItemIntoView(node) {
-  if (!node) {
-    return;
-  }
-
-  const transcriptList = getReaderElement(ids.readingTranscriptList);
-  const inlineHost = document.getElementById("boc-reading-inline-host");
-  const listRect = transcriptList.getBoundingClientRect();
-  const itemRect = node.getBoundingClientRect();
-  if (!(listRect.height > 0) || !(itemRect.height > 0)) {
-    scrollReadingRailItemIntoView(node);
-    return;
-  }
-
-  const behavior = state.reader.readingNextScrollBehavior === "auto" ? "auto" : "smooth";
-  programmaticScrollUntil = Date.now() + (behavior === "auto" ? 120 : 800);
-  state.reader.setNextScrollBehavior("smooth");
-  if (state.reader.readingNativePageMode && inlineHost && inlineHost.scrollHeight > inlineHost.clientHeight + 8) {
-    const hostRect = inlineHost.getBoundingClientRect();
-    const computed = window.getComputedStyle(node);
-    const lineHeight = Number.parseFloat(computed.lineHeight) || itemRect.height || 32;
-    const desiredOffset = lineHeight * 2.5;
-    const targetScrollTop =
-      inlineHost.scrollTop + (itemRect.top - hostRect.top) - desiredOffset;
-    inlineHost.scrollTo({
-      top: Math.max(0, Math.round(targetScrollTop)),
-      behavior
-    });
-    return;
-  }
-  if (state.reader.readingNativePageMode || transcriptList.scrollHeight <= transcriptList.clientHeight + 8) {
-    const desiredTop = listRect.top + Math.max(72, Math.min(listRect.height * 0.24, 220));
-    const nextTop = window.scrollY + itemRect.top - desiredTop;
-    window.scrollTo({
-      top: Math.max(0, Math.round(nextTop)),
-      behavior
-    });
-    return;
-  }
-
-  const targetScrollTop =
-    transcriptList.scrollTop + (itemRect.top - listRect.top) - Math.max(48, Math.min(listRect.height * 0.24, 180));
-  transcriptList.scrollTo({
-    top: Math.max(0, Math.round(targetScrollTop)),
-    behavior
-  });
-}
-
-export function jumpReadingTarget(seconds) {
-  const video = bindReadingViewVideo();
-  if (!video) {
-    renderReadingStatus("当前页面没有找到可联动的视频播放器。");
-    return;
-  }
-
-  const nextTime = Math.max(0, Number(seconds || 0) || 0);
-  manualScrollPauseUntil = 0;
-  state.reader.setNextScrollBehavior("auto");
-  updateReaderFollowState();
-  video.currentTime = nextTime;
-  if (video.paused) {
-    video.play().catch(() => {});
-  }
-  syncReadingViewPlayback(true);
-}
-
-export function onReadingChapterClick(event) {
-  const target = event.target.closest(".boc-reading-chapter");
-  if (!target) {
-    return;
-  }
-  jumpReadingTarget(target.dataset.seconds);
-}
-
-export function onReadingTranscriptClick(event) {
-  const target = event.target.closest(".boc-reading-item");
-  if (!target) {
-    return;
-  }
-  // Don't jump if user is selecting text
-  if (window.getSelection()?.toString().trim()) {
-    return;
-  }
-  jumpReadingTarget(target.dataset.seconds);
-}
-
-export function noteManualReaderInteraction(durationMs = 3000) {
-  if (!state.reader.readingAutoScroll) {
-    updateReaderFollowState();
-    return;
-  }
-  manualScrollPauseUntil = Date.now() + durationMs;
-  updateReaderFollowState();
-}
-
-export function updateReaderFollowState() {
-  const readingView = document.getElementById(ids.readingView);
-  if (!readingView) {
-    return;
-  }
-  const mode =
-    !state.reader.readingAutoScroll ? "off" : Date.now() < manualScrollPauseUntil ? "manual" : "auto";
-  readingView.setAttribute("data-boc-reader-follow", mode);
-}
+// ===== sync.js (playback sync) =====
+//
+// The sync domain (formerly the transcript-sync.js segment) lives in
+// ./sync.js: startReadingViewSync, stopReadingViewSync, syncReadingViewPlayback,
+// setActiveReadingItems, the scroll helpers, jumpReadingTarget, the click
+// handlers, noteManualReaderInteraction and updateReaderFollowState. It
+// depends on this module (LAYOUT) and must not be imported by it.
+//
+// reader-impl.js's sync reading of the scroll-pause deadlines is exposed as
+// isManualScrollPaused() / isProgrammaticScrolling() above (see the "reader
+// facade accessors" section); the variables themselves live in sync.js.
