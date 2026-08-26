@@ -35,7 +35,7 @@ import {
 import {
   getCurrentAid,
   fetchHotComments
-} from "../bilibili/bili-api.js";
+} from "../bilibili/gateway.js";
 import { buildMarkdown } from "../notes/render.js";
 
 export function bindRuntimeEvents() {

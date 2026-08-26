@@ -3,15 +3,22 @@
 // background service worker. It centralizes the request/response orchestration that
 // previously lived in both subtitle-fetch.js and background.js, behind a transport seam.
 //
-// Contains ONLY pure orchestration + one pure transport (`bgFetchJson`). It has NO
-// chrome.* APIs, NO DOM access, does NOT touch `state`, and does NOT call
-// sendRuntimeMessage. The caller injects a `transport(url) -> Promise<json>`:
-//   - content side: contentFetchJson (sendRuntimeMessage "fetch-json") from bili-api.js
-//   - background side: bgFetchJson (direct fetch with B站 headers)
-// so both sides share one implementation and avoid behavior drift.
+// The orchestration layer is pure. Transports and runtime-facing adapters live here
+// too, split by side:
+//   - bgFetchJson: direct fetch with B站 headers (background service worker)
+//   - contentFetchJson: routes B站 requests through sendRuntimeMessage "fetch-json"
+//     so they carry the B站 headers in the background and bypass page CORS
+// The caller injects a `transport(url) -> Promise<json>` into the orchestration
+// functions, so both sides share one implementation and avoid behavior drift.
+// Content-side adapters (getCurrentAid / readRuntimeVideoDuration / fetchSubtitleBody /
+// fetchHotComments) are thin wrappers over the pure orchestration + contentFetchJson.
 
 import { formatLocalDate } from "../core/shared-defaults.js";
 import { toReadableText } from "../shared/error-helpers.js";
+import { sendRuntimeMessage, isExtensionContextInvalidated } from "../core/runtime.js";
+import { state } from "../core/state.js";
+import { getRuntimeVideoElement } from "./video-probe.js";
+import { logInfo } from "../shared/logging.js";
 import {
   buildSubtitleInfoRequests,
   buildBiliApiError,
@@ -28,7 +35,7 @@ export function isBiliUrl(url) {
   return /(?:api\.bilibili\.com|hdslb\.com)/.test(String(url || ""));
 }
 
-// ===== transport: direct fetch (background/service-worker side) =====
+// ===== transports =====
 
 export async function bgFetchJson(url) {
   const headers = new Headers();
@@ -58,6 +65,83 @@ export async function bgFetchJson(url) {
     throw new Error(`HTTP ${response.status}`);
   }
   return response.json();
+}
+
+async function fetchJson(url) {
+  if (isBiliUrl(url)) {
+    return fetchJsonInBackground(url);
+  }
+
+  const response = await fetch(url, {
+    credentials: "include",
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`请求失败：${response.status}`);
+  }
+
+  return response.json();
+}
+
+export async function contentFetchJson(url) {
+  return fetchJson(url);
+}
+
+async function fetchJsonInBackground(url) {
+  try {
+    const resp = await sendRuntimeMessage({ type: "fetch-json", url });
+    if (!resp?.ok) {
+      throw new Error(toReadableText(resp?.error, "Background fetch failed"));
+    }
+    return resp.data;
+  } catch (error) {
+    if (isExtensionContextInvalidated(error)) {
+      throw new Error("扩展刚刚更新，请刷新当前页面后重试。");
+    }
+    throw error;
+  }
+}
+
+// ===== content-side adapters =====
+
+export function getCurrentAid() {
+  let aid = Number(state.clip.aid) || 0;
+  if (!aid && typeof window !== "undefined") {
+    try {
+      aid = Number(window?.__INITIAL_STATE__?.aid) || 0;
+    } catch {}
+  }
+  return aid;
+}
+
+export function readRuntimeVideoDuration() {
+  const video = getRuntimeVideoElement();
+  const duration = Number(video?.duration);
+  if (Number.isFinite(duration) && duration > 0) {
+    return duration;
+  }
+  return 0;
+}
+
+export async function fetchSubtitleBody(url) {
+  logInfo("[BOC] fetch subtitle body", { url });
+  const body = await fetchSubtitleBodyJson(contentFetchJson, url);
+  return { body };
+}
+
+export async function fetchHotComments(count = 20) {
+  const safeCount = Math.max(0, Number(count) || 0);
+  if (!safeCount) {
+    return [];
+  }
+
+  const aid = getCurrentAid();
+  if (!aid) {
+    return [];
+  }
+
+  return fetchHotCommentsJson(contentFetchJson, aid, safeCount);
 }
 
 // ===== gateway orchestration =====
@@ -136,12 +220,12 @@ export async function fetchSubtitleBundle(transport, { bvid, cid, aid }) {
   }
 }
 
-export async function fetchSubtitleBody(transport, url) {
+export async function fetchSubtitleBodyJson(transport, url) {
   const payload = await transport(url);
   return Array.isArray(payload?.body) ? payload.body : [];
 }
 
-export async function fetchHotComments(transport, aid, count = 18) {
+export async function fetchHotCommentsJson(transport, aid, count = 18) {
   const safeAid = Number(aid || 0) || 0;
   const safeCount = Math.max(0, Number(count) || 0);
   if (!safeAid || !safeCount) {

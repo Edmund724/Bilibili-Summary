@@ -33,13 +33,11 @@ import {
   setStatus
 } from "../ui/ui-renderer.js";
 import {
+  fetchVideoMeta as gatewayFetchVideoMeta,
+  fetchSubtitleBundle as gatewayFetchSubtitleBundle,
   fetchSubtitleBody,
   readRuntimeVideoDuration,
   contentFetchJson
-} from "../bilibili/bili-api.js";
-import {
-  fetchVideoMeta as gatewayFetchVideoMeta,
-  fetchSubtitleBundle as gatewayFetchSubtitleBundle
 } from "../bilibili/gateway.js";
 import {
   readVideoDescription,
