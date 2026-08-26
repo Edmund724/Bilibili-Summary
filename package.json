@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build:content-classic": "node scripts/build-content-classic.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run"
   },
   "repository": {
     "type": "git",
@@ -23,6 +23,8 @@
   },
   "homepage": "https://github.com/Edmund724/Bilibili-Summary#readme",
   "devDependencies": {
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
+    "vitest": "^4.1.11"
   }
 }
