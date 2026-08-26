@@ -33,6 +33,7 @@ import {
   schedulePlayerAiQuickActionSync
 } from "../ai/player-ai.js";
 import { refreshClip } from "../subtitle/fetcher.js";
+import { subscribeReaderPresenter } from "./presenter.js";
 import {
   getReaderPlayerWrapNode,
   hasNativeReaderPlayerLayoutIssue,
@@ -74,6 +75,39 @@ export function maybeRefreshReaderSubtitleInBackground() {
         renderReadingStatus(`字幕加载失败：${getErrorMessage(error)}`);
       }
     });
+  });
+}
+
+// Subtitle fetcher publishes reader data changes through the presenter seam;
+// the reader side registers a single handler that performs the rendering.
+export function bindReaderPresenter() {
+  return subscribeReaderPresenter((kind, text) => {
+    switch (kind) {
+      case "reset":
+        stopReadingViewSync();
+        stopReaderPlayerObserver();
+        break;
+      case "subtitle-ready":
+        if (state.reader.readingViewOpen) {
+          moveReadingMainInline();
+          renderReadingView();
+          renderReadingStatus(String(text || "") || "抓取完成，阅读视图已同步最新字幕。");
+          startReadingViewSync();
+          startReaderPlayerObserver();
+          syncReadingViewPlayback(true);
+        }
+        break;
+      case "rerender":
+        if (state.reader.readingViewOpen) {
+          renderReadingView();
+        }
+        break;
+      case "status":
+        renderReadingStatus(String(text || ""));
+        break;
+      default:
+        break;
+    }
   });
 }
 
