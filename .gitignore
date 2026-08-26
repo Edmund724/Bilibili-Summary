@@ -8,6 +8,7 @@ node_modules/
 /release/
 /dist/
 /build/
+/coverage/
 
 # Generated extension files
 /extension/entry/content-classic.js
