@@ -25,9 +25,9 @@ import {
   resolveConversationStorageKey,
   normalizeConversationTitle,
   doesConversationMatchCurrentContext,
-  extractPageIndexFromUrl,
   MAX_SAVED_CONVERSATIONS
 } from "../ai/conversation.js";
+import { extractPageIndexFromUrl } from "../bilibili/video-id-shared.js";
 
 // ---------------------------------------------------------------------------
 // 纯函数（直接 export，无需 store 实例即可测试）
