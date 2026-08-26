@@ -1,7 +1,7 @@
 import { setMessage } from "../ui/ui-message.js";
 import { DEFAULT_SETTINGS, normalizeDownloadFormat } from "../core/shared-defaults.js";
 import { state, clipState, readerState } from "../core/state.js";
-import { extractBvid, extractPageIndex, computeCurrentClipSignature } from "../bilibili/url-utils.js";
+import { extractBvid, computeCurrentClipSignature } from "../bilibili/url-utils.js";
 import { getSettings, byId } from "../core/runtime.js";
 import { ensureRunActive, isStaleRunError, getErrorMessage, toReadableText } from "../shared/error-helpers.js";
 import {
@@ -22,15 +22,8 @@ import {
   loadSubtitleFromCache,
   getSubtitleCacheKey
 } from "./cache.js";
-import {
-  extractOid,
-  hasExplicitPageParam,
-  pickPageFromPages,
-  pickCidFromPages,
-  pickDurationFromPages,
-  pickPageIndexFromOid,
-  moveReadingMainInline
-} from "../reader/page-frame.js";
+import { resolvePageContext } from "../reader/page-context.js";
+import { moveReadingMainInline } from "../reader/page-frame.js";
 import {
   logInfo,
   logWarn,
@@ -181,9 +174,6 @@ export async function refreshClip() {
       throw new Error("当前页面不是标准 BV 视频地址，无法抓取字幕。");
     }
 
-    const pageIndex = extractPageIndex(location.href);
-    const oid = extractOid(location.href);
-    const hasPageParam = hasExplicitPageParam(location.href);
     const meta = await retryAsync(() => fetchVideoMeta(state.clip.bvid), 2, 250);
     ensureRunActive(runId);
 
@@ -201,33 +191,15 @@ export async function refreshClip() {
     clipState.setDescription(meta.description || readVideoDescription());
     clipState.setPageCount(Array.isArray(meta.pages) ? meta.pages.length : 0);
     clipState.setCurrentClipSignature(computeCurrentClipSignature());
-    let resolvedPageIndex = pageIndex;
-    if ((meta.pages || []).length > 1 && !hasPageParam) {
-      const pageIndexFromOid = pickPageIndexFromOid(meta.pages, oid, {
-        aid: meta.aid,
-        defaultCid: meta.defaultCid
-      });
-      if (pageIndexFromOid > 0) {
-        resolvedPageIndex = pageIndexFromOid;
-        logInfo("[BOC] resolved page index from oid", {
-          oid,
-          resolvedPageIndex
-        });
-      } else {
-        // B 站多分P中，P1 常见为无 ?p= 参数；watchlater 等页面可能改用 oid 标识当前分P。
-        resolvedPageIndex = 1;
-        logInfo("[BOC] multi-page video without p param or valid oid, fallback to P1", {
-          oid
-        });
-      }
-    }
 
-    const currentPage = pickPageFromPages(meta.pages, resolvedPageIndex);
+    // 分 P / cid / duration 解析统一走 page-context seam；结果由本模块写入 state.clip。
+    const pageContext = resolvePageContext(location.href, meta);
+    const resolvedPageIndex = pageContext.pageIndex;
     clipState.setPageIndex(resolvedPageIndex);
-    clipState.setPageTitle(currentPage?.part || "");
-    clipState.setCid(currentPage?.cid || pickCidFromPages(meta.pages, resolvedPageIndex, meta.defaultCid));
-    clipState.setCidSource("meta-pages");
-    clipState.setVideoDuration(pickDurationFromPages(meta.pages, resolvedPageIndex, meta.defaultDuration));
+    clipState.setPageTitle(pageContext.pageTitle);
+    clipState.setCid(pageContext.cid);
+    clipState.setCidSource(pageContext.cidSource);
+    clipState.setVideoDuration(pageContext.duration);
     if (!(state.clip.videoDuration > 0)) {
       clipState.setVideoDuration(readRuntimeVideoDuration());
     }
