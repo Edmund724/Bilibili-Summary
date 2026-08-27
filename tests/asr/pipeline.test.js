@@ -238,7 +238,7 @@ describe("openai-transcriptions 适配器", () => {
 });
 
 describe("pipeline 时间戳合成与偏移合并", () => {
-  it("11 分钟视频 10 分钟片 → 2 片，全局偏移正确且递增", async () => {
+  it("25 分钟视频 20 分钟片 → 2 片，全局偏移正确且递增", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -268,18 +268,18 @@ describe("pipeline 时间戳合成与偏移合并", () => {
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      durationSec: 11 * 60,
+      durationSec: 25 * 60,
       provider: { ...OPENAI_PROVIDER, supportsTimestamps: true },
       runId: getValidRunId(),
       onProgress: vi.fn(),
-      chunkHost: makeSynthChunkHost({ durationSec: 11 * 60 })
+      chunkHost: makeSynthChunkHost({ durationSec: 25 * 60 })
     });
 
     expect(body).toEqual([
       { from: 0, to: 1, content: "第一句" },
       { from: 2, to: 3, content: "第二句" },
-      { from: 600, to: 601, content: "第三句" },
-      { from: 601.5, to: 602.5, content: "第四句" }
+      { from: 1200, to: 1201, content: "第三句" },
+      { from: 1201.5, to: 1202.5, content: "第四句" }
     ]);
     // from 严格递增
     for (let i = 1; i < body.length; i += 1) {
@@ -304,7 +304,7 @@ describe("pipeline 时间戳合成与偏移合并", () => {
       chunkHost: makeSynthChunkHost({ durationSec: 10 * 60 })
     });
 
-    // 10 分钟整段 → 1 片（统一 10 分钟片）
+    // 10 分钟整段 → 1 片（统一 20 分钟片）
     expect(body).toEqual([{ from: 0, to: 600, content: "整片文本" }]);
   });
 

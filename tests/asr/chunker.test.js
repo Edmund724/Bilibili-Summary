@@ -138,8 +138,8 @@ describe("encodeWav 编码器正确性", () => {
 });
 
 describe("buildChunkPlan 各平台规则", () => {
-  it("openai-transcriptions 统一 10 分钟一片", () => {
-    expect(buildChunkPlan("openai-transcriptions")).toEqual({ chunkSeconds: 10 * 60 });
+  it("openai-transcriptions 统一 20 分钟一片", () => {
+    expect(buildChunkPlan("openai-transcriptions")).toEqual({ chunkSeconds: 20 * 60 });
   });
 
   it("未知类型保守按不切处理", () => {
