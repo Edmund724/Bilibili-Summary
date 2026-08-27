@@ -532,19 +532,26 @@ async function maybeRunAsrFallback({ runId }) {
     }
 
     setStatus(`无字幕轨，正在使用语音识别（${platformName}）生成字幕…`);
+    let emptyDiag = "";
     const body = await runAsrPipeline({
       bvid: state.clip.bvid,
       cid: state.clip.cid,
       durationSec: state.clip.videoDuration,
       provider,
       runId,
-      onProgress: (msg) => setStatus(msg)
+      onProgress: (msg) => setStatus(msg),
+      onEmptyDiagnostic: (diagText) => {
+        emptyDiag = diagText;
+      }
     });
     ensureRunActive(runId);
 
-    // 空结果：全部为空白 → 返回 "empty"，调用点呈现"未识别到语音内容"文案
+    // 空结果：全部为空白 → 返回 "empty"，调用点呈现"未识别到语音内容"文案；
+    // 有诊断信息时直接拼进状态栏，用户转述即可定位问题层
     if (!Array.isArray(body) || body.length === 0) {
-      setStatus("未识别到语音内容，该视频可能没有人声。若视频确有人声，请在设置页开启调试日志后重试，并查看控制台 [BOC] 日志。");
+      setStatus(
+        `未识别到语音内容，该视频可能没有人声。${emptyDiag ? `（诊断：${emptyDiag}）` : ""}`
+      );
       return "empty";
     }
 

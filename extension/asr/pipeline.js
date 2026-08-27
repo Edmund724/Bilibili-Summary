@@ -16,7 +16,6 @@ import { transcribe as transcribeStepfunSse } from "./adapters/stepfun-sse.js";
 import { ensureRunActive } from "../shared/error-helpers.js";
 import { retryAsync } from "../subtitle/fetcher.js";
 import { createOffscreenDecodeHost } from "./offscreen-bridge.js";
-import { logWarn } from "../shared/logging.js";
 
 // type → 适配器映射。映射表缺 type 时 throw 明确错误，避免静默走错分支。
 // 并发策略：映射表项的 concurrency 元数据驱动（见 runAsrPipeline）；
@@ -139,7 +138,7 @@ export function mergeChunkResults(chunks, results) {
 // → [{from,to,content}]（空数组表示未识别到语音内容）。
 // decodeHost 为可选注入的解码宿主（测试传合成宿主，生产默认走
 // createOffscreenDecodeHost：一次全量解码 + 分块回传）。
-export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, onProgress, decodeHost }) {
+export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, onProgress, decodeHost, onEmptyDiagnostic }) {
   const type = String(provider?.type || "").trim();
   const entry = ADAPTERS[type];
   if (!entry) {
@@ -196,14 +195,23 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
   const progress = (msg) => onProgress?.(`${msg}（共 ${total} 片）`);
   const collectResults = (results) => {
     const merged = mergeChunkResults(chunks, results);
-    if (merged.length === 0) {
+    if (merged.length === 0 && typeof onEmptyDiagnostic === "function") {
       // 空结果诊断：各片转写都"成功"但没文本。静音场景已在解码层显式报错，
-      // 这里剩语言不匹配、平台返回空文本等，留日志供反馈排查。
-      logWarn("[BOC] asr 空结果诊断", {
-        type,
-        model: provider?.model || "",
-        chunkTextLens: results.map((r) => String(r?.text || "").length)
-      });
+      // 剩下的事件级证据随适配器 _stepfunDiag 上来，直接拼进状态栏文案。
+      const stepfunDiags = results
+        .map((r) => r?._stepfunDiag)
+        .filter(Boolean)
+        .slice(0, 1);
+      let diagText =
+        `分片 ${chunks.length} 片、各片文本长度[${results.map((r) => String(r?.text || "").length).join(",")}]`;
+      if (stepfunDiags[0]) {
+        diagText += `；阶跃事件诊断 ${JSON.stringify(stepfunDiags[0])}`;
+      }
+      try {
+        onEmptyDiagnostic(diagText.slice(0, 400));
+      } catch {
+        // 诊断回调异常不影响主流程
+      }
     }
     return merged;
   };

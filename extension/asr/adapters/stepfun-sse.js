@@ -279,20 +279,18 @@ export async function transcribe({ wavBlob, startSec, durationSec, provider, sig
   }
 
   const result = buildResult({ textParts, segments, doneEvent });
-  // 转写事件到了但聚合文本为空：无条件打印诊断（不受调试开关限制），
-  // 用于区分"服务端真听不到"还是"事件结构与预期不一致"。出现频率极低
-  //（仅每片一次且仅在空文本时），不构成刷屏。
+  // 转写事件到了但聚合文本为空：把事件级诊断附到结果上（pipeline 汇总进
+  // 空结果文案，直接在状态栏可见），并同步打一条控制台日志。
   if (!result.text) {
-    console.info(
-      "[BOC][stepfun] 本片转写完成但文本为空",
-      {
-        transcriptEventCount,
-        deltaCount: textParts.length,
-        hasDoneEvent: Boolean(doneEvent),
-        doneKeys: doneEvent ? Object.keys(doneEvent).join(",") : "",
-        firstDataLineSample
-      }
-    );
+    const diag = {
+      transcriptEventCount,
+      deltaCount: textParts.length,
+      hasDoneEvent: Boolean(doneEvent),
+      doneKeys: doneEvent ? Object.keys(doneEvent).join(",") : "",
+      firstDataLineSample
+    };
+    console.info("[BOC][stepfun] 本片转写完成但文本为空", diag);
+    result._stepfunDiag = diag;
   }
   // 流自然读完或遇哨兵：把聚合文本作为结果返回
   return result;
