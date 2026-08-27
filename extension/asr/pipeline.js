@@ -142,10 +142,8 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
   }
   const host = chunkHost || createOffscreenChunkHost();
 
-  // 切片计划：openai-transcriptions 带时间戳 10 分钟一片、无时间戳按
-  // settings.asrChunkMinutes（默认 3 分钟）。
-  const chunkMinutes = Number(provider?.chunkMinutes || 0) || 3;
-  const plan = buildChunkPlan(type, provider?.supportsTimestamps === true, chunkMinutes);
+  // 切片计划：openai-transcriptions 统一 10 分钟一片。
+  const plan = buildChunkPlan(type);
 
   // 取音轨
   ensureRunActive(runId);

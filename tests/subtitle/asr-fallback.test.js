@@ -118,8 +118,7 @@ beforeEach(async () => {
   // 这里 mock sendMessage 对 get-settings 返回自定义设置（其余消息保持默认 ok:true）
   const syncSettings = {
     asrAutoFallback: true,
-    activeAsrProviderId: "p1",
-    asrChunkMinutes: 3
+    activeAsrProviderId: "p1"
   };
   globalThis.__syncSettings = syncSettings;
   globalThis.chrome.runtime.sendMessage.mockImplementation((message, callback) => {

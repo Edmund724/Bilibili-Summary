@@ -138,18 +138,12 @@ describe("encodeWav 编码器正确性", () => {
 });
 
 describe("buildChunkPlan 各平台规则", () => {
-  it("openai-transcriptions 带时间戳 10 分钟一片", () => {
-    expect(buildChunkPlan("openai-transcriptions", true)).toEqual({ chunkSeconds: 10 * 60 });
-  });
-
-  it("openai-transcriptions 无时间戳按 chunkMinutes（默认 3 分钟）", () => {
-    expect(buildChunkPlan("openai-transcriptions", false)).toEqual({ chunkSeconds: 3 * 60 });
-    expect(buildChunkPlan("openai-transcriptions", false, 5)).toEqual({ chunkSeconds: 5 * 60 });
-    expect(buildChunkPlan("openai-transcriptions", false, 0)).toEqual({ chunkSeconds: 3 * 60 });
+  it("openai-transcriptions 统一 10 分钟一片", () => {
+    expect(buildChunkPlan("openai-transcriptions")).toEqual({ chunkSeconds: 10 * 60 });
   });
 
   it("未知类型保守按不切处理", () => {
-    expect(buildChunkPlan("mystery-type", true)).toEqual({ chunkSeconds: 0 });
+    expect(buildChunkPlan("mystery-type")).toEqual({ chunkSeconds: 0 });
   });
 });
 
@@ -184,7 +178,7 @@ describe("decideChunks 边界与连续性", () => {
     expect(chunks[1]).toEqual({ index: 1, startSec: 25 * 60, durationSec: 60 });
   });
 
-  it("8 分钟 chunkMinutes=3 → 3 片（3 + 3 + 2）", () => {
+  it("8 分钟 3 分钟片 → 3 片（3 + 3 + 2）", () => {
     const chunks = decideChunks(8 * 60, { chunkSeconds: 3 * 60 });
     expect(chunks.length).toBe(3);
     expect(chunks[0].durationSec).toBe(3 * 60);

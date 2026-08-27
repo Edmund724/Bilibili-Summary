@@ -269,7 +269,7 @@ describe("pipeline 时间戳合成与偏移合并", () => {
       bvid: "BV1test",
       cid: "101",
       durationSec: 11 * 60,
-      provider: { ...OPENAI_PROVIDER, chunkMinutes: 10, supportsTimestamps: true },
+      provider: { ...OPENAI_PROVIDER, supportsTimestamps: true },
       runId: getValidRunId(),
       onProgress: vi.fn(),
       chunkHost: makeSynthChunkHost({ durationSec: 11 * 60 })
@@ -298,13 +298,13 @@ describe("pipeline 时间戳合成与偏移合并", () => {
       bvid: "BV1test",
       cid: "101",
       durationSec: 10 * 60,
-      provider: { ...OPENAI_PROVIDER, chunkMinutes: 10, supportsTimestamps: false },
+      provider: { ...OPENAI_PROVIDER, supportsTimestamps: false },
       runId: getValidRunId(),
       onProgress: vi.fn(),
       chunkHost: makeSynthChunkHost({ durationSec: 10 * 60 })
     });
 
-    // 10 分钟整段 → 1 片（无时间戳按 chunkMinutes 10 分钟）
+    // 10 分钟整段 → 1 片（统一 10 分钟片）
     expect(body).toEqual([{ from: 0, to: 600, content: "整片文本" }]);
   });
 
@@ -323,7 +323,7 @@ describe("pipeline 时间戳合成与偏移合并", () => {
       bvid: "BV1test",
       cid: "101",
       durationSec: 120,
-      provider: { ...OPENAI_PROVIDER, chunkMinutes: 10, supportsTimestamps: true },
+      provider: { ...OPENAI_PROVIDER, supportsTimestamps: true },
       runId: getValidRunId(),
       chunkHost: makeSynthChunkHost({ durationSec: 120 })
     });
@@ -355,7 +355,7 @@ describe("pipeline 并发上限与 runId 作废", () => {
         bvid: "BV1test",
         cid: "101",
         durationSec: 11 * 60,
-        provider: { ...OPENAI_PROVIDER, chunkMinutes: 10, supportsTimestamps: true },
+        provider: { ...OPENAI_PROVIDER, supportsTimestamps: true },
         runId: 0,
         onProgress: vi.fn(),
         chunkHost: makeSynthChunkHost({ durationSec: 11 * 60 })
@@ -402,7 +402,7 @@ describe("pipeline 重试与未知类型", () => {
       bvid: "BV1test",
       cid: "101",
       durationSec: 60,
-      provider: { ...OPENAI_PROVIDER, chunkMinutes: 10, supportsTimestamps: true },
+      provider: { ...OPENAI_PROVIDER, supportsTimestamps: true },
       runId: 0,
       chunkHost: makeSynthChunkHost({ durationSec: 60 })
     });
@@ -442,7 +442,7 @@ describe("pipeline 空结果", () => {
       bvid: "BV1test",
       cid: "101",
       durationSec: 60,
-      provider: { ...OPENAI_PROVIDER, chunkMinutes: 10, supportsTimestamps: false },
+      provider: { ...OPENAI_PROVIDER, supportsTimestamps: false },
       runId: getValidRunId(),
       chunkHost: makeSynthChunkHost({ durationSec: 60 })
     });

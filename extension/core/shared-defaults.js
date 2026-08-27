@@ -155,8 +155,8 @@ export const ASR_PROVIDER_PRESETS = [
     ],
     maxBytes: 50 * 1024 * 1024, // 50MB
     maxDurationSec: 60 * 60, // 1 小时
-    supportsTimestamps: false, // verbose_json 不支持，只返回 { text }
-    note: "模型名从下拉四选一；Qwen/Qwen3-ASR-1.7B 为收费模型。verbose_json 不支持，只返回纯文本，切片时长按 asrChunkMinutes。"
+    supportsTimestamps: true,
+    note: "模型名从下拉四选一；Qwen/Qwen3-ASR-1.7B 为收费模型。"
   },
   {
     id: "local-whisper",
@@ -484,8 +484,7 @@ export const DEFAULT_SETTINGS = {
   // ===== ASR（语音转写）回退配置 =====
   asrProviders: [],          // [{id, name, type, baseUrl, model, maxBytes, maxDurationSec, ...}]
   activeAsrProviderId: "",   // 当前选用的 ASR 平台 id
-  asrAutoFallback: true,     // 无字幕轨时自动走 ASR；false 则仅提示
-  asrChunkMinutes: 3         // 无时间戳平台（SiliconFlow）的切片时长（分钟）
+  asrAutoFallback: true     // 无字幕轨时自动走 ASR；false 则仅提示
 };
 
 const SYSTEM_FRONTMATTER_FIELDS = new Set(

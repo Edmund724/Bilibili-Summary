@@ -29,7 +29,7 @@ import {
 // ===== 设置归一化 + 存储 =====
 
 // ASR 默认项归一化：asrProviders 列表逐项走 normalizeAsrProvider，
-// asrAutoFallback/asrChunkMinutes 标量各自兜底。
+// asrAutoFallback 标量兜底。
 function normalizeAsrProvidersList(value) {
   if (!Array.isArray(value)) return [];
   return value.map(normalizeAsrProvider).filter(Boolean);
@@ -37,12 +37,6 @@ function normalizeAsrProvidersList(value) {
 
 function normalizeAsrAutoFallback(value) {
   return value !== false; // 默认 true，仅显式 false 关闭
-}
-
-function normalizeAsrChunkMinutes(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0) return 3;
-  return Math.floor(n);
 }
 
 export async function getMergedSettings(timeoutMs = 5000) {
@@ -76,7 +70,6 @@ export async function getMergedSettings(timeoutMs = 5000) {
   merged.asrProviders = normalizeAsrProvidersList(merged.asrProviders);
   merged.activeAsrProviderId = String(merged.activeAsrProviderId || "").trim();
   merged.asrAutoFallback = normalizeAsrAutoFallback(merged.asrAutoFallback);
-  merged.asrChunkMinutes = normalizeAsrChunkMinutes(merged.asrChunkMinutes);
 
   return merged;
 }
@@ -116,7 +109,6 @@ export async function saveSettings(settings) {
   if ("asrProviders" in syncPayload) syncPayload.asrProviders = normalizeAsrProvidersList(syncPayload.asrProviders);
   if ("activeAsrProviderId" in syncPayload) syncPayload.activeAsrProviderId = String(syncPayload.activeAsrProviderId || "").trim();
   if ("asrAutoFallback" in syncPayload) syncPayload.asrAutoFallback = normalizeAsrAutoFallback(syncPayload.asrAutoFallback);
-  if ("asrChunkMinutes" in syncPayload) syncPayload.asrChunkMinutes = normalizeAsrChunkMinutes(syncPayload.asrChunkMinutes);
 
   await chrome.storage.sync.set(syncPayload);
 }

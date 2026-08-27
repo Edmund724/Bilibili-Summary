@@ -81,12 +81,11 @@ export function decideChunks(totalDurationSec, plan) {
 }
 
 // 按 provider 类型计算切片计划（分钟 → 秒）：
-//   openai-transcriptions：带时间戳 10 分钟一片；无时间戳按 chunkMinutes（默认 3）分钟。
+//   openai-transcriptions：统一 10 分钟一片。
 // 未知类型保守按不切处理。
-export function buildChunkPlan(providerType, supportsTimestamps, chunkMinutes) {
+export function buildChunkPlan(providerType) {
   if (providerType === "openai-transcriptions") {
-    const minutes = supportsTimestamps ? 10 : chunkMinutes || 3;
-    return { chunkSeconds: minutes * 60 };
+    return { chunkSeconds: 10 * 60 };
   }
   return { chunkSeconds: 0 };
 }

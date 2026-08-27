@@ -94,7 +94,6 @@ const elements = {
   asrProvidersEmpty: document.getElementById("asrProvidersEmpty"),
   addAsrProviderBtn: document.getElementById("addAsrProviderBtn"),
   asrAutoFallback: document.getElementById("asrAutoFallback"),
-  asrChunkMinutes: document.getElementById("asrChunkMinutes"),
   aiSystemPrompt: document.getElementById("aiSystemPrompt"),
   aiInitialQuickPrompts: document.querySelectorAll(".ai-initial-quick-prompt"),
   saveBtn: document.getElementById("saveBtn"),
@@ -159,16 +158,6 @@ async function init() {
   elements.asrAutoFallback?.addEventListener("change", async () => {
     await sendRuntimeMessage({ type: "save-settings", settings: { asrAutoFallback: elements.asrAutoFallback.checked } });
   });
-  // ASR：切片时长即时持久化；合理范围 1-30 分钟，越界提示并修正回界内
-  elements.asrChunkMinutes?.addEventListener("change", async () => {
-    const raw = Number(elements.asrChunkMinutes.value);
-    const clamped = Math.min(30, Math.max(1, Math.floor(raw) || 1));
-    if (!Number.isFinite(raw) || clamped !== raw) {
-      elements.asrChunkMinutes.value = String(clamped);
-      setStatus("切片时长已在 1-30 分钟内修正", true);
-    }
-    await sendRuntimeMessage({ type: "save-settings", settings: { asrChunkMinutes: clamped } });
-  });
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === "sync" && "defaultModel" in changes) {
       const next = String(changes.defaultModel.newValue || "").trim();
@@ -181,9 +170,6 @@ async function init() {
     }
     if (areaName === "sync" && "asrAutoFallback" in changes) {
       elements.asrAutoFallback.checked = changes.asrAutoFallback.newValue !== false;
-    }
-    if (areaName === "sync" && "asrChunkMinutes" in changes) {
-      elements.asrChunkMinutes.value = String(Number(changes.asrChunkMinutes.newValue) || 3);
     }
   });
 }
@@ -214,7 +200,6 @@ async function loadSettings() {
 
   // ASR 配置
   elements.asrAutoFallback.checked = settings.asrAutoFallback !== false;
-  elements.asrChunkMinutes.value = String(Number(settings.asrChunkMinutes) || 3);
   const asrProviders = await loadAsrProviders();
   renderAsrProviders(elements.asrProvidersList, elements.asrProvidersEmpty, asrProviders, {
     presets: asrPresets,

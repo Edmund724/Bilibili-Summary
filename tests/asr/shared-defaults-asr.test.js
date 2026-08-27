@@ -40,8 +40,8 @@ describe("ASR_PROVIDER_PRESETS", () => {
     expect(getAsrPresetById("local-whisper").type).toBe("openai-transcriptions");
   });
 
-  it("SiliconFlow verbose_json 不支持，supportsTimestamps=false", () => {
-    expect(getAsrPresetById("siliconflow-sensevoice").supportsTimestamps).toBe(false);
+  it("SiliconFlow 已支持返回时间戳，supportsTimestamps=true", () => {
+    expect(getAsrPresetById("siliconflow-sensevoice").supportsTimestamps).toBe(true);
   });
 
   it("SiliconFlow 提供 4 个 ASR 模型下拉选项（Qwen3 标明收费）", () => {
@@ -164,8 +164,5 @@ describe("DEFAULT_SETTINGS ASR 默认项", () => {
   });
   it("asrAutoFallback 默认 true（无字幕自动走 ASR）", () => {
     expect(DEFAULT_SETTINGS.asrAutoFallback).toBe(true);
-  });
-  it("asrChunkMinutes 默认 3", () => {
-    expect(DEFAULT_SETTINGS.asrChunkMinutes).toBe(3);
   });
 });
