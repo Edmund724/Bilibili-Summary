@@ -352,9 +352,12 @@ async function probeStepfunSse({ baseUrl, apiKey, model }) {
     return { ok: true };
   }
 
-  // 非 2xx：解析响应体。阶跃的两个典型错误：
+  // 非 2xx：解析响应体。阶跃的三个典型错误：
   //  1) "model stepaudio-2.5-asr not supported" —— 端点或模型名错误（误导性文案）
-  //  2) 4xx 无错误体 —— Plan key 无声失败，需主动引导检查 Key 类型
+  //  2) 402 quota_exceeded —— /v1 音频端点按音频时长单独计费，文本额度与
+  //     Step Plan 订阅 Credit 都不通用；Plan 用户可把 baseUrl 改为
+  //     https://api.stepfun.com/step_plan 走订阅专属端点 step_plan/v1/audio/asr/sse
+  //  3) 4xx 无错误体 —— Plan key 无声失败，需主动引导检查 Key 类型
   let detail = "";
   try {
     detail = (await response.text()).slice(0, 500);
@@ -364,6 +367,13 @@ async function probeStepfunSse({ baseUrl, apiKey, model }) {
     return {
       ok: false,
       error: `端点或模型名错误（HTTP ${response.status}）: ${detail}`
+    };
+  }
+
+  if (response.status === 402 || detail.includes("quota_exceeded")) {
+    return {
+      ok: false,
+      error: `配额校验未通过（HTTP 402 quota_exceeded）。该端点按音频时长单独计费，与文本模型额度、Step Plan 订阅 Credit 不共享——请确认是普通按量 Key 且有按量余额；若是 Step Plan 订阅用户，可把 baseUrl 改为 https://api.stepfun.com/step_plan 走订阅专属端点。`
     };
   }
 

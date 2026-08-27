@@ -115,14 +115,21 @@ export function parseSegmentsFromEvent(event) {
   return out;
 }
 
-// 读取响应体并解析错误文案（三类坑的口径与探针 probeStepfunSse 一致）：
+// 读取响应体并解析错误文案（口径与探针 probeStepfunSse 一致）：
 //   - "not supported" → 端点或模型名错误；
+//   - 402 / quota_exceeded → 计费通道引导（/v1 音频端点只吃按量余额，
+//     文本可用 ≠ 音频可用；Step Plan Credit 需走 step_plan/v1 专属路径）；
 //   - 响应体为空 → Key 等级引导（Normal / Plan）。
 // 返回 { message } 供抛错透出。
 export function describeHttpError(response, rawText) {
   const detail = String(rawText || "").slice(0, 500);
   if (detail.includes("not supported")) {
     return { message: `端点或模型名错误（HTTP ${response.status}）: ${detail}` };
+  }
+  if (response.status === 402 || detail.includes("quota_exceeded")) {
+    return {
+      message: `配额校验未通过（HTTP 402 quota_exceeded）。该端点按音频时长单独计费，与文本模型额度、Step Plan 订阅 Credit 不共享——请确认是普通按量 Key 且有按量余额；若是 Step Plan 订阅用户，可把 baseUrl 改为 https://api.stepfun.com/step_plan 走订阅专属端点。`
+    };
   }
   if (!detail.trim()) {
     return {

@@ -260,6 +260,19 @@ describe("stepfun-sse 错误处理", () => {
     ).rejects.toThrow("Normal 等级");
   });
 
+  it("402 quota_exceeded → 计费通道引导文案（按量余额 / step_plan 端点）", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 402,
+      body: null,
+      text: async () => JSON.stringify({ error: { message: "You exceeded your current quota", type: "quota_exceeded" } })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      adapter.transcribe({ wavBlob: new Blob([new Uint8Array(4)]), startSec: 0, durationSec: 60, provider: STEPFUN_PROVIDER })
+    ).rejects.toThrow(/quota_exceeded.*step_plan/s);
+  });
+
   it("其他 4xx 带响应体 → HTTP 码 + 响应体片段", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: false,

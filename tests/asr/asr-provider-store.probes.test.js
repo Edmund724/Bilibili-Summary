@@ -225,6 +225,19 @@ describe("stepfun-sse 探针", () => {
     expect(resp.error).toContain("HTTP 401");
   });
 
+  it("402 quota_exceeded 时给出计费通道引导（step_plan 端点）文案", async () => {
+    fetchMock.mockImplementation(async () => ({
+      ok: false,
+      status: 402,
+      text: vi.fn(async () => '{"error":{"type":"quota_exceeded"}}')
+    }));
+    const { testAsrConnection } = await loadModule();
+    const resp = await testAsrConnection(stepfunProvider({ apiKey: "sk-plan" }));
+    expect(resp.ok).toBe(false);
+    expect(resp.error).toContain("quota_exceeded");
+    expect(resp.error).toContain("step_plan");
+  });
+
   it("缺 model / 缺 apiKey 时报错且不发请求", async () => {
     const { testAsrConnection } = await loadModule();
     const noModel = await testAsrConnection(
