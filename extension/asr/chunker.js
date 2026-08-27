@@ -1,7 +1,7 @@
 // extension/asr/chunker.js
 // 音频解码 + 切片 + WAV 编码（16bit PCM / 16kHz / 单声道）。
 // Service Worker 没有 AudioContext，解码与重采样抽成「宿主」注入式接口：
-//   - 服务层优先 offscreen 文档宿主（createOffscreenDecodeHost，接 entry/offscreen.js 基建）；
+//   - 服务层用 offscreen 文档宿主（见 offscreen-bridge.js，接 entry/offscreen.js 基建）；
 //   - Firefox 无 offscreen（Chrome MV3 专属），由 side panel 页面侧充当宿主（spec 备忘 7）；
 //   接口参数化，调用方可按环境替换宿主。
 // 核心模块不直接碰 AudioContext，Node/vitest 下可独立测试。WAV header 手写，不引依赖。
@@ -103,8 +103,8 @@ export function buildChunkPlan(providerType, supportsTimestamps, chunkMinutes) {
 // 解码宿主契约：decodeHost 为 async (arrayBuffer) => { sampleRate, length,
 // getChannelData(ch) }（AudioBuffer 鸭子类型），返回的必须是已重采样为
 // 16000Hz 单声道的 buffer——重采样是宿主职责，核心模块只依赖该契约做切片与
-// 编码。默认宿主见 createOffscreenDecodeHost（offscreen 文档）；Firefox 无
-// offscreen 时由 side panel 页面侧实现同契约宿主传入（spec 备忘 7）。
+// 编码。默认宿主见 offscreen-bridge.js 的 createOffscreenDecodeHost（offscreen
+// 文档）；Firefox 无 offscreen 时由 side panel 页面侧实现同契约宿主传入（spec 备忘 7）。
 //
 // 返回 [{ index, startSec, wavBlob }]，wavBlob 为 16bit PCM WAV（16kHz 单声道）。
 // decodeHost 抛错（坏字节/不支持的容器）→ 包装为 Error：message 含「音频解码失败」，
@@ -149,36 +149,3 @@ function hexDiagnostic(arrayBuffer, maxBytes = 32) {
   return hex;
 }
 
-// ===== 默认解码宿主（offscreen 文档） =====
-
-// 基于 OfflineAudioContext 的解码 + 重采样宿主工厂，供 offscreen 文档侧调用。
-// AudioContext/OfflineAudioContext 只在函数体内引用，Node/vitest 下不调用
-// 工厂（或调用但环境无 AudioContext）都不会因 import 崩。
-export function createOffscreenDecodeHost() {
-  return async function offscreenDecodeHost(arrayBuffer) {
-    const AudioCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
-    if (!AudioCtor) {
-      throw new Error("当前环境没有 AudioContext，无法解码");
-    }
-    const audioCtx = new AudioCtor();
-    try {
-      // decodeAudioData 会 detach 传入的 buffer，传副本避免破坏调用方数据
-      const decoded = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
-      const targetRate = 16000;
-      const outLength = Math.max(1, Math.round(decoded.duration * targetRate));
-      const offline = new OfflineAudioContext(1, outLength, targetRate);
-      const source = offline.createBufferSource();
-      source.buffer = decoded;
-      source.connect(offline.destination);
-      source.start(0);
-      const rendered = await offline.startRendering();
-      return {
-        sampleRate: rendered.sampleRate,
-        length: rendered.length,
-        getChannelData: (ch) => rendered.getChannelData(ch)
-      };
-    } finally {
-      audioCtx.close();
-    }
-  };
-}

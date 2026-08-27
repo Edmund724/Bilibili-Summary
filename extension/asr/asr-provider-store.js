@@ -301,7 +301,9 @@ async function probeStepfunSse({ baseUrl, apiKey, model }) {
     return { ok: false, error: "请填写 API Key" };
   }
 
-  // 极短静音 WAV（100ms），转 base64。阶跃端点要求嵌套 JSON + base64 音频。
+  // 极短静音 WAV（100ms），转 base64。阶跃端点要求嵌套 JSON + base64 音频，
+  // 形状须与 adapters/stepfun-sse.js 的 buildStepfunRequestBody 保持一致
+  // （不直接 import 以免 store↔adapter 循环依赖）。
   const wavBytes = buildSilentWavBytes(0.1, 16000);
   const audioB64 = bytesToBase64(wavBytes);
 
@@ -315,10 +317,18 @@ async function probeStepfunSse({ baseUrl, apiKey, model }) {
         Accept: "text/event-stream"
       },
       body: JSON.stringify({
-        model,
-        audio: audioB64,
-        // 极短音频，期望尽快收到结束事件
-        stream: true
+        audio: {
+          data: audioB64,
+          input: {
+            transcription: {
+              model,
+              language: "zh",
+              enable_timestamp: true,
+              enable_itn: true
+            },
+            format: { type: "wav", rate: 16000, bits: 16, channel: 1 }
+          }
+        }
       })
     });
   } catch (error) {

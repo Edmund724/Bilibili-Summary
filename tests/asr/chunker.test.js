@@ -7,8 +7,7 @@ import {
   encodeWav,
   decideChunks,
   buildChunkPlan,
-  processAudio,
-  createOffscreenDecodeHost
+  processAudio
 } from "../../extension/asr/chunker.js";
 
 // 合成解码宿主：把传入 buffer 视为 48kHz 双声道音频，重采样为 16kHz 单声道。
@@ -293,9 +292,3 @@ describe("processAudio 整链与坏字节诊断", () => {
   });
 });
 
-describe("createOffscreenDecodeHost 工厂", () => {
-  it("不调用工厂时不触碰 AudioContext（模块导入安全）", () => {
-    // 若未调用工厂即报错，则 import 阶段已崩——此处仅确认函数存在且可引用
-    expect(typeof createOffscreenDecodeHost).toBe("function");
-  });
-});

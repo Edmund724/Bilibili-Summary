@@ -180,11 +180,12 @@ describe("stepfun-sse 探针", () => {
     expect(init.method).toBe("POST");
     expect(init.headers.Authorization).toBe("Bearer sk-step");
     expect(init.headers.Accept).toBe("text/event-stream");
-    // 请求体是嵌套 JSON + base64 音频
+    // 请求体是嵌套 JSON + base64 音频（与 adapters/stepfun-sse.js 同形状）
     const body = JSON.parse(init.body);
-    expect(body.model).toBe("stepaudio-2.5-asr");
-    expect(typeof body.audio).toBe("string");
-    expect(body.audio.length).toBeGreaterThan(0);
+    expect(body.audio.input.transcription.model).toBe("stepaudio-2.5-asr");
+    expect(typeof body.audio.data).toBe("string");
+    expect(body.audio.data.length).toBeGreaterThan(0);
+    expect(body.audio.input.format).toEqual({ type: "wav", rate: 16000, bits: 16, channel: 1 });
   });
 
   it("收到 data: [DONE] 结束事件也通过", async () => {
