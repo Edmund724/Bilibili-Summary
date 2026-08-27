@@ -145,11 +145,18 @@ export const ASR_PROVIDER_PRESETS = [
     name: "SiliconFlow 硅基流动（免费）",
     type: "openai-transcriptions",
     baseUrl: "https://api.siliconflow.cn/v1",
-    model: "FunAudioLLM/SenseVoiceSmall",
+    model: "XingChenAGI/XingChenASR-V3.2",
+    // 模型名固定为四选一下拉；Qwen3-ASR 为收费模型，其余免费。
+    modelOptions: [
+      { value: "Qwen/Qwen3-ASR-1.7B", label: "Qwen/Qwen3-ASR-1.7B（收费）" },
+      { value: "XingChenAGI/XingChenASR-V3.2", label: "XingChenAGI/XingChenASR-V3.2" },
+      { value: "XingChenAGI/XingChenASR-Diarize-V3.0", label: "XingChenAGI/XingChenASR-Diarize-V3.0" },
+      { value: "XingChenAGI/XingChenASR-V3.2-Ultra", label: "XingChenAGI/XingChenASR-V3.2-Ultra" }
+    ],
     maxBytes: 50 * 1024 * 1024, // 50MB
     maxDurationSec: 60 * 60, // 1 小时
     supportsTimestamps: false, // verbose_json 不支持，只返回 { text }
-    note: "免费模型；verbose_json 不支持，只返回纯文本，切片时长按 asrChunkMinutes。"
+    note: "模型名从下拉四选一；Qwen/Qwen3-ASR-1.7B 为收费模型。verbose_json 不支持，只返回纯文本，切片时长按 asrChunkMinutes。"
   },
   {
     id: "local-whisper",

@@ -44,6 +44,20 @@ describe("ASR_PROVIDER_PRESETS", () => {
     expect(getAsrPresetById("siliconflow-sensevoice").supportsTimestamps).toBe(false);
   });
 
+  it("SiliconFlow 提供 4 个 ASR 模型下拉选项（Qwen3 标明收费）", () => {
+    const sf = getAsrPresetById("siliconflow-sensevoice");
+    expect(Array.isArray(sf.modelOptions)).toBe(true);
+    expect(sf.modelOptions.map((o) => o.value)).toEqual([
+      "Qwen/Qwen3-ASR-1.7B",
+      "XingChenAGI/XingChenASR-V3.2",
+      "XingChenAGI/XingChenASR-Diarize-V3.0",
+      "XingChenAGI/XingChenASR-V3.2-Ultra"
+    ]);
+    expect(sf.modelOptions[0].label).toContain("收费");
+    // 默认 model 必须是有效下拉选项，保证新建行下拉框有默认选中项
+    expect(sf.modelOptions.some((o) => o.value === sf.model)).toBe(true);
+  });
+
   it("getAsrPresetById 未知 id 返回 null", () => {
     expect(getAsrPresetById("nonexistent")).toBeNull();
   });

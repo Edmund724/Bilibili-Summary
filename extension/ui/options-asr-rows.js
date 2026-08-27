@@ -26,6 +26,28 @@ function updateAsrProvidersEmptyState(listNode, emptyNode) {
   emptyNode.hidden = hasRows;
 }
 
+// 模型名字段：预设带 modelOptions 时渲染为下拉框（如 SiliconFlow 的 ASR 模型），
+// 否则保持可自由编辑的文本输入，供本地 Whisper / 自定义端点使用。
+function buildAsrModelField(preset, model) {
+  const modelOptions = Array.isArray(preset?.modelOptions) && preset.modelOptions.length > 0
+    ? preset.modelOptions
+    : null;
+  if (!modelOptions) {
+    return `<input class="asr-provider-model" type="text" placeholder="模型名（如 FunAudioLLM/SenseVoiceSmall）" value="${escapeHtml(model)}" />`;
+  }
+  const valueSet = new Set(modelOptions.map((o) => String(o?.value ?? "")));
+  let optionsHtml = modelOptions.map((o) => {
+    const value = String(o?.value ?? "");
+    return `<option value="${escapeHtml(value)}" ${value === model ? "selected" : ""}>${escapeHtml(o?.label ?? value)}</option>`;
+  }).join("");
+  // 已保存的 model 不在下拉选项里（如旧版 FunAudioLLM/SenseVoiceSmall）时，
+  // 追加一项以保留原值，避免保存时被静默替换成默认选项。
+  if (model && !valueSet.has(model)) {
+    optionsHtml += `<option value="${escapeHtml(model)}" selected>${escapeHtml(model)}</option>`;
+  }
+  return `<select class="asr-provider-model" title="模型名">${optionsHtml}</select>`;
+}
+
 export function addAsrProviderRow(listNode, emptyNode, item = {}, { presets = ASR_PROVIDER_PRESETS, activeId = "" } = {}) {
   const id = String(item.id || generateAsrProviderId());
   const presetId = String(item.presetId || "custom");
@@ -48,7 +70,7 @@ export function addAsrProviderRow(listNode, emptyNode, item = {}, { presets = AS
     <input class="asr-provider-name" type="text" placeholder="平台名称" value="${escapeHtml(name)}" />
     <input class="asr-provider-baseurl" type="text" placeholder="baseUrl（如 https://api.siliconflow.cn/v1）" value="${escapeHtml(baseUrl)}" />
     <input class="asr-provider-apikey" type="password" placeholder="${hasSavedKey ? "已保存" : "API Key"}" autocomplete="off" />
-    <input class="asr-provider-model" type="text" placeholder="模型名（如 FunAudioLLM/SenseVoiceSmall）" value="${escapeHtml(model)}" />
+    ${buildAsrModelField(preset, model)}
     <label class="asr-provider-active" title="选用该平台自动生成字幕">
       <input class="asr-provider-active-radio" type="radio" name="asrActiveProvider" ${isActive ? "checked" : ""} />
       选用
@@ -78,7 +100,8 @@ export function addAsrProviderRow(listNode, emptyNode, item = {}, { presets = AS
     if (!currentBaseUrl || (previousPreset && currentBaseUrl === previousPreset.baseUrl)) {
       baseUrlInput.value = next.baseUrl;
     }
-    row.querySelector(".asr-provider-model").value = next.model || "";
+    // 模型名随预设切换重建：带 modelOptions 的预设渲染为下拉框，否则为文本输入。
+    row.querySelector(".asr-provider-model").outerHTML = buildAsrModelField(next, next.model || "");
     row.querySelector(".asr-provider-name").value = next.name || "";
     row.querySelector(".asr-provider-apikey").value = "";
     row.dataset.currentPresetId = next.id;
