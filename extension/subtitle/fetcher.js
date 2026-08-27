@@ -468,6 +468,20 @@ export function buildNoSubtitleStatusMessage(base = "当前视频无字幕。") 
   return `${base} 可在设置页配置语音识别平台自动生成字幕。`;
 }
 
+// 把耗时阶段的变更广播给 popup / AI 侧边栏，让它们在各自等待抓取响应、
+// 无法实时读取页内状态栏的情况下也能区分“抓取本地字幕”和“音频转写”。
+// 仅广播阶段标记，文案由各端自行渲染；失败（扩展上下文关闭等）静默忽略。
+function broadcastSubtitleStatus(phase) {
+  try {
+    const promise = chrome.runtime.sendMessage({ type: "boc-subtitle-status", phase });
+    if (promise && typeof promise.catch === "function") {
+      promise.catch(() => {});
+    }
+  } catch {
+    // 静默忽略：广播失败不影响抓取主流程。
+  }
+}
+
 // 无字幕轨时的语音识别回退入口。流程：
 //   skip（未启用开关 / 无激活平台）→ 返回 "skip"，调用方走原有无字幕提示
 //   （提示文案已追加引导句，见 applyNoSubtitleState 调用处）；
@@ -532,6 +546,7 @@ async function maybeRunAsrFallback({ runId }) {
     }
 
     setStatus(`无字幕轨，正在使用语音识别（${platformName}）生成字幕…`);
+    broadcastSubtitleStatus("asr-transcribing");
     let emptyDiag = "";
     const body = await runAsrPipeline({
       bvid: state.clip.bvid,

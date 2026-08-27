@@ -27,6 +27,14 @@ const el = {
 let latestPayload = null;
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 
+// 无字幕视频在做音频转写时会广播阶段，刷新等待期间据此把笼统的“正在抓取...”
+// 替换为更准确的转写提示，以便用户区分抓取本地字幕与语音转写。
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "boc-subtitle-status" && message.phase === "asr-transcribing") {
+    setStatus("此视频无字幕，正在进行音频转写…");
+  }
+});
+
 init().catch((error) => {
   setStatus(`初始化失败：${error.message}`, true);
 });

@@ -77,6 +77,20 @@ const DEFAULT_AI_PREFS = {
   aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice()
 };
 
+// 无字幕视频做音频转写时，content 会广播阶段；刷新键转圈等待期间据此显示
+// 一行转写提示，替代仅有图标旋转却没有说明的状态。只在转写阶段展示，其余
+// 阶段（含转写结束后未再广播的情况）经由 setRefreshing(false) 与 phase 判断隐藏。
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type !== "boc-subtitle-status") {
+    return;
+  }
+  const notice = document.getElementById("spAsrNotice");
+  if (!notice) {
+    return;
+  }
+  notice.hidden = message.phase !== "asr-transcribing";
+});
+
 let contextData = null;
 let currentContextKey = "";
 let providers = [];
@@ -948,6 +962,11 @@ function setRefreshing(isRefreshing) {
     els.refreshBtn.setAttribute("aria-busy", "true");
   } else {
     els.refreshBtn.removeAttribute("aria-busy");
+    // 刷新结束即转写（若有）收尾，收起“正在音频转写”提示。
+    const notice = document.getElementById("spAsrNotice");
+    if (notice) {
+      notice.hidden = true;
+    }
   }
 }
 

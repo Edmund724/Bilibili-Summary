@@ -576,6 +576,19 @@ body {
   position: relative;
 }
 
+.sp-asr-notice {
+  margin: 8px 12px 0;
+  padding: 7px 10px;
+  border: 1px solid #e6ebf2;
+  border-radius: 10px;
+  background: rgba(247, 248, 251, 0.96);
+  color: #4b5563;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+  backdrop-filter: blur(8px);
+}
+
 .sp-toolbar {
   display: flex;
   align-items: center;
