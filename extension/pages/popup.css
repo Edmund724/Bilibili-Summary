@@ -43,6 +43,24 @@ body {
   justify-content: space-between;
 }
 
+.top-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.top-lang {
+  height: 26px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--button-bg);
+  color: var(--button-text);
+  font-size: 12px;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
 .top-actions {
   display: inline-flex;
   align-items: center;

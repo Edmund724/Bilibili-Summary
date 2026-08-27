@@ -135,13 +135,21 @@ export function normalizeAiThinkingLevel(value) {
   return value === "low" || value === "high" ? value : "off";
 }
 
+// ASR 转写语言档位（auto / zh / en），auto 为默认。枚举与
+// ASR_LANGUAGE_OPTIONS 保持一致；非法值回落 auto。
+export function normalizeAsrLanguage(value) {
+  const lang = String(value || "").trim().toLowerCase();
+  return lang === "zh" || lang === "en" ? lang : "auto";
+}
+
 // ===== ASR（语音转写）平台预设 =====
 // 字段含义见 spec.md 第 4 节。type 决定走哪个适配器，共一种：
 //   openai-transcriptions：OpenAI 兼容 multipart 端点（SiliconFlow / 本地 Whisper / 自定义）
 // maxBytes / maxDurationSec 用于切片决策；supportsTimestamps 决定时间戳合成方式。
-// ASR 转写语言档位：auto（自动检测）/ zh / en。zh/en 以查询参数传给平台：
-// SiliconFlow 辰星（XingChen）系列模型只有传 ?language=english 才走英文转写，
-// 否则纯英文音频静默返回空文本；本地 Whisper 忽略该参数（服务端自动识别）。
+// ASR 转写语言档位（全局设置 asrLanguage）：auto（自动检测）/ zh / en。
+// zh/en 由适配器转为查询参数传给平台：SiliconFlow 辰星（XingChen）系列模型
+// 只有传 ?language=english 才走英文转写，否则纯英文音频静默返回空文本；
+// 本地 Whisper 忽略该参数（服务端自动识别）。该设置只出现在 popup 顶部。
 export const ASR_LANGUAGE_OPTIONS = [
   { value: "auto", label: "自动检测（推荐）" },
   { value: "zh", label: "中文" },
@@ -165,10 +173,7 @@ export const ASR_PROVIDER_PRESETS = [
     maxBytes: 50 * 1024 * 1024, // 50MB
     maxDurationSec: 60 * 60, // 1 小时
     supportsTimestamps: true,
-    // 辰星（XingChen）系列 / SenseVoice 的英文识别依赖 ?language=english 查询参数，
-    // 中英混说也可选 auto；纯英文视频务必选 English。
-    language: "zh",
-    note: "模型名从下拉四选一；Qwen/Qwen3-ASR-1.7B 为收费模型。纯英文视频请在平台行选择 English 语言。"
+    note: "模型名从下拉四选一；Qwen/Qwen3-ASR-1.7B 为收费模型。英文视频请在插件页顶部切换为 English 后重新刷新。"
   },
   {
     id: "local-whisper",
@@ -179,7 +184,6 @@ export const ASR_PROVIDER_PRESETS = [
     maxBytes: 0, // 取决于本地部署，0 表示不限制
     maxDurationSec: 0, // 不限制
     supportsTimestamps: true, // verbose_json segments
-    language: "auto", // Whisper 服务端自动检测语言，不传 language 参数
     note: "本地部署，音频不上传任何外部服务。model 可按本地部署情况修改。"
   },
   {
@@ -224,8 +228,6 @@ export function normalizeAsrProvider(item) {
     maxBytes: Number(item.maxBytes) || 0,
     maxDurationSec: Number(item.maxDurationSec) || 0,
     supportsTimestamps: item.supportsTimestamps !== false,
-    // 转写语言档位（auto/zh/en），非法值回落 auto
-    language: ASR_LANGUAGE_OPTIONS.some((o) => o.value === item.language) ? item.language : "auto",
     enabled: item.enabled !== false
   };
 }

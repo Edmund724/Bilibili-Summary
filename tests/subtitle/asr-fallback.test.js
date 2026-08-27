@@ -217,6 +217,12 @@ describe("maybeRunAsrFallback 成功与缓存", () => {
     await runRefreshClipWithNoSubtitles();
 
     expect(pipelineMock.runAsrPipeline).toHaveBeenCalledTimes(1);
+    // 语言档位来自全局 asrLanguage 设置，注入 provider.language
+    expect(pipelineMock.runAsrPipeline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: expect.objectContaining({ language: "auto", model: "whisper-large-v3" })
+      })
+    );
 
     expect(stateMod.state.clip.subtitleFetchState).toBe("ready");
     expect(stateMod.state.clip.subtitleBody).toEqual([

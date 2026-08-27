@@ -9,7 +9,14 @@
   <body>
     <main class="popup">
       <header class="top">
-        <strong>B站字幕</strong>
+        <div class="top-left">
+          <strong>B站字幕</strong>
+          <select id="asrLanguageSelect" class="top-lang" title="语音转写语言（无字幕视频）">
+            <option value="auto">自动</option>
+            <option value="zh">中文</option>
+            <option value="en">EN</option>
+          </select>
+        </div>
         <div class="top-actions">
           <button id="aiBtn" type="button" class="ghost ghost-ai">
             <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">

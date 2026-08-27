@@ -98,10 +98,12 @@ describe("openai-transcriptions 探针", () => {
     expect(init.headers["Content-Type"]).toBeUndefined();
   });
 
-  it("language=en 时探针 URL 附加 ?language=english（验证英文链路）", async () => {
+  it("全局 asrLanguage=en 时探针 URL 附加 ?language=english（验证英文链路）", async () => {
     fetchMock.mockResolvedValue(jsonResponse(200, { text: "ok" }));
+    // 语言档位来自全局设置（popup 顶部切换），预置 sync 存储
+    vi.mocked(globalThis.chrome.storage.sync.get).mockResolvedValue({ asrLanguage: "en" });
     const { testAsrConnection } = await loadModule();
-    const resp = await testAsrConnection(baseProvider({ apiKey: "sk-1", language: "en" }));
+    const resp = await testAsrConnection(baseProvider({ apiKey: "sk-1" }));
     expect(resp.ok).toBe(true);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://example.com/v1/audio/transcriptions?language=english");

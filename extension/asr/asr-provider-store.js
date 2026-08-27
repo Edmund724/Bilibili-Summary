@@ -9,6 +9,7 @@
 // 不和对话平台混用同一个列表。
 
 import { normalizeAsrProvider, normalizeBaseUrl } from "../core/shared-defaults.js";
+import { getMergedSettings } from "../core/ai-provider-store.js";
 
 // ===== ASR 平台列表存储 =====
 
@@ -161,11 +162,21 @@ export async function testAsrConnection(provider) {
   }
 
   if (normalized.type === "openai-transcriptions") {
+    // 语言档位来自全局设置 asrLanguage（popup 顶部切换）：测试连接时同步
+    // 验证该语言的请求链路（SiliconFlow 辰星只有 ?language=english 才启用
+    // 英文识别，静音探针的 200 即证明该参数被接受）。
+    let language = "";
+    try {
+      const settings = await getMergedSettings();
+      language = settings?.asrLanguage || "";
+    } catch {
+      // 设置读取失败不阻塞探针：按 auto 处理（不附语言参数）
+    }
     return probeOpenAiTranscriptions({
       baseUrl: normalized.baseUrl,
       apiKey,
       model: normalized.model,
-      language: normalized.language
+      language
     });
   }
   // normalizeAsrProvider 已校验 type，理论上到不了这里

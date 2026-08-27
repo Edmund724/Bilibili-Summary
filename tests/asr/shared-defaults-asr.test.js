@@ -7,6 +7,7 @@ import {
   ASR_PROVIDER_PRESETS,
   DEFAULT_SETTINGS,
   normalizeAsrProvider,
+  normalizeAsrLanguage,
   getAsrPresetById
 } from "../../extension/core/shared-defaults.js";
 
@@ -32,14 +33,7 @@ describe("ASR_PROVIDER_PRESETS", () => {
       expect(typeof p.maxDurationSec).toBe("number");
       expect(typeof p.supportsTimestamps).toBe("boolean");
       expect(typeof p.note).toBe("string");
-      expect(["auto", "zh", "en"].includes(p.language)).toBe(true);
     }
-  });
-
-  it("SiliconFlow 默认中文（辰星模型依赖 language 参数），本地 Whisper 与自定义默认 auto", () => {
-    expect(getAsrPresetById("siliconflow-sensevoice").language).toBe("zh");
-    expect(getAsrPresetById("local-whisper").language).toBe("auto");
-    expect(getAsrPresetById("custom").language).toBe("auto");
   });
 
   it("SiliconFlow 与本地 Whisper 同为 openai-transcriptions", () => {
@@ -93,25 +87,26 @@ describe("normalizeAsrProvider", () => {
       maxBytes: 52428800,
       maxDurationSec: 3600,
       supportsTimestamps: false,
-      language: "auto",
       enabled: true
     });
   });
 
-  it("language 合法档位保留、非法值回落 auto", () => {
-    const zh = normalizeAsrProvider({
-      id: "p1", type: "openai-transcriptions", baseUrl: "x", model: "y", language: "zh"
+  it("language 归 normalizeAsrLanguage 管：normalizeAsrProvider 不保留该字段", () => {
+    const out = normalizeAsrProvider({
+      id: "p1", type: "openai-transcriptions", baseUrl: "x", model: "y", language: "en"
     });
-    expect(zh.language).toBe("zh");
+    expect(out.language).toBeUndefined();
+  });
 
-    const en = normalizeAsrProvider({
-      id: "p2", type: "openai-transcriptions", baseUrl: "x", model: "y", language: "en"
-    });
-    expect(en.language).toBe("en");
-
+  it("normalizeAsrLanguage：zh/en 保留，其余回落 auto", () => {
+    expect(normalizeAsrLanguage("zh")).toBe("zh");
+    expect(normalizeAsrLanguage("en")).toBe("en");
+    expect(normalizeAsrLanguage("EN")).toBe("en");
+    expect(normalizeAsrLanguage("auto")).toBe("auto");
     // 缺失 / 非法值都回落 auto
-    expect(normalizeAsrProvider({ id: "p3", type: "openai-transcriptions", baseUrl: "x", model: "y" }).language).toBe("auto");
-    expect(normalizeAsrProvider({ id: "p4", type: "openai-transcriptions", baseUrl: "x", model: "y", language: "ja" }).language).toBe("auto");
+    expect(normalizeAsrLanguage("")).toBe("auto");
+    expect(normalizeAsrLanguage(undefined)).toBe("auto");
+    expect(normalizeAsrLanguage("ja")).toBe("auto");
   });
 
   it("baseUrl 尾部斜杠被剥离", () => {

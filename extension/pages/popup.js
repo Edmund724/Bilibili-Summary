@@ -1,5 +1,6 @@
 import {
   DEFAULT_SETTINGS,
+  normalizeAsrLanguage,
   normalizeDownloadFormat,
   formatLocalDate,
   isSupportedBilibiliPage,
@@ -21,7 +22,8 @@ const el = {
   downloadBtn: document.getElementById("downloadBtn"),
   readingViewBtn: document.getElementById("readingViewBtn"),
   aiBtn: document.getElementById("aiBtn"),
-  settingsBtn: document.getElementById("settingsBtn")
+  settingsBtn: document.getElementById("settingsBtn"),
+  asrLanguageSelect: document.getElementById("asrLanguageSelect")
 };
 
 let latestPayload = null;
@@ -41,10 +43,25 @@ init().catch((error) => {
 
 async function init() {
   bindEvents();
+  await loadAsrLanguage();
   await refreshFromTab();
 }
 
 function bindEvents() {
+  el.asrLanguageSelect.addEventListener("change", async () => {
+    const language = el.asrLanguageSelect.value || "auto";
+    try {
+      const resp = await sendToRuntime({ type: "save-settings", settings: { asrLanguage: language } });
+      if (!resp?.ok) {
+        throw new Error(resp?.error || "保存失败");
+      }
+      setMessage("转写语言已切换，点击刷新重新转写。");
+    } catch (error) {
+      setMessage(`语言切换失败：${error?.message || "未知错误"}`);
+      // 失败回滚下拉显示值
+      await loadAsrLanguage();
+    }
+  });
   el.refreshBtn.addEventListener("click", async () => {
     await refreshFromTab();
   });
@@ -198,6 +215,13 @@ async function refreshFromTab() {
     return;
   }
   render(resp?.payload || latestPayload);
+}
+
+// 读取已保存的转写语言档位并同步下拉显示
+async function loadAsrLanguage() {
+  const settings = await getSettingsFromRuntime();
+  const language = normalizeAsrLanguage(settings?.asrLanguage);
+  el.asrLanguageSelect.value = language;
 }
 
 async function ensurePayload() {

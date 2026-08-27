@@ -23,7 +23,8 @@ import {
   normalizeAiPresetPrompts,
   normalizeDefaultModel,
   normalizeAiThinkingLevel,
-  normalizeAsrProvider
+  normalizeAsrProvider,
+  normalizeAsrLanguage
 } from "./shared-defaults.js";
 
 // ===== 设置归一化 + 存储 =====
@@ -70,6 +71,7 @@ export async function getMergedSettings(timeoutMs = 5000) {
   merged.asrProviders = normalizeAsrProvidersList(merged.asrProviders);
   merged.activeAsrProviderId = String(merged.activeAsrProviderId || "").trim();
   merged.asrAutoFallback = normalizeAsrAutoFallback(merged.asrAutoFallback);
+  merged.asrLanguage = normalizeAsrLanguage(merged.asrLanguage);
 
   return merged;
 }
@@ -109,6 +111,7 @@ export async function saveSettings(settings) {
   if ("asrProviders" in syncPayload) syncPayload.asrProviders = normalizeAsrProvidersList(syncPayload.asrProviders);
   if ("activeAsrProviderId" in syncPayload) syncPayload.activeAsrProviderId = String(syncPayload.activeAsrProviderId || "").trim();
   if ("asrAutoFallback" in syncPayload) syncPayload.asrAutoFallback = normalizeAsrAutoFallback(syncPayload.asrAutoFallback);
+  if ("asrLanguage" in syncPayload) syncPayload.asrLanguage = normalizeAsrLanguage(syncPayload.asrLanguage);
 
   await chrome.storage.sync.set(syncPayload);
 }
