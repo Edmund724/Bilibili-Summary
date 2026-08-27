@@ -7,7 +7,8 @@ import {
   ASR_PROVIDER_PRESETS,
   DEFAULT_SETTINGS,
   normalizeAsrProvider,
-  getAsrPresetById
+  getAsrPresetById,
+  resolveStepfunSseUrl
 } from "../../extension/core/shared-defaults.js";
 
 describe("ASR_PROVIDER_PRESETS", () => {
@@ -46,11 +47,23 @@ describe("ASR_PROVIDER_PRESETS", () => {
     expect(p.supportsTimestamps).toBe(true);
   });
 
-  it("阶跃为 stepfun-sse、SSE 端点", () => {
+  it("阶跃为 stepfun-sse、默认 Step Plan 订阅端点", () => {
     const p = getAsrPresetById("stepfun-stepaudio");
     expect(p.type).toBe("stepfun-sse");
-    expect(p.baseUrl).toBe("https://api.stepfun.com");
+    expect(p.baseUrl).toBe("https://api.stepfun.com/step_plan/v1/audio/asr/sse");
     expect(p.model).toBe("stepaudio-2.5-asr");
+  });
+
+  it("resolveStepfunSseUrl 兼容三种 baseUrl 写法", () => {
+    // 完整端点 → 原样
+    expect(resolveStepfunSseUrl("https://api.stepfun.com/step_plan/v1/audio/asr/sse"))
+      .toBe("https://api.stepfun.com/step_plan/v1/audio/asr/sse");
+    // 订阅根 → 拼 /v1/audio/asr/sse
+    expect(resolveStepfunSseUrl("https://api.stepfun.com/step_plan/"))
+      .toBe("https://api.stepfun.com/step_plan/v1/audio/asr/sse");
+    // 站点根（按量 Key）→ 拼 /v1/audio/asr/sse
+    expect(resolveStepfunSseUrl("https://api.stepfun.com"))
+      .toBe("https://api.stepfun.com/v1/audio/asr/sse");
   });
 
   it("SiliconFlow 与本地 Whisper 同为 openai-transcriptions", () => {

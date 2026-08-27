@@ -157,7 +157,9 @@ export const ASR_PROVIDER_PRESETS = [
     id: "stepfun-stepaudio",
     name: "阶跃 StepAudio 2.5 ASR",
     type: "stepfun-sse",
-    baseUrl: "https://api.stepfun.com",
+    // 默认走 Step Plan 订阅端点（Credit 计费）；普通按量 Key 请把 baseUrl
+    // 改回 https://api.stepfun.com（/v1 通用音频端点按量计费，两者额度独立）。
+    baseUrl: "https://api.stepfun.com/step_plan/v1/audio/asr/sse",
     model: "stepaudio-2.5-asr",
     maxBytes: 50 * 1024 * 1024, // 估算上限，按 25 分钟片 ≈ 48MB
     maxDurationSec: 30 * 60, // 30 分钟/次
@@ -165,8 +167,9 @@ export const ASR_PROVIDER_PRESETS = [
     // 关键坑：stepaudio-2.5-asr 不在 /v1/audio/transcriptions 上，错误端点会返回
     // "model stepaudio-2.5-asr not supported"（与权限被拒长得一样）。正确端点是
     // SSE 流式接口 POST /v1/audio/asr/sse，请求体为嵌套 JSON + base64 音频。
-    // 另外 API Key 必须是 "Normal" 等级，"Plan" 类型 key 调音频端点会无声 4xx。
-    note: "SSE 流式端点 /v1/audio/asr/sse；API Key 必须是 Normal 等级（Plan key 无声失败）。官方文档确认接口带 enable_timestamp 句级时间戳参数，但事件字段（尤其 done）是否实际携带待实测；实测若确认无句级时间戳则改回片级（25 分钟片粒度粗），建议本地 Whisper 或百炼获取句级时间戳。0.15 元/小时。"
+    // 另外音频与文本、Step Plan Credit 分池计费：/v1 端点只认按量余额，
+    // 订阅 Credit 走 step_plan 前缀端点，用错池子报 402 quota_exceeded。
+    note: "默认走 Step Plan 订阅端点（Credit 计费）；普通按量 Key 改回 https://api.stepfun.com。0.15 元/小时。官方文档确认 enable_timestamp 句级时间戳参数，事件字段是否实际携带待实测；实测若确认无则建议本地 Whisper 或百炼获取句级时间戳。"
   },
   {
     id: "siliconflow-sensevoice",
@@ -212,6 +215,17 @@ const ASR_PROVIDER_TYPES = new Set([
 
 export function getAsrPresetById(id) {
   return ASR_PROVIDER_PRESETS.find((p) => p.id === id) || null;
+}
+
+// 阶跃 SSE 端点归一：baseUrl 兼容三种写法，统一为完整端点 URL——
+//   1. 完整端点（…/v1/audio/asr/sse，预设默认值）→ 原样使用；
+//   2. Step Plan 订阅根（https://api.stepfun.com/step_plan）→ 拼 /v1/audio/asr/sse；
+//   3. 站点根（https://api.stepfun.com，按量 Key）→ 拼 /v1/audio/asr/sse。
+// 适配器与探针共用此函数，避免两处拼接规则漂移。
+export function resolveStepfunSseUrl(baseUrl) {
+  const base = String(baseUrl || "").trim().replace(/\/+$/, "");
+  if (/\/audio\/asr\/sse$/.test(base)) return base;
+  return `${base}/v1/audio/asr/sse`;
 }
 
 // 归一化单个 ASR provider：字段齐全 + type 合法值校验。

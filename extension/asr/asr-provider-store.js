@@ -8,7 +8,7 @@
 // 与 AI 平台存储完全隔离：用不同的 storage key（asrProviders / asrProviderKeys），
 // 不和对话平台混用同一个列表。
 
-import { normalizeAsrProvider, normalizeBaseUrl } from "../core/shared-defaults.js";
+import { normalizeAsrProvider, normalizeBaseUrl, resolveStepfunSseUrl } from "../core/shared-defaults.js";
 
 // ===== ASR 平台列表存储 =====
 
@@ -309,7 +309,8 @@ async function probeStepfunSse({ baseUrl, apiKey, model }) {
 
   let response;
   try {
-    response = await fetch(`${normalizedBaseUrl}/v1/audio/asr/sse`, {
+    // baseUrl 兼容完整端点 / step_plan 订阅根 / 站点根三种写法（见 shared-defaults.js）
+    response = await fetch(resolveStepfunSseUrl(normalizedBaseUrl), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,

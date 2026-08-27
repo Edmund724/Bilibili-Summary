@@ -90,6 +90,18 @@ describe("stepfun-sse 请求构造", () => {
     expect(result.text).toBe("ok");
   });
 
+  it("baseUrl 为完整端点 URL 时原样使用（Step Plan 预设默认形式）", async () => {
+    const fetchMock = vi.fn(async () => makeSseStub({ lines: [sseData({ type: "transcript.text.done", text: "ok" })] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await adapter.transcribe({
+      wavBlob: new Blob([new Uint8Array(8)]),
+      startSec: 0,
+      durationSec: 60,
+      provider: { ...STEPFUN_PROVIDER, baseUrl: "https://api.stepfun.com/step_plan/v1/audio/asr/sse" }
+    });
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.stepfun.com/step_plan/v1/audio/asr/sse");
+  });
+
   it("base64 编码正确性：小样本往返断言（分段编码不破坏数据）", async () => {
     // 用超过单段 32768 字节的样本验证分段编码拼接正确
     const sample = new Uint8Array(70000);

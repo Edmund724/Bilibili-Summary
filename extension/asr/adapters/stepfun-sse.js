@@ -42,6 +42,7 @@
 //   - SSE 流中可能出现 error 事件（内容审查等），单独解析并报出 message。
 
 import { bytesToBase64 } from "../asr-provider-store.js";
+import { resolveStepfunSseUrl } from "../../core/shared-defaults.js";
 
 export const ADAPTER_TYPE = "stepfun-sse";
 
@@ -162,7 +163,8 @@ export async function transcribe({ wavBlob, startSec, durationSec, provider, sig
 
   let response;
   try {
-    response = await fetch(`${baseUrl}/v1/audio/asr/sse`, {
+    // baseUrl 兼容完整端点 / step_plan 订阅根 / 站点根三种写法（见 shared-defaults.js）
+    response = await fetch(resolveStepfunSseUrl(baseUrl), {
       method: "POST",
       headers,
       body: JSON.stringify(body),
