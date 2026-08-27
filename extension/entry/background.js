@@ -32,6 +32,7 @@ import {
   resolveAiSidepanelPageRef
 } from "../ai/context-resolver.js";
 import { bgFetchJson } from "../bilibili/gateway.js";
+import { handleAsrDownload } from "../asr/downloader.js";
 
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 
@@ -293,6 +294,28 @@ function handleAsrProvidersTest(message, sender, sendResponse) {
   return true;
 }
 
+// ===== ASR 音频下载 =====
+
+// ASR_DOWNLOAD_AUDIO 走专用长连接：页面侧连 "asr-audio-chunk" 端口发
+// { audioUrl, backupUrls }，background 侧下载后按块回传，见 asr/downloader.js。
+function handleAsrDownloadAudio(message, sender, sendResponse) {
+  const { port } = message;
+  if (!port) {
+    sendResponse({ ok: false, error: "缺少下载端口" });
+    return false;
+  }
+  const audioUrl = typeof message.audioUrl === "string" ? message.audioUrl : "";
+  if (!audioUrl) {
+    sendResponse({ ok: false, error: "缺少音频地址" });
+    return false;
+  }
+  handleAsrDownload(
+    { audioUrl, backupUrls: Array.isArray(message.backupUrls) ? message.backupUrls : [] },
+    port
+  );
+  return false;
+}
+
 function handleAiSidepanelGetState(message, sender, sendResponse) {
   const tabId = Number(message.tabId || 0) || 0;
   const forceRefresh = message.forceRefresh === true;
@@ -341,6 +364,7 @@ const messageHandlers = new Map([
   ["asr-providers-delete", handleAsrProvidersDelete],
   ["get-asr-provider-key", handleGetAsrProviderKey],
   ["asr-providers-test", handleAsrProvidersTest],
+  ["asr-download-audio", handleAsrDownloadAudio],
   ["ai-sidepanel-get-state", handleAiSidepanelGetState],
   ["ai-sidepanel-resolve-context", handleAiSidepanelResolveContext],
   ["ai-sidepanel-resolve-page-ref", handleAiSidepanelResolvePageRef]

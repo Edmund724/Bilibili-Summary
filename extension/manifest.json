@@ -14,7 +14,8 @@
     "scripting",
     "sidePanel",
     "tabs",
-    "offscreen"
+    "offscreen",
+    "declarativeNetRequest"
   ],
   "host_permissions": [
     "https://www.bilibili.com/*",
