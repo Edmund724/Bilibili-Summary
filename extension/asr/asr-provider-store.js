@@ -8,7 +8,7 @@
 // 与 AI 平台存储完全隔离：用不同的 storage key（asrProviders / asrProviderKeys），
 // 不和对话平台混用同一个列表。
 
-import { normalizeAsrProvider, normalizeBaseUrl, resolveStepfunSseUrl } from "../core/shared-defaults.js";
+import { normalizeAsrProvider, normalizeBaseUrl } from "../core/shared-defaults.js";
 
 // ===== ASR 平台列表存储 =====
 
@@ -99,7 +99,7 @@ export async function deleteAsrProvider(providerId) {
 // ===== 静音 WAV 生成（探针用） =====
 
 // 构造 1 秒 16kHz 单声道 16bit PCM 静音 WAV（全零采样）。
-// 手写 WAV header + PCM，不引依赖。用于 openai-transcriptions / stepfun-sse 探针。
+// 手写 WAV header + PCM，不引依赖。用于 openai-transcriptions 探针。
 // 1 秒 16k 单声道 16bit = 16000 采样 * 2 字节 = 32000 字节 PCM。
 export function buildSilentWavBytes(durationSec = 1, sampleRate = 16000) {
   const numChannels = 1;
@@ -169,13 +169,6 @@ export async function testAsrConnection(provider) {
   }
   if (normalized.type === "dashscope-filetrans") {
     return probeDashscopeFiletrans({ baseUrl: normalized.baseUrl, apiKey });
-  }
-  if (normalized.type === "stepfun-sse") {
-    return probeStepfunSse({
-      baseUrl: normalized.baseUrl,
-      apiKey,
-      model: normalized.model
-    });
   }
   // normalizeAsrProvider 已校验 type，理论上到不了这里
   return { ok: false, error: "未知的 ASR 平台类型：" + normalized.type };
@@ -286,109 +279,6 @@ async function probeDashscopeFiletrans({ baseUrl, apiKey }) {
   return { ok: false, error: `HTTP ${response.status}${detail ? `: ${detail}` : ""}` };
 }
 
-// stepfun-sse 探针：发极短 base64 静音到 POST ${baseUrl}/v1/audio/asr/sse，
-// 收到任意合法 SSE 事件即通过；4xx 无错误体的无声失败要返回指向
-// "Key 必须是 Normal 等级"的失败文案（Plan key 调音频端点会无声 4xx）。
-async function probeStepfunSse({ baseUrl, apiKey, model }) {
-  const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
-  if (!normalizedBaseUrl) {
-    return { ok: false, error: "请填写 baseUrl" };
-  }
-  if (!model) {
-    return { ok: false, error: "请填写模型名" };
-  }
-  if (!apiKey) {
-    return { ok: false, error: "请填写 API Key" };
-  }
-
-  // 极短静音 WAV（100ms），转 base64。阶跃端点要求嵌套 JSON + base64 音频，
-  // 形状须与 adapters/stepfun-sse.js 的 buildStepfunRequestBody 保持一致
-  // （不直接 import 以免 store↔adapter 循环依赖）。
-  const wavBytes = buildSilentWavBytes(0.1, 16000);
-  const audioB64 = bytesToBase64(wavBytes);
-
-  let response;
-  try {
-    // baseUrl 兼容完整端点 / step_plan 订阅根 / 站点根三种写法（见 shared-defaults.js）
-    response = await fetch(resolveStepfunSseUrl(normalizedBaseUrl), {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        Accept: "text/event-stream"
-      },
-      body: JSON.stringify({
-        audio: {
-          data: audioB64,
-          input: {
-            transcription: {
-              model,
-              language: "zh",
-              enable_timestamp: true,
-              enable_itn: true
-            },
-            format: { type: "wav", rate: 16000, bits: 16, channel: 1 }
-          }
-        }
-      })
-    });
-  } catch (error) {
-    return { ok: false, error: `无法连接：${error?.message || error}` };
-  }
-
-  // SSE 响应：HTTP 200 且读到任意合法 data: 行即通过
-  if (response.ok) {
-    let text = "";
-    try {
-      text = await response.text();
-    } catch {
-      // 流式读取失败也视为连接已建立，Key 有效
-      return { ok: true };
-    }
-    // 任意合法 SSE 事件：以 "data:" 开头的行（含 "data: [DONE]"）
-    if (/^data:/m.test(text)) {
-      return { ok: true };
-    }
-    // 200 但无 SSE 事件体——可能是空响应，谨慎起见按通过处理（Key 已通过鉴权）
-    return { ok: true };
-  }
-
-  // 非 2xx：解析响应体。阶跃的三个典型错误：
-  //  1) "model stepaudio-2.5-asr not supported" —— 端点或模型名错误（误导性文案）
-  //  2) 402 quota_exceeded —— /v1 音频端点按音频时长单独计费，文本额度与
-  //     Step Plan 订阅 Credit 都不通用；Plan 用户可把 baseUrl 改为
-  //     https://api.stepfun.com/step_plan 走订阅专属端点 step_plan/v1/audio/asr/sse
-  //  3) 4xx 无错误体 —— Plan key 无声失败，需主动引导检查 Key 类型
-  let detail = "";
-  try {
-    detail = (await response.text()).slice(0, 500);
-  } catch {}
-
-  if (detail.includes("not supported")) {
-    return {
-      ok: false,
-      error: `端点或模型名错误（HTTP ${response.status}）: ${detail}`
-    };
-  }
-
-  if (response.status === 402 || detail.includes("quota_exceeded")) {
-    return {
-      ok: false,
-      error: `配额校验未通过（HTTP 402 quota_exceeded）。该端点按音频时长单独计费，与文本模型额度、Step Plan 订阅 Credit 不共享——请确认是普通按量 Key 且有按量余额；若是 Step Plan 订阅用户，可把 baseUrl 改为 https://api.stepfun.com/step_plan 走订阅专属端点。`
-    };
-  }
-
-  if (!detail.trim()) {
-    // 无声失败：4xx 无错误体，指向 Key 等级
-    return {
-      ok: false,
-      error: `连接失败（HTTP ${response.status}，无错误体）。请确认 API Key 为 Normal 等级——Plan 类型的 Key 调音频端点会无声 4xx。`
-    };
-  }
-
-  return { ok: false, error: `HTTP ${response.status}: ${detail}` };
-}
-
 // ===== 工具：multipart 手拼（无 FormData 环境降级用） =====
 
 function buildMultipartBody(boundary, fields) {
@@ -434,9 +324,8 @@ function buildMultipartBody(boundary, fields) {
 
 // ===== 工具：bytes -> base64 =====
 
-// 分段编码避免 String.fromCharCode 栈溢出（32768 字节/段）。供本文件
-// 探针与 stepfun-sse 适配器共用。
-export function bytesToBase64(bytes) {
+// 分段编码避免 String.fromCharCode 栈溢出（32768 字节/段）。
+function bytesToBase64(bytes) {
   // 环境差异：浏览器有 btoa，Node 有 Buffer。优先 btoa。
   if (typeof btoa === "function") {
     let binary = "";

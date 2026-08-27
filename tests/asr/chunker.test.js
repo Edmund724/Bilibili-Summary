@@ -139,11 +139,6 @@ describe("buildChunkPlan 各平台规则", () => {
     expect(buildChunkPlan("dashscope-filetrans", false)).toEqual({ chunkSeconds: 0 });
   });
 
-  it("stepfun-sse 固定 25 分钟一片（30 分钟限制留 5 分钟安全边距）", () => {
-    expect(buildChunkPlan("stepfun-sse", false)).toEqual({ chunkSeconds: 25 * 60 });
-    expect(buildChunkPlan("stepfun-sse", true)).toEqual({ chunkSeconds: 25 * 60 });
-  });
-
   it("openai-transcriptions 带时间戳 10 分钟一片", () => {
     expect(buildChunkPlan("openai-transcriptions", true)).toEqual({ chunkSeconds: 10 * 60 });
   });

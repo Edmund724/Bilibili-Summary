@@ -7,24 +7,22 @@ import {
   ASR_PROVIDER_PRESETS,
   DEFAULT_SETTINGS,
   normalizeAsrProvider,
-  getAsrPresetById,
-  resolveStepfunSseUrl
+  getAsrPresetById
 } from "../../extension/core/shared-defaults.js";
 
 describe("ASR_PROVIDER_PRESETS", () => {
-  it("包含五个内置预设（阿里百炼/阶跃/SiliconFlow/本地 Whisper/自定义）", () => {
+  it("包含四个内置预设（阿里百炼/SiliconFlow/本地 Whisper/自定义）", () => {
     const ids = ASR_PROVIDER_PRESETS.map((p) => p.id);
     expect(ids).toEqual([
       "aliyun-dashscope",
-      "stepfun-stepaudio",
       "siliconflow-sensevoice",
       "local-whisper",
       "custom"
     ]);
   });
 
-  it("每个预设字段齐全且 type 为三种合法值之一", () => {
-    const validTypes = new Set(["openai-transcriptions", "dashscope-filetrans", "stepfun-sse"]);
+  it("每个预设字段齐全且 type 为两种合法值之一", () => {
+    const validTypes = new Set(["openai-transcriptions", "dashscope-filetrans"]);
     for (const p of ASR_PROVIDER_PRESETS) {
       expect(p.id).toBeTruthy();
       expect(p.name).toBeTruthy();
@@ -45,25 +43,6 @@ describe("ASR_PROVIDER_PRESETS", () => {
     expect(p.model).toBe("paraformer-v2");
     expect(p.maxDurationSec).toBe(12 * 60 * 60);
     expect(p.supportsTimestamps).toBe(true);
-  });
-
-  it("阶跃为 stepfun-sse、默认 Step Plan 订阅端点", () => {
-    const p = getAsrPresetById("stepfun-stepaudio");
-    expect(p.type).toBe("stepfun-sse");
-    expect(p.baseUrl).toBe("https://api.stepfun.com/step_plan/v1/audio/asr/sse");
-    expect(p.model).toBe("stepaudio-2.5-asr");
-  });
-
-  it("resolveStepfunSseUrl 兼容三种 baseUrl 写法", () => {
-    // 完整端点 → 原样
-    expect(resolveStepfunSseUrl("https://api.stepfun.com/step_plan/v1/audio/asr/sse"))
-      .toBe("https://api.stepfun.com/step_plan/v1/audio/asr/sse");
-    // 订阅根 → 拼 /v1/audio/asr/sse
-    expect(resolveStepfunSseUrl("https://api.stepfun.com/step_plan/"))
-      .toBe("https://api.stepfun.com/step_plan/v1/audio/asr/sse");
-    // 站点根（按量 Key）→ 拼 /v1/audio/asr/sse
-    expect(resolveStepfunSseUrl("https://api.stepfun.com"))
-      .toBe("https://api.stepfun.com/v1/audio/asr/sse");
   });
 
   it("SiliconFlow 与本地 Whisper 同为 openai-transcriptions", () => {

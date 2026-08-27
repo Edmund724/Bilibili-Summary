@@ -1,5 +1,5 @@
 // asr-provider-store.js 按 provider.type 的测试连接分发测试。
-// 覆盖三种协议探针（openai-transcriptions / dashscope-filetrans / stepfun-sse）
+// 覆盖两种协议探针（openai-transcriptions / dashscope-filetrans）
 // 的成功与失败分支、apiKey 缺失时回退读取已存 Key、非法 provider 的兜底。
 // 探针只与 fetch / chrome.storage 交互，用 vi.stubGlobal 替换 fetch 与 chrome。
 // 注意：本仓库 jsdom 环境里 FormData/Blob 均存在，openai-transcriptions
@@ -152,104 +152,6 @@ describe("dashscope-filetrans 探针", () => {
     );
     expect(resp.ok).toBe(false);
     expect(resp.error).toContain("请填写 API Key");
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-});
-
-describe("stepfun-sse 探针", () => {
-  function stepfunProvider(overrides = {}) {
-    return baseProvider({
-      type: "stepfun-sse",
-      baseUrl: "https://api.stepfun.com",
-      model: "stepaudio-2.5-asr",
-      ...overrides
-    });
-  }
-
-  it("收到 data: 行即通过，请求发到 SSE 端点", async () => {
-    fetchMock.mockImplementation(async () => ({
-      ok: true,
-      status: 200,
-      text: vi.fn(async () => "data: {\"text\":\"你好\"}\n\n")
-    }));
-    const { testAsrConnection } = await loadModule();
-    const resp = await testAsrConnection(stepfunProvider({ apiKey: "sk-step" }));
-    expect(resp.ok).toBe(true);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://api.stepfun.com/v1/audio/asr/sse");
-    expect(init.method).toBe("POST");
-    expect(init.headers.Authorization).toBe("Bearer sk-step");
-    expect(init.headers.Accept).toBe("text/event-stream");
-    // 请求体是嵌套 JSON + base64 音频（与 adapters/stepfun-sse.js 同形状）
-    const body = JSON.parse(init.body);
-    expect(body.audio.input.transcription.model).toBe("stepaudio-2.5-asr");
-    expect(typeof body.audio.data).toBe("string");
-    expect(body.audio.data.length).toBeGreaterThan(0);
-    expect(body.audio.input.format).toEqual({ type: "wav", rate: 16000, bits: 16, channel: 1 });
-  });
-
-  it("收到 data: [DONE] 结束事件也通过", async () => {
-    fetchMock.mockImplementation(async () => ({
-      ok: true,
-      status: 200,
-      text: vi.fn(async () => "data: [DONE]\n\n")
-    }));
-    const { testAsrConnection } = await loadModule();
-    const resp = await testAsrConnection(stepfunProvider({ apiKey: "sk-step" }));
-    expect(resp.ok).toBe(true);
-  });
-
-  it("错误体含 not supported 时给出「端点或模型名错误」文案", async () => {
-    fetchMock.mockImplementation(async () => ({
-      ok: false,
-      status: 400,
-      text: vi.fn(async () => "model stepaudio-2.5-asr not supported")
-    }));
-    const { testAsrConnection } = await loadModule();
-    const resp = await testAsrConnection(stepfunProvider({ apiKey: "sk-step" }));
-    expect(resp.ok).toBe(false);
-    expect(resp.error).toContain("端点或模型名错误");
-  });
-
-  it("4xx 无错误体时给出指向 Normal 等级与 Plan 的失败文案", async () => {
-    fetchMock.mockImplementation(async () => ({
-      ok: false,
-      status: 401,
-      text: vi.fn(async () => "")
-    }));
-    const { testAsrConnection } = await loadModule();
-    const resp = await testAsrConnection(stepfunProvider({ apiKey: "sk-plan" }));
-    expect(resp.ok).toBe(false);
-    expect(resp.error).toContain("Normal");
-    expect(resp.error).toContain("Plan");
-    expect(resp.error).toContain("HTTP 401");
-  });
-
-  it("402 quota_exceeded 时给出计费通道引导（step_plan 端点）文案", async () => {
-    fetchMock.mockImplementation(async () => ({
-      ok: false,
-      status: 402,
-      text: vi.fn(async () => '{"error":{"type":"quota_exceeded"}}')
-    }));
-    const { testAsrConnection } = await loadModule();
-    const resp = await testAsrConnection(stepfunProvider({ apiKey: "sk-plan" }));
-    expect(resp.ok).toBe(false);
-    expect(resp.error).toContain("quota_exceeded");
-    expect(resp.error).toContain("step_plan");
-  });
-
-  it("缺 model / 缺 apiKey 时报错且不发请求", async () => {
-    const { testAsrConnection } = await loadModule();
-    const noModel = await testAsrConnection(
-      stepfunProvider({ model: "", apiKey: "sk-step" })
-    );
-    expect(noModel.ok).toBe(false);
-    expect(noModel.error).toContain("模型名");
-    const noKey = await testAsrConnection(
-      stepfunProvider({ apiKey: "" })
-    );
-    expect(noKey.ok).toBe(false);
-    expect(noKey.error).toContain("API Key");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

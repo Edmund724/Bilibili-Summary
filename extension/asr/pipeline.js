@@ -12,7 +12,6 @@ import { downloadAudioViaBackground } from "./downloader.js";
 import { buildChunkPlan, processAudio } from "./chunker.js";
 import { transcribe as transcribeOpenAi } from "./adapters/openai-transcriptions.js";
 import { transcribe as transcribeDashscopeFiletrans } from "./adapters/dashscope-filetrans.js";
-import { transcribe as transcribeStepfunSse } from "./adapters/stepfun-sse.js";
 import { ensureRunActive } from "../shared/error-helpers.js";
 import { retryAsync } from "../subtitle/fetcher.js";
 import { createOffscreenDecodeHost } from "./offscreen-bridge.js";
@@ -22,8 +21,7 @@ import { createOffscreenDecodeHost } from "./offscreen-bridge.js";
 // openai-transcriptions 最多 2 片并发，其余类型单任务串行。
 const ADAPTERS = {
   "openai-transcriptions": { adapter: transcribeOpenAi, concurrency: 2 },
-  "dashscope-filetrans": { adapter: transcribeDashscopeFiletrans, concurrency: 1 },
-  "stepfun-sse": { adapter: transcribeStepfunSse, concurrency: 1 }
+  "dashscope-filetrans": { adapter: transcribeDashscopeFiletrans, concurrency: 1 }
 };
 
 // 并发窗口：最多 limit 个任务同时执行，按完成顺序收集结果（无顺序依赖，
@@ -148,7 +146,7 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
 
   // 切片计划：openai-transcriptions 带时间戳 10 分钟一片、无时间戳按
   // settings.asrChunkMinutes（默认 3 分钟）；其余类型由 chunker 决策
-  // （dashscope-filetrans 不切整段；stepfun-sse 25 分钟一片）。
+  // （dashscope-filetrans 不切整段）。
   let plan;
   if (type === "openai-transcriptions") {
     const chunkMinutes = Number(provider?.chunkMinutes || 0) || 3;
@@ -197,15 +195,15 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
     const merged = mergeChunkResults(chunks, results);
     if (merged.length === 0 && typeof onEmptyDiagnostic === "function") {
       // 空结果诊断：各片转写都"成功"但没文本。静音场景已在解码层显式报错，
-      // 剩下的事件级证据随适配器 _stepfunDiag 上来，直接拼进状态栏文案。
-      const stepfunDiags = results
-        .map((r) => r?._stepfunDiag)
+      // 剩下的事件级证据随适配器诊断字段上来，直接拼进状态栏文案。
+      const diagnostics = results
+        .map((r) => r?._asrDiag)
         .filter(Boolean)
         .slice(0, 1);
       let diagText =
         `分片 ${chunks.length} 片、各片文本长度[${results.map((r) => String(r?.text || "").length).join(",")}]`;
-      if (stepfunDiags[0]) {
-        diagText += `；阶跃事件诊断 ${JSON.stringify(stepfunDiags[0])}`;
+      if (diagnostics[0]) {
+        diagText += `；事件诊断 ${JSON.stringify(diagnostics[0])}`;
       }
       try {
         onEmptyDiagnostic(diagText.slice(0, 400));
@@ -224,7 +222,7 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
     return collectResults(results);
   }
 
-  // 串行分支：dashscope-filetrans（整段一片）与 stepfun-sse 后续票。
+  // 串行分支：dashscope-filetrans（整段一片）。
   const serialResults = [];
   for (const chunk of chunks) {
     serialResults.push(await transcribeChunk({ chunk, provider, runId, onProgress: progress }));
