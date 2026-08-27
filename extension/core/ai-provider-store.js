@@ -22,10 +22,28 @@ import {
   normalizeAiInitialQuickPrompts,
   normalizeAiPresetPrompts,
   normalizeDefaultModel,
-  normalizeAiThinkingLevel
+  normalizeAiThinkingLevel,
+  normalizeAsrProvider
 } from "./shared-defaults.js";
 
 // ===== 设置归一化 + 存储 =====
+
+// ASR 默认项归一化：asrProviders 列表逐项走 normalizeAsrProvider，
+// asrAutoFallback/asrChunkMinutes 标量各自兜底。
+function normalizeAsrProvidersList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(normalizeAsrProvider).filter(Boolean);
+}
+
+function normalizeAsrAutoFallback(value) {
+  return value !== false; // 默认 true，仅显式 false 关闭
+}
+
+function normalizeAsrChunkMinutes(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 3;
+  return Math.floor(n);
+}
 
 export async function getMergedSettings(timeoutMs = 5000) {
   const timeoutPromise = new Promise((_, reject) => {
@@ -55,6 +73,10 @@ export async function getMergedSettings(timeoutMs = 5000) {
   merged.aiPresetPrompts = normalizeAiPresetPrompts(merged.aiPresetPrompts);
   merged.defaultModel = normalizeDefaultModel(merged.defaultModel);
   merged.aiThinkingLevel = normalizeAiThinkingLevel(merged.aiThinkingLevel);
+  merged.asrProviders = normalizeAsrProvidersList(merged.asrProviders);
+  merged.activeAsrProviderId = String(merged.activeAsrProviderId || "").trim();
+  merged.asrAutoFallback = normalizeAsrAutoFallback(merged.asrAutoFallback);
+  merged.asrChunkMinutes = normalizeAsrChunkMinutes(merged.asrChunkMinutes);
 
   return merged;
 }
@@ -91,6 +113,10 @@ export async function saveSettings(settings) {
   if ("aiPresetPrompts" in syncPayload) syncPayload.aiPresetPrompts = normalizeAiPresetPrompts(syncPayload.aiPresetPrompts);
   if ("defaultModel" in syncPayload) syncPayload.defaultModel = normalizeDefaultModel(syncPayload.defaultModel);
   if ("aiThinkingLevel" in syncPayload) syncPayload.aiThinkingLevel = normalizeAiThinkingLevel(syncPayload.aiThinkingLevel);
+  if ("asrProviders" in syncPayload) syncPayload.asrProviders = normalizeAsrProvidersList(syncPayload.asrProviders);
+  if ("activeAsrProviderId" in syncPayload) syncPayload.activeAsrProviderId = String(syncPayload.activeAsrProviderId || "").trim();
+  if ("asrAutoFallback" in syncPayload) syncPayload.asrAutoFallback = normalizeAsrAutoFallback(syncPayload.asrAutoFallback);
+  if ("asrChunkMinutes" in syncPayload) syncPayload.asrChunkMinutes = normalizeAsrChunkMinutes(syncPayload.asrChunkMinutes);
 
   await chrome.storage.sync.set(syncPayload);
 }

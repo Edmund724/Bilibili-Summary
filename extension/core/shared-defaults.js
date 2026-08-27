@@ -135,6 +135,108 @@ export function normalizeAiThinkingLevel(value) {
   return value === "low" || value === "high" ? value : "off";
 }
 
+// ===== ASR（语音转写）平台预设 =====
+// 字段含义见 spec.md 第 4 节。type 决定走哪个适配器，共三种：
+//   openai-transcriptions：OpenAI 兼容 multipart 端点（SiliconFlow / 本地 Whisper / 自定义）
+//   dashscope-filetrans：阿里百炼异步任务制（上传 → 提交 → 轮询）
+//   stepfun-sse：阶跃 StepAudio SSE 流式端点
+// maxBytes / maxDurationSec 用于切片决策；supportsTimestamps 决定时间戳合成方式。
+export const ASR_PROVIDER_PRESETS = [
+  {
+    id: "aliyun-dashscope",
+    name: "阿里百炼",
+    type: "dashscope-filetrans",
+    baseUrl: "https://dashscope.aliyuncs.com",
+    model: "paraformer-v2",
+    maxBytes: 2 * 1024 * 1024 * 1024, // 2GB
+    maxDurationSec: 12 * 60 * 60, // 12 小时，整段不切片
+    supportsTimestamps: true, // 句级 sentences.begin_time/end_time
+    note: "异步任务制，需上传音频到百炼临时存储换取公网可访问 URL；0.288 元/小时，每月送 10 小时。"
+  },
+  {
+    id: "stepfun-stepaudio",
+    name: "阶跃 StepAudio 2.5 ASR",
+    type: "stepfun-sse",
+    baseUrl: "https://api.stepfun.com",
+    model: "stepaudio-2.5-asr",
+    maxBytes: 50 * 1024 * 1024, // 估算上限，按 25 分钟片 ≈ 48MB
+    maxDurationSec: 30 * 60, // 30 分钟/次
+    supportsTimestamps: false, // 待验证，先用片级时间戳
+    // 关键坑：stepaudio-2.5-asr 不在 /v1/audio/transcriptions 上，错误端点会返回
+    // "model stepaudio-2.5-asr not supported"（与权限被拒长得一样）。正确端点是
+    // SSE 流式接口 POST /v1/audio/asr/sse，请求体为嵌套 JSON + base64 音频。
+    // 另外 API Key 必须是 "Normal" 等级，"Plan" 类型 key 调音频端点会无声 4xx。
+    note: "SSE 流式端点 /v1/audio/asr/sse；API Key 必须是 Normal 等级（Plan key 无声失败）。0.15 元/小时。"
+  },
+  {
+    id: "siliconflow-sensevoice",
+    name: "SiliconFlow 硅基流动（免费）",
+    type: "openai-transcriptions",
+    baseUrl: "https://api.siliconflow.cn/v1",
+    model: "FunAudioLLM/SenseVoiceSmall",
+    maxBytes: 50 * 1024 * 1024, // 50MB
+    maxDurationSec: 60 * 60, // 1 小时
+    supportsTimestamps: false, // verbose_json 不支持，只返回 { text }
+    note: "免费模型；verbose_json 不支持，只返回纯文本，切片时长按 asrChunkMinutes。"
+  },
+  {
+    id: "local-whisper",
+    name: "本地 Whisper 服务",
+    type: "openai-transcriptions",
+    baseUrl: "http://localhost:8000/v1",
+    model: "whisper-large-v3",
+    maxBytes: 0, // 取决于本地部署，0 表示不限制
+    maxDurationSec: 0, // 不限制
+    supportsTimestamps: true, // verbose_json segments
+    note: "本地部署，音频不上传任何外部服务。model 可按本地部署情况修改。"
+  },
+  {
+    id: "custom",
+    name: "自定义",
+    type: "openai-transcriptions",
+    baseUrl: "",
+    model: "",
+    maxBytes: 0,
+    maxDurationSec: 0,
+    supportsTimestamps: true, // 自动探测
+    note: "兼容 OpenAI transcriptions 协议的自定义端点。"
+  }
+];
+
+// 合法的 ASR 适配器类型，决定请求构造与响应解析方式
+const ASR_PROVIDER_TYPES = new Set([
+  "openai-transcriptions",
+  "dashscope-filetrans",
+  "stepfun-sse"
+]);
+
+export function getAsrPresetById(id) {
+  return ASR_PROVIDER_PRESETS.find((p) => p.id === id) || null;
+}
+
+// 归一化单个 ASR provider：字段齐全 + type 合法值校验。
+// 与 normalizeAiProvider 平行：持久化层只存"明文可回传"字段，
+// apiKey 单独存放在 chrome.storage.local，不进列表，故此处不带 apiKey。
+export function normalizeAsrProvider(item) {
+  if (!item || typeof item !== "object") return null;
+  const id = String(item.id || "").trim();
+  if (!id) return null;
+  const type = String(item.type || "").trim();
+  if (!ASR_PROVIDER_TYPES.has(type)) return null;
+  return {
+    id,
+    presetId: String(item.presetId || "custom"),
+    name: String(item.name || "自定义").trim() || "自定义",
+    type,
+    baseUrl: String(item.baseUrl || "").trim().replace(/\/+$/, ""),
+    model: String(item.model || "").trim(),
+    maxBytes: Number(item.maxBytes) || 0,
+    maxDurationSec: Number(item.maxDurationSec) || 0,
+    supportsTimestamps: item.supportsTimestamps !== false,
+    enabled: item.enabled !== false
+  };
+}
+
 // ===== AI platform presets =====
 export const PRESETS = [
   { id: "openai_compat", name: "OpenAI 兼容", baseUrl: "https://api.openai.com/v1", requiresKey: true },
@@ -401,7 +503,12 @@ export const DEFAULT_SETTINGS = {
   aiInitialQuickPrompts: DEFAULT_INITIAL_QUICK_PROMPTS.slice(),
   aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice(),
   defaultModel: "",
-  aiThinkingLevel: "off"
+  aiThinkingLevel: "off",
+  // ===== ASR（语音转写）回退配置 =====
+  asrProviders: [],          // [{id, name, type, baseUrl, model, maxBytes, maxDurationSec, ...}]
+  activeAsrProviderId: "",   // 当前选用的 ASR 平台 id
+  asrAutoFallback: true,     // 无字幕轨时自动走 ASR；false 则仅提示
+  asrChunkMinutes: 3         // 无时间戳平台（SiliconFlow）的切片时长（分钟）
 };
 
 const SYSTEM_FRONTMATTER_FIELDS = new Set(

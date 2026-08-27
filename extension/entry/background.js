@@ -3,6 +3,7 @@ import {
   DEFAULT_PLAYER_AI_QUICK_PROMPT,
   PLAYER_AI_QUICK_ACTION_STORAGE_KEY,
   PRESETS,
+  ASR_PROVIDER_PRESETS,
   normalizePlayerAiQuickPrompt,
   isSupportedBilibiliPage,
   sleep
@@ -18,6 +19,13 @@ import {
   testAiConnection,
   handleAiProvidersModels as fetchAiProviderModels
 } from "../core/ai-provider-store.js";
+import {
+  loadAsrProviders,
+  saveAsrProviders,
+  deleteAsrProvider,
+  loadAsrProviderKeys,
+  testAsrConnection
+} from "../asr/asr-provider-store.js";
 import {
   getAiSidepanelState,
   resolveAiSidepanelContext,
@@ -235,6 +243,56 @@ function handleAiProvidersModels(message, sender, sendResponse) {
   return true;
 }
 
+// ===== ASR 平台消息处理 =====
+
+function handleAsrPresetsList(message, sender, sendResponse) {
+  sendResponse({ ok: true, presets: ASR_PROVIDER_PRESETS.slice() });
+  return false;
+}
+
+function handleAsrProvidersList(message, sender, sendResponse) {
+  loadAsrProviders()
+    .then((items) => sendResponse({ ok: true, providers: items }))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleAsrProvidersSave(message, sender, sendResponse) {
+  saveAsrProviders(message.providers || [])
+    .then((items) => sendResponse({ ok: true, providers: items }))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleAsrProvidersDelete(message, sender, sendResponse) {
+  deleteAsrProvider(String(message.providerId || ""))
+    .then((items) => sendResponse({ ok: true, providers: items }))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleGetAsrProviderKey(message, sender, sendResponse) {
+  const providerId = String(message.providerId || "").trim();
+  if (!providerId) {
+    sendResponse({ ok: false, error: "缺少 providerId" });
+    return false;
+  }
+  loadAsrProviderKeys()
+    .then((keys) => {
+      const apiKey = String(keys[providerId] || "").trim();
+      sendResponse({ ok: true, apiKey });
+    })
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+function handleAsrProvidersTest(message, sender, sendResponse) {
+  testAsrConnection(message.provider || {})
+    .then((resp) => sendResponse(resp))
+    .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+  return true;
+}
+
 function handleAiSidepanelGetState(message, sender, sendResponse) {
   const tabId = Number(message.tabId || 0) || 0;
   const forceRefresh = message.forceRefresh === true;
@@ -277,6 +335,12 @@ const messageHandlers = new Map([
   ["ai-providers-delete", handleAiProvidersDelete],
   ["ai-providers-test", handleAiProvidersTest],
   ["ai-providers-models", handleAiProvidersModels],
+  ["asr-presets-list", handleAsrPresetsList],
+  ["asr-providers-list", handleAsrProvidersList],
+  ["asr-providers-save", handleAsrProvidersSave],
+  ["asr-providers-delete", handleAsrProvidersDelete],
+  ["get-asr-provider-key", handleGetAsrProviderKey],
+  ["asr-providers-test", handleAsrProvidersTest],
   ["ai-sidepanel-get-state", handleAiSidepanelGetState],
   ["ai-sidepanel-resolve-context", handleAiSidepanelResolveContext],
   ["ai-sidepanel-resolve-page-ref", handleAiSidepanelResolvePageRef]
