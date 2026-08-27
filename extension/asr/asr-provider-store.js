@@ -164,7 +164,8 @@ export async function testAsrConnection(provider) {
     return probeOpenAiTranscriptions({
       baseUrl: normalized.baseUrl,
       apiKey,
-      model: normalized.model
+      model: normalized.model,
+      language: normalized.language
     });
   }
   // normalizeAsrProvider 已校验 type，理论上到不了这里
@@ -174,7 +175,10 @@ export async function testAsrConnection(provider) {
 // openai-transcriptions 探针：构造 1 秒 16kHz 静音 WAV POST 到
 // `${baseUrl}/audio/transcriptions`，HTTP 200 即通过。
 // 适用于 SiliconFlow / 本地 Whisper / 自定义。
-async function probeOpenAiTranscriptions({ baseUrl, apiKey, model }) {
+// 语言档位（provider.language）以查询参数附带：选 zh/en 时同时验证该语言的
+// 请求链路（SiliconFlow 辰星只有 ?language=english 才启用英文识别，静音探针
+// 的 200 即证明该参数被接受）。
+async function probeOpenAiTranscriptions({ baseUrl, apiKey, model, language }) {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
   if (!normalizedBaseUrl) {
     return { ok: false, error: "请填写 baseUrl" };
@@ -192,12 +196,19 @@ async function probeOpenAiTranscriptions({ baseUrl, apiKey, model }) {
     headers["Authorization"] = `Bearer ${apiKey}`;
   }
 
+  // 语言档位转查询参数（与适配器 buildTranscriptionUrl 同规则）：
+  // zh → ?language=zh，en → ?language=english，auto 省略
+  const lang = String(language || "").trim().toLowerCase();
+  const query = lang === "zh" || lang === "en"
+    ? `?language=${lang === "zh" ? "zh" : "english"}`
+    : "";
+
   if (hasFormData) {
     const form = new FormData();
     form.append("file", new Blob([wavBytes], { type: "audio/wav" }), "probe.wav");
     form.append("model", model);
     form.append("response_format", "verbose_json");
-    form.append("language", "zh");
+    // 不把 language 放 multipart 字段（SiliconFlow 只认查询参数）
     body = form;
     // 千万不要手动设 Content-Type，浏览器自动带 boundary
   } else {
@@ -206,14 +217,13 @@ async function probeOpenAiTranscriptions({ baseUrl, apiKey, model }) {
     body = buildMultipartBody(boundary, [
       { name: "file", filename: "probe.wav", contentType: "audio/wav", data: wavBytes },
       { name: "model", value: model },
-      { name: "response_format", value: "verbose_json" },
-      { name: "language", value: "zh" }
+      { name: "response_format", value: "verbose_json" }
     ]);
   }
 
   let response;
   try {
-    response = await fetch(`${normalizedBaseUrl}/audio/transcriptions`, {
+    response = await fetch(`${normalizedBaseUrl}/audio/transcriptions${query}`, {
       method: "POST",
       headers,
       body

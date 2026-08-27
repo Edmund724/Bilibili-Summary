@@ -4,7 +4,7 @@
 // 编辑/删除（确认）/测试连接；radio 选择当前选用平台；行内状态行复用 ai-provider-status 样式。
 // 行构建器只依赖参数与回调，不直接访问 DOM 全局。
 
-import { ASR_PROVIDER_PRESETS } from "../core/shared-defaults.js";
+import { ASR_PROVIDER_PRESETS, ASR_LANGUAGE_OPTIONS } from "../core/shared-defaults.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../core/runtime.js";
 
@@ -48,6 +48,18 @@ function buildAsrModelField(preset, model) {
   return `<select class="asr-provider-model" title="模型名">${optionsHtml}</select>`;
 }
 
+// 转写语言档位下拉：auto（自动检测）/ zh / en。英文视频必须选 English——
+// SiliconFlow 辰星 / SenseVoice 只有传 ?language=english 才走英文转写，
+// 否则纯英文音频静默返回空文本（表现为"未识别到语音内容"）。
+function buildAsrLanguageField(language) {
+  const current = String(language || "auto");
+  const optionsHtml = ASR_LANGUAGE_OPTIONS.map((o) => {
+    const value = String(o?.value ?? "");
+    return `<option value="${escapeHtml(value)}" ${value === current ? "selected" : ""}>${escapeHtml(o?.label ?? value)}</option>`;
+  }).join("");
+  return `<select class="asr-provider-language" title="转写语言">${optionsHtml}</select>`;
+}
+
 export function addAsrProviderRow(listNode, emptyNode, item = {}, { presets = ASR_PROVIDER_PRESETS, activeId = "" } = {}) {
   const id = String(item.id || generateAsrProviderId());
   const presetId = String(item.presetId || "custom");
@@ -71,6 +83,7 @@ export function addAsrProviderRow(listNode, emptyNode, item = {}, { presets = AS
     <input class="asr-provider-baseurl" type="text" placeholder="baseUrl（如 https://api.siliconflow.cn/v1）" value="${escapeHtml(baseUrl)}" />
     <input class="asr-provider-apikey" type="password" placeholder="${hasSavedKey ? "已保存" : "API Key"}" autocomplete="off" />
     ${buildAsrModelField(preset, model)}
+    ${buildAsrLanguageField(item.language)}
     <label class="asr-provider-active" title="选用该平台自动生成字幕">
       <input class="asr-provider-active-radio" type="radio" name="asrActiveProvider" ${isActive ? "checked" : ""} />
       选用
@@ -102,6 +115,11 @@ export function addAsrProviderRow(listNode, emptyNode, item = {}, { presets = AS
     }
     // 模型名随预设切换重建：带 modelOptions 的预设渲染为下拉框，否则为文本输入。
     row.querySelector(".asr-provider-model").outerHTML = buildAsrModelField(next, next.model || "");
+    // 语言档位随预设切换回落预设默认值（SiliconFlow 默认 zh，其余 auto）。
+    const languageSelect = row.querySelector(".asr-provider-language");
+    if (languageSelect) {
+      languageSelect.value = next?.language || "auto";
+    }
     row.querySelector(".asr-provider-name").value = next.name || "";
     row.querySelector(".asr-provider-apikey").value = "";
     row.dataset.currentPresetId = next.id;
@@ -185,6 +203,7 @@ export function collectAsrProviders(listNode, { presets = ASR_PROVIDER_PRESETS, 
     const presetSelect = row.querySelector(".asr-provider-preset");
     const preset = presets.find((p) => p.id === presetSelect.value) || null;
     const apiKey = row.querySelector(".asr-provider-apikey").value.trim();
+    const language = String(row.querySelector(".asr-provider-language")?.value || "auto");
     return {
       id: row.dataset.providerId || generateId(),
       presetId: preset?.id || "custom",
@@ -192,6 +211,9 @@ export function collectAsrProviders(listNode, { presets = ASR_PROVIDER_PRESETS, 
       type: preset?.type || "openai-transcriptions",
       baseUrl: row.querySelector(".asr-provider-baseurl").value.trim().replace(/\/+$/, ""),
       model: row.querySelector(".asr-provider-model").value.trim(),
+      // 语言档位：auto 回落预设默认值（SiliconFlow 预设默认 zh，其余 auto），
+      // 保证英文视频切到 English 后不会被下一次保存静默重置。
+      language: language === "auto" ? (preset?.language || "auto") : language,
       apiKey,
       hasSavedKey: row.dataset.hasSavedKey === "1"
     };

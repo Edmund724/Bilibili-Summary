@@ -191,8 +191,10 @@ describe("openai-transcriptions 适配器", () => {
 
   it("FormData 字段断言：body 为 FormData、model 正确、绝无 Content-Type 头、apiKey 带 Bearer", async () => {
     let captured = null;
+    let capturedUrl = null;
     const fetchMock = vi.fn(async (url, init) => {
       captured = init;
+      capturedUrl = url;
       return { ok: true, status: 200, json: async () => ({ text: "ok", segments: [] }) };
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -210,12 +212,53 @@ describe("openai-transcriptions 适配器", () => {
     expect(captured.body).toBeInstanceOf(FormData);
     expect(captured.body.get("model")).toBe("FunAudioLLM/SenseVoiceSmall");
     expect(captured.body.get("response_format")).toBe("json");
-    // 不硬编码语言：省略交服务端自动检测
+    // 语言不放在 multipart 字段里（SiliconFlow 只认查询参数）
     expect(captured.body.get("language")).toBeNull();
     expect(captured.body.get("file")).toBeInstanceOf(Blob);
     // 绝不手动设 Content-Type
     expect(captured.headers["Content-Type"]).toBeUndefined();
     expect(captured.headers.Authorization).toBe("Bearer sk-test");
+    // provider 未设语言档位 → URL 不带 language 参数
+    expect(capturedUrl).toBe("https://api.siliconflow.cn/v1/audio/transcriptions");
+  });
+
+  it("language=en 时 URL 附加 ?language=english（英文转写链路）", async () => {
+    let capturedUrls = [];
+    const fetchMock = vi.fn(async (url, init) => {
+      capturedUrls.push(url);
+      return { ok: true, status: 200, json: async () => ({ text: "hello" }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = await import("../../extension/asr/adapters/openai-transcriptions.js");
+    await adapter.transcribe({
+      wavBlob: new Blob([new Uint8Array(8)]),
+      startSec: 0,
+      durationSec: 60,
+      provider: { ...OPENAI_PROVIDER, language: "en" }
+    });
+
+    // 两次请求（verbose_json + json 降级）都带 ?language=english
+    expect(capturedUrls).toEqual([
+      "https://api.siliconflow.cn/v1/audio/transcriptions?language=english",
+      "https://api.siliconflow.cn/v1/audio/transcriptions?language=english"
+    ]);
+  });
+
+  it("language=zh 时 URL 附加 ?language=zh", async () => {
+    let capturedUrls = [];
+    const fetchMock = vi.fn(async (url) => {
+      capturedUrls.push(url);
+      return { ok: true, status: 200, json: async () => ({ text: "你好" }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = await import("../../extension/asr/adapters/openai-transcriptions.js");
+    await adapter.transcribe({
+      wavBlob: new Blob([new Uint8Array(8)]),
+      startSec: 0,
+      durationSec: 60,
+      provider: { ...OPENAI_PROVIDER, language: "zh" }
+    });
+    expect(capturedUrls[0]).toBe("https://api.siliconflow.cn/v1/audio/transcriptions?language=zh");
   });
 
   it("apiKey 为空时不带 Authorization 头", async () => {

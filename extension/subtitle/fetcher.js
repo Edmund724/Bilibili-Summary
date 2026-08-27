@@ -511,6 +511,11 @@ async function maybeRunAsrFallback({ runId }) {
     const apiKey = await getAsrProviderKey(activeId);
     ensureRunActive(runId);
     const provider = { ...activeProvider, apiKey };
+    // 生效转写语言：优先平台行自带的 language 档位，未设则用全局 asrLanguage
+    // 设置（默认 auto）。auto 不传语言参数，交服务端自动检测。
+    if (!provider.language && settings.asrLanguage) {
+      provider.language = settings.asrLanguage;
+    }
     const platformName = provider.name || "语音识别平台";
     const model = String(provider.model || "").trim();
     const cacheKey = getSubtitleCacheKey({

@@ -32,7 +32,14 @@ describe("ASR_PROVIDER_PRESETS", () => {
       expect(typeof p.maxDurationSec).toBe("number");
       expect(typeof p.supportsTimestamps).toBe("boolean");
       expect(typeof p.note).toBe("string");
+      expect(["auto", "zh", "en"].includes(p.language)).toBe(true);
     }
+  });
+
+  it("SiliconFlow 默认中文（辰星模型依赖 language 参数），本地 Whisper 与自定义默认 auto", () => {
+    expect(getAsrPresetById("siliconflow-sensevoice").language).toBe("zh");
+    expect(getAsrPresetById("local-whisper").language).toBe("auto");
+    expect(getAsrPresetById("custom").language).toBe("auto");
   });
 
   it("SiliconFlow 与本地 Whisper 同为 openai-transcriptions", () => {
@@ -86,8 +93,25 @@ describe("normalizeAsrProvider", () => {
       maxBytes: 52428800,
       maxDurationSec: 3600,
       supportsTimestamps: false,
+      language: "auto",
       enabled: true
     });
+  });
+
+  it("language 合法档位保留、非法值回落 auto", () => {
+    const zh = normalizeAsrProvider({
+      id: "p1", type: "openai-transcriptions", baseUrl: "x", model: "y", language: "zh"
+    });
+    expect(zh.language).toBe("zh");
+
+    const en = normalizeAsrProvider({
+      id: "p2", type: "openai-transcriptions", baseUrl: "x", model: "y", language: "en"
+    });
+    expect(en.language).toBe("en");
+
+    // 缺失 / 非法值都回落 auto
+    expect(normalizeAsrProvider({ id: "p3", type: "openai-transcriptions", baseUrl: "x", model: "y" }).language).toBe("auto");
+    expect(normalizeAsrProvider({ id: "p4", type: "openai-transcriptions", baseUrl: "x", model: "y", language: "ja" }).language).toBe("auto");
   });
 
   it("baseUrl 尾部斜杠被剥离", () => {
@@ -164,5 +188,8 @@ describe("DEFAULT_SETTINGS ASR 默认项", () => {
   });
   it("asrAutoFallback 默认 true（无字幕自动走 ASR）", () => {
     expect(DEFAULT_SETTINGS.asrAutoFallback).toBe(true);
+  });
+  it("asrLanguage 默认 auto（自动检测语言）", () => {
+    expect(DEFAULT_SETTINGS.asrLanguage).toBe("auto");
   });
 });

@@ -6,11 +6,27 @@
 // 关键约束（spec 6.7 / 7.1）：
 //   - 用 FormData 上传，绝不手动设 Content-Type（浏览器自动带 boundary）；
 //   - apiKey 存在才带 Authorization: Bearer（本地 Whisper 常无 Key）；
+//   - 转写语言：provider.language 为 zh/en 时以查询参数 ?language=zh|english
+//     传给平台（SiliconFlow 辰星/SenseVoice 的英文识别依赖该参数）；auto 省略，
+//     交服务端自动检测；
 //   - 兼容性降级：非 2xx 或响应体无 segments → 以 response_format=json
 //     自动重试一次（只取 text），返回里省略 segments 表达"无时间戳"，
 //     调用方据此合成整片粗粒度字幕。
 
 export const ADAPTER_TYPE = "openai-transcriptions";
+
+// 把识别语言转成平台查询参数：?language=zh / ?language=english。
+// SiliconFlow 辰星 / SenseVoice 系列的英文识别依赖 ?language=english（multipart
+// 字段不生效），只有显式选择 zh/en 才附带；auto 省略让服务端自动检测
+// （本地 Whisper 也无此参数，其语言自动识别）。
+export function buildTranscriptionUrl(baseUrl, language) {
+  const normalized = String(baseUrl || "").trim().replace(/\/+$/, "");
+  const lang = String(language || "").trim().toLowerCase();
+  if (lang !== "zh" && lang !== "en") {
+    return `${normalized}/audio/transcriptions`;
+  }
+  return `${normalized}/audio/transcriptions?language=${lang === "zh" ? "zh" : "english"}`;
+}
 
 // 构造 FormData（纯函数便于单测断言字段）
 export function buildTranscriptionForm(wavBlob, provider, responseFormat) {
@@ -18,8 +34,9 @@ export function buildTranscriptionForm(wavBlob, provider, responseFormat) {
   form.append("file", wavBlob, "chunk.wav");
   form.append("model", provider?.model || "");
   form.append("response_format", responseFormat || "verbose_json");
-  // 不硬编码 language——语言与实际语音不匹配时部分平台会静默返回空文本；
-  // 缺省让服务端自动检测，兼容中英混排与外语视频。
+  // 不把 language 放 multipart 字段——SiliconFlow 辰星/SenseVoice 只认查询
+  // 参数 ?language=zh|english，字段会被忽略；语言参数由 buildTranscriptionUrl
+  // 附加到 URL（auto 省略，服务端自动检测，兼容中英混排与外语视频）。
   return form;
 }
 
@@ -59,7 +76,7 @@ async function postTranscription({ wavBlob, provider, signal, responseFormat }) 
 
   let response;
   try {
-    response = await fetch(`${baseUrl}/audio/transcriptions`, {
+    response = await fetch(buildTranscriptionUrl(baseUrl, provider?.language), {
       method: "POST",
       headers,
       body: form,

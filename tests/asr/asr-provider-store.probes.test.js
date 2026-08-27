@@ -98,6 +98,17 @@ describe("openai-transcriptions 探针", () => {
     expect(init.headers["Content-Type"]).toBeUndefined();
   });
 
+  it("language=en 时探针 URL 附加 ?language=english（验证英文链路）", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { text: "ok" }));
+    const { testAsrConnection } = await loadModule();
+    const resp = await testAsrConnection(baseProvider({ apiKey: "sk-1", language: "en" }));
+    expect(resp.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://example.com/v1/audio/transcriptions?language=english");
+    // 语言不在 multipart 字段里（SiliconFlow 只认查询参数）
+    expect(init.body.get("language")).toBeNull();
+  });
+
   it("非 200 报 HTTP 状态码与响应体片段", async () => {
     fetchMock.mockResolvedValue(jsonResponse(400, { message: "bad request" }));
     const { testAsrConnection } = await loadModule();
