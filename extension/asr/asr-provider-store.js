@@ -413,7 +413,9 @@ function buildMultipartBody(boundary, fields) {
 
 // ===== 工具：bytes -> base64 =====
 
-function bytesToBase64(bytes) {
+// 分段编码避免 String.fromCharCode 栈溢出（32768 字节/段）。供本文件
+// 探针与 stepfun-sse 适配器共用。
+export function bytesToBase64(bytes) {
   // 环境差异：浏览器有 btoa，Node 有 Buffer。优先 btoa。
   if (typeof btoa === "function") {
     let binary = "";

@@ -12,6 +12,7 @@ import { downloadAudioViaBackground } from "./downloader.js";
 import { buildChunkPlan, processAudio } from "./chunker.js";
 import { transcribe as transcribeOpenAi } from "./adapters/openai-transcriptions.js";
 import { transcribe as transcribeDashscopeFiletrans } from "./adapters/dashscope-filetrans.js";
+import { transcribe as transcribeStepfunSse } from "./adapters/stepfun-sse.js";
 import { ensureRunActive } from "../shared/error-helpers.js";
 import { retryAsync } from "../subtitle/fetcher.js";
 import { createOffscreenDecodeHost } from "./offscreen-bridge.js";
@@ -21,7 +22,8 @@ import { createOffscreenDecodeHost } from "./offscreen-bridge.js";
 // openai-transcriptions 最多 2 片并发，其余类型单任务串行。
 const ADAPTERS = {
   "openai-transcriptions": { adapter: transcribeOpenAi, concurrency: 2 },
-  "dashscope-filetrans": { adapter: transcribeDashscopeFiletrans, concurrency: 1 }
+  "dashscope-filetrans": { adapter: transcribeDashscopeFiletrans, concurrency: 1 },
+  "stepfun-sse": { adapter: transcribeStepfunSse, concurrency: 1 }
 };
 
 // 并发窗口：最多 limit 个任务同时执行，按完成顺序收集结果（无顺序依赖，
