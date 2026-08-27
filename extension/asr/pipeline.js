@@ -11,14 +11,17 @@ import { getSourceAudioUrl } from "./audio-source.js";
 import { downloadAudioViaBackground } from "./downloader.js";
 import { buildChunkPlan, processAudio } from "./chunker.js";
 import { transcribe as transcribeOpenAi } from "./adapters/openai-transcriptions.js";
+import { transcribe as transcribeDashscopeFiletrans } from "./adapters/dashscope-filetrans.js";
 import { ensureRunActive } from "../shared/error-helpers.js";
 import { retryAsync } from "../subtitle/fetcher.js";
 import { createOffscreenDecodeHost } from "./offscreen-bridge.js";
 
-// type → 适配器映射。dashscope-filetrans / stepfun-sse 适配器后续票注册；
-// 映射表缺 type 时 throw 明确错误，避免静默走错分支。
+// type → 适配器映射。映射表缺 type 时 throw 明确错误，避免静默走错分支。
+// 并发策略：映射表项的 concurrency 元数据驱动（见 runAsrPipeline）；
+// openai-transcriptions 最多 2 片并发，其余类型单任务串行。
 const ADAPTERS = {
-  "openai-transcriptions": transcribeOpenAi
+  "openai-transcriptions": { adapter: transcribeOpenAi, concurrency: 2 },
+  "dashscope-filetrans": { adapter: transcribeDashscopeFiletrans, concurrency: 1 }
 };
 
 // 并发窗口：最多 limit 个任务同时执行，按完成顺序收集结果（无顺序依赖，
@@ -62,8 +65,9 @@ async function runWithConcurrency(tasks, limit = 2) {
 
 // 逐片转写（含重试），onProgress 透传给上层展示逐片进度。
 async function transcribeChunk({ chunk, provider, runId, onProgress }) {
+  const adapter = ADAPTERS[provider.type]?.adapter;
   const task = () =>
-    transcribeOpenAi({
+    adapter({
       wavBlob: chunk.wavBlob,
       startSec: chunk.startSec,
       durationSec: chunk.durationSec,
@@ -134,14 +138,15 @@ export function mergeChunkResults(chunks, results) {
 // createOffscreenDecodeHost：一次全量解码 + 分块回传）。
 export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, onProgress, decodeHost }) {
   const type = String(provider?.type || "").trim();
-  const adapter = ADAPTERS[type];
-  if (!adapter) {
+  const entry = ADAPTERS[type];
+  if (!entry) {
     throw new Error("暂不支持的平台类型：" + (type || "未知"));
   }
   const host = decodeHost || createOffscreenDecodeHost();
 
   // 切片计划：openai-transcriptions 带时间戳 10 分钟一片、无时间戳按
-  // settings.asrChunkMinutes（默认 3 分钟）；其余类型由 chunker 决策。
+  // settings.asrChunkMinutes（默认 3 分钟）；其余类型由 chunker 决策
+  // （dashscope-filetrans 不切整段；stepfun-sse 25 分钟一片）。
   let plan;
   if (type === "openai-transcriptions") {
     const chunkMinutes = Number(provider?.chunkMinutes || 0) || 3;
@@ -181,19 +186,21 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
     return { ...chunk, durationSec: endSec - chunk.startSec };
   });
 
-  // 逐片转写：openai-transcriptions 最多 2 片并发，其余类型串行。
+  // 逐片转写：并发窗口取映射表 concurrency 元数据（openai-transcriptions 2，
+  // 其余单任务串行）；结果按片 index 有序，合成阶段排序。
   const total = chunks.length;
+  const concurrency = Number(entry.concurrency) || 1;
   const progress = (msg) => onProgress?.(`${msg}（共 ${total} 片）`);
-  if (type === "openai-transcriptions") {
+  if (concurrency > 1) {
     const results = await runWithConcurrency(
       chunks.map((chunk) => () => transcribeChunk({ chunk, provider, runId, onProgress: progress })),
-      2
+      concurrency
     );
     ensureRunActive(runId);
     return mergeChunkResults(chunks, results);
   }
 
-  // 串行分支：当前仅 openai 分支在用，dashscope/stepfun 后续票扩展。
+  // 串行分支：dashscope-filetrans（整段一片）与 stepfun-sse 后续票。
   const serialResults = [];
   for (const chunk of chunks) {
     serialResults.push(await transcribeChunk({ chunk, provider, runId, onProgress: progress }));
