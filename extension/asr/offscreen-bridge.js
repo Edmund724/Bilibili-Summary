@@ -1,147 +1,181 @@
-// extension/asr/offscreen-bridge.js
-// ASR 音频解码的 offscreen 通道。MV3 service worker 没有 AudioContext，
-// 解码必须跑在 offscreen 文档里；本项目现有 offscreen 基建是
-// 「background 创建文档 + 页面侧连 port 发消息」的模式（entry/offscreen.js
-// 的 offscreen-chat 端口即如此），因此这里沿用同一套：page 侧发起一个
-// 单任务通道（background 保证任务互斥、至多一个活跃文档），结果随
-// port 回显。
+// ASR 音频「下载 + 解码 + 切片 + WAV 编码」的 offscreen 通道。MV3 service
+// worker 没有 AudioContext，且 chrome.runtime 消息是 JSON 序列化——二进制
+// （Uint8Array / Float32Array）跨 context 会变成数字键普通对象，字节全损。
+// 因此下载、解码、切片、WAV 编码整体搬进 offscreen 文档，跨 context 只传
+// 字符串（base64）与小 JSON，转写层（页面侧逐片 fetch 语音平台）不动。
 //
-// 数据流：runAsrPipeline → createOffscreenDecodeHost()（page 侧）→
-//   sendOffloadMessage({ taskType:"asr-decode", task }) → background
-//   handleAsrDecode → 创建 offscreen 文档 → 文档 decodeTo16kMono →
-//   解码结果按 MAX_RESPONSE_BYTES 分块回传（结构化克隆转普通数组）。
+// 数据流：runAsrPipeline → createOffscreenChunkHost()（page 侧）→
+//   sendOffloadMessage({ taskType:"asr-decode-prepare" }) → background 建
+//   offscreen 文档 + 加 dnr 防盗链规则 → 页面连 "asr-decode" port 直连
+//   文档 → postMessage 任务 → 逐片收 { type:"chunk", wavBase64 } →
+//   { type:"done" } → base64 还原为 Blob 返回 → 再发
+//   { taskType:"asr-decode-cleanup" } 清 dnr 规则。
 //
-// 潜在上限：解码结果按块回传（每块 16MB，低于跨进程消息配额），
-// 单条消息无超限风险；输入音频经 background 下载时已按 200MB 上限拒绝
-// 超长视频（downloader.js）。
+// 本模块同时在 background 与页面两个环境加载：顶层不触碰 worker-only API
+// （chrome.declarativeNetRequest / chrome.offscreen 只在各自 handler 函数体内
+// 访问）。
 
 import { sendOffloadMessage } from "../core/runtime.js";
 
-// offscreen 文档侧按此字节上限对解码结果分块回传（低于配额，保持保守）
-export const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
-// offscreen 文档内的任务超时（分钟）
+// 音频体积上限 200MB（offscreen 文档侧下载时 HEAD 探大小据此拒绝超长视频）
+export const MAX_AUDIO_BYTES = 200 * 1024 * 1024;
+// offscreen 文档内的任务超时（解码与下载共用）
 export const ASR_DECODE_TIMEOUT_MS = 10 * 60 * 1000;
 // background 为任务创建的 offscreen 文档 URL
 export const ASR_DECODE_OFFSCREEN_URL = "entry/offscreen.html";
+// 会话规则 id：固定值即可，一次只跑一个解码任务，冲突概率低；
+// updateSessionRules 采用"移除全部旧规则再添加"的方式天然去重。
+const ASR_AUDIO_SESSION_RULE_ID = 32001;
 
-// page 侧：发起单任务通道并收结果。task 返回结构化克隆可序列化的值
-// （TypedArray 会被转成普通数组；收结果侧自行复原）。
-function runOffscreenTask(task) {
-  return sendOffloadMessage({ taskType: "asr-decode", task });
+// ===== 共享工具（页面/文档双侧共用） =====
+
+// Uint8Array → base64 字符串（btoa 0x8000 分块，避免 String.fromCharCode
+// 栈溢出）。浏览器用 btoa，Node 下退 Buffer。
+export function bytesToBase64(bytes) {
+  const source = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  if (typeof btoa === "function") {
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < source.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, source.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(source).toString("base64");
+  }
+  throw new Error("当前环境不支持 base64 编码（无 btoa / Buffer）");
 }
 
-// 页面侧合成宿主（全量解码 + 重采样）：一次把整段音频送给 offscreen，
-// 解码结果按 MAX_RESPONSE_BYTES 分块回传后拼回 Float32Array。startSec 传 0
-// （整段从头解码，无需对齐）。回传已按 MAX_RESPONSE_BYTES 分块（每个
-// 16MB 块远低于跨进程消息配额），单条消息无超限风险，超长视频同样适用。
-export function createOffscreenDecodeHost() {
-  return async function offscreenDecodeHost(arrayBuffer) {
-    const task = {
-      type: "decode",
-      audioBytes: new Uint8Array(arrayBuffer),
-      startSec: 0
-    };
-    return runOffscreenTask(task).then((payload) => {
-      const merged = restoreFloat32Array(payload.chunks || []);
-      return {
-        sampleRate: Number(payload.sampleRate) || 16000,
-        length: merged.length,
-        getChannelData: () => merged,
-        // 解码诊断（时长/峰值幅度），offscreen 文档侧产出；chunker 据此
-        // 把"解码出静音"变成显式报错。其它宿主无此字段，属可选项。
-        diagnostic: payload.diagnostic || null
+// base64 字符串 → Uint8Array（bytesToBase64 的逆操作）
+export function base64ToBytes(b64) {
+  const binary = atob(String(b64 || ""));
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    out[i] = binary.charCodeAt(i);
+  }
+  return out;
+}
+
+// ===== 页面侧 chunk host =====
+
+// 页面侧合成宿主：一次发起「下载 + 解码 + 切片 + WAV 编码」任务，音频字节
+// 全程不跨 context（offscreen 文档自己 fetch），每片 WAV 以 base64 字符串
+// 回传后还原为 Blob。契约：
+//   async ({ audioUrl, backupUrls, plan }) =>
+//     [{ index, startSec, durationSec, wavBlob }]
+// 失败 reject 带用户可读文案；成功失败都会发 asr-decode-cleanup 清 dnr 规则。
+export function createOffscreenChunkHost() {
+  return async function offscreenChunkHost({ audioUrl, backupUrls, plan }) {
+    // 先让 background 建 offscreen 文档 + 加防盗链规则，再直连文档传任务
+    const prepared = await sendOffloadMessage({ taskType: "asr-decode-prepare" });
+    if (!prepared?.ok) {
+      throw new Error(prepared?.error || "音频解码服务启动失败");
+    }
+
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      let done = false;
+
+      const cleanup = () => {
+        sendOffloadMessage({ taskType: "asr-decode-cleanup" }).catch(() => {
+          // 规则清理失败不影响主流程（会话规则随浏览器重启自动清空）
+        });
       };
+      const finish = (callback, value) => {
+        if (done) return;
+        done = true;
+        try {
+          port.disconnect();
+        } catch {
+          // ignore
+        }
+        cleanup();
+        callback(value);
+      };
+
+      const port = chrome.runtime.connect({ name: "asr-decode" });
+      port.onMessage.addListener((msg) => {
+        if (!msg || typeof msg !== "object") return;
+        if (msg.type === "chunk") {
+          // done 之前未知 index 的 chunk 也收下，done 后统一按 index 排序
+          chunks.push({
+            index: Number(msg.index) || 0,
+            startSec: Number(msg.startSec) || 0,
+            durationSec: Number(msg.durationSec) || 0,
+            wavBlob: new Blob([base64ToBytes(msg.wavBase64)], { type: "audio/wav" })
+          });
+          return;
+        }
+        if (msg.type === "done") {
+          const ordered = chunks
+            .slice()
+            .sort((a, b) => a.index - b.index);
+          finish(resolve, ordered);
+          return;
+        }
+        if (msg.type === "error") {
+          finish(reject, new Error(msg.error || "音频解码失败"));
+        }
+      });
+      port.onDisconnect.addListener(() => {
+        if (!done) {
+          finish(reject, new Error("音频解码中断：后台连接已断开"));
+        }
+      });
+
+      port.postMessage({
+        action: "asr-decode",
+        task: {
+          audioUrl: String(audioUrl || "").trim(),
+          backupUrls: Array.isArray(backupUrls) ? backupUrls : [],
+          chunkSeconds: Number(plan?.chunkSeconds) || 0
+        }
+      });
     });
   };
 }
 
 // ===== background 侧执行器 =====
 
-// 执行 asr-decode 任务：创建（或复用）offscreen 文档 → 连 port 提交
-// { action:"asr-decode", task } → 收 done/error 结果。background 侧只
-// 透传文档的 port 消息（消息携带 content 时直接回传，需避免 sendResponse
-// 跨任务误接：文档始终只回显单条结果）。
-const ASR_OFFSCREEN_PORT = "asr-decode";
-let asrOffscreenLock = null;
-
-export async function handleAsrDecode(message, sender, sendResponse) {
-  const task = message?.task;
-  if (!task || typeof task !== "object") {
-    sendResponse({ ok: false, error: "缺少 asr-decode 任务参数" });
-    return;
-  }
+// 任务准备：创建（或复用）offscreen 文档 + 加防盗链下载规则。页面侧连
+// "asr-decode" 端口前调用，保证文档与规则就绪。
+export async function handleAsrDecodePrepare(message, sender, sendResponse) {
   try {
-    const payload = await withAsrOffscreenLock(() => runInAsrOffscreen(task));
-    sendResponse({ ok: true, payload });
+    await ensureAsrOffscreenDocument();
+    await addDownloadRules();
+    sendResponse({ ok: true });
   } catch (error) {
     sendResponse({ ok: false, error: String(error?.message || error) });
   }
 }
 
-// 任务互斥：同时只有一个 offscreen 解码任务在跑（避免并发创建文档）
-async function withAsrOffscreenLock(taskFn) {
-  while (asrOffscreenLock) {
-    await asrOffscreenLock;
-  }
-  let release;
-  asrOffscreenLock = new Promise((resolve) => {
-    release = resolve;
-  });
+// 任务收尾：清掉本次解码会话加的防盗链规则（成功失败都要调，页面侧用
+// try/finally 或 .finally 兜底）。会话规则随浏览器重启自动清空，无需持久化。
+export async function handleAsrDecodeCleanup(message, sender, sendResponse) {
   try {
-    return await taskFn();
-  } finally {
-    asrOffscreenLock = null;
-    release();
+    await removeDownloadRules();
+    sendResponse({ ok: true });
+  } catch (error) {
+    sendResponse({ ok: false, error: String(error?.message || error) });
   }
-}
-
-async function runInAsrOffscreen(task) {
-  const document = await ensureAsrOffscreenDocument();
-  return new Promise((resolve, reject) => {
-    const port = chrome.runtime.connect({ name: ASR_OFFSCREEN_PORT });
-    let settled = false;
-    const finish = (cb, value) => {
-      if (settled) return;
-      settled = true;
-      try {
-        port.disconnect();
-      } catch {
-        // ignore
-      }
-      cb(value);
-    };
-    port.onMessage.addListener((msg) => {
-      if (!msg || typeof msg !== "object") return;
-      if (msg.type === "done") {
-        finish(resolve, msg.payload);
-        return;
-      }
-      if (msg.type === "error") {
-        finish(reject, new Error(String(msg.error || "offscreen 解码失败")));
-      }
-    });
-    port.onDisconnect.addListener(() => {
-      finish(reject, new Error("offscreen 文档已断开，音频解码失败"));
-    });
-    port.postMessage({ action: "asr-decode", task });
-    // 兜底超时（文档侧也会超时，这里防文档被冻结的极端情况）
-    setTimeout(() => {
-      finish(reject, new Error("音频解码超时"));
-    }, ASR_DECODE_TIMEOUT_MS + 15000).unref?.();
-  });
 }
 
 // 有活跃文档就复用，没有则创建一个（offscreen 文档常驻 sidepanel 创建的
 // "offscreen-chat" 实例，新端口与之并存互不干扰）。
 async function ensureAsrOffscreenDocument() {
   try {
-    const clients = await chrome.clients.matchAll({ includeUncontrolled: true });
+    // 注意：SW 标准全局是 self.clients（ServiceWorkerGlobalScope.clients），
+    // 没有 chrome.clients 这个命名空间。曾误用 chrome.clients 导致 TypeError
+    // 被外层 catch 吞掉、无文档时从不创建 offscreen 文档，页面侧 asr-decode
+    // 端口因找不到接收端 ~2ms 断连（「音频解码中断：后台连接已断开」）。
+    const clients = await self.clients.matchAll({ includeUncontrolled: true });
     const hasDoc = clients.some((client) => client.url?.includes(ASR_DECODE_OFFSCREEN_URL));
     if (!hasDoc) {
       await chrome.offscreen.createDocument({
         url: chrome.runtime.getURL(ASR_DECODE_OFFSCREEN_URL),
         reasons: ["AUDIO_PLAYBACK"],
-        justification: "Decode and resample video audio for ASR transcription."
+        justification: "Download, decode and slice video audio for ASR transcription."
       });
     }
   } catch {
@@ -150,28 +184,36 @@ async function ensureAsrOffscreenDocument() {
   return true;
 }
 
-// ===== 工具（页面/文档双侧共用） =====
+// ===== 防盗链下载规则（dnr 为 MV3 专属 API，仅 background 可用） =====
 
-// 把 Float32Array 按 MAX_RESPONSE_BYTES 切成若干普通数组（结构化克隆
-// 会把 TypedArray 转普通数组，这里显式切片避免一次传过大）
-export function splitFloat32Array(data, maxBytes = MAX_RESPONSE_BYTES) {
-  const bytesPerSample = 4;
-  const maxSamples = Math.max(1, Math.floor(maxBytes / bytesPerSample));
-  const chunks = [];
-  for (let offset = 0; offset < data.length; offset += maxSamples) {
-    chunks.push(Array.from(data.subarray(offset, offset + maxSamples)));
-  }
-  return chunks;
+// 为本次解码任务添加 Referer/Origin 会话规则（offscreen 文档 fetch 音轨时
+// 绕防盗链；规则添加在任务准备阶段完成）
+export async function addDownloadRules() {
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [ASR_AUDIO_SESSION_RULE_ID],
+    addRules: [
+      {
+        id: ASR_AUDIO_SESSION_RULE_ID,
+        priority: 1,
+        action: {
+          type: "modifyHeaders",
+          requestHeaders: [
+            { header: "Referer", operation: "set", value: "https://www.bilibili.com" },
+            { header: "Origin", operation: "set", value: "https://www.bilibili.com" }
+          ]
+        },
+        condition: {
+          urlFilter: "||bilivideo.com",
+          resourceTypes: ["xmlhttprequest"]
+        }
+      }
+    ]
+  });
 }
 
-// 拼回整段解码结果（供宿主 getChannelData 使用）
-export function restoreFloat32Array(chunks) {
-  const total = chunks.reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
-  const out = new Float32Array(total);
-  let offset = 0;
-  for (const arr of chunks) {
-    out.set(arr, offset);
-    offset += arr.length;
-  }
-  return out;
+// 清掉本次解码会话添加的规则（updateSessionRules 同时支持移除与添加）
+export async function removeDownloadRules() {
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [ASR_AUDIO_SESSION_RULE_ID]
+  });
 }

@@ -3,9 +3,11 @@
 // AudioContext，解码+重采样在这里用 OfflineAudioContext 完成。
 import { streamChat } from "../ai/client.js";
 import {
+  MAX_AUDIO_BYTES,
   ASR_DECODE_TIMEOUT_MS,
-  splitFloat32Array
+  bytesToBase64
 } from "../asr/offscreen-bridge.js";
+import { buildWavChunks, makeDecodedBuffer } from "../asr/chunker.js";
 
 let activeAbortController = null;
 let idleTimeoutId = null;
@@ -117,28 +119,99 @@ function clearActiveRequestState() {
 
 // ===== ASR 音频解码任务 =====
 
-// 收 { task: { type:"decode", audioBytes, startSec } }，解码 + 重采样 16k
-// 单声道后按块回传 Float32Array（块间序号升序，页面侧按序拼接）。
-// startSec 仅用于对齐采样起点：输入必须是 16k 采样率的字节流（页面侧
-// 按此切段），先解码到 16k 单声道，再丢弃 startSec 前的采样。
+// 收 { task: { audioUrl, backupUrls, chunkSeconds } }：在 offscreen 文档内
+// 完成「下载（HEAD 探大小、主备 URL 轮换）→ 解码 → 校验 → 切片 → WAV 编码」，
+// 每片 WAV 转 base64 字符串回传（chrome.runtime 消息是 JSON 序列化，二进制
+// 跨 context 会变成数字键对象字节全损，base64 是唯一可靠通道）。音频字节
+// 全程不跨 context。
 async function handleAsrDecodeTask(task, port) {
+  let aborted = false;
+  port.onDisconnect.addListener(() => {
+    // 断连视为取消：下载/切片循环处检查标志并静默退出（原 asr-audio 通道风格）
+    aborted = true;
+  });
   try {
-    if (task?.type !== "decode" || !task.audioBytes) {
+    const audioUrl = String(task?.audioUrl || "").trim();
+    if (!audioUrl) {
       throw new Error("asr-decode 任务参数不完整");
     }
-    const { data, diagnostic } = await decodeTo16kMono(task.audioBytes, task.startSec);
-    port.postMessage({
-      type: "done",
-      payload: { sampleRate: 16000, chunks: splitFloat32Array(data), diagnostic }
-    });
+    const chunkSeconds = Number(task?.chunkSeconds) || 0;
+
+    const audioBytes = await fetchAudioBytes([audioUrl, ...(task?.backupUrls || [])], aborted);
+    if (aborted) return;
+
+    const { data, diagnostic } = await decodeTo16kMono(audioBytes, 0);
+    if (aborted) return;
+
+    // 静音/零时长校验 + 切片（chunkSeconds<=0 不切，整段一片，与 chunker 既有语义一致）。
+    // data 是裸 Float32Array，须经 makeDecodedBuffer 适配为 chunker 契约的
+    // AudioBuffer 鸭子类型（sampleRate 16k + diagnostic），否则会被误报「时长为零」。
+    const chunks = buildWavChunks(makeDecodedBuffer(data, { diagnostic }), { chunkSeconds });
+    for (const chunk of chunks) {
+      if (aborted) return;
+      port.postMessage({
+        type: "chunk",
+        index: chunk.index,
+        startSec: chunk.startSec,
+        durationSec: chunk.durationSec,
+        wavBase64: bytesToBase64(new Uint8Array(await chunk.wavBlob.arrayBuffer()))
+      });
+    }
+    if (aborted) return;
+    port.postMessage({ type: "done", totalChunks: chunks.length });
   } catch (e) {
-    port.postMessage({ type: "error", error: String(e?.message || e) });
+    if (aborted) {
+      return;
+    }
+    try {
+      port.postMessage({ type: "error", error: String(e?.message || e) });
+    } catch {
+      // port 已断开，忽略
+    }
+  }
+}
+
+// 依次尝试主地址与备用地址下载，返回字节数组。HEAD 先探大小：超上限直接
+// 拒绝（不发起 GET），报「视频过长」；HEAD 非 ok 也照常走 GET（部分 CDN
+// 不支持 HEAD）。任一次 GET 非 ok 或返回体为空视为失败，继续试下一个地址。
+async function fetchAudioBytes(urls, aborted) {
+  let headDone = false;
+  for (const url of urls) {
+    if (aborted) return null;
+    if (!headDone) {
+      await probeSize(url);
+      headDone = true;
+    }
+    if (aborted) return null;
+    const response = await fetch(url, { method: "GET" });
+    if (!response.ok) {
+      continue;
+    }
+    const buffer = new Uint8Array(await response.arrayBuffer());
+    if (buffer.length === 0) {
+      continue;
+    }
+    return buffer;
+  }
+  throw new Error("音频下载失败");
+}
+
+// HEAD 探大小：Content-Length 超上限直接拒绝（超长视频不下载不解码）
+async function probeSize(url) {
+  const response = await fetch(url, { method: "HEAD" });
+  if (!response.ok) {
+    // HEAD 非 ok：部分 CDN 不支持 HEAD，交给 GET 兜底
+    return;
+  }
+  const length = Number(response.headers.get("Content-Length"));
+  if (Number.isFinite(length) && length > 0 && length > MAX_AUDIO_BYTES) {
+    throw new Error("视频过长");
   }
 }
 
 // 解码输入字节为 16kHz 单声道 Float32Array（解码 + 重采样 + 起点对齐）。
 // AudioContext 解码用 detach 语义的 decodeAudioData，传入副本避免破坏
-// 结构化克隆后的数据。
+// 数据。startSec 仅用于对齐采样起点（本链路恒传 0，整段从头解码）。
 async function decodeTo16kMono(audioBytes, startSec = 0) {
   const AudioCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
   if (!AudioCtor) {
@@ -161,6 +234,7 @@ async function decodeTo16kMono(audioBytes, startSec = 0) {
     }
     // 诊断信息：解码时长与峰值幅度。峰值≈0 说明解码出来是静音——用于区分
     // "视频真没人声"与"音轨获取/容器解码出了问题"（B 站 fMP4 有兼容性风险）。
+    // 校验（静音/零时长显式报错）由 chunker 的 validateDecodedAudio 统一负责。
     let peak = 0;
     for (let i = 0; i < mono.length; i += 1) {
       const abs = Math.abs(mono[i]);

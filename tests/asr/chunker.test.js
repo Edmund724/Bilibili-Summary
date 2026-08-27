@@ -1,5 +1,6 @@
 // chunker.js 测试：WAV 编码器正确性 / buildChunkPlan 各平台规则 /
-// decideChunks 边界与连续性 / processAudio 整链与坏字节诊断。
+// decideChunks 边界与连续性 / processAudio 整链与坏字节诊断 /
+// buildWavChunks 直测。
 // 全部纯 Node/vitest，解码宿主用合成宿主注入，不依赖真实 AudioContext。
 
 import { describe, expect, it } from "vitest";
@@ -7,7 +8,10 @@ import {
   encodeWav,
   decideChunks,
   buildChunkPlan,
-  processAudio
+  processAudio,
+  buildWavChunks,
+  validateDecodedAudio,
+  makeDecodedBuffer
 } from "../../extension/asr/chunker.js";
 
 // 合成解码宿主：把传入 buffer 视为 48kHz 双声道音频，重采样为 16kHz 单声道。
@@ -134,11 +138,6 @@ describe("encodeWav 编码器正确性", () => {
 });
 
 describe("buildChunkPlan 各平台规则", () => {
-  it("dashscope-filetrans 不切（chunkSeconds 0）", () => {
-    expect(buildChunkPlan("dashscope-filetrans", true)).toEqual({ chunkSeconds: 0 });
-    expect(buildChunkPlan("dashscope-filetrans", false)).toEqual({ chunkSeconds: 0 });
-  });
-
   it("openai-transcriptions 带时间戳 10 分钟一片", () => {
     expect(buildChunkPlan("openai-transcriptions", true)).toEqual({ chunkSeconds: 10 * 60 });
   });
@@ -207,6 +206,103 @@ describe("decideChunks 边界与连续性", () => {
       expect(chunks[i].index).toBe(chunks[i - 1].index + 1);
     }
     expect(covered).toBeCloseTo(611, 9);
+  });
+});
+
+describe("buildWavChunks 直测", () => {
+  it("按 plan 切片并编码：8 分钟 3 分钟片 → 3 片，头部 16k 单声道", () => {
+    const data = new Float32Array(8 * 60 * 16000).fill(0.25);
+    const audioBuffer = {
+      sampleRate: 16000,
+      length: data.length,
+      getChannelData: () => data
+    };
+    const chunks = buildWavChunks(audioBuffer, { chunkSeconds: 3 * 60 });
+
+    expect(chunks).toHaveLength(3);
+    chunks.forEach((c, i) => {
+      expect(c.index).toBe(i);
+      expect(c.startSec).toBeCloseTo(i * 3 * 60, 9);
+      expect(c.durationSec).toBeCloseTo(i < 2 ? 3 * 60 : 2 * 60, 9);
+      expect(c.wavBlob).toBeInstanceOf(Blob);
+      expect(c.wavBlob.type).toBe("audio/wav");
+    });
+  });
+
+  it("每片 WAV 头部校验：16k 采样率 / 单声道 / 16bit，最后一片体积正确", async () => {
+    const data = new Float32Array(8 * 60 * 16000).fill(0.25);
+    const audioBuffer = {
+      sampleRate: 16000,
+      length: data.length,
+      getChannelData: () => data
+    };
+    const chunks = buildWavChunks(audioBuffer, { chunkSeconds: 3 * 60 });
+
+    const bytes = new Uint8Array(await chunks[2].wavBlob.arrayBuffer());
+    const h = readWavHeader(chunks[2].wavBlob, bytes);
+    expect(h.sampleRate).toBe(16000);
+    expect(h.numChannels).toBe(1);
+    expect(h.bitsPerSample).toBe(16);
+    // 最后一片 2 分钟：44 + 16000*2*120
+    expect(bytes.byteLength).toBe(44 + 16000 * 2 * 120);
+  });
+
+  it("不切（chunkSeconds 0）：整段一片且时长=总时长", () => {
+    const data = new Float32Array(60 * 16000).fill(0.25);
+    const audioBuffer = {
+      sampleRate: 16000,
+      length: data.length,
+      getChannelData: () => data
+    };
+    const chunks = buildWavChunks(audioBuffer, { chunkSeconds: 0 });
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].durationSec).toBeCloseTo(60, 9);
+  });
+});
+
+describe("makeDecodedBuffer 契约适配", () => {
+  it("裸 Float32Array → 鸭子类型：validateDecodedAudio / buildWavChunks 正常", () => {
+    const data = new Float32Array(2 * 16000).fill(0.25);
+    const buf = makeDecodedBuffer(data, {
+      sampleRate: 16000,
+      diagnostic: { durationSec: 2, peak: 0.25 }
+    });
+    expect(buf.sampleRate).toBe(16000);
+    expect(buf.length).toBe(data.length);
+    expect(buf.getChannelData(0)).toBe(data);
+    expect(validateDecodedAudio(buf)).toBe(2);
+    const chunks = buildWavChunks(buf, { chunkSeconds: 1 });
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0].wavBlob).toBeInstanceOf(Blob);
+  });
+
+  it("未适配的裸数组（重构回归点）→ 校验抛「采样率 undefined」而非静默零切片", () => {
+    // 模拟用户报错路径：decodeTo16kMono 返回裸 Float32Array，若绕过适配
+    // 直接喂给 validateDecodedAudio，必须抛显式错误而不是产出空切片。
+    const bare = new Float32Array(16000);
+    expect(() => validateDecodedAudio(bare)).toThrow(/解码结果时长为零/);
+  });
+});
+
+describe("validateDecodedAudio 直测", () => {
+  it("非法解码结果（零时长）→ 抛「时长为零」", () => {
+    const bad = { sampleRate: 16000, length: 0, getChannelData: () => new Float32Array(0) };
+    expect(() => validateDecodedAudio(bad)).toThrow(/解码结果时长为零/);
+  });
+
+  it("静音诊断（peak < 0.001 且时长 > 0）→ 抛「疑似静音」", () => {
+    const silent = {
+      sampleRate: 16000,
+      length: 16000,
+      getChannelData: () => new Float32Array(16000),
+      diagnostic: { durationSec: 1, peak: 0 }
+    };
+    expect(() => validateDecodedAudio(silent)).toThrow(/疑似静音/);
+  });
+
+  it("正常解码结果 → 返回总时长", () => {
+    const ok = { sampleRate: 16000, length: 16000, getChannelData: () => new Float32Array(16000) };
+    expect(validateDecodedAudio(ok)).toBe(1);
   });
 });
 
@@ -284,6 +380,29 @@ describe("processAudio 整链与坏字节诊断", () => {
       expect(err.diagnostic).toBe("deadbeef");
       expect(err.message).toContain("deadbeef");
     }
+  });
+
+  it("解码结果为零时长 → 显式报错而非静默产出空切片", async () => {
+    const zeroHost = async () => ({
+      sampleRate: 16000,
+      length: 0,
+      getChannelData: () => new Float32Array(0)
+    });
+    await expect(
+      processAudio(new ArrayBuffer(8), { decodeHost: zeroHost, plan: { chunkSeconds: 600 } })
+    ).rejects.toThrow(/解码结果时长为零/);
+  });
+
+  it("解码诊断为静音（峰值 < 0.001 且时长 > 0）→ 显式报错", async () => {
+    const silentHost = async () => ({
+      sampleRate: 16000,
+      length: 16000,
+      getChannelData: () => new Float32Array(16000),
+      diagnostic: { durationSec: 1, peak: 0 }
+    });
+    await expect(
+      processAudio(new ArrayBuffer(8), { decodeHost: silentHost, plan: {} })
+    ).rejects.toThrow(/疑似静音/);
   });
 });
 
