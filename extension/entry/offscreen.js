@@ -8,6 +8,7 @@ import {
   bytesToBase64
 } from "../asr/offscreen-bridge.js";
 import { buildWavChunks, makeDecodedBuffer } from "../asr/chunker.js";
+import { isFragmentedMp4, adtsFromFmp4, parseAudioSpecificConfig } from "../asr/adts.js";
 
 let activeAbortController = null;
 let idleTimeoutId = null;
@@ -212,6 +213,9 @@ async function probeSize(url) {
 // 解码输入字节为 16kHz 单声道 Float32Array（解码 + 重采样 + 起点对齐）。
 // AudioContext 解码用 detach 语义的 decodeAudioData，传入副本避免破坏
 // 数据。startSec 仅用于对齐采样起点（本链路恒传 0，整段从头解码）。
+// 降级路径：B 站 DASH 音轨是 fragmented MP4（moof/mdat 分片），Chrome 的
+// decodeAudioData 不支持（报 "Unable to decode audio data"），先尝试直接
+// 解码，失败且判定为 fMP4 时把 AAC 帧包装成 ADTS 流重试（Chrome 支持 ADTS）。
 async function decodeTo16kMono(audioBytes, startSec = 0) {
   const AudioCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
   if (!AudioCtor) {
@@ -219,7 +223,73 @@ async function decodeTo16kMono(audioBytes, startSec = 0) {
   }
   const audioCtx = new AudioCtor();
   try {
-    const decoded = await withTimeout(audioCtx.decodeAudioData(bytesToArrayBuffer(audioBytes)), ASR_DECODE_TIMEOUT_MS);
+    let decoded = null;
+    let decodeError = null;
+    try {
+      decoded = await withTimeout(audioCtx.decodeAudioData(bytesToArrayBuffer(audioBytes)), ASR_DECODE_TIMEOUT_MS);
+    } catch (error) {
+      decodeError = error;
+    }
+
+    // 直接解码失败 + 判为 fragmented MP4 → ADTS 降级
+    if (!decoded && isFragmentedMp4(audioBytes)) {
+      const asc = parseAudioSpecificConfig(audioBytes);
+      const adtsSegments = adtsFromFmp4(audioBytes, asc || {});
+      if (adtsSegments.length > 0) {
+        console.info("[BOC][asr-decode] fMP4 → ADTS 降级解码", {
+          asc: asc || null,
+          segments: adtsSegments.length
+        });
+        // 逐段解码后直接重采样到 16kHz 单声道，再拼接 16k mono Float32Array。
+        // 不创建整条大 AudioBuffer：Chrome 的 decodeAudioData 对超长 ADTS 流
+        // （完整音轨 ~46MB / 96min）解码失败，实测每段（~10 moof / 1MB）
+        // 可正常解码，逐段解码 + 逐段重采样即可绕过。
+        const targetRate = 16000;
+        const monoArrays = [];
+        let monoLength = 0;
+        for (const segment of adtsSegments) {
+          const segmentDecoded = await withTimeout(
+            audioCtx.decodeAudioData(bytesToArrayBuffer(segment)),
+            ASR_DECODE_TIMEOUT_MS
+          );
+          const segLen = Math.max(1, Math.round(segmentDecoded.duration * targetRate));
+          const offline = new OfflineAudioContext(1, segLen, targetRate);
+          const src = offline.createBufferSource();
+          src.buffer = segmentDecoded;
+          src.connect(offline.destination);
+          src.start(0);
+          const segMono = (await withTimeout(offline.startRendering(), ASR_DECODE_TIMEOUT_MS)).getChannelData(0);
+          monoArrays.push(segMono);
+          monoLength += segMono.length;
+        }
+        const mergedMono = new Float32Array(monoLength);
+        let writeOffset = 0;
+        for (const mono of monoArrays) {
+          mergedMono.set(mono, writeOffset);
+          writeOffset += mono.length;
+        }
+        // 直接产出 16k mono，跳过下方重复的重采样分支
+        if (!(mergedMono.length > 0)) {
+          throw new Error("音频解码失败：解码结果为空采样");
+        }
+        let peak = 0;
+        for (let i = 0; i < mergedMono.length; i += 1) {
+          const abs = Math.abs(mergedMono[i]);
+          if (abs > peak) peak = abs;
+        }
+        const diag = { durationSec: Math.round(mergedMono.length / targetRate * 100) / 100, peak };
+        console.info("[BOC][asr-decode] 解码完成", diag);
+        const startSample = Math.round(Number(startSec || 0) * targetRate);
+        if (startSample <= 0 || startSample >= mergedMono.length) {
+          return { data: mergedMono, diagnostic: diag };
+        }
+        return { data: mergedMono.subarray(startSample), diagnostic: diag };
+      }
+    }
+    if (!decoded) {
+      throw decodeError || new Error("音频解码失败：无法解码音频数据");
+    }
+
     const targetRate = 16000;
     const outLength = Math.max(1, Math.round(decoded.duration * targetRate));
     const offline = new OfflineAudioContext(1, outLength, targetRate);
