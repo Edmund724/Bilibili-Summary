@@ -544,7 +544,7 @@ async function maybeRunAsrFallback({ runId }) {
 
     // 空结果：全部为空白 → 返回 "empty"，调用点呈现"未识别到语音内容"文案
     if (!Array.isArray(body) || body.length === 0) {
-      setStatus("未识别到语音内容，该视频可能没有人声。");
+      setStatus("未识别到语音内容，该视频可能没有人声。若视频确有人声，请在设置页开启调试日志后重试，并查看控制台 [BOC] 日志。");
       return "empty";
     }
 

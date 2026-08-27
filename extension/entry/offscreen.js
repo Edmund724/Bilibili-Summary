@@ -126,8 +126,11 @@ async function handleAsrDecodeTask(task, port) {
     if (task?.type !== "decode" || !task.audioBytes) {
       throw new Error("asr-decode 任务参数不完整");
     }
-    const data = await decodeTo16kMono(task.audioBytes, task.startSec);
-    port.postMessage({ type: "done", payload: { sampleRate: 16000, chunks: splitFloat32Array(data) } });
+    const { data, diagnostic } = await decodeTo16kMono(task.audioBytes, task.startSec);
+    port.postMessage({
+      type: "done",
+      payload: { sampleRate: 16000, chunks: splitFloat32Array(data), diagnostic }
+    });
   } catch (e) {
     port.postMessage({ type: "error", error: String(e?.message || e) });
   }
@@ -153,11 +156,23 @@ async function decodeTo16kMono(audioBytes, startSec = 0) {
     source.start(0);
     const rendered = await withTimeout(offline.startRendering(), ASR_DECODE_TIMEOUT_MS);
     const mono = rendered.getChannelData(0);
+    if (!(mono.length > 0)) {
+      throw new Error("音频解码失败：解码结果为空采样");
+    }
+    // 诊断信息：解码时长与峰值幅度。峰值≈0 说明解码出来是静音——用于区分
+    // "视频真没人声"与"音轨获取/容器解码出了问题"（B 站 fMP4 有兼容性风险）。
+    let peak = 0;
+    for (let i = 0; i < mono.length; i += 1) {
+      const abs = Math.abs(mono[i]);
+      if (abs > peak) peak = abs;
+    }
+    const diagnostic = { durationSec: Math.round(rendered.duration * 100) / 100, peak };
+    console.info("[BOC][asr-decode] 解码完成", diagnostic);
     const startSample = Math.round(Number(startSec || 0) * targetRate);
     if (startSample <= 0 || startSample >= mono.length) {
-      return mono;
+      return { data: mono, diagnostic };
     }
-    return mono.subarray(startSample);
+    return { data: mono.subarray(startSample), diagnostic };
   } finally {
     audioCtx.close();
   }

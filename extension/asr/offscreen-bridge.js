@@ -46,7 +46,10 @@ export function createOffscreenDecodeHost() {
       return {
         sampleRate: Number(payload.sampleRate) || 16000,
         length: merged.length,
-        getChannelData: () => merged
+        getChannelData: () => merged,
+        // 解码诊断（时长/峰值幅度），offscreen 文档侧产出；chunker 据此
+        // 把"解码出静音"变成显式报错。其它宿主无此字段，属可选项。
+        diagnostic: payload.diagnostic || null
       };
     });
   };

@@ -16,6 +16,7 @@ import { transcribe as transcribeStepfunSse } from "./adapters/stepfun-sse.js";
 import { ensureRunActive } from "../shared/error-helpers.js";
 import { retryAsync } from "../subtitle/fetcher.js";
 import { createOffscreenDecodeHost } from "./offscreen-bridge.js";
+import { logWarn } from "../shared/logging.js";
 
 // type → 适配器映射。映射表缺 type 时 throw 明确错误，避免静默走错分支。
 // 并发策略：映射表项的 concurrency 元数据驱动（见 runAsrPipeline）；
@@ -193,13 +194,26 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
   const total = chunks.length;
   const concurrency = Number(entry.concurrency) || 1;
   const progress = (msg) => onProgress?.(`${msg}（共 ${total} 片）`);
+  const collectResults = (results) => {
+    const merged = mergeChunkResults(chunks, results);
+    if (merged.length === 0) {
+      // 空结果诊断：各片转写都"成功"但没文本。静音场景已在解码层显式报错，
+      // 这里剩语言不匹配、平台返回空文本等，留日志供反馈排查。
+      logWarn("[BOC] asr 空结果诊断", {
+        type,
+        model: provider?.model || "",
+        chunkTextLens: results.map((r) => String(r?.text || "").length)
+      });
+    }
+    return merged;
+  };
   if (concurrency > 1) {
     const results = await runWithConcurrency(
       chunks.map((chunk) => () => transcribeChunk({ chunk, provider, runId, onProgress: progress })),
       concurrency
     );
     ensureRunActive(runId);
-    return mergeChunkResults(chunks, results);
+    return collectResults(results);
   }
 
   // 串行分支：dashscope-filetrans（整段一片）与 stepfun-sse 后续票。
@@ -208,7 +222,7 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
     serialResults.push(await transcribeChunk({ chunk, provider, runId, onProgress: progress }));
     ensureRunActive(runId);
   }
-  return mergeChunkResults(chunks, serialResults);
+  return collectResults(serialResults);
 }
 
 export { ensureRunActive, retryAsync, runWithConcurrency };

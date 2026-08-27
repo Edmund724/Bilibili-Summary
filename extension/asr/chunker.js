@@ -120,6 +120,16 @@ export async function processAudio(arrayBuffer, { decodeHost, plan }) {
     throw err;
   }
 
+  // 解码诊断：offscreen 宿主会附带 {durationSec, peak}。峰值≈0 说明解码出
+  // 的是静音（音轨获取或容器解码出了问题）——直接报错，避免上游把空音频
+  // 转写出误导性的"未识别到语音内容"。
+  const diag = audioBuffer?.diagnostic;
+  if (diag && Number.isFinite(diag.peak) && diag.peak < 0.001 && diag.durationSec > 0) {
+    throw new Error(
+      `音频解码失败：解码结果疑似静音（时长 ${diag.durationSec}s、峰值幅度 ${diag.peak}）`
+    );
+  }
+
   const totalDurationSec = audioBuffer.length / audioBuffer.sampleRate;
   const chunks = decideChunks(totalDurationSec, plan);
   const channelData = audioBuffer.getChannelData(0);

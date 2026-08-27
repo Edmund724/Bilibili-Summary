@@ -202,9 +202,13 @@ export async function transcribe({ wavBlob, startSec, durationSec, provider, sig
   let segments = [];
   let doneEvent = null;
   let dataLineCount = 0;
+  // 流诊断：转写事件计数 + 首条数据行样本。零事件 EOF（端点/Key 类型不匹配
+  // 等场景）曾表现为"静默聚合出空文本→误报没有人声"，这里把它变成显式报错。
+  let transcriptEventCount = 0;
+  let firstDataLineSample = "";
 
   try {
-    while (true) {
+    readLoop: while (true) {
       if (signal?.aborted) {
         throw new DOMException("已停止生成", "AbortError");
       }
@@ -218,14 +222,17 @@ export async function transcribe({ wavBlob, startSec, durationSec, provider, sig
       while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
         const line = buffer.slice(0, newlineIndex);
         buffer = buffer.slice(newlineIndex + 1);
+        if (!firstDataLineSample && line.trim().startsWith("data:")) {
+          firstDataLineSample = line.trim().slice(0, 200);
+        }
         const parsed = parseSseLine(line);
         if (!parsed) {
           continue;
         }
         if (parsed.done) {
-          // 结束哨兵：data: [DONE]（或空行），停止读取
+          // 结束哨兵：data: [DONE]（或空行），停止读取（与 EOF 同一收尾逻辑）
           reader.cancel?.().catch(() => {});
-          return buildResult({ textParts, segments, doneEvent });
+          break readLoop;
         }
         dataLineCount += 1;
         const event = parsed.event;
@@ -238,11 +245,13 @@ export async function transcribe({ wavBlob, startSec, durationSec, provider, sig
           throw new Error(`语音识别失败：${String(event.message || "未知错误")}`);
         }
         if (eventType === "transcript.text.delta") {
+          transcriptEventCount += 1;
           const delta = String(event.delta || "");
           if (delta) {
             textParts.push(delta);
           }
         } else if (eventType === "transcript.text.done") {
+          transcriptEventCount += 1;
           doneEvent = event;
           const segs = parseSegmentsFromEvent(event);
           if (segs.length > 0) {
@@ -258,7 +267,15 @@ export async function transcribe({ wavBlob, startSec, durationSec, provider, sig
     reader.releaseLock?.();
   }
 
-  // 流自然读完（未遇 [DONE]/done）：把聚合文本作为结果返回
+  // 零转写事件的流结束：不是"没有人声"，而是端点/鉴权/参数层面的异常
+  if (transcriptEventCount === 0) {
+    throw new Error(
+      `阶跃流式响应未包含任何转写事件（收到 ${dataLineCount} 条数据行）。` +
+        `请确认 baseUrl 端点与 API Key 类型匹配${firstDataLineSample ? `；首行样本: ${firstDataLineSample}` : ""}`
+    );
+  }
+
+  // 流自然读完或遇哨兵：把聚合文本作为结果返回
   return buildResult({ textParts, segments, doneEvent });
 }
 
