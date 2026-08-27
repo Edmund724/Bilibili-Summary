@@ -69,6 +69,7 @@
         </label>
         <label for="asrChunkMinutes">无时间戳平台切片时长（分钟）</label>
         <input id="asrChunkMinutes" type="number" min="1" max="30" step="1" />
+        <p class="hint">仅对不返回时间戳的平台生效（如 SiliconFlow 免费模型）：每片转写结果合成为一条粗粒度字幕，3 分钟即每条约 3 分钟语音。调小跳转更准但请求更多。默认 3 即可；本地 Whisper 固定 10 分钟片、百炼不切片、阶跃固定 25 分钟片，不受此项影响。</p>
       </section>
 
       <section class="field-group field-group-tight-bottom player-ai-quick-action-settings">
