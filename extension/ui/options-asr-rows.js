@@ -66,7 +66,9 @@ export function addAsrProviderRow(listNode, emptyNode, item = {}, { presets = AS
     <p class="ai-provider-status" hidden></p>
   `;
 
-  // 预设切换：baseUrl 未改过（空或仍是上一预设默认值）时自动填充新预设的 baseUrl/model/name
+  // 预设切换：baseUrl 未改过（空或仍是上一预设默认值）时跟随新预设；
+  // 模型名与名称无条件跟随——上一平台的模型对新平台无意义；
+  // API Key 输入框清空，避免旧平台的 Key 在测试/保存时误发给新平台。
   row.querySelector(".asr-provider-preset").addEventListener("change", (e) => {
     const previousPreset = presets.find((p) => p.id === row.dataset.currentPresetId) || null;
     const next = presets.find((p) => p.id === e.target.value);
@@ -76,14 +78,9 @@ export function addAsrProviderRow(listNode, emptyNode, item = {}, { presets = AS
     if (!currentBaseUrl || (previousPreset && currentBaseUrl === previousPreset.baseUrl)) {
       baseUrlInput.value = next.baseUrl;
     }
-    const modelInput = row.querySelector(".asr-provider-model");
-    if (!modelInput.value.trim()) {
-      modelInput.value = next.model || "";
-    }
-    const nameInput = row.querySelector(".asr-provider-name");
-    if (!nameInput.value.trim()) {
-      nameInput.value = next.name || "";
-    }
+    row.querySelector(".asr-provider-model").value = next.model || "";
+    row.querySelector(".asr-provider-name").value = next.name || "";
+    row.querySelector(".asr-provider-apikey").value = "";
     row.dataset.currentPresetId = next.id;
   });
 
