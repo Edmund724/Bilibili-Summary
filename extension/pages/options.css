@@ -873,3 +873,133 @@ ol {
     margin-top: 4px;
   }
 }
+
+/* ===== 语音转写平台（平行于 AI 模型平台） ===== */
+
+.asr-provider-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 150px minmax(0, 1.2fr) minmax(0, 1.7fr) minmax(0, 1.5fr) minmax(0, 1.6fr) 62px 56px 24px;
+  gap: 6px;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  margin-top: 0;
+}
+
+.asr-provider-row select,
+.asr-provider-row input[type="text"],
+.asr-provider-row input[type="number"],
+.asr-provider-row input[type="password"] {
+  height: var(--fixed-property-control-size);
+  padding: 4px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: var(--fixed-property-control-radius);
+  font: inherit;
+  font-size: var(--settings-row-font-size);
+  background: #fff;
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 0;
+  align-self: center;
+}
+
+.asr-provider-row select.asr-provider-preset {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 28px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #98928a 50%),
+    linear-gradient(135deg, #98928a 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) calc(50% - 1px),
+    calc(100% - 10px) calc(50% - 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.asr-provider-row > * {
+  min-width: 0;
+}
+
+.asr-provider-row .asr-provider-test {
+  height: var(--fixed-property-control-size);
+  width: 56px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.asr-provider-row .ai-provider-remove {
+  width: 24px;
+  height: var(--fixed-property-control-size);
+  padding: 0;
+  border: 0;
+  border-radius: var(--fixed-property-control-radius);
+  background: transparent;
+  color: #a8a29e;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.asr-provider-row .ai-provider-remove:hover {
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+.asr-provider-row .ai-provider-remove svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.asr-provider-row .ai-provider-status {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #0f766e;
+}
+
+.asr-provider-row .ai-provider-status[data-error="true"] {
+  color: #b91c1c;
+}
+
+.asr-provider-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: #4b5563;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.asr-provider-active input[type="radio"] {
+  margin: 0;
+  accent-color: #00a1d6;
+}
+
+.asr-fallback-checkbox {
+  margin-top: 14px;
+}
+
+@media (max-width: 720px) {
+  .asr-provider-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .asr-provider-row .ai-provider-status {
+    grid-column: 1 / -1;
+    margin-top: 4px;
+  }
+}

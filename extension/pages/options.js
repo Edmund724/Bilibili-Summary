@@ -2,6 +2,7 @@ import {
   DEFAULT_SETTINGS,
   DEFAULT_INITIAL_QUICK_PROMPTS,
   PRESETS,
+  ASR_PROVIDER_PRESETS,
   normalizeDownloadFormat,
   normalizePlayerAiQuickPrompt,
   normalizeFixedFrontmatterProperties,
@@ -26,10 +27,20 @@ import {
   collectAiProviders,
   setTestSuccessHandler
 } from "../ui/options-rows.js";
+import {
+  renderAsrProviders,
+  addAsrProviderRow,
+  collectAsrProviders,
+  setActiveAsrProvider,
+  getActiveAsrProviderId,
+  setAsrTestSuccessHandler,
+  setAsrDeleteHandler
+} from "../ui/options-asr-rows.js";
 
 const NOTE_SECTION_POSITIONS = new Set(["before_intro", "before_chapters", "before_subtitle"]);
 
 let aiPresets = [];
+let asrPresets = [];
 
 async function loadAiPresets() {
   try {
@@ -43,6 +54,20 @@ async function loadAiPresets() {
   }
 
   aiPresets = PRESETS.slice();
+}
+
+async function loadAsrPresets() {
+  try {
+    const resp = await sendRuntimeMessage({ type: "asr-presets-list" });
+    if (resp?.ok && Array.isArray(resp.presets)) {
+      asrPresets = resp.presets;
+      return;
+    }
+  } catch {
+    // fallback to built-in list when background is unreachable
+  }
+
+  asrPresets = ASR_PROVIDER_PRESETS.slice();
 }
 
 const elements = {
@@ -65,6 +90,11 @@ const elements = {
   aiProvidersEmpty: document.getElementById("aiProvidersEmpty"),
   addAiProviderBtn: document.getElementById("addAiProviderBtn"),
   defaultModel: document.getElementById("defaultModel"),
+  asrProvidersList: document.getElementById("asrProvidersList"),
+  asrProvidersEmpty: document.getElementById("asrProvidersEmpty"),
+  addAsrProviderBtn: document.getElementById("addAsrProviderBtn"),
+  asrAutoFallback: document.getElementById("asrAutoFallback"),
+  asrChunkMinutes: document.getElementById("asrChunkMinutes"),
   aiSystemPrompt: document.getElementById("aiSystemPrompt"),
   aiInitialQuickPrompts: document.querySelectorAll(".ai-initial-quick-prompt"),
   saveBtn: document.getElementById("saveBtn"),
@@ -77,15 +107,25 @@ init();
 
 async function init() {
   await loadAiPresets();
+  await loadAsrPresets();
   setTestSuccessHandler(async (providerId) => {
     await saveSettings();
     return providerId;
+  });
+  setAsrTestSuccessHandler(async () => {
+    await saveSettings();
+  });
+  setAsrDeleteHandler(async (providerId) => {
+    if (providerId && String(getActiveAsrProviderId(elements.asrProvidersList) || "") === providerId) {
+      await sendRuntimeMessage({ type: "save-settings", settings: { activeAsrProviderId: "" } });
+    }
   });
   loadSettings();
   elements.saveBtn.addEventListener("click", saveSettings);
   elements.addFixedPropertyBtn.addEventListener("click", () => addFixedPropertyRow(elements.fixedPropertiesList, elements.fixedPropertiesEmpty));
   elements.addNoteSectionBtn.addEventListener("click", () => addNoteSectionRow(elements.noteSectionsList, elements.noteSectionsEmpty));
   elements.addAiProviderBtn.addEventListener("click", () => addAiProviderRow(elements.aiProvidersList, elements.aiProvidersEmpty, {}, { presets: aiPresets }));
+  elements.addAsrProviderBtn.addEventListener("click", () => addAsrProviderRow(elements.asrProvidersList, elements.asrProvidersEmpty, {}, { presets: asrPresets }));
   document.addEventListener("click", (event) => {
     if (!(event.target instanceof Element) || !event.target.closest(".fixed-property-type-picker")) {
       elements.fixedPropertiesList.querySelectorAll(".fixed-property-type-picker").forEach((picker) => {
@@ -115,6 +155,20 @@ async function init() {
     const providers = await loadAiProviders();
     renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, providers, { defaultModel, onRenderDefaultModel: (list) => renderDefaultModelSelect(elements.defaultModel, list, defaultModel) });
   });
+  // ASR：总开关即时持久化
+  elements.asrAutoFallback?.addEventListener("change", async () => {
+    await sendRuntimeMessage({ type: "save-settings", settings: { asrAutoFallback: elements.asrAutoFallback.checked } });
+  });
+  // ASR：切片时长即时持久化；合理范围 1-30 分钟，越界提示并修正回界内
+  elements.asrChunkMinutes?.addEventListener("change", async () => {
+    const raw = Number(elements.asrChunkMinutes.value);
+    const clamped = Math.min(30, Math.max(1, Math.floor(raw) || 1));
+    if (!Number.isFinite(raw) || clamped !== raw) {
+      elements.asrChunkMinutes.value = String(clamped);
+      setStatus("切片时长已在 1-30 分钟内修正", true);
+    }
+    await sendRuntimeMessage({ type: "save-settings", settings: { asrChunkMinutes: clamped } });
+  });
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === "sync" && "defaultModel" in changes) {
       const next = String(changes.defaultModel.newValue || "").trim();
@@ -124,6 +178,12 @@ async function init() {
           renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, providers, { defaultModel: next, onRenderDefaultModel: (list) => renderDefaultModelSelect(elements.defaultModel, list, next) });
         });
       }
+    }
+    if (areaName === "sync" && "asrAutoFallback" in changes) {
+      elements.asrAutoFallback.checked = changes.asrAutoFallback.newValue !== false;
+    }
+    if (areaName === "sync" && "asrChunkMinutes" in changes) {
+      elements.asrChunkMinutes.value = String(Number(changes.asrChunkMinutes.newValue) || 3);
     }
   });
 }
@@ -151,6 +211,15 @@ async function loadSettings() {
   // AI 配置
   const providers = await loadAiProviders();
   renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, providers, { defaultModel: settings.defaultModel, onRenderDefaultModel: (list) => renderDefaultModelSelect(elements.defaultModel, list, settings.defaultModel) });
+
+  // ASR 配置
+  elements.asrAutoFallback.checked = settings.asrAutoFallback !== false;
+  elements.asrChunkMinutes.value = String(Number(settings.asrChunkMinutes) || 3);
+  const asrProviders = await loadAsrProviders();
+  renderAsrProviders(elements.asrProvidersList, elements.asrProvidersEmpty, asrProviders, {
+    presets: asrPresets,
+    activeId: settings.activeAsrProviderId || ""
+  });
 }
 
 async function saveSettings() {
@@ -186,6 +255,19 @@ async function saveSettings() {
     }
     // 用最新列表（含 hasSavedKey）重新渲染，避免误以为 Key 丢了
     renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, aiResp.providers || [], { defaultModel: payload.defaultModel, onRenderDefaultModel: (list) => renderDefaultModelSelect(elements.defaultModel, list, payload.defaultModel) });
+
+    // ASR 平台：同样 list 走 sync、apiKey 走 local；空输入沿用已存 Key（后台处理）
+    const asrPayload = collectAsrProviders(elements.asrProvidersList, { presets: asrPresets });
+    const asrResp = await sendRuntimeMessage({ type: "asr-providers-save", providers: asrPayload });
+    if (!asrResp?.ok) {
+      setStatus(`已保存，但语音转写平台保存失败：${asrResp?.error || "未知错误"}`, true);
+      return;
+    }
+    // 用最新列表（含 hasSavedKey）重新渲染，保存后界面只见掩码占位不见明文
+    renderAsrProviders(elements.asrProvidersList, elements.asrProvidersEmpty, asrResp.providers || [], {
+      presets: asrPresets,
+      activeId: getActiveAsrProviderId(elements.asrProvidersList)
+    });
     setStatus("保存成功");
   } catch (error) {
     setStatus(error.message || "保存失败", true);
@@ -336,6 +418,16 @@ function setBusy(isBusy) {
 async function loadAiProviders() {
   try {
     const resp = await sendRuntimeMessage({ type: "ai-providers-list" });
+    if (!resp?.ok) return [];
+    return Array.isArray(resp.providers) ? resp.providers : [];
+  } catch {
+    return [];
+  }
+}
+
+async function loadAsrProviders() {
+  try {
+    const resp = await sendRuntimeMessage({ type: "asr-providers-list" });
     if (!resp?.ok) return [];
     return Array.isArray(resp.providers) ? resp.providers : [];
   } catch {

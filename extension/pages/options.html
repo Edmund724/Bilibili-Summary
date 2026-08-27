@@ -57,6 +57,20 @@
         </div>
       </section>
 
+      <section class="field-group">
+        <h2>语音转写平台</h2>
+        <p class="hint">无字幕轨视频可通过语音识别自动生成字幕。当前选用平台将用于转写。</p>
+        <div id="asrProvidersList" class="ai-providers-list"></div>
+        <p id="asrProvidersEmpty" class="ai-providers-empty">还没有配置语音转写平台。点击下方添加按钮从预设创建，无字幕视频将无法自动生成字幕。</p>
+        <button id="addAsrProviderBtn" class="add-property-btn" type="button">+ 添加平台</button>
+        <label class="checkbox asr-fallback-checkbox">
+          <input id="asrAutoFallback" type="checkbox" />
+          无字幕时自动生成字幕
+        </label>
+        <label for="asrChunkMinutes">无时间戳平台切片时长（分钟）</label>
+        <input id="asrChunkMinutes" type="number" min="1" max="30" step="1" />
+      </section>
+
       <section class="field-group field-group-tight-bottom player-ai-quick-action-settings">
         <h2>AI 按钮</h2>
         <label class="checkbox">
