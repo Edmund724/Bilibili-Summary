@@ -1,5 +1,5 @@
 // pipeline.js + openai-transcriptions 适配器测试。
-// 关键点：pipeline 的解码宿主可注入（decodeHost 参数），单测直接传合成
+// 关键点：pipeline 的切片宿主可注入（chunkHost 参数），单测直接传合成
 // 宿主，不真正路由到 offscreen（避免依赖 chrome.offscreen / AudioContext）；
 // 网络层全部用 fake fetch（vi.stubGlobal("fetch")）断言 FormData 与请求体。
 // runId 作废（STALE_RUN）与缓存命中通过 mock fetcher / 真实 state 验证。
@@ -15,15 +15,8 @@ function getValidRunId() {
   return 0;
 }
 
-// 下载走 chrome.runtime.connect 长连接（jsdom 无 chrome），mock 掉返回 ArrayBuffer。
-// fetch mock 里不依赖 downloader 真实实现，pipeline 调 downloadAudioViaBackground
-// 时走真实模块会连 chrome.runtime.connect（stub 无 connect），故 mock。
-vi.mock("../../extension/asr/downloader.js", () => ({
-  downloadAudioViaBackground: vi.fn(async () => {
-    // 合成宿主忽略输入，返回内容无关的 ArrayBuffer（16k*60s*2 字节）
-    return new Uint8Array(16000 * 60 * 2).buffer;
-  })
-}));
+// 切片宿主走 offscreen 直连（jsdom 无 chrome.runtime.connect），mock 掉
+// audio-source 返回的 URL 即可（pipeline 不直接接触 offscreen 通道）。
 vi.mock("../../extension/asr/audio-source.js", () => ({
   getSourceAudioUrl: vi.fn(async () => ({
     url: "https://example.com/audio.m4s",
@@ -77,19 +70,34 @@ vi.mock("../../extension/bilibili/gateway.js", async (importOriginal) => {
   return { ...actual, contentFetchJson: vi.fn() };
 });
 
-// 合成解码宿主：把传入 buffer 当 16k 单声道音频（WAV 已由 chunker 编码，
-// 这里直接按字节长度生成 16k 单声道采样），返回契约 { sampleRate, length,
-// getChannelData(0) }。测试视频时长由调用方传入 durationSec，宿主按时长
-// 生成对应长度的采样（chunker 的 decideChunks 按宿主 length 切片）。
-function makeSynthDecodeHost({ durationSec = 60 } = {}) {
-  return async function synthDecodeHost() {
-    const sampleCount = Math.round(durationSec * 16000);
-    const data = new Float32Array(Math.max(1, sampleCount)).fill(0.25);
-    return {
-      sampleRate: 16000,
-      length: data.length,
-      getChannelData: () => data
-    };
+// 合成切片宿主：模拟 offscreen 文档返回的切片（[{index,startSec,durationSec,
+// wavBlob}]），durationSec 按 plan.chunkSeconds 切（chunker 的 decideChunks
+// 语义），wavBlob 用 chunker 的 encodeWav 生成真实 WAV（16k 单声道固定样本值）。
+// 测试视频时长由调用方传入 durationSec，宿主按时长生成对应长度的采样。
+function makeSynthChunkHost({ durationSec = 60 } = {}) {
+  return async function synthChunkHost({ plan }) {
+    const chunkSeconds = Number(plan?.chunkSeconds) || 0;
+    const totalSamples = Math.max(1, Math.round(durationSec * 16000));
+    const samples = new Float32Array(totalSamples).fill(0.25);
+    const chunks = [];
+    let startSec = 0;
+    let index = 0;
+    while (totalSamples - Math.round(startSec * 16000) > 0) {
+      const secs = chunkSeconds > 0 ? chunkSeconds : durationSec;
+      const dur = Math.min(secs, durationSec - startSec);
+      const startSample = Math.round(startSec * 16000);
+      const sampleCount = Math.max(1, Math.round(dur * 16000));
+      chunks.push({
+        index,
+        startSec,
+        durationSec: dur,
+        wavBlob: encodeWav(samples.subarray(startSample, startSample + sampleCount), 16000)
+      });
+      startSec += dur;
+      index += 1;
+      if (chunkSeconds <= 0) break;
+    }
+    return chunks;
   };
 }
 
@@ -120,18 +128,16 @@ const OPENAI_PROVIDER = {
   apiKey: "sk-test"
 };
 
+import { encodeWav } from "../../extension/asr/chunker.js";
+
 let pipeline;
 let fetcherMock;
-let downloaderMock;
 
 beforeEach(async () => {
   resetModuleState();
   pipeline = await import("../../extension/asr/pipeline.js");
   fetcherMock = (await import("../../extension/subtitle/fetcher.js")).retryAsync;
-  downloaderMock = (await import("../../extension/asr/downloader.js")).downloadAudioViaBackground;
   fetcherMock.mockImplementation((fn) => fn());
-  downloaderMock.mockReset();
-  downloaderMock.mockImplementation(async () => new Uint8Array(16000 * 60 * 2).buffer);
   // fetch mock：默认直接 200 返回空 text（transcribe 各用例自己覆盖）
   vi.stubGlobal("fetch", vi.fn(async () => {
     return { ok: true, status: 200, json: async () => ({ text: "" }) };
@@ -266,7 +272,7 @@ describe("pipeline 时间戳合成与偏移合并", () => {
       provider: { ...OPENAI_PROVIDER, chunkMinutes: 10, supportsTimestamps: true },
       runId: getValidRunId(),
       onProgress: vi.fn(),
-      decodeHost: makeSynthDecodeHost({ durationSec: 11 * 60 })
+      chunkHost: makeSynthChunkHost({ durationSec: 11 * 60 })
     });
 
     expect(body).toEqual([
@@ -295,7 +301,7 @@ describe("pipeline 时间戳合成与偏移合并", () => {
       provider: { ...OPENAI_PROVIDER, chunkMinutes: 10, supportsTimestamps: false },
       runId: getValidRunId(),
       onProgress: vi.fn(),
-      decodeHost: makeSynthDecodeHost({ durationSec: 10 * 60 })
+      chunkHost: makeSynthChunkHost({ durationSec: 10 * 60 })
     });
 
     // 10 分钟整段 → 1 片（无时间戳按 chunkMinutes 10 分钟）
@@ -319,7 +325,7 @@ describe("pipeline 时间戳合成与偏移合并", () => {
       durationSec: 120,
       provider: { ...OPENAI_PROVIDER, chunkMinutes: 10, supportsTimestamps: true },
       runId: getValidRunId(),
-      decodeHost: makeSynthDecodeHost({ durationSec: 120 })
+      chunkHost: makeSynthChunkHost({ durationSec: 120 })
     });
     expect(body[0]).toEqual({ from: 0, to: 120, content: "越界句" });
   });
@@ -352,7 +358,7 @@ describe("pipeline 并发上限与 runId 作废", () => {
         provider: { ...OPENAI_PROVIDER, chunkMinutes: 10, supportsTimestamps: true },
         runId: 0,
         onProgress: vi.fn(),
-        decodeHost: makeSynthDecodeHost({ durationSec: 11 * 60 })
+        chunkHost: makeSynthChunkHost({ durationSec: 11 * 60 })
       })
     ).rejects.toThrow("Stale refresh run");
   });
@@ -398,7 +404,7 @@ describe("pipeline 重试与未知类型", () => {
       durationSec: 60,
       provider: { ...OPENAI_PROVIDER, chunkMinutes: 10, supportsTimestamps: true },
       runId: 0,
-      decodeHost: makeSynthDecodeHost({ durationSec: 60 })
+      chunkHost: makeSynthChunkHost({ durationSec: 60 })
     });
 
     // retryAsync 被调用（每片一次），重试 1 次后成功：
@@ -418,7 +424,7 @@ describe("pipeline 重试与未知类型", () => {
         durationSec: 60,
         provider: { type: "mystery", baseUrl: "https://x", model: "m" },
         runId: getValidRunId(),
-        decodeHost: makeSynthDecodeHost({ durationSec: 60 })
+        chunkHost: makeSynthChunkHost({ durationSec: 60 })
       })
     ).rejects.toThrow("暂不支持的平台类型");
   });
@@ -438,7 +444,7 @@ describe("pipeline 空结果", () => {
       durationSec: 60,
       provider: { ...OPENAI_PROVIDER, chunkMinutes: 10, supportsTimestamps: false },
       runId: getValidRunId(),
-      decodeHost: makeSynthDecodeHost({ durationSec: 60 })
+      chunkHost: makeSynthChunkHost({ durationSec: 60 })
     });
     expect(body).toEqual([]);
   });

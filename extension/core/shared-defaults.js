@@ -136,22 +136,10 @@ export function normalizeAiThinkingLevel(value) {
 }
 
 // ===== ASR（语音转写）平台预设 =====
-// 字段含义见 spec.md 第 4 节。type 决定走哪个适配器，共两种：
+// 字段含义见 spec.md 第 4 节。type 决定走哪个适配器，共一种：
 //   openai-transcriptions：OpenAI 兼容 multipart 端点（SiliconFlow / 本地 Whisper / 自定义）
-//   dashscope-filetrans：阿里百炼异步任务制（上传 → 提交 → 轮询）
 // maxBytes / maxDurationSec 用于切片决策；supportsTimestamps 决定时间戳合成方式。
 export const ASR_PROVIDER_PRESETS = [
-  {
-    id: "aliyun-dashscope",
-    name: "阿里百炼",
-    type: "dashscope-filetrans",
-    baseUrl: "https://dashscope.aliyuncs.com",
-    model: "paraformer-v2",
-    maxBytes: 2 * 1024 * 1024 * 1024, // 2GB
-    maxDurationSec: 12 * 60 * 60, // 12 小时，整段不切片
-    supportsTimestamps: true, // 句级 sentences.begin_time/end_time
-    note: "异步任务制，需上传音频到百炼临时存储换取公网可访问 URL；0.288 元/小时，每月送 10 小时。"
-  },
   {
     id: "siliconflow-sensevoice",
     name: "SiliconFlow 硅基流动（免费）",
@@ -189,8 +177,7 @@ export const ASR_PROVIDER_PRESETS = [
 
 // 合法的 ASR 适配器类型，决定请求构造与响应解析方式
 const ASR_PROVIDER_TYPES = new Set([
-  "openai-transcriptions",
-  "dashscope-filetrans"
+  "openai-transcriptions"
 ]);
 
 export function getAsrPresetById(id) {

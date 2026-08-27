@@ -1,6 +1,6 @@
 // asr-provider-store.js 按 provider.type 的测试连接分发测试。
-// 覆盖两种协议探针（openai-transcriptions / dashscope-filetrans）
-// 的成功与失败分支、apiKey 缺失时回退读取已存 Key、非法 provider 的兜底。
+// 覆盖 openai-transcriptions 探针的成功与失败分支、apiKey 缺失时回退
+// 读取已存 Key、非法 provider 的兜底。
 // 探针只与 fetch / chrome.storage 交互，用 vi.stubGlobal 替换 fetch 与 chrome。
 // 注意：本仓库 jsdom 环境里 FormData/Blob 均存在，openai-transcriptions
 // 探针走 FormData 分支；multipart 手拼降级分支（无 FormData 环境）不在本文件覆盖。
@@ -113,46 +113,6 @@ describe("openai-transcriptions 探针", () => {
     const resp = await testAsrConnection(baseProvider({ apiKey: "sk-1" }));
     expect(resp.ok).toBe(false);
     expect(resp.error).toContain("无法连接");
-  });
-});
-
-describe("dashscope-filetrans 探针", () => {
-  it("调 uploads 授权接口，HTTP 200 即通过", async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, { policy: "x" }));
-    const { testAsrConnection } = await loadModule();
-    const resp = await testAsrConnection(
-      baseProvider({ type: "dashscope-filetrans", baseUrl: "https://dashscope.aliyuncs.com", apiKey: "dk-1" })
-    );
-    expect(resp.ok).toBe(true);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(
-      "https://dashscope.aliyuncs.com/api/v1/uploads?action=getPolicy&model=paraformer-v2"
-    );
-    expect(init.method).toBe("GET");
-    expect(init.headers.Authorization).toBe("Bearer dk-1");
-  });
-
-  it("401 / 403 给出「API Key 无效」文案", async () => {
-    for (const status of [401, 403]) {
-      fetchMock.mockReset();
-      fetchMock.mockResolvedValue(jsonResponse(status, {}));
-      const { testAsrConnection } = await loadModule();
-      const resp = await testAsrConnection(
-        baseProvider({ type: "dashscope-filetrans", baseUrl: "https://dashscope.aliyuncs.com", apiKey: "dk-bad" })
-      );
-      expect(resp.ok).toBe(false);
-      expect(resp.error).toContain("API Key 无效或无权限");
-    }
-  });
-
-  it("缺 apiKey 时报「请填写 API Key」，不发请求", async () => {
-    const { testAsrConnection } = await loadModule();
-    const resp = await testAsrConnection(
-      baseProvider({ type: "dashscope-filetrans", baseUrl: "https://dashscope.aliyuncs.com" })
-    );
-    expect(resp.ok).toBe(false);
-    expect(resp.error).toContain("请填写 API Key");
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

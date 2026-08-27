@@ -167,9 +167,6 @@ export async function testAsrConnection(provider) {
       model: normalized.model
     });
   }
-  if (normalized.type === "dashscope-filetrans") {
-    return probeDashscopeFiletrans({ baseUrl: normalized.baseUrl, apiKey });
-  }
   // normalizeAsrProvider 已校验 type，理论上到不了这里
   return { ok: false, error: "未知的 ASR 平台类型：" + normalized.type };
 }
@@ -233,49 +230,6 @@ async function probeOpenAiTranscriptions({ baseUrl, apiKey, model }) {
   try {
     detail = (await response.text()).slice(0, 200);
   } catch {}
-  return { ok: false, error: `HTTP ${response.status}${detail ? `: ${detail}` : ""}` };
-}
-
-// dashscope-filetrans 探针：调百炼临时存储上传授权接口验证 Key 有效即可，
-// 不真跑转写任务。接口：GET ${baseUrl}/api/v1/uploads?action=getPolicy&model=paraformer-v2
-// （参考百炼"文件上传"文档）。授权 200 即认为 Key 有效。
-async function probeDashscopeFiletrans({ baseUrl, apiKey }) {
-  const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
-  if (!normalizedBaseUrl) {
-    return { ok: false, error: "请填写 baseUrl" };
-  }
-  if (!apiKey) {
-    return { ok: false, error: "请填写 API Key" };
-  }
-
-  let response;
-  try {
-    response = await fetch(
-      `${normalizedBaseUrl}/api/v1/uploads?action=getPolicy&model=paraformer-v2`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: "application/json"
-        }
-      }
-    );
-  } catch (error) {
-    return { ok: false, error: `无法连接：${error?.message || error}` };
-  }
-
-  if (response.ok) {
-    return { ok: true };
-  }
-
-  // 401/403 明确是 Key 无效；其它 4xx 附带响应体片段
-  let detail = "";
-  try {
-    detail = (await response.text()).slice(0, 200);
-  } catch {}
-  if (response.status === 401 || response.status === 403) {
-    return { ok: false, error: `API Key 无效或无权限（HTTP ${response.status}）${detail ? `: ${detail}` : ""}` };
-  }
   return { ok: false, error: `HTTP ${response.status}${detail ? `: ${detail}` : ""}` };
 }
 

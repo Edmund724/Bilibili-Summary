@@ -11,18 +11,17 @@ import {
 } from "../../extension/core/shared-defaults.js";
 
 describe("ASR_PROVIDER_PRESETS", () => {
-  it("包含四个内置预设（阿里百炼/SiliconFlow/本地 Whisper/自定义）", () => {
+  it("包含三个内置预设（SiliconFlow/本地 Whisper/自定义）", () => {
     const ids = ASR_PROVIDER_PRESETS.map((p) => p.id);
     expect(ids).toEqual([
-      "aliyun-dashscope",
       "siliconflow-sensevoice",
       "local-whisper",
       "custom"
     ]);
   });
 
-  it("每个预设字段齐全且 type 为两种合法值之一", () => {
-    const validTypes = new Set(["openai-transcriptions", "dashscope-filetrans"]);
+  it("每个预设字段齐全且 type 为合法值之一", () => {
+    const validTypes = new Set(["openai-transcriptions"]);
     for (const p of ASR_PROVIDER_PRESETS) {
       expect(p.id).toBeTruthy();
       expect(p.name).toBeTruthy();
@@ -34,15 +33,6 @@ describe("ASR_PROVIDER_PRESETS", () => {
       expect(typeof p.supportsTimestamps).toBe("boolean");
       expect(typeof p.note).toBe("string");
     }
-  });
-
-  it("阿里百炼为 dashscope-filetrans、整段不切片、句级时间戳", () => {
-    const p = getAsrPresetById("aliyun-dashscope");
-    expect(p.type).toBe("dashscope-filetrans");
-    expect(p.baseUrl).toBe("https://dashscope.aliyuncs.com");
-    expect(p.model).toBe("paraformer-v2");
-    expect(p.maxDurationSec).toBe(12 * 60 * 60);
-    expect(p.supportsTimestamps).toBe(true);
   });
 
   it("SiliconFlow 与本地 Whisper 同为 openai-transcriptions", () => {

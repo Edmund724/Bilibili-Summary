@@ -32,8 +32,7 @@ import {
   resolveAiSidepanelPageRef
 } from "../ai/context-resolver.js";
 import { bgFetchJson } from "../bilibili/gateway.js";
-import { handleAsrDownload, ASR_AUDIO_PORT_NAME } from "../asr/downloader.js";
-import { handleAsrDecode } from "../asr/offscreen-bridge.js";
+import { handleAsrDecodePrepare, handleAsrDecodeCleanup } from "../asr/offscreen-bridge.js";
 
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 
@@ -295,37 +294,14 @@ function handleAsrProvidersTest(message, sender, sendResponse) {
   return true;
 }
 
-// ===== ASR 音频下载 =====
-
-// 页面侧连 "asr-audio-chunk" 端口，首条消息发 { audioUrl, backupUrls }，
-// background 下载后按块回传，见 asr/downloader.js 的 handleAsrDownload /
-// downloadAudioViaBackground。端口必须在这里收（onMessage 传不了 Port 对象）。
-chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== ASR_AUDIO_PORT_NAME) return;
-  port.onMessage.addListener((msg) => {
-    const audioUrl = typeof msg?.audioUrl === "string" ? msg.audioUrl.trim() : "";
-    if (!audioUrl) {
-      try {
-        port.postMessage({ type: "error", message: "缺少音频地址" });
-      } catch {
-        // port 已断开，忽略
-      }
-      return;
-    }
-    handleAsrDownload(
-      { audioUrl, backupUrls: Array.isArray(msg.backupUrls) ? msg.backupUrls : [] },
-      port
-    );
-  });
-});
-
 // ===== 通用 offscreen 任务通道 =====
 
-// 把任务转发给"临时创建的 offscreen 文档"执行：文档 onConnect 只回显一条结果。
-// 任务的超时与超时错误统一在 offscreen 文档侧处理（桥接逻辑见
-// extension/asr/offscreen-bridge.js），消息类型分发给对应执行函数。
+// 把任务转发给"临时创建的 offscreen 文档"执行：asr-decode-prepare 建文档 +
+// 加防盗链规则（页面侧随后直连 offscreen 的 asr-decode 端口传下载解码任务），
+// asr-decode-cleanup 清规则。消息类型分发给对应执行函数。
 const offloadTaskHandlers = new Map([
-  ["asr-decode", handleAsrDecode]
+  ["asr-decode-prepare", handleAsrDecodePrepare],
+  ["asr-decode-cleanup", handleAsrDecodeCleanup]
 ]);
 
 function handleOffloadTask(message, sender, sendResponse) {

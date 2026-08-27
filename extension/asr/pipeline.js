@@ -1,6 +1,6 @@
 // extension/asr/pipeline.js
-// ASR 管线编排：取音轨 → 下载 → 解码切片 → 按平台 type 分发适配器逐片
-// 转写（openai-transcriptions 最多 2 片并发，其余串行）→ 时间戳加片偏移
+// ASR 管线编排：取音轨 → offscreen 下载/解码切片 → 按平台 type 分发适配器逐片
+// 转写（openai-transcriptions 最多 2 片并发）→ 时间戳加片偏移
 // 合并为 B 站字幕格式 [{from,to,content}]。
 //
 // 每步都做 ensureRunActive(runId) 守卫：转写中切换视频，旧任务立即中止，
@@ -8,20 +8,17 @@
 // 重试（本管线按 2 次重试调用）。
 
 import { getSourceAudioUrl } from "./audio-source.js";
-import { downloadAudioViaBackground } from "./downloader.js";
-import { buildChunkPlan, processAudio } from "./chunker.js";
+import { buildChunkPlan } from "./chunker.js";
 import { transcribe as transcribeOpenAi } from "./adapters/openai-transcriptions.js";
-import { transcribe as transcribeDashscopeFiletrans } from "./adapters/dashscope-filetrans.js";
 import { ensureRunActive } from "../shared/error-helpers.js";
 import { retryAsync } from "../subtitle/fetcher.js";
-import { createOffscreenDecodeHost } from "./offscreen-bridge.js";
+import { createOffscreenChunkHost } from "./offscreen-bridge.js";
 
 // type → 适配器映射。映射表缺 type 时 throw 明确错误，避免静默走错分支。
 // 并发策略：映射表项的 concurrency 元数据驱动（见 runAsrPipeline）；
-// openai-transcriptions 最多 2 片并发，其余类型单任务串行。
+// openai-transcriptions 最多 2 片并发。
 const ADAPTERS = {
-  "openai-transcriptions": { adapter: transcribeOpenAi, concurrency: 2 },
-  "dashscope-filetrans": { adapter: transcribeDashscopeFiletrans, concurrency: 1 }
+  "openai-transcriptions": { adapter: transcribeOpenAi, concurrency: 2 }
 };
 
 // 并发窗口：最多 limit 个任务同时执行，按完成顺序收集结果（无顺序依赖，
@@ -132,28 +129,23 @@ export function mergeChunkResults(chunks, results) {
 
 // ===== 主入口 =====
 
-// runAsrPipeline({ bvid, cid, durationSec, provider, runId, onProgress, decodeHost })
+// runAsrPipeline({ bvid, cid, durationSec, provider, runId, onProgress, chunkHost })
 // → [{from,to,content}]（空数组表示未识别到语音内容）。
-// decodeHost 为可选注入的解码宿主（测试传合成宿主，生产默认走
-// createOffscreenDecodeHost：一次全量解码 + 分块回传）。
-export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, onProgress, decodeHost, onEmptyDiagnostic }) {
+// chunkHost 为可选注入的切片宿主（测试传合成宿主，生产默认走
+// createOffscreenChunkHost：offscreen 文档内下载+解码+切片+WAV 编码，
+// 逐片以 base64 回传，转写层完全不动）。
+export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, onProgress, chunkHost, onEmptyDiagnostic }) {
   const type = String(provider?.type || "").trim();
   const entry = ADAPTERS[type];
   if (!entry) {
     throw new Error("暂不支持的平台类型：" + (type || "未知"));
   }
-  const host = decodeHost || createOffscreenDecodeHost();
+  const host = chunkHost || createOffscreenChunkHost();
 
   // 切片计划：openai-transcriptions 带时间戳 10 分钟一片、无时间戳按
-  // settings.asrChunkMinutes（默认 3 分钟）；其余类型由 chunker 决策
-  // （dashscope-filetrans 不切整段）。
-  let plan;
-  if (type === "openai-transcriptions") {
-    const chunkMinutes = Number(provider?.chunkMinutes || 0) || 3;
-    plan = buildChunkPlan(type, provider?.supportsTimestamps === true, chunkMinutes);
-  } else {
-    plan = buildChunkPlan(type, provider?.supportsTimestamps === true, 3);
-  }
+  // settings.asrChunkMinutes（默认 3 分钟）。
+  const chunkMinutes = Number(provider?.chunkMinutes || 0) || 3;
+  const plan = buildChunkPlan(type, provider?.supportsTimestamps === true, chunkMinutes);
 
   // 取音轨
   ensureRunActive(runId);
@@ -161,24 +153,17 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
   const source = await getSourceAudioUrl({ bvid, cid });
   ensureRunActive(runId);
 
-  // 下载音频（background 侧绕防盗链）
-  onProgress?.("音频下载中…");
-  const arrayBuffer = await downloadAudioViaBackground({
-    url: source.url,
-    backupUrls: source.backupUrls || []
-  });
-  ensureRunActive(runId);
-
-  // 解码 + 切片 + WAV 编码（宿主在 offscreen 文档跑）
-  onProgress?.("音频解码中…");
-  const rawChunks = await processAudio(arrayBuffer, { decodeHost: host, plan });
+  // 下载 + 解码 + 切片 + WAV 编码（offscreen 文档内完成，音频字节不跨 context，
+  // 跨 context 只传 base64 字符串；防盗链规则由 prepare 阶段在 background 加上）
+  onProgress?.("音频下载与解码中…");
+  const rawChunks = await host({ audioUrl: source.url, backupUrls: source.backupUrls || [], plan });
   ensureRunActive(runId);
   if (rawChunks.length === 0) {
-    return [];
+    throw new Error("音频切片为空，无法转写");
   }
 
-  // processAudio 返回的 chunk 只有 {index,startSec,wavBlob}，无时长字段；
-  // 这里按片间 startSec 间隙 + 入参总时长推算每片时长（片边界与 chunker
+  // chunkHost 返回的 chunk 带 { index, startSec, durationSec, wavBlob }；这里
+  // 仍按片间 startSec 间隙 + 入参总时长推算每片时长（片边界与 chunker
   // 的 decideChunks 连续切片一致）。
   const totalDuration = Number(durationSec) > 0 ? Number(durationSec) : rawChunks[rawChunks.length - 1].startSec + 1;
   const chunks = rawChunks.map((chunk, i) => {
@@ -186,8 +171,8 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
     return { ...chunk, durationSec: endSec - chunk.startSec };
   });
 
-  // 逐片转写：并发窗口取映射表 concurrency 元数据（openai-transcriptions 2，
-  // 其余单任务串行）；结果按片 index 有序，合成阶段排序。
+  // 逐片转写：并发窗口取映射表 concurrency 元数据（openai-transcriptions 2）；
+  // 结果按片 index 有序，合成阶段排序。
   const total = chunks.length;
   const concurrency = Number(entry.concurrency) || 1;
   const progress = (msg) => onProgress?.(`${msg}（共 ${total} 片）`);
@@ -213,22 +198,12 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
     }
     return merged;
   };
-  if (concurrency > 1) {
-    const results = await runWithConcurrency(
-      chunks.map((chunk) => () => transcribeChunk({ chunk, provider, runId, onProgress: progress })),
-      concurrency
-    );
-    ensureRunActive(runId);
-    return collectResults(results);
-  }
-
-  // 串行分支：dashscope-filetrans（整段一片）。
-  const serialResults = [];
-  for (const chunk of chunks) {
-    serialResults.push(await transcribeChunk({ chunk, provider, runId, onProgress: progress }));
-    ensureRunActive(runId);
-  }
-  return collectResults(serialResults);
+  const results = await runWithConcurrency(
+    chunks.map((chunk) => () => transcribeChunk({ chunk, provider, runId, onProgress: progress })),
+    concurrency
+  );
+  ensureRunActive(runId);
+  return collectResults(results);
 }
 
 export { ensureRunActive, retryAsync, runWithConcurrency };

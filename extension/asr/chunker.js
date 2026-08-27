@@ -156,7 +156,6 @@ export async function processAudio(arrayBuffer, { decodeHost, plan }) {
 
   const totalDurationSec = validateDecodedAudio(audioBuffer);
   const chunks = decideChunks(totalDurationSec, plan);
-  console.warn(`[DEBUG-asr] decoded len=${audioBuffer?.length} sr=${audioBuffer?.sampleRate} diag=${JSON.stringify(audioBuffer?.diagnostic ?? null)} plan=${JSON.stringify(plan)} totalDur=${totalDurationSec} chunks=${chunks.length}`);
   const channelData = audioBuffer.getChannelData(0);
 
   return chunks.map((chunk) => {

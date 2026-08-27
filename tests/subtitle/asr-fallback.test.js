@@ -61,7 +61,7 @@ vi.mock("../../extension/subtitle/cache.js", async (importOriginal) => {
     getSubtitleCacheKey: vi.fn(({ subtitleId }) => `boc_subtitle_cache_${subtitleId || "x"}`)
   };
 });
-// ASR 依赖 mock：provider store / pipeline / audio-source / downloader
+// ASR 依赖 mock：provider store / pipeline / audio-source / offscreen-bridge
 vi.mock("../../extension/asr/asr-provider-store.js", () => ({
   loadAsrProviders: vi.fn(async () => []),
   getAsrProviderKey: vi.fn(async () => "")
@@ -72,8 +72,8 @@ vi.mock("../../extension/asr/pipeline.js", () => ({
 vi.mock("../../extension/asr/audio-source.js", () => ({
   getSourceAudioUrl: vi.fn(async () => ({ url: "https://audio.example/a.m4s", backupUrls: [] }))
 }));
-vi.mock("../../extension/asr/downloader.js", () => ({
-  downloadAudioViaBackground: vi.fn(async () => new ArrayBuffer(8))
+vi.mock("../../extension/asr/offscreen-bridge.js", () => ({
+  createOffscreenChunkHost: vi.fn(() => async () => [])
 }));
 
 let fetcher;
@@ -82,7 +82,7 @@ let cacheMock;
 let asrStoreMock;
 let pipelineMock;
 let audioSourceMock;
-let downloaderMock;
+let offscreenBridgeMock;
 let uiMock;
 let uiRendererMock;
 let stateMod;
@@ -95,12 +95,12 @@ beforeEach(async () => {
   asrStoreMock = await import("../../extension/asr/asr-provider-store.js");
   pipelineMock = await import("../../extension/asr/pipeline.js");
   audioSourceMock = await import("../../extension/asr/audio-source.js");
-  downloaderMock = await import("../../extension/asr/downloader.js");
+  offscreenBridgeMock = await import("../../extension/asr/offscreen-bridge.js");
   uiMock = await import("../../extension/subtitle/ui.js");
   uiRendererMock = await import("../../extension/ui/ui-renderer.js");
   stateMod = await import("../../extension/core/state.js");
 
-  for (const m of [gatewayMock, cacheMock, asrStoreMock, pipelineMock, audioSourceMock, downloaderMock, uiMock, uiRendererMock]) {
+  for (const m of [gatewayMock, cacheMock, asrStoreMock, pipelineMock, audioSourceMock, offscreenBridgeMock, uiMock, uiRendererMock]) {
     for (const key of Object.keys(m)) {
       if (typeof m[key] === "function" && m[key].mockReset) {
         m[key].mockReset();
@@ -111,6 +111,7 @@ beforeEach(async () => {
   asrStoreMock.loadAsrProviders.mockResolvedValue([]);
   asrStoreMock.getAsrProviderKey.mockResolvedValue("");
   pipelineMock.runAsrPipeline.mockResolvedValue([]);
+  offscreenBridgeMock.createOffscreenChunkHost.mockImplementation(() => async () => []);
   cacheMock.loadSubtitleFromCache.mockResolvedValue(null);
 
   // 默认 settings：getSettings 走 chrome.runtime.sendMessage("get-settings")，
@@ -244,7 +245,7 @@ describe("maybeRunAsrFallback 成功与缓存", () => {
 
     expect(pipelineMock.runAsrPipeline).not.toHaveBeenCalled();
     expect(audioSourceMock.getSourceAudioUrl).not.toHaveBeenCalled();
-    expect(downloaderMock.downloadAudioViaBackground).not.toHaveBeenCalled();
+    expect(offscreenBridgeMock.createOffscreenChunkHost).not.toHaveBeenCalled();
     expect(stateMod.state.clip.subtitleFetchState).toBe("ready");
     expect(stateMod.state.clip.subtitleBody).toEqual([
       { from: 0, to: 1, content: "缓存句" },
@@ -319,7 +320,7 @@ describe("有字幕轨不触发回退", () => {
 
     expect(pipelineMock.runAsrPipeline).not.toHaveBeenCalled();
     expect(audioSourceMock.getSourceAudioUrl).not.toHaveBeenCalled();
-    expect(downloaderMock.downloadAudioViaBackground).not.toHaveBeenCalled();
+    expect(offscreenBridgeMock.createOffscreenChunkHost).not.toHaveBeenCalled();
     expect(stateMod.state.clip.subtitleFetchState).toBe("ready");
     expect(stateMod.state.clip.subtitleBody).toEqual([
       { from: 0, to: 5, content: "正常字幕" },
