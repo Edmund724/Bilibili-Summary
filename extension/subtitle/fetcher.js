@@ -44,6 +44,11 @@ import {
   readVideoDescription,
   applyNoSubtitleState
 } from "./ui.js";
+import {
+  loadAsrProviders,
+  getAsrProviderKey
+} from "../asr/asr-provider-store.js";
+import { runAsrPipeline } from "../asr/pipeline.js";
 
 // The fetcher is always loaded at startup through the message-handler / entry
 // chain, so registering here is the only wiring needed: the reader side can
@@ -274,13 +279,22 @@ export async function refreshClip() {
 
     // 无字幕时也允许进入阅读视图，只是字幕区域保持空态。
     if (state.clip.subtitles.length === 0) {
+      const asrResult = await maybeRunAsrFallback({ runId });
+      if (asrResult === "done") {
+        return;
+      }
+      // skip：未配置/开关关闭，提示带引导句；empty：未识别到语音内容
+      // （文案已由 maybeRunAsrFallback 写入状态栏，这里不再覆盖）；
+      // error：失败兜底（文案同样已写入）。三种都落回无字幕状态。
       applyNoSubtitleState();
       renderMeta();
       renderSubtitleSelect();
       if (isReaderViewOpen()) {
         notifyReaderPresenter("subtitle-ready", "当前视频无字幕。");
       }
-      setStatus("当前视频无字幕。");
+      if (asrResult === "skip") {
+        setStatus(buildNoSubtitleStatusMessage());
+      }
       return;
     }
 
@@ -294,13 +308,19 @@ export async function refreshClip() {
     });
 
     if (!preferred) {
+      const asrResult = await maybeRunAsrFallback({ runId });
+      if (asrResult === "done") {
+        return;
+      }
       applyNoSubtitleState();
       renderMeta();
       renderSubtitleSelect();
       if (isReaderViewOpen()) {
         notifyReaderPresenter("subtitle-ready", "当前视频无字幕。");
       }
-      setStatus("当前视频无字幕。");
+      if (asrResult === "skip") {
+        setStatus(buildNoSubtitleStatusMessage());
+      }
       return;
     }
 
@@ -439,6 +459,120 @@ export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, sub
   await refreshDerivedContent();
   if (isReaderViewOpen()) {
     notifyReaderPresenter("subtitle-ready");
+  }
+}
+
+// 无字幕提示（skip 分支）：基础文案 + 引导句——用户可去设置页配置语音识别
+// 平台自动生成字幕。返回完整提示文案。
+export function buildNoSubtitleStatusMessage(base = "当前视频无字幕。") {
+  return `${base} 可在设置页配置语音识别平台自动生成字幕。`;
+}
+
+// 无字幕轨时的语音识别回退入口。流程：
+//   skip（未启用开关 / 无激活平台）→ 返回 "skip"，调用方走原有无字幕提示
+//   （提示文案已追加引导句，见 applyNoSubtitleState 调用处）；
+//   缓存命中 → 直接走成功收尾（不发 playurl、不下载、不转写）；
+//   成功 → 塞伪轨道 + setSubtitleBody + ready + 写缓存，返回 "done"；
+//   空结果 / 失败 → 落回 applyNoSubtitleState 并展示对应文案。
+// runId 全程守卫：切换视频后旧任务立即中止（pipeline 内每步检查）。
+async function maybeRunAsrFallback({ runId }) {
+  try {
+    ensureRunActive(runId);
+
+    // 设置判定：开关未启用或没有激活平台 → skip（与现状行为一致，仅文案变化）
+    const settings = state.settings || (await getSettings());
+    const enabled = settings.asrAutoFallback === true;
+    const activeId = String(settings.activeAsrProviderId || "").trim();
+    if (!enabled || !activeId) {
+      return "skip";
+    }
+    const providers = await loadAsrProviders();
+    ensureRunActive(runId);
+    const activeProvider = (providers || []).find((p) => p.id === activeId);
+    if (!activeProvider) {
+      return "skip";
+    }
+
+    // 组装 provider（含已存 Key），准备跑管线
+    const apiKey = await getAsrProviderKey(activeId);
+    ensureRunActive(runId);
+    const provider = { ...activeProvider, apiKey };
+    const platformName = provider.name || "语音识别平台";
+    const model = String(provider.model || "").trim();
+    const cacheKey = getSubtitleCacheKey({
+      bvid: state.clip.bvid,
+      cid: state.clip.cid,
+      subtitleId: `asr:${activeId}:${model}`
+    });
+
+    // 缓存命中：直接收尾（校验通过才用，不通过则清掉重新生成）
+    const cachedBody = await loadSubtitleFromCache(cacheKey);
+    ensureRunActive(runId);
+    if (cachedBody && Array.isArray(cachedBody) && cachedBody.length > 0) {
+      const cachedCheck = validateSubtitleByDuration(cachedBody, state.clip.videoDuration);
+      if (cachedCheck.ok) {
+        clipState.setSelectedSubtitleId("asr");
+        clipState.setSelectedSubtitleUrl("");
+        clipState.setSelectedSubtitleLang(`语音识别（${platformName}）`);
+        clipState.setSubtitleBody(cachedBody);
+        clipState.setSubtitleFetchState("ready");
+        await refreshDerivedContent();
+        if (isReaderViewOpen()) {
+          notifyReaderPresenter("subtitle-ready");
+        }
+        setStatus("语音识别完成（缓存命中）。");
+        return "done";
+      }
+      logWarn("[BOC] cached asr subtitle duration mismatch, clearing cache", {
+        cacheKey,
+        reason: cachedCheck.reason
+      });
+      await clearSubtitleCacheByKey(cacheKey);
+      ensureRunActive(runId);
+    }
+
+    setStatus(`无字幕轨，正在使用语音识别（${platformName}）生成字幕…`);
+    const body = await runAsrPipeline({
+      bvid: state.clip.bvid,
+      cid: state.clip.cid,
+      durationSec: state.clip.videoDuration,
+      provider,
+      runId,
+      onProgress: (msg) => setStatus(msg)
+    });
+    ensureRunActive(runId);
+
+    // 空结果：全部为空白 → 返回 "empty"，调用点呈现"未识别到语音内容"文案
+    if (!Array.isArray(body) || body.length === 0) {
+      setStatus("未识别到语音内容，该视频可能没有人声。");
+      return "empty";
+    }
+
+    // 成功收尾：塞伪轨道 → body → ready → 派生内容 → 写缓存 → 完成提示
+    clipState.setSubtitles([
+      { id: "asr", lan: "asr-zh", lanDoc: `语音识别（${platformName}）`, subtitleUrl: "" },
+      ...(state.clip.subtitles || [])
+    ]);
+    clipState.setSelectedSubtitleId("asr");
+    clipState.setSelectedSubtitleUrl("");
+    clipState.setSelectedSubtitleLang(`语音识别（${platformName}）`);
+    clipState.setSubtitleBody(body);
+    clipState.setSubtitleFetchState("ready");
+    await refreshDerivedContent();
+    if (isReaderViewOpen()) {
+      notifyReaderPresenter("subtitle-ready");
+    }
+    await saveSubtitleToCache(cacheKey, body);
+    setStatus(`语音识别完成，已生成 ${body.length} 条字幕。`);
+    return "done";
+  } catch (error) {
+    // 失败兜底：错误文案进状态，不崩；落回原有无字幕状态
+    if (isStaleRunError(error)) {
+      throw error;
+    }
+    setStatus(`语音识别失败：${getErrorMessage(error)}`);
+    applyNoSubtitleState();
+    return "error";
   }
 }
 

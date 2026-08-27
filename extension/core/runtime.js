@@ -125,6 +125,13 @@ export function sendRuntimeMessage(message) {
   });
 }
 
+// 通用 offscreen 任务通道：发消息给 background 执行为单个任务创建的
+// offscreen 文档（background 保证至多一个活跃文档、任务间互斥、异常透传），
+// 消息结构随任务类型定。用于 ASR 音频解码（audio-bytes → typedArray）。
+export function sendOffloadMessage(message) {
+  return sendRuntimeMessage({ type: "offload-task", ...message });
+}
+
 export function isExtensionContextInvalidated(error) {
   const msg = String(error?.message || "");
   return msg.includes("Extension context invalidated");

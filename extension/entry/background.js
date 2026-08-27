@@ -33,6 +33,7 @@ import {
 } from "../ai/context-resolver.js";
 import { bgFetchJson } from "../bilibili/gateway.js";
 import { handleAsrDownload } from "../asr/downloader.js";
+import { handleAsrDecode } from "../asr/offscreen-bridge.js";
 
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 
@@ -316,6 +317,26 @@ function handleAsrDownloadAudio(message, sender, sendResponse) {
   return false;
 }
 
+// ===== 通用 offscreen 任务通道 =====
+
+// 把任务转发给"临时创建的 offscreen 文档"执行：文档 onConnect 只回显一条结果。
+// 任务的超时与超时错误统一在 offscreen 文档侧处理（桥接逻辑见
+// extension/asr/offscreen-bridge.js），消息类型分发给对应执行函数。
+const offloadTaskHandlers = new Map([
+  ["asr-decode", handleAsrDecode]
+]);
+
+function handleOffloadTask(message, sender, sendResponse) {
+  const taskType = String(message.taskType || "").trim();
+  const handler = offloadTaskHandlers.get(taskType);
+  if (!handler) {
+    sendResponse({ ok: false, error: "不支持的 offscreen 任务类型：" + taskType });
+    return false;
+  }
+  handler(message, sender, sendResponse);
+  return true;
+}
+
 function handleAiSidepanelGetState(message, sender, sendResponse) {
   const tabId = Number(message.tabId || 0) || 0;
   const forceRefresh = message.forceRefresh === true;
@@ -365,6 +386,7 @@ const messageHandlers = new Map([
   ["get-asr-provider-key", handleGetAsrProviderKey],
   ["asr-providers-test", handleAsrProvidersTest],
   ["asr-download-audio", handleAsrDownloadAudio],
+  ["offload-task", handleOffloadTask],
   ["ai-sidepanel-get-state", handleAiSidepanelGetState],
   ["ai-sidepanel-resolve-context", handleAiSidepanelResolveContext],
   ["ai-sidepanel-resolve-page-ref", handleAiSidepanelResolvePageRef]
