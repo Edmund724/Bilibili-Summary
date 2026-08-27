@@ -51,6 +51,9 @@ export const ADAPTER_TYPE = "stepfun-sse";
 const PROGRESS_EVERY = 1;
 
 // 构造阶跃 SSE 请求体（纯函数便于单测断言）。audioB64 为 WAV 的 base64。
+// language 仅在调用方显式给出时携带，否则省略交给服务端自动检测——
+// 不要硬编码 "zh"：语言与实际语音不匹配时阶跃会静默返回空文本
+// （社区实测记录的已知坑），英语视频会得到"没有人声"假象。
 export function buildStepfunRequestBody({ wavBytes, model, language }) {
   return {
     audio: {
@@ -58,11 +61,11 @@ export function buildStepfunRequestBody({ wavBytes, model, language }) {
       input: {
         transcription: {
           model: String(model || "").trim(),
-          language: language || "zh",
           // 请求句级时间戳（官方文档：默认 false）。若服务端不支持/不返回，
           // 则按无时间戳处理（见 transcribe）。
           enable_timestamp: true,
-          enable_itn: true
+          enable_itn: true,
+          ...(language ? { language } : {})
         },
         format: {
           // 管线统一输出 16k 单声道 16bit PCM WAV（chunker.js），故写死
@@ -275,8 +278,24 @@ export async function transcribe({ wavBlob, startSec, durationSec, provider, sig
     );
   }
 
+  const result = buildResult({ textParts, segments, doneEvent });
+  // 转写事件到了但聚合文本为空：无条件打印诊断（不受调试开关限制），
+  // 用于区分"服务端真听不到"还是"事件结构与预期不一致"。出现频率极低
+  //（仅每片一次且仅在空文本时），不构成刷屏。
+  if (!result.text) {
+    console.info(
+      "[BOC][stepfun] 本片转写完成但文本为空",
+      {
+        transcriptEventCount,
+        deltaCount: textParts.length,
+        hasDoneEvent: Boolean(doneEvent),
+        doneKeys: doneEvent ? Object.keys(doneEvent).join(",") : "",
+        firstDataLineSample
+      }
+    );
+  }
   // 流自然读完或遇哨兵：把聚合文本作为结果返回
-  return buildResult({ textParts, segments, doneEvent });
+  return result;
 }
 
 // 归一化最终结果。优先级：done.text（权威全量文本）> 各 delta 拼接。

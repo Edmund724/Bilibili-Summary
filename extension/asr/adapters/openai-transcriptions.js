@@ -18,7 +18,8 @@ export function buildTranscriptionForm(wavBlob, provider, responseFormat) {
   form.append("file", wavBlob, "chunk.wav");
   form.append("model", provider?.model || "");
   form.append("response_format", responseFormat || "verbose_json");
-  form.append("language", "zh");
+  // 不硬编码 language——语言与实际语音不匹配时部分平台会静默返回空文本；
+  // 缺省让服务端自动检测，兼容中英混排与外语视频。
   return form;
 }
 

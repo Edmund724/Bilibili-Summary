@@ -81,7 +81,8 @@ describe("stepfun-sse 请求构造", () => {
     // 请求体嵌套结构：audio.data 为 base64，input 下 transcription/format
     expect(body.audio.data).toBeTypeOf("string");
     expect(body.audio.input.transcription.model).toBe("stepaudio-2.5-asr");
-    expect(body.audio.input.transcription.language).toBe("zh");
+    // 不硬编码语言：省略交服务端自动检测（语言不匹配会静默空文本）
+    expect(body.audio.input.transcription.language).toBeUndefined();
     expect(body.audio.input.transcription.enable_timestamp).toBe(true);
     expect(body.audio.input.format.type).toBe("wav");
     expect(body.audio.input.format.rate).toBe(16000);

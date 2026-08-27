@@ -204,7 +204,8 @@ describe("openai-transcriptions 适配器", () => {
     expect(captured.body).toBeInstanceOf(FormData);
     expect(captured.body.get("model")).toBe("FunAudioLLM/SenseVoiceSmall");
     expect(captured.body.get("response_format")).toBe("json");
-    expect(captured.body.get("language")).toBe("zh");
+    // 不硬编码语言：省略交服务端自动检测
+    expect(captured.body.get("language")).toBeNull();
     expect(captured.body.get("file")).toBeInstanceOf(Blob);
     // 绝不手动设 Content-Type
     expect(captured.headers["Content-Type"]).toBeUndefined();
