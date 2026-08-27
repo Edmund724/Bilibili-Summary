@@ -16,9 +16,9 @@ import { createOffscreenChunkHost } from "./offscreen-bridge.js";
 
 // type → 适配器映射。映射表缺 type 时 throw 明确错误，避免静默走错分支。
 // 并发策略：映射表项的 concurrency 元数据驱动（见 runAsrPipeline）；
-// openai-transcriptions 最多 2 片并发。
+// openai-transcriptions 最多 5 片并发。
 const ADAPTERS = {
-  "openai-transcriptions": { adapter: transcribeOpenAi, concurrency: 2 }
+  "openai-transcriptions": { adapter: transcribeOpenAi, concurrency: 5 }
 };
 
 // 并发窗口：最多 limit 个任务同时执行，按完成顺序收集结果（无顺序依赖，

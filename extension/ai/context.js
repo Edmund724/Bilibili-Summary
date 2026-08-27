@@ -40,7 +40,7 @@ export function buildMessages({ context, userPrompt, history, systemPrompt }) {
   return messages;
 }
 
-export function clipSubtitleForContext(markdown, maxChars = 8000) {
+export function clipSubtitleForContext(markdown, maxChars = 50000) {
   const text = String(markdown || "");
   if (!text || text.length <= maxChars) return text;
   return text.slice(0, maxChars) + "\n\n...（字幕过长，已截断）";

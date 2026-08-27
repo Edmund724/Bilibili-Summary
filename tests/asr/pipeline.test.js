@@ -332,17 +332,17 @@ describe("pipeline 时间戳合成与偏移合并", () => {
 });
 
 describe("pipeline 并发上限与 runId 作废", () => {
-  it("openai-transcriptions 最多 2 片并发：计数信号量 fake adapter 峰值 ≤2", async () => {
+  it("openai-transcriptions 最多 5 片并发：计数信号量 fake adapter 峰值 ≤5", async () => {
     // 用适配器级并发窗口验证：直接调用 runWithConcurrency（导出的纯函数）
     const counting = makeCountingAdapter();
-    const tasks = Array.from({ length: 6 }, (_, i) => async () => {
+    const tasks = Array.from({ length: 10 }, (_, i) => async () => {
       await counting.adapter();
       return i;
     });
-    const results = await pipeline.runWithConcurrency(tasks, 2);
-    expect(counting.getPeak()).toBeLessThanOrEqual(2);
-    expect(counting.getCalls()).toBe(6);
-    expect(results).toEqual([0, 1, 2, 3, 4, 5]);
+    const results = await pipeline.runWithConcurrency(tasks, 5);
+    expect(counting.getPeak()).toBeLessThanOrEqual(5);
+    expect(counting.getCalls()).toBe(10);
+    expect(results).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
   it("runId 作废：pipeline 各步守卫在 runId 不匹配时立即中止上抛", async () => {
