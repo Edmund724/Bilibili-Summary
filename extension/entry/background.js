@@ -32,7 +32,7 @@ import {
   resolveAiSidepanelPageRef
 } from "../ai/context-resolver.js";
 import { bgFetchJson } from "../bilibili/gateway.js";
-import { handleAsrDownload } from "../asr/downloader.js";
+import { handleAsrDownload, ASR_AUDIO_PORT_NAME } from "../asr/downloader.js";
 import { handleAsrDecode } from "../asr/offscreen-bridge.js";
 
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
@@ -297,25 +297,27 @@ function handleAsrProvidersTest(message, sender, sendResponse) {
 
 // ===== ASR 音频下载 =====
 
-// ASR_DOWNLOAD_AUDIO 走专用长连接：页面侧连 "asr-audio-chunk" 端口发
-// { audioUrl, backupUrls }，background 侧下载后按块回传，见 asr/downloader.js。
-function handleAsrDownloadAudio(message, sender, sendResponse) {
-  const { port } = message;
-  if (!port) {
-    sendResponse({ ok: false, error: "缺少下载端口" });
-    return false;
-  }
-  const audioUrl = typeof message.audioUrl === "string" ? message.audioUrl : "";
-  if (!audioUrl) {
-    sendResponse({ ok: false, error: "缺少音频地址" });
-    return false;
-  }
-  handleAsrDownload(
-    { audioUrl, backupUrls: Array.isArray(message.backupUrls) ? message.backupUrls : [] },
-    port
-  );
-  return false;
-}
+// 页面侧连 "asr-audio-chunk" 端口，首条消息发 { audioUrl, backupUrls }，
+// background 下载后按块回传，见 asr/downloader.js 的 handleAsrDownload /
+// downloadAudioViaBackground。端口必须在这里收（onMessage 传不了 Port 对象）。
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== ASR_AUDIO_PORT_NAME) return;
+  port.onMessage.addListener((msg) => {
+    const audioUrl = typeof msg?.audioUrl === "string" ? msg.audioUrl.trim() : "";
+    if (!audioUrl) {
+      try {
+        port.postMessage({ type: "error", message: "缺少音频地址" });
+      } catch {
+        // port 已断开，忽略
+      }
+      return;
+    }
+    handleAsrDownload(
+      { audioUrl, backupUrls: Array.isArray(msg.backupUrls) ? msg.backupUrls : [] },
+      port
+    );
+  });
+});
 
 // ===== 通用 offscreen 任务通道 =====
 
@@ -385,7 +387,6 @@ const messageHandlers = new Map([
   ["asr-providers-delete", handleAsrProvidersDelete],
   ["get-asr-provider-key", handleGetAsrProviderKey],
   ["asr-providers-test", handleAsrProvidersTest],
-  ["asr-download-audio", handleAsrDownloadAudio],
   ["offload-task", handleOffloadTask],
   ["ai-sidepanel-get-state", handleAiSidepanelGetState],
   ["ai-sidepanel-resolve-context", handleAiSidepanelResolveContext],
