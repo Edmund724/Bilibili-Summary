@@ -189,6 +189,10 @@ export function createChatRuntime(deps) {
         showAssistantError(activeAssistantNode, msg.error || "未知错误");
       } else if (msg.type === "notice") {
         deps.showConversationContextNotice(msg.data, 4000);
+      } else if (msg.type === "cost-guard") {
+        // offscreen 发起 Map-Reduce 前弹成本护栏，等待确认后回执。
+        const ok = window.confirm(String(msg.data?.message || "预计会有多次调用，是否继续？"));
+        port.postMessage({ action: "cost-guard-confirm", ok });
       }
     });
 

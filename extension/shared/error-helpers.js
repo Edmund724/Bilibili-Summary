@@ -74,3 +74,11 @@ export function isRetryableNetworkError(error) {
     message.includes("timed out")
   );
 }
+
+// 中止标记错误工厂：AI 编排（map-reduce / merge / pool）统一用 e.aborted === true 收束
+// 中止，避免各处手工 `new Error + err.aborted = true` 的重复形状。
+export function makeAbortedError(message = "已停止生成") {
+  const err = new Error(message);
+  err.aborted = true;
+  return err;
+}

@@ -101,4 +101,19 @@ export function setLocationUrl(url) {
   history.replaceState({}, "", url);
 }
 
+// 生成指定总字符数的字幕体：每项 charsPerItem 个字符（末项取余），from 每项 +5 秒。
+// 供 AI 预算器 / Map-Reduce / 单次路径测试共享（避免各测试文件重复定义）。
+export function makeSubtitleBody(totalChars, charsPerItem = 1000) {
+  const items = [];
+  let remaining = totalChars;
+  let t = 0;
+  while (remaining > 0) {
+    const n = Math.min(charsPerItem, remaining);
+    items.push({ from: t, to: t + 5, content: "x".repeat(n) });
+    remaining -= n;
+    t += 5;
+  }
+  return items;
+}
+
 setupEnvironment();

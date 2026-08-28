@@ -1,0 +1,351 @@
+// 「Map-Reduce 编排」模块：超预算视频（>100k token）端到端出成稿。
+// 阶梯：预算内单次（02 streamChat）；超出走本模块——按 01 的分段计划切段，
+// 逐段（串行）生成分段小结，再一次性交给成稿调用输出正文（clamp ≤16k）。
+// 跑在 offscreen 文档，经 port 向侧边栏回吐进度 notice 与最终正文 token；
+// 全程可中止（复用 AbortController）；04 缓存命中可跳过 map 调用。
+// prompt 措辞对齐蓝本 .scratch/video-to-note/backend/llm_summarizer.py：
+// 分段小结忠实压缩保留时间点与事实，成稿面向收藏/复习、不补外部知识。
+
+import { formatCompactTimestamp } from "../shared/string-utils.js";
+import { makeAbortedError } from "../shared/error-helpers.js";
+import { buildBudgetPlan, FINAL_OUTPUT_CHARS, SEGMENT_SUMMARY_CHARS } from "./budgeter.js";
+import { normalizeThinkingLevel, isContextLengthOverflow } from "./client.js";
+import { runMapBounded, DEFAULT_MAP_CONCURRENCY } from "./pool.js";
+import { shouldMerge, mergeSummaries } from "./merge.js";
+import {
+  getSegmentSummaryKey,
+  getRawSegmentKey,
+  loadSegmentSummary,
+  saveSegmentSummary,
+  saveRawSegments
+} from "./segment-cache.js";
+
+// 单条字幕项渲染上限（防御性截断，避免个别超长项撑爆小结请求）。
+const MAX_ITEM_CHARS = 4000;
+
+/**
+ * 进度文案纯函数：percent = round(index / total * 100)。
+ */
+export function buildProgressNotice(index, total) {
+  const safeTotal = Math.max(1, Number(total) || 1);
+  const safeIndex = Math.min(Math.max(1, Number(index) || 1), safeTotal);
+  const percent = Math.round((safeIndex / safeTotal) * 100);
+  return `正在整理第 ${safeIndex}/${safeTotal} 段（${percent}%）`;
+}
+
+/**
+ * 把一条字幕项渲染成 `[起点-终点] 内容`（时间点格式对齐蓝本 segments_to_prompt）。
+ */
+export function formatSegmentItem(item) {
+  const content = String(item && item.content != null ? item.content : "").trim();
+  const from = Number(item && item.from) || 0;
+  const to = Number(item && item.to) || from;
+  const withHours = from >= 3600 || to >= 3600;
+  return `[${formatCompactTimestamp(from, withHours)}-${formatCompactTimestamp(to, withHours)}] ${content}`;
+}
+
+/**
+ * 分段小结 prompt：对齐蓝本 _chunk_prompt——视频标题 + 第 index/N 个连续片段 +
+ * 忠实压缩（保留重要事实、例子、论证关系与原有时间点），不做评价、不补外部知识。
+ */
+export function buildChunkPrompt({ title, index, total, items }) {
+  const segmentLines = (Array.isArray(items) ? items : []).map((item) => {
+    const text = formatSegmentItem(item);
+    return text.length > MAX_ITEM_CHARS ? text.slice(0, MAX_ITEM_CHARS) + "…" : text;
+  });
+  return `视频标题：${title}
+这是第 ${index}/${total} 个连续片段。
+
+请忠实压缩这个片段，供后续撰写完整笔记使用。保留重要事实、例子、论证关系和原有时间点；
+结合上下文理解表达意图，不做评价，不补充外部知识。
+
+字幕：
+${segmentLines.join("\n")}`;
+}
+
+/**
+ * 成稿 prompt：对齐蓝本 _note_prompt——产出面向收藏/复习的 Markdown 视频笔记，
+ * 忠实复原脉络/观点/依据/时间点，不补外部知识，标题 `# 视频笔记：《{title}》`。
+ * 材料中每条小结以 `### 片段 i` 标注。
+ */
+export function buildNotePrompt({ title, material }) {
+  return `写一份翔实、自然的 Markdown 视频笔记。完整复原内容脉络、具体例子、核心观点及其依据，
+并在有帮助时加入关键时间点。不要加入外部知识或评价。
+
+视频标题：${title}
+
+以准确理解语境和作者立场为先。时间点只能取自材料。可在上下文支持时直接修正明显的口误、
+笔误或转写错误。结构按内容自然组织，不必凑固定模板。标题使用：# 视频笔记：《${title}》
+
+材料：
+${material}`;
+}
+
+/**
+ * 把所有分段小结汇总为一份成稿材料：每条前面 `### 片段 i` 标注。
+ */
+export function buildMaterial(summaries) {
+  const list = Array.isArray(summaries) ? summaries : [];
+  return list
+    .map((summary, i) => `### 片段 ${i + 1}\n${String(summary || "")}`)
+    .join("\n\n");
+}
+
+/**
+ * 非流式 chat/completions 辅助（可注入 runCompletion 覆盖，默认用全局 fetch）。
+ * 非 2xx 抛错；错误文案命中 context-length 溢出时标记 error.overflow = true（供外层兜底）。
+ */
+export async function runCompletion({ provider, messages, thinkingLevel, signal, fetchImpl = globalThis.fetch }) {
+  const baseUrl = String(provider?.baseUrl || "").trim().replace(/\/+$/, "");
+  const model = provider?.model;
+  const body = { model, messages, stream: false };
+  const level = normalizeThinkingLevel(thinkingLevel);
+  if (level !== "off") {
+    body.reasoning_effort = level;
+  }
+
+  const headers = { "Content-Type": "application/json" };
+  if (provider?.apiKey) {
+    headers["Authorization"] = `Bearer ${provider.apiKey}`;
+  }
+
+  let response;
+  try {
+    response = await fetchImpl(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal
+    });
+  } catch (e) {
+    // 中止（真实 signal 中止 / 注入实现抛出的中止标记 / AbortError）统一收束为 aborted 标记错误。
+    if (signal?.aborted || e?.aborted || e?.name === "AbortError") {
+      throw makeAbortedError();
+    }
+    throw new Error(`网络错误：${e?.message || e}`);
+  }
+
+  if (!response.ok) {
+    let detail = "";
+    try {
+      detail = (await response.text()).slice(0, 500);
+    } catch {}
+    const errorMsg = `HTTP ${response.status}${detail ? `: ${detail}` : ""}`;
+    const error = new Error(errorMsg);
+    if (isContextLengthOverflow(detail)) {
+      error.overflow = true;
+    }
+    throw error;
+  }
+
+  let json = null;
+  try {
+    json = await response.json();
+  } catch (e) {
+    throw new Error(`响应解析失败：${e?.message || e}`);
+  }
+  const content = json?.choices?.[0]?.message?.content;
+  return typeof content === "string" ? content : "";
+}
+
+/**
+ * 单段小结：先查缓存命中直接复用（04 填空后生效），未命中则构造 prompt 调模型并落盘。
+ * 返回小结字符串；中止（signal.aborted）时抛出标记 aborted 的错误，由上层统一收束。
+ */
+async function summarizeSegment({ provider, context, segment, total, signal, thinkingLevel, runCompletionImpl }) {
+  const rawKey = getRawSegmentKey({
+    bvid: context?.bvid,
+    cid: context?.cid,
+    subtitleId: context?.selectedSubtitleId,
+    subtitleUrl: context?.selectedSubtitleUrl,
+    lang: context?.subtitleLang,
+    segmentIndex: segment.index
+  });
+  const summaryKey = getSegmentSummaryKey({
+    bvid: context?.bvid,
+    cid: context?.cid,
+    subtitleId: context?.selectedSubtitleId,
+    subtitleUrl: context?.selectedSubtitleUrl,
+    lang: context?.subtitleLang,
+    segmentIndex: segment.index
+  });
+
+  // 缓存命中直接复用，跳过 map 调用与无谓的原始段落盘（04 填空后生效）。
+  const cached = await loadSegmentSummary(summaryKey);
+  if (cached != null) {
+    return cached;
+  }
+
+  // 原始字幕段落盘（04 实现落盘；06 按需检索时可跨会话复用）。
+  await saveRawSegments(rawKey, segment.items || []);
+
+  if (signal?.aborted) {
+    throw makeAbortedError();
+  }
+
+  const prompt = buildChunkPrompt({
+    title: context?.title || "未知",
+    index: segment.index,
+    total,
+    items: segment.items || []
+  });
+  const summary = await runCompletionImpl({
+    provider,
+    messages: [
+      { role: "system", content: "你是视频笔记编辑。忠实理解语境与作者意图，允许结合上下文保守修正明显的口误、笔误和语音转写错误。" },
+      { role: "user", content: prompt }
+    ],
+    thinkingLevel,
+    signal
+  });
+
+  const trimmed = String(summary || "").trim();
+  // 小结 ≤10k 保留（约 20%）；超出时尾部截断兜底（本票不做归并，靠此 clamp 保预算）
+  const clamped = trimmed.length > SEGMENT_SUMMARY_CHARS ? trimmed.slice(0, SEGMENT_SUMMARY_CHARS) : trimmed;
+  await saveSegmentSummary(summaryKey, clamped);
+  return clamped;
+}
+
+/**
+ * 编排主函数（签名固定，04/07/08 只换内部实现）：
+ * 切片 → 逐段小结（串行 runMapBounded）→ 成稿（shouldMerge 为真先归并）→ 回吐正文。
+ * 返回 { draft, segmentSummaries, aborted }；aborted 时已回吐内容不串数据、不再 post done。
+ */
+export async function orchestrateMapReduce({
+  provider,
+  context,
+  plan,
+  port,
+  signal,
+  thinkingLevel,
+  onProgress,
+  runCompletion: runCompletionImpl = runCompletion
+}) {
+  const ctx = context || {};
+  const resolvedPlan =
+    plan ||
+    buildBudgetPlan({
+      body: Array.isArray(ctx.subtitleBody) ? ctx.subtitleBody : [],
+      chapters: Array.isArray(ctx.chapters) ? ctx.chapters : []
+    });
+  const segments = Array.isArray(resolvedPlan.segments) ? resolvedPlan.segments : [];
+  const total = segments.length;
+
+  const segmentSummaries = [];
+  const emitProgress = (index) => {
+    const notice = buildProgressNotice(index, total);
+    if (typeof onProgress === "function") {
+      onProgress(notice);
+    } else if (port && typeof port.postMessage === "function") {
+      port.postMessage({ type: "notice", data: notice });
+    }
+  };
+  // 中止收束：回吐 stopped（对齐 streamChat 的停止 UX），不 post done，不抛错误。
+  const abortReturn = () => {
+    if (port && typeof port.postMessage === "function") {
+      port.postMessage({ type: "stopped", reason: "已停止生成" });
+    }
+    return { draft: "", segmentSummaries, aborted: true };
+  };
+
+  const worker = async (segment, i) => {
+    const summary = await summarizeSegment({
+      provider,
+      context: ctx,
+      segment,
+      total,
+      signal,
+      thinkingLevel,
+      runCompletionImpl: runCompletionImpl
+    });
+    return { segment, summary };
+  };
+
+  let done;
+  try {
+    done = await runMapBounded({
+      items: segments,
+      worker,
+      concurrency: DEFAULT_MAP_CONCURRENCY,
+      signal,
+      onItemDone: (result, index) => {
+        segmentSummaries[index] = result?.summary || "";
+        emitProgress(result?.segment?.index ?? index + 1);
+      }
+    });
+  } catch (e) {
+    if (e?.aborted || signal?.aborted) {
+      return abortReturn();
+    }
+    throw e;
+  }
+
+  if (signal?.aborted) {
+    return abortReturn();
+  }
+
+  // 成稿材料：所有小结汇总；shouldMerge 为真先走归并（07 填空后生效）。
+  let materialSummaries = segmentSummaries.filter((s) => s != null);
+  if (shouldMerge(resolvedPlan) && materialSummaries.length > 1) {
+    const merged = await mergeSummaries({
+      summaries: materialSummaries,
+      title: ctx.title || "未知",
+      runPrompts: async ({ prompt, messages }) => {
+        const text = await runCompletionImpl({
+          provider,
+          messages: messages || [
+            { role: "system", content: "你是视频笔记编辑。" },
+            { role: "user", content: prompt }
+          ],
+          thinkingLevel,
+          signal
+        });
+        return String(text || "");
+      },
+      signal,
+      onProgress: emitProgress
+    });
+    materialSummaries = Array.isArray(merged?.merged) ? merged.merged : materialSummaries;
+  }
+  if (signal?.aborted) {
+    return { draft: "", segmentSummaries, aborted: true };
+  }
+
+  const material = buildMaterial(materialSummaries);
+  const notePrompt = buildNotePrompt({ title: ctx.title || "未知", material });
+
+  let draft = "";
+  try {
+    draft = String(
+      await runCompletionImpl({
+        provider,
+        messages: [
+          { role: "system", content: "你是视频笔记编辑。忠实理解语境与作者意图，允许结合上下文保守修正明显的口误、笔误和语音转写错误。" },
+          { role: "user", content: notePrompt }
+        ],
+        thinkingLevel,
+        signal
+      }) || ""
+    ).trim();
+  } catch (e) {
+    if (e?.aborted || signal?.aborted) {
+      return abortReturn();
+    }
+    throw e;
+  }
+
+  if (signal?.aborted) {
+    return abortReturn();
+  }
+
+  // 成稿 clamp 到 FINAL_OUTPUT_CHARS（16000）以内
+  if (draft.length > FINAL_OUTPUT_CHARS) {
+    draft = draft.slice(0, FINAL_OUTPUT_CHARS);
+  }
+
+  if (port && typeof port.postMessage === "function") {
+    port.postMessage({ type: "token", data: draft });
+    port.postMessage({ type: "done" });
+  }
+  return { draft, segmentSummaries, aborted: false };
+}

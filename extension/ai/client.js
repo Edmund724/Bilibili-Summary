@@ -1,6 +1,7 @@
 // 编排：拼请求 → fetch → 解析 SSE → 通过 port 把 token / reasoning 回吐给 side panel。
 
 import { buildMessages, clipSubtitleForContext } from "./context.js";
+import { buildBudgetPlan, estimateTokens, MATERIAL_BUDGET_CHARS } from "./budgeter.js";
 import { parseSsePayload } from "./sse-parser.js";
 
 // OpenAI 兼容协议常量。
@@ -30,6 +31,79 @@ export function buildChatRequestBody({ model, messages, thinkingLevel }) {
     body.reasoning_effort = level;
   }
   return body;
+}
+
+// 超预算回落时的提示文案：仅提示不报错，超预算/溢出标记供 03 接管。
+export const OVER_BUDGET_NOTICE = "超长视频整理即将支持";
+
+/**
+ * 判定一段错误文案是否属于 context-length 溢出（纯函数，供单测与 03 兜底复用）。
+ * 粗判：命中常见溢出子串，或「长度/上下文/令牌」语义 + 「超限」语义同时出现。
+ * 非溢出错误（401/404/500/网络错误/限流等）返回 false，仍走既有重试/报错路径。
+ */
+export function isContextLengthOverflow(detailOrError) {
+  const text = String(detailOrError ?? "").toLowerCase();
+  if (!text) return false;
+
+  const directPatterns = [
+    "context_length",
+    "context length",
+    "maximum context length",
+    "max context length",
+    "context window",
+    "too many tokens",
+    "too long",
+    "too large",
+    "max_tokens",
+    "max tokens",
+    "token limit",
+    "最大上下文",
+    "上下文长度",
+    "上下文超出",
+    "超出上下文",
+    "超出长度",
+    "超过上下文",
+    "令牌超限",
+    "token超限",
+    "超出上限"
+  ];
+
+  for (const pattern of directPatterns) {
+    if (text.includes(pattern)) return true;
+  }
+
+  const subjectPattern = /(context|tokens?|length|上下文|长度|令牌|窗口)/;
+  const overflowPattern = /(exceed|limit|maximum|too many|too long|overflow|超出|超过|超限|上限|最大)/;
+  return subjectPattern.test(text) && overflowPattern.test(text);
+}
+
+/**
+ * 决定给模型的字幕：素材预算内（≤100k token）整篇原样；超预算回落 50k 硬截断并打标记。
+ * 纯函数，streamChat 只负责消费返回的 { markdown, mode, notice, overflowMarked }。
+ * body 缺失/空时退化为对 subtitleMarkdown 的 estimateTokens 判定。
+ */
+export function resolveSubtitleForContext(context) {
+  const ctx = context || {};
+  const body = Array.isArray(ctx.subtitleBody) ? ctx.subtitleBody : [];
+  const markdown = String(ctx.subtitleMarkdown || "");
+
+  let mode;
+  if (body.length > 0) {
+    mode = buildBudgetPlan({ body, chapters: ctx.chapters }).mode;
+  } else {
+    mode = estimateTokens(markdown) > MATERIAL_BUDGET_CHARS ? "map-reduce" : "single";
+  }
+
+  if (mode === "single") {
+    return { markdown, mode, notice: "", overflowMarked: false };
+  }
+
+  return {
+    markdown: clipSubtitleForContext(markdown),
+    mode,
+    notice: OVER_BUDGET_NOTICE,
+    overflowMarked: true
+  };
 }
 
 /**
@@ -99,8 +173,17 @@ export async function streamChat({ provider, context, userPrompt, history, port,
     return;
   }
 
+  const subtitleResolution = resolveSubtitleForContext(context);
+  if (subtitleResolution.notice) {
+    port.postMessage({ type: "notice", data: subtitleResolution.notice });
+  }
+  if (subtitleResolution.overflowMarked) {
+    // 超预算：仍先提示，再以 "overflow" 哨兵返回供 03 兜底转 Map-Reduce。
+    return "overflow";
+  }
+
   const messages = buildMessages({
-    context: { ...context, subtitleMarkdown: clipSubtitleForContext(context?.subtitleMarkdown) },
+    context: { ...context, subtitleMarkdown: subtitleResolution.markdown },
     userPrompt,
     history,
     systemPrompt: context?.aiSystemPrompt
@@ -147,6 +230,10 @@ export async function streamChat({ provider, context, userPrompt, history, port,
         detail = (await response.text()).slice(0, 200);
       } catch {}
       const errorMsg = `HTTP ${response.status}${detail ? `: ${detail}` : ""}`;
+      if (isContextLengthOverflow(detail)) {
+        // context-length 溢出：以 "overflow" 哨兵返回供 03 兜底转 Map-Reduce，不走普通重试/报错路径。
+        return "overflow";
+      }
       if (attempt >= MAX_STREAM_RETRIES) {
         port.postMessage({ type: "error", error: errorMsg });
         return;
@@ -164,7 +251,7 @@ export async function streamChat({ provider, context, userPrompt, history, port,
       });
       if (result === "stopped") return;
       port.postMessage({ type: "done" });
-      return;
+      return "done";
     } catch (e) {
       if (signal?.aborted) {
         port.postMessage({ type: "stopped", reason: "已停止生成" });

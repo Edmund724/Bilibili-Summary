@@ -2,6 +2,11 @@
 // 同时承接 ASR 音频解码任务（asr-decode 端口）：service worker 无
 // AudioContext，解码+重采样在这里用 OfflineAudioContext 完成。
 import { streamChat } from "../ai/client.js";
+import { buildBudgetPlan } from "../ai/budgeter.js";
+import { orchestrateMapReduce } from "../ai/map-reduce.js";
+import { resolveFollowupContext } from "../ai/followup-router.js";
+import { trimRecentTurns } from "../ai/followup-context.js";
+import { buildCostGuardNotice } from "../ai/cost-guard.js";
 import {
   MAX_AUDIO_BYTES,
   ASR_DECODE_TIMEOUT_MS,
@@ -11,6 +16,7 @@ import { buildWavChunks, makeDecodedBuffer } from "../asr/chunker.js";
 import { isFragmentedMp4, adtsFromFmp4, parseAudioSpecificConfig } from "../asr/adts.js";
 
 let activeAbortController = null;
+let pendingCostGuard = null;
 let idleTimeoutId = null;
 var STREAM_IDLE_TIMEOUT_MS = 90000;
 
@@ -52,37 +58,96 @@ chrome.runtime.onConnect.addListener((port) => {
       abortActiveRequest();
       return;
     }
+    if (msg.action === "cost-guard-confirm") {
+      if (pendingCostGuard) {
+        const resolve = pendingCostGuard.resolve;
+        pendingCostGuard = null;
+        resolve(msg.ok !== false);
+      }
+      return;
+    }
     if (msg.action !== "chat") return;
 
     try {
       abortActiveRequest();
       activeAbortController = new AbortController();
 
-      const providersResp = await chrome.runtime.sendMessage({ type: "ai-providers-list" });
-      const list = (providersResp?.providers || []).filter(p => p.enabled);
-      const provider = list.find(p => p.id === msg.providerId) || null;
-      if (!provider) {
-        port.postMessage({ type: "error", error: "未找到选中的平台" });
+      const resolved = await resolveProviderWithKey(port, msg.providerId);
+      if (resolved.error) {
         clearActiveRequestState();
         return;
       }
-
-      const keysResp = await chrome.runtime.sendMessage({ type: "get-ai-provider-key", providerId: msg.providerId });
-      if (!keysResp?.ok) {
-        port.postMessage({ type: "error", error: keysResp?.error || "读取 API Key 失败" });
-        clearActiveRequestState();
-        return;
-      }
-      const apiKey = String(keysResp.apiKey || "").trim();
-      if (provider.requiresKey !== false && !apiKey) {
-        port.postMessage({ type: "error", error: "该平台 API Key 未配置" });
-        clearActiveRequestState();
-        return;
-      }
+      const { provider, apiKey } = resolved;
 
       armIdleTimeout(activeAbortController, port);
 
-      await streamChat({
+      // 阶梯分派：预算内（≤100k token）走单次流式；超预算走 Map-Reduce 分段编排。
+      const plan = buildBudgetPlan({
+        body: Array.isArray(msg.context?.subtitleBody) ? msg.context.subtitleBody : [],
+        chapters: Array.isArray(msg.context?.chapters) ? msg.context.chapters : []
+      });
+      if (plan.mode === "map-reduce") {
+        // 追问压缩：已有成稿笔记 + 分段小结时，改走「压缩摘要 + 检索注入 + 单次调用」，
+        // 不再重跑 Map-Reduce（token 随追问近乎常数）。
+        const followupContext = await resolveFollowupContext({
+          context: msg.context || {},
+          plan,
+          history: Array.isArray(msg.history) ? msg.history : [],
+          userPrompt: msg.prompt || ""
+        });
+        if (followupContext) {
+          // 近 N 轮 verbatim 封顶：只带最近几轮历史，token 不随追问轮数增长。
+          const trimmedHistory = trimRecentTurns(msg.history);
+          const followupResult = await streamChat({
+            provider: { ...provider, apiKey },
+            context: followupContext,
+            userPrompt: msg.prompt || "",
+            history: trimmedHistory,
+            thinkingLevel: msg.thinkingLevel,
+            port,
+            signal: activeAbortController.signal,
+            onActivity: function () { armIdleTimeout(activeAbortController, port); }
+          });
+          // 兜底：压缩摘要 + 检索注入仍意外溢出（HTTP context-length）时，绝不静默无输出。
+          if (followupResult === "overflow") {
+            port.postMessage({ type: "error", error: "追问内容仍超出上下文预算，请换个更具体的问题重试" });
+          }
+          return;
+        }
+
+        // 成本护栏：发起 Map-Reduce 前预估 ≥5 次调用 → 弹确认，可取消。
+        const guard = buildCostGuardNotice({
+          estimatedCalls: plan.estimatedCalls,
+          estimatedTokens: plan.estimatedTokens
+        });
+        if (guard.shouldPrompt) {
+          // 等待用户确认期间暂停空闲超时计时，确认后重新武装。
+          clearIdleTimeout();
+          const confirmed = await askCostGuard(port, guard.message);
+          if (!confirmed) {
+            port.postMessage({ type: "stopped", reason: "已取消" });
+            return;
+          }
+          armIdleTimeout(activeAbortController, port);
+        }
+
+        await orchestrateMapReduce({
+          provider: { ...provider, apiKey },
+          context: msg.context || {},
+          plan,
+          port,
+          signal: activeAbortController.signal,
+          thinkingLevel: msg.thinkingLevel,
+          onProgress: function (notice) {
+            // 进度回吐 + 每段完成重挂空闲超时（覆盖下一段模型调用）
+            port.postMessage({ type: "notice", data: notice });
+            armIdleTimeout(activeAbortController, port);
+          }
+        });
+        return;
+      }
+
+      const result = await streamChat({
         provider: { ...provider, apiKey },
         context: msg.context || {},
         userPrompt: msg.prompt || "",
@@ -92,6 +157,24 @@ chrome.runtime.onConnect.addListener((port) => {
         signal: activeAbortController.signal,
         onActivity: function () { armIdleTimeout(activeAbortController, port); }
       });
+
+      // 单次路径 context-length 溢出 → 自动转 Map-Reduce 重试一次
+      //（仅一次：map-reduce 各调用自身更短，再溢出就抛出错误；activeAbortController 复用，stop 仍可中止）。
+      if (result === "overflow") {
+        await orchestrateMapReduce({
+          provider: { ...provider, apiKey },
+          context: msg.context || {},
+          plan,
+          port,
+          signal: activeAbortController.signal,
+          thinkingLevel: msg.thinkingLevel,
+          onProgress: function (notice) {
+            // 进度回吐 + 每段完成重挂空闲超时（覆盖下一段模型调用）
+            port.postMessage({ type: "notice", data: notice });
+            armIdleTimeout(activeAbortController, port);
+          }
+        });
+      }
     } catch (e) {
       port.postMessage({ type: "error", error: String(e?.message || e) });
     } finally {
@@ -101,6 +184,11 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 
   port.onDisconnect.addListener(() => {
+    if (pendingCostGuard) {
+      const resolve = pendingCostGuard.resolve;
+      pendingCostGuard = null;
+      resolve(false);
+    }
     abortActiveRequest();
     clearIdleTimeout();
     clearActiveRequestState();
@@ -116,6 +204,39 @@ function abortActiveRequest() {
 
 function clearActiveRequestState() {
   activeAbortController = null;
+}
+
+// 向侧边栏弹成本护栏确认，等待其回复 { action: "cost-guard-confirm", ok: boolean }。
+// 断连时 resolve(false)（视为取消）。
+function askCostGuard(port, message) {
+  return new Promise((resolve) => {
+    pendingCostGuard = { resolve };
+    port.postMessage({ type: "cost-guard", data: { message } });
+  });
+}
+
+// 取「选中的平台 + 其 API Key」：provider 来自 ai-providers-list，key 来自 get-ai-provider-key。
+// 任一缺失（平台不存在 / key 读取失败 / 需要 key 但未配置）返回带 error 的对象；成功返回 { provider, apiKey }。
+async function resolveProviderWithKey(port, providerId) {
+  const providersResp = await chrome.runtime.sendMessage({ type: "ai-providers-list" });
+  const list = (providersResp?.providers || []).filter(p => p.enabled);
+  const provider = list.find(p => p.id === providerId) || null;
+  if (!provider) {
+    port.postMessage({ type: "error", error: "未找到选中的平台" });
+    return { error: true };
+  }
+
+  const keysResp = await chrome.runtime.sendMessage({ type: "get-ai-provider-key", providerId });
+  if (!keysResp?.ok) {
+    port.postMessage({ type: "error", error: keysResp?.error || "读取 API Key 失败" });
+    return { error: true };
+  }
+  const apiKey = String(keysResp.apiKey || "").trim();
+  if (provider.requiresKey !== false && !apiKey) {
+    port.postMessage({ type: "error", error: "该平台 API Key 未配置" });
+    return { error: true };
+  }
+  return { provider: { ...provider, apiKey }, apiKey };
 }
 
 // ===== ASR 音频解码任务 =====
