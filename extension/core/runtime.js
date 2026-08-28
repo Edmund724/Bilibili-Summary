@@ -153,6 +153,7 @@ export function requestOpenOptions() {
     });
 }
 
+// 归一化责任在 background(get-settings 处理器统一走 normalizeSettings),本函数只透传。
 export async function getSettings(timeoutMs = 5000) {
   try {
     const timeoutPromise = new Promise((_, reject) => {

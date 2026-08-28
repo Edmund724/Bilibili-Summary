@@ -40,6 +40,47 @@ function normalizeAsrAutoFallback(value) {
   return value !== false; // 默认 true，仅显式 false 关闭
 }
 
+// 归一化步骤表：[key, normalizeField]，normalizeField 接收完整对象、返回该 key
+// 的归一化值。readerLetterSpacing 依赖同一对象里尚未归一化的 readerLineHeight
+// （缺失时派生兜底），因此步骤顺序即历史内联顺序，不可调整。
+const SETTINGS_NORMALIZER_STEPS = [
+  ["downloadFormat", (m) => normalizeDownloadFormat(m.downloadFormat)],
+  ["includeHotCommentsInNote", (m) => normalizeIncludeHotCommentsInNote(m.includeHotCommentsInNote)],
+  ["enablePlayerAiQuickAction", (m) => normalizeEnablePlayerAiQuickAction(m.enablePlayerAiQuickAction)],
+  ["playerAiQuickPrompt", (m) => normalizePlayerAiQuickPrompt(m.playerAiQuickPrompt)],
+  ["readerTheme", (m) => normalizeReaderTheme(m.readerTheme)],
+  ["readerFontScale", (m) => normalizeReaderFontScale(m.readerFontScale)],
+  ["readerLetterSpacing", (m) => normalizeReaderLetterSpacing(m.readerLetterSpacing ?? m.readerLineHeight)],
+  ["readerLineHeight", (m) => normalizeReaderLineHeight(m.readerLineHeight)],
+  ["readerContentWidth", (m) => normalizeReaderContentWidth(m.readerContentWidth)],
+  ["readerChapterVisibility", (m) => normalizeReaderChapterVisibility(m.readerChapterVisibility)],
+  ["readerTranscriptVisible", (m) => normalizeReaderTranscriptVisible(m.readerTranscriptVisible)],
+  ["fixedFrontmatterProperties", (m) => normalizeFixedFrontmatterProperties(m.fixedFrontmatterProperties)],
+  ["notePlaceholderSections", (m) => normalizeNotePlaceholderSections(m.notePlaceholderSections)],
+  ["aiSystemPrompt", (m) => normalizeAiSystemPrompt(m.aiSystemPrompt)],
+  ["aiInitialQuickPrompts", (m) => normalizeAiInitialQuickPrompts(m.aiInitialQuickPrompts)],
+  ["aiPresetPrompts", (m) => normalizeAiPresetPrompts(m.aiPresetPrompts)],
+  ["defaultModel", (m) => normalizeDefaultModel(m.defaultModel)],
+  ["aiThinkingLevel", (m) => normalizeAiThinkingLevel(m.aiThinkingLevel)],
+  ["asrProviders", (m) => normalizeAsrProvidersList(m.asrProviders)],
+  ["activeAsrProviderId", (m) => String(m.activeAsrProviderId || "").trim()],
+  ["asrAutoFallback", (m) => normalizeAsrAutoFallback(m.asrAutoFallback)],
+  ["asrLanguage", (m) => normalizeAsrLanguage(m.asrLanguage)]
+];
+
+// 设置归一化的唯一收口：对 22 个受管字段按步骤表逐项归一化，返回新对象
+// （不改入参）。读路径（getMergedSettings）、写路径（saveSettings）与安装/
+// 更新迁移（background 的 initializeSettingsStorage）统一经由这里。
+// aiSystemPrompt 在此把 LEGACY 默认提示词映射为当前默认（LEGACY 常量保留
+// 一个版本周期）；落盘收口后，存储里的旧值会被一次性改写而非反复映射。
+export function normalizeSettings(merged) {
+  const normalized = { ...merged };
+  for (const [key, normalizeField] of SETTINGS_NORMALIZER_STEPS) {
+    normalized[key] = normalizeField(normalized);
+  }
+  return normalized;
+}
+
 export async function getMergedSettings(timeoutMs = 5000) {
   const timeoutPromise = new Promise((_, reject) => {
     setTimeout(() => reject(new Error("storage timeout")), timeoutMs);
@@ -49,31 +90,7 @@ export async function getMergedSettings(timeoutMs = 5000) {
     timeoutPromise
   ]).catch(() => ({}));
 
-  const merged = { ...DEFAULT_SETTINGS, ...syncSettings };
-  merged.downloadFormat = normalizeDownloadFormat(merged.downloadFormat);
-  merged.includeHotCommentsInNote = normalizeIncludeHotCommentsInNote(merged.includeHotCommentsInNote);
-  merged.enablePlayerAiQuickAction = normalizeEnablePlayerAiQuickAction(merged.enablePlayerAiQuickAction);
-  merged.playerAiQuickPrompt = normalizePlayerAiQuickPrompt(merged.playerAiQuickPrompt);
-  merged.readerTheme = normalizeReaderTheme(merged.readerTheme);
-  merged.readerFontScale = normalizeReaderFontScale(merged.readerFontScale);
-  merged.readerLetterSpacing = normalizeReaderLetterSpacing(merged.readerLetterSpacing ?? merged.readerLineHeight);
-  merged.readerLineHeight = normalizeReaderLineHeight(merged.readerLineHeight);
-  merged.readerContentWidth = normalizeReaderContentWidth(merged.readerContentWidth);
-  merged.readerChapterVisibility = normalizeReaderChapterVisibility(merged.readerChapterVisibility);
-  merged.readerTranscriptVisible = normalizeReaderTranscriptVisible(merged.readerTranscriptVisible);
-  merged.fixedFrontmatterProperties = normalizeFixedFrontmatterProperties(merged.fixedFrontmatterProperties);
-  merged.notePlaceholderSections = normalizeNotePlaceholderSections(merged.notePlaceholderSections);
-  merged.aiSystemPrompt = normalizeAiSystemPrompt(merged.aiSystemPrompt);
-  merged.aiInitialQuickPrompts = normalizeAiInitialQuickPrompts(merged.aiInitialQuickPrompts);
-  merged.aiPresetPrompts = normalizeAiPresetPrompts(merged.aiPresetPrompts);
-  merged.defaultModel = normalizeDefaultModel(merged.defaultModel);
-  merged.aiThinkingLevel = normalizeAiThinkingLevel(merged.aiThinkingLevel);
-  merged.asrProviders = normalizeAsrProvidersList(merged.asrProviders);
-  merged.activeAsrProviderId = String(merged.activeAsrProviderId || "").trim();
-  merged.asrAutoFallback = normalizeAsrAutoFallback(merged.asrAutoFallback);
-  merged.asrLanguage = normalizeAsrLanguage(merged.asrLanguage);
-
-  return merged;
+  return normalizeSettings({ ...DEFAULT_SETTINGS, ...syncSettings });
 }
 
 export async function saveSettings(settings) {
@@ -84,34 +101,12 @@ export async function saveSettings(settings) {
   for (const key of Object.keys(syncPayload)) {
     if (syncPayload[key] === undefined) delete syncPayload[key];
   }
-  // 只归一化 payload 中实际存在的 key；缺失的 key 不写入，
-  // 避免部分保存（如只传 aiThinkingLevel）把其它设置覆盖成默认值。
-  if ("downloadFormat" in syncPayload) syncPayload.downloadFormat = normalizeDownloadFormat(syncPayload.downloadFormat);
-  if ("includeHotCommentsInNote" in syncPayload) syncPayload.includeHotCommentsInNote = normalizeIncludeHotCommentsInNote(syncPayload.includeHotCommentsInNote);
-  if ("enablePlayerAiQuickAction" in syncPayload) syncPayload.enablePlayerAiQuickAction = normalizeEnablePlayerAiQuickAction(syncPayload.enablePlayerAiQuickAction);
-  if ("playerAiQuickPrompt" in syncPayload) syncPayload.playerAiQuickPrompt = normalizePlayerAiQuickPrompt(syncPayload.playerAiQuickPrompt);
-  if ("readerTheme" in syncPayload) syncPayload.readerTheme = normalizeReaderTheme(syncPayload.readerTheme);
-  if ("readerFontScale" in syncPayload) syncPayload.readerFontScale = normalizeReaderFontScale(syncPayload.readerFontScale);
-  if ("readerLetterSpacing" in syncPayload) {
-    syncPayload.readerLetterSpacing = normalizeReaderLetterSpacing(
-      syncPayload.readerLetterSpacing ?? syncPayload.readerLineHeight
-    );
+  // 写路径收口：与 normalizeSettings 共用同一套步骤表，但只归一化 payload 中
+  // 实际存在的 key；缺失的 key 不写入，避免部分保存（如只传 aiThinkingLevel）
+  // 把其它设置覆盖成默认值。
+  for (const [key, normalizeField] of SETTINGS_NORMALIZER_STEPS) {
+    if (key in syncPayload) syncPayload[key] = normalizeField(syncPayload);
   }
-  if ("readerLineHeight" in syncPayload) syncPayload.readerLineHeight = normalizeReaderLineHeight(syncPayload.readerLineHeight);
-  if ("readerContentWidth" in syncPayload) syncPayload.readerContentWidth = normalizeReaderContentWidth(syncPayload.readerContentWidth);
-  if ("readerChapterVisibility" in syncPayload) syncPayload.readerChapterVisibility = normalizeReaderChapterVisibility(syncPayload.readerChapterVisibility);
-  if ("readerTranscriptVisible" in syncPayload) syncPayload.readerTranscriptVisible = normalizeReaderTranscriptVisible(syncPayload.readerTranscriptVisible);
-  if ("fixedFrontmatterProperties" in syncPayload) syncPayload.fixedFrontmatterProperties = normalizeFixedFrontmatterProperties(syncPayload.fixedFrontmatterProperties);
-  if ("notePlaceholderSections" in syncPayload) syncPayload.notePlaceholderSections = normalizeNotePlaceholderSections(syncPayload.notePlaceholderSections);
-  if ("aiSystemPrompt" in syncPayload) syncPayload.aiSystemPrompt = normalizeAiSystemPrompt(syncPayload.aiSystemPrompt);
-  if ("aiInitialQuickPrompts" in syncPayload) syncPayload.aiInitialQuickPrompts = normalizeAiInitialQuickPrompts(syncPayload.aiInitialQuickPrompts);
-  if ("aiPresetPrompts" in syncPayload) syncPayload.aiPresetPrompts = normalizeAiPresetPrompts(syncPayload.aiPresetPrompts);
-  if ("defaultModel" in syncPayload) syncPayload.defaultModel = normalizeDefaultModel(syncPayload.defaultModel);
-  if ("aiThinkingLevel" in syncPayload) syncPayload.aiThinkingLevel = normalizeAiThinkingLevel(syncPayload.aiThinkingLevel);
-  if ("asrProviders" in syncPayload) syncPayload.asrProviders = normalizeAsrProvidersList(syncPayload.asrProviders);
-  if ("activeAsrProviderId" in syncPayload) syncPayload.activeAsrProviderId = String(syncPayload.activeAsrProviderId || "").trim();
-  if ("asrAutoFallback" in syncPayload) syncPayload.asrAutoFallback = normalizeAsrAutoFallback(syncPayload.asrAutoFallback);
-  if ("asrLanguage" in syncPayload) syncPayload.asrLanguage = normalizeAsrLanguage(syncPayload.asrLanguage);
 
   await chrome.storage.sync.set(syncPayload);
 }

@@ -9,6 +9,7 @@ import { isSupportedBilibiliPage } from "../bilibili/video-id-shared.js";
 import { sleep } from "../shared/utils.js";
 import {
   getMergedSettings,
+  normalizeSettings,
   saveSettings,
   loadAiProviders,
   saveAiProviders,
@@ -530,5 +531,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function initializeSettingsStorage() {
   const syncCurrent = await chrome.storage.sync.get(DEFAULT_SETTINGS);
-  await chrome.storage.sync.set({ ...DEFAULT_SETTINGS, ...syncCurrent });
+  // 安装/更新迁移：合并结果先经 normalizeSettings 收口再落盘，存量 LEGACY
+  // 默认提示词等旧值在此一次性改写为当前值，而不是每次读取时重复映射。
+  await chrome.storage.sync.set(normalizeSettings({ ...DEFAULT_SETTINGS, ...syncCurrent }));
 }
