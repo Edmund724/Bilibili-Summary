@@ -57,7 +57,9 @@ describe("handleAsrDecodePrepare 的 offscreen 文档守卫", () => {
     expect(createDocument).toHaveBeenCalledTimes(1);
     expect(createDocument.mock.calls[0][0]).toMatchObject({
       url: "chrome-extension://test/entry/offscreen.html",
-      reasons: ["AUDIO_PLAYBACK"]
+      // BLOBS（非 AUDIO_PLAYBACK）：Chrome 对无音频播放的 AUDIO_PLAYBACK
+      // 文档 30 秒强制关闭，长视频解码会被「音频解码中断」
+      reasons: ["BLOBS"]
     });
     expect(sendResponse).toHaveBeenCalledWith({ ok: true });
   });

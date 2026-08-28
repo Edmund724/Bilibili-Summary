@@ -174,7 +174,10 @@ async function ensureAsrOffscreenDocument() {
     if (!hasDoc) {
       await chrome.offscreen.createDocument({
         url: chrome.runtime.getURL(ASR_DECODE_OFFSCREEN_URL),
-        reasons: ["AUDIO_PLAYBACK"],
+        // 不用 AUDIO_PLAYBACK：Chrome 对无真实播放的 AUDIO_PLAYBACK 文档
+        // 30 秒强制关闭（长视频解码 >30s 会「音频解码中断」）；本文档实际
+        // 只是解码 + 生成 WAV Blob，BLOBS 不受该限制。
+        reasons: ["BLOBS"],
         justification: "Download, decode and slice video audio for ASR transcription."
       });
     }
