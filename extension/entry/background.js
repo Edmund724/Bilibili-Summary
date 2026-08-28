@@ -25,6 +25,7 @@ import {
   loadAsrProviderKeys,
   testAsrConnection
 } from "../asr/asr-provider-store.js";
+import { createProviderMessageHandlers } from "../core/provider-handlers.js";
 import {
   getAiSidepanelState,
   resolveAiSidepanelContext,
@@ -153,78 +154,22 @@ function handleFetchJson(message, sender, sendResponse) {
   return true;
 }
 
-function handleAiProvidersList(message, sender, sendResponse) {
-  loadAiProviders()
-    .then((items) => sendResponse({ ok: true, providers: items }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
-  return true;
-}
+// Provider CRUD + 连通性测试消息：AI / ASR 两个家族形状相同，统一由
+// core/provider-handlers.js 的工厂装配。响应负载与消息名保持不变，
+// 路由表只换处理器指向。AI 的 test 消息是平铺字段（Key 可由处理器按
+// providerId 代查），用工厂缺省的探针输入装配。
+const aiProviderHandlers = createProviderMessageHandlers({
+  loadProviders: loadAiProviders,
+  saveProviders: saveAiProviders,
+  deleteProvider: deleteAiProvider,
+  loadKeys: loadAiProviderKeys,
+  saveKey: saveAiProviderKey,
+  probe: testAiConnection
+});
 
 function handleAiPresetsList(message, sender, sendResponse) {
   sendResponse({ ok: true, presets: PRESETS.slice() });
   return false;
-}
-
-function handleGetAiProviderKey(message, sender, sendResponse) {
-  const providerId = String(message.providerId || "").trim();
-  if (!providerId) {
-    sendResponse({ ok: false, error: "缺少 providerId" });
-    return false;
-  }
-  loadAiProviderKeys()
-    .then((keys) => {
-      const apiKey = String(keys[providerId] || "").trim();
-      sendResponse({ ok: true, apiKey });
-    })
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
-  return true;
-}
-
-function handleAiProvidersSave(message, sender, sendResponse) {
-  saveAiProviders(message.providers || [])
-    .then((items) => sendResponse({ ok: true, providers: items }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
-  return true;
-}
-
-function handleAiProviderSetKey(message, sender, sendResponse) {
-  saveAiProviderKey(String(message.providerId || ""), String(message.apiKey || ""))
-    .then(() => sendResponse({ ok: true }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
-  return true;
-}
-
-function handleAiProvidersDelete(message, sender, sendResponse) {
-  deleteAiProvider(String(message.providerId || ""))
-    .then((items) => sendResponse({ ok: true, providers: items }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
-  return true;
-}
-
-function handleAiProvidersTest(message, sender, sendResponse) {
-  const baseUrl = String(message.baseUrl || "").trim();
-  const providerId = String(message.providerId || "").trim();
-  const model = String(message.model || "").trim();
-  if (!baseUrl) {
-    sendResponse({ ok: false, error: "请填写 baseUrl" });
-    return false;
-  }
-  Promise.resolve()
-    .then(async () => {
-      const directApiKey = String(message.apiKey || "").trim();
-      if (directApiKey) {
-        return directApiKey;
-      }
-      if (!providerId) {
-        return "";
-      }
-      const keys = await loadAiProviderKeys();
-      return String(keys[providerId] || "").trim();
-    })
-    .then((apiKey) => testAiConnection({ baseUrl, apiKey, model }))
-    .then((resp) => sendResponse(resp))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
-  return true;
 }
 
 function handleAiProvidersModels(message, sender, sendResponse) {
@@ -250,48 +195,16 @@ function handleAsrPresetsList(message, sender, sendResponse) {
   return false;
 }
 
-function handleAsrProvidersList(message, sender, sendResponse) {
-  loadAsrProviders()
-    .then((items) => sendResponse({ ok: true, providers: items }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
-  return true;
-}
-
-function handleAsrProvidersSave(message, sender, sendResponse) {
-  saveAsrProviders(message.providers || [])
-    .then((items) => sendResponse({ ok: true, providers: items }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
-  return true;
-}
-
-function handleAsrProvidersDelete(message, sender, sendResponse) {
-  deleteAsrProvider(String(message.providerId || ""))
-    .then((items) => sendResponse({ ok: true, providers: items }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
-  return true;
-}
-
-function handleGetAsrProviderKey(message, sender, sendResponse) {
-  const providerId = String(message.providerId || "").trim();
-  if (!providerId) {
-    sendResponse({ ok: false, error: "缺少 providerId" });
-    return false;
-  }
-  loadAsrProviderKeys()
-    .then((keys) => {
-      const apiKey = String(keys[providerId] || "").trim();
-      sendResponse({ ok: true, apiKey });
-    })
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
-  return true;
-}
-
-function handleAsrProvidersTest(message, sender, sendResponse) {
-  testAsrConnection(message.provider || {})
-    .then((resp) => sendResponse(resp))
-    .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
-  return true;
-}
+// ASR 的 test 消息把整个 provider 对象放在 message.provider（Key 由探针
+// 自行解析），覆写探针输入装配；其余处理器与 AI 家族共用同一套契约。
+const asrProviderHandlers = createProviderMessageHandlers({
+  loadProviders: loadAsrProviders,
+  saveProviders: saveAsrProviders,
+  deleteProvider: deleteAsrProvider,
+  loadKeys: loadAsrProviderKeys,
+  probe: testAsrConnection,
+  pickTestProvider: (message) => ({ provider: message.provider || {} })
+});
 
 // ===== 通用 offscreen 任务通道 =====
 
@@ -348,20 +261,20 @@ const messageHandlers = new Map([
   ["open-reading-view-tab", handleOpenReadingViewTab],
   ["close-reading-view-tab", handleCloseReadingViewTab],
   ["fetch-json", handleFetchJson],
-  ["ai-providers-list", handleAiProvidersList],
+  ["ai-providers-list", aiProviderHandlers.list],
   ["ai-presets-list", handleAiPresetsList],
-  ["get-ai-provider-key", handleGetAiProviderKey],
-  ["ai-providers-save", handleAiProvidersSave],
-  ["ai-provider-set-key", handleAiProviderSetKey],
-  ["ai-providers-delete", handleAiProvidersDelete],
-  ["ai-providers-test", handleAiProvidersTest],
+  ["get-ai-provider-key", aiProviderHandlers.get],
+  ["ai-providers-save", aiProviderHandlers.save],
+  ["ai-provider-set-key", aiProviderHandlers.setKey],
+  ["ai-providers-delete", aiProviderHandlers.remove],
+  ["ai-providers-test", aiProviderHandlers.test],
   ["ai-providers-models", handleAiProvidersModels],
   ["asr-presets-list", handleAsrPresetsList],
-  ["asr-providers-list", handleAsrProvidersList],
-  ["asr-providers-save", handleAsrProvidersSave],
-  ["asr-providers-delete", handleAsrProvidersDelete],
-  ["get-asr-provider-key", handleGetAsrProviderKey],
-  ["asr-providers-test", handleAsrProvidersTest],
+  ["asr-providers-list", asrProviderHandlers.list],
+  ["asr-providers-save", asrProviderHandlers.save],
+  ["asr-providers-delete", asrProviderHandlers.remove],
+  ["get-asr-provider-key", asrProviderHandlers.get],
+  ["asr-providers-test", asrProviderHandlers.test],
   ["offload-task", handleOffloadTask],
   ["ai-sidepanel-get-state", handleAiSidepanelGetState],
   ["ai-sidepanel-resolve-context", handleAiSidepanelResolveContext],
