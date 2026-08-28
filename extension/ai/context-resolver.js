@@ -201,6 +201,20 @@ export async function resolveAiSidepanelPageRef(contextRef) {
 
 // ===== 页内状态获取（依赖注入 tabOps：ensureReaderContentReady + sendMessageToTab）=====
 
+// popup-refresh 的响应要等 content 的 refreshClip 全程完成；无字幕长视频会
+// 触发小时级 ASR 转写，消息通道撑不住这种长事务（挂起期间任何失败都会让
+// 侧边栏把上下文清空、误报"不是 B 站视频页"）。限时等待，超时视为"抓取仍在
+// 后台进行"，回退读取当前快照（subtitleFetchState 会告知转写进行中）。
+const REFRESH_WAIT_MS = 10000;
+
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(undefined), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 export async function getAiSidepanelState(tabId, { forceRefresh = false } = {}, tabOps = {}) {
   const { ensureReaderContentReady, sendMessageToTab } = tabOps;
   if (!tabId) {
@@ -240,11 +254,21 @@ export async function getAiSidepanelState(tabId, { forceRefresh = false } = {}, 
     (!hasLoadedClip && (!Array.isArray(contextResp.payload.subtitleBody) || !contextResp.payload.subtitleBody.length));
 
   if (needsRefresh) {
-    const refreshResp = await sendMessageToTab(tab.id, { type: "popup-refresh" });
+    const refreshResp = await withTimeout(
+      sendMessageToTab(tab.id, { type: "popup-refresh" }),
+      REFRESH_WAIT_MS
+    );
     if (!refreshResp?.ok) {
-      throw new Error(refreshResp?.error || "当前视频上下文加载失败");
+      // 超时（无响应）或 content 报错：不整体失败，回退读取当前快照。
+      // 无字幕长视频的 ASR 转写以分钟/小时计，这里必须立刻返回"转写中"的
+      // 可用快照，由 sidepanel 决定等待策略。
+      contextResp = await sendMessageToTab(tab.id, { type: "sidepanel-get-context" });
+      if (!contextResp?.ok || !contextResp?.payload) {
+        throw new Error(refreshResp?.error || "当前视频上下文加载失败");
+      }
+    } else {
+      contextResp = await sendMessageToTab(tab.id, { type: "sidepanel-get-context" });
     }
-    contextResp = await sendMessageToTab(tab.id, { type: "sidepanel-get-context" });
   }
 
   if (!contextResp?.ok || !contextResp?.payload) {

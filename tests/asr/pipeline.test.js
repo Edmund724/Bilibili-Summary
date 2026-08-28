@@ -405,6 +405,45 @@ describe("pipeline 并发上限与 runId 作废", () => {
       })
     ).rejects.toThrow("Stale refresh run");
   });
+
+  it("isStale 注入：回调返回 true 时中止上抛 STALE_RUN（fetcher 传视频键比较）", async () => {
+    await expect(
+      pipeline.runAsrPipeline({
+        bvid: "BV1test",
+        cid: "101",
+        durationSec: 11 * 60,
+        provider: { ...OPENAI_PROVIDER, supportsTimestamps: true },
+        runId: getValidRunId(),
+        isStale: () => true,
+        onProgress: vi.fn(),
+        chunkHost: makeSynthChunkHost({ durationSec: 11 * 60 })
+      })
+    ).rejects.toMatchObject({ code: "STALE_RUN" });
+  });
+
+  it("isStale 注入：返回 false 时即使 runId 过期也不中止（同视频并发抓取不误杀转写）", async () => {
+    const { clipState } = await import("../../extension/core/state.js");
+    clipState.setFetchRunId(99); // runId 已过期
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ text: "片文本" })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const body = await pipeline.runAsrPipeline({
+      bvid: "BV1test",
+      cid: "101",
+      durationSec: 10 * 60,
+      provider: { ...OPENAI_PROVIDER, supportsTimestamps: false },
+      runId: 0,
+      isStale: () => false, // 视频键未变
+      onProgress: vi.fn(),
+      chunkHost: makeSynthChunkHost({ durationSec: 10 * 60 })
+    });
+    expect(body).toEqual([{ from: 0, to: 600, content: "片文本" }]);
+  });
 });
 
 describe("pipeline 重试与未知类型", () => {

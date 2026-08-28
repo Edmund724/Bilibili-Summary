@@ -143,6 +143,10 @@ export function bindRuntimeEvents() {
           pageTitle: state.clip.pageTitle || "",
           subtitleBody: body,
           subtitleMarkdown,
+          // idle/loading/ready/error：loading 且 subtitleBody 为空表示抓取
+          // （可能含小时级 ASR 转写）仍在进行，sidepanel 据此等待而非把
+          // 空字幕直接发给模型。
+          subtitleFetchState: state.clip.subtitleFetchState || "idle",
           subtitleLang: state.clip.selectedSubtitleLang || "",
           selectedSubtitleId: state.clip.selectedSubtitleId || "",
           selectedSubtitleUrl: state.clip.selectedSubtitleUrl || "",

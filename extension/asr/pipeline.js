@@ -14,6 +14,23 @@ import { ensureRunActive } from "../shared/error-helpers.js";
 import { retryAsync } from "../subtitle/fetcher.js";
 import { createOffscreenChunkHost } from "./offscreen-bridge.js";
 
+// 过期检查统一入口：优先用注入的 isStale 回调（fetcher 传"视频键是否已切换"，
+// 同视频并发抓取不会误杀进行中的转写），未注入时回退 runId 比较（保住
+// pipeline 直连调用方与旧测试的守卫语义）。
+function makeEnsureActive({ runId, isStale }) {
+  if (typeof isStale === "function") {
+    return () => {
+      if (!isStale()) {
+        return;
+      }
+      const error = new Error("Stale refresh run");
+      error.code = "STALE_RUN";
+      throw error;
+    };
+  }
+  return () => ensureRunActive(runId);
+}
+
 // type → 适配器映射。映射表缺 type 时 throw 明确错误，避免静默走错分支。
 // 并发策略：映射表项的 concurrency 元数据驱动（见 runAsrPipeline）；
 // openai-transcriptions 最多 5 片并发。
@@ -61,7 +78,7 @@ async function runWithConcurrency(tasks, limit = 2) {
 }
 
 // 逐片转写（含重试），onProgress 透传给上层展示逐片进度。
-async function transcribeChunk({ chunk, provider, runId, onProgress }) {
+async function transcribeChunk({ chunk, provider, ensureActive, onProgress }) {
   const adapter = ADAPTERS[provider.type]?.adapter;
   const task = () =>
     adapter({
@@ -73,7 +90,7 @@ async function transcribeChunk({ chunk, provider, runId, onProgress }) {
       onProgress: () => onProgress?.(`语音识别中 ${chunk.index + 1} 片…`)
     });
   const result = await retryAsync(task, 2, 500);
-  ensureRunActive(runId);
+  ensureActive();
   return { ...result, durationSec: chunk.durationSec };
 }
 
@@ -129,33 +146,35 @@ export function mergeChunkResults(chunks, results) {
 
 // ===== 主入口 =====
 
-// runAsrPipeline({ bvid, cid, durationSec, provider, runId, onProgress, chunkHost })
+// runAsrPipeline({ bvid, cid, durationSec, provider, runId, isStale, onProgress, chunkHost })
 // → [{from,to,content}]（空数组表示未识别到语音内容）。
-// chunkHost 为可选注入的切片宿主（测试传合成宿主，生产默认走
-// createOffscreenChunkHost：offscreen 文档内下载+解码+切片+WAV 编码，
-// 逐片以 base64 回传，转写层完全不动）。
-export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, onProgress, chunkHost, onEmptyDiagnostic }) {
+// isStale 可选注入"本次转写是否已过期"回调（返回 true 即中止上抛 STALE_RUN）；
+// 未注入时按 runId !== state.clip.fetchRunId 判断。chunkHost 为可选注入的切片
+// 宿主（测试传合成宿主，生产默认走 createOffscreenChunkHost：offscreen 文档内
+// 下载+解码+切片+WAV 编码，逐片以 base64 回传，转写层完全不动）。
+export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, isStale, onProgress, chunkHost, onEmptyDiagnostic }) {
   const type = String(provider?.type || "").trim();
   const entry = ADAPTERS[type];
   if (!entry) {
     throw new Error("暂不支持的平台类型：" + (type || "未知"));
   }
   const host = chunkHost || createOffscreenChunkHost();
+  const ensureActive = makeEnsureActive({ runId, isStale });
 
   // 切片计划：openai-transcriptions 统一 20 分钟一片。
   const plan = buildChunkPlan(type);
 
   // 取音轨
-  ensureRunActive(runId);
+  ensureActive();
   onProgress?.("无字幕轨，正在获取音频流…");
   const source = await getSourceAudioUrl({ bvid, cid });
-  ensureRunActive(runId);
+  ensureActive();
 
   // 下载 + 解码 + 切片 + WAV 编码（offscreen 文档内完成，音频字节不跨 context，
   // 跨 context 只传 base64 字符串；防盗链规则由 prepare 阶段在 background 加上）
   onProgress?.("音频下载与解码中…");
   const rawChunks = await host({ audioUrl: source.url, backupUrls: source.backupUrls || [], plan });
-  ensureRunActive(runId);
+  ensureActive();
   if (rawChunks.length === 0) {
     throw new Error("音频切片为空，无法转写");
   }
@@ -197,10 +216,10 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
     return merged;
   };
   const results = await runWithConcurrency(
-    chunks.map((chunk) => () => transcribeChunk({ chunk, provider, runId, onProgress: progress })),
+    chunks.map((chunk) => () => transcribeChunk({ chunk, provider, ensureActive, onProgress: progress })),
     concurrency
   );
-  ensureRunActive(runId);
+  ensureActive();
   return collectResults(results);
 }
 

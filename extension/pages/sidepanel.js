@@ -40,6 +40,7 @@ import { renderMarkdown, stripThinkBlocks } from "../ui/markdown.js";
 import { linkifyAssistantTimestamps } from "../ui/timestamp-nav.js";
 import { normalizeMarkdownForSectionPaste } from "../notes/paste.js";
 import { createChatRuntime } from "./sidepanel-chat-runtime.js";
+import { createSubtitleWaiter } from "./sidepanel-subtitle-wait.js";
 import { createConversationStore } from "./sidepanel-conversation-store.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
@@ -77,18 +78,44 @@ const DEFAULT_AI_PREFS = {
   aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice()
 };
 
+// 抓取/音频转写进行中（content 的 subtitleFetchState 为 loading 且字幕体为空）
+// 时等待其完成再放行发送流程，状态机本体在 ./sidepanel-subtitle-wait.js（可测）。
+// 这里只组装 deps：轮询读当前上下文、提示走消息区 notice、定时器用 window。
+// 引用的 loadContextState / 通知函数都是函数声明（有提升），回调执行时才读
+// contextData，放在广播监听之前只为保证监听触发时组装已完成。
+const SUBTITLE_WAIT_POLL_MS = 4000;
+const subtitleWaiter = createSubtitleWaiter({
+  pollIntervalMs: SUBTITLE_WAIT_POLL_MS,
+  pollContext: async () => {
+    const ok = await loadContextState({ forceRefresh: false, silent: true }).catch(() => false);
+    const body = Array.isArray(contextData?.subtitleBody) ? contextData.subtitleBody : [];
+    return {
+      ok,
+      pending: ok && contextData?.subtitleFetchState === "loading" && body.length === 0
+    };
+  },
+  showWaitingNotice: () => showConversationContextNotice("正在等待音频转写完成，完成后自动开始总结…", 0),
+  removeNotice: removeConversationContextNotice,
+  setTimer: (fn, ms) => window.setTimeout(fn, ms),
+  clearTimer: (handle) => window.clearTimeout(handle)
+});
+
 // 无字幕视频做音频转写时，content 会广播阶段；刷新键转圈等待期间据此显示
 // 一行转写提示，替代仅有图标旋转却没有说明的状态。只在转写阶段展示，其余
 // 阶段（含转写结束后未再广播的情况）经由 setRefreshing(false) 与 phase 判断隐藏。
+// asr-done/asr-failed：一键总结若正在等待转写（subtitleWaiter.wait），立即
+// 触发一轮上下文轮询，不必等 4 秒间隔。
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type !== "boc-subtitle-status") {
     return;
   }
   const notice = document.getElementById("spAsrNotice");
-  if (!notice) {
-    return;
+  if (notice) {
+    notice.hidden = message.phase !== "asr-transcribing";
   }
-  notice.hidden = message.phase !== "asr-transcribing";
+  if (message.phase === "asr-done" || message.phase === "asr-failed") {
+    subtitleWaiter.kick();
+  }
 });
 
 let contextData = null;
@@ -1027,7 +1054,8 @@ function findPreviousUserPrompt(index) {
   return "";
 }
 
-// 发送前确保当前上下文就绪（pinned 对话补水 / 普通对话读当前页）
+// 发送前确保当前上下文就绪（pinned 对话补水 / 普通对话读当前页；抓取或
+// 音频转写进行中时先等待，避免空字幕上下文直接发给模型）
 async function ensureCurrentContextForSend() {
   if (currentConversationMeta?.pinnedContext) {
     await loadContextState({ forceRefresh: false, silent: true }).catch(() => null);
@@ -1035,6 +1063,11 @@ async function ensureCurrentContextForSend() {
   }
   const ok = await loadContextState({ forceRefresh: false, silent: true });
   if (!ok || !contextData) {
+    resetConversationView("当前页面上下文读取失败。");
+    return false;
+  }
+  const ready = await subtitleWaiter.wait();
+  if (!ready || !contextData) {
     resetConversationView("当前页面上下文读取失败。");
     return false;
   }
