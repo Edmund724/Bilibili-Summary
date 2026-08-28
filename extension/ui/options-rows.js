@@ -1,5 +1,7 @@
 // extension/ui/options-rows.js
 // 选项页三类行构建器（固定属性 / 笔记段落 / AI 平台）与纯验证逻辑。
+// AI 平台行的构建本体由 ui/provider-row.js 的 createProviderRow 承担（与 ASR 行共用），
+// 本文件只提供 AI 侧真实差异：模型字段形态、模型下拉拉取、报文形状与既有导出签名。
 // 行构建器只依赖参数与回调，不直接访问 DOM 全局；验证函数不触碰 DOM。
 
 import {
@@ -14,6 +16,7 @@ import {
 } from "../core/shared-defaults.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../core/runtime.js";
+import { createProviderRow, TRASH_ICON_PATHS } from "./provider-row.js";
 
 const MAX_NOTE_PLACEHOLDER_SECTIONS = 5;
 
@@ -41,13 +44,7 @@ export function addFixedPropertyRow(listNode, emptyNode, item = {}) {
       </div>
       <div class="fixed-property-field fixed-property-field-remove">
         <button class="fixed-property-remove" type="button" aria-label="删除属性" title="删除属性">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <path d="M4 7h16"></path>
-            <path d="M9 3h6"></path>
-            <path d="M10 11v6"></path>
-            <path d="M14 11v6"></path>
-            <path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"></path>
-          </svg>
+          <svg viewBox="0 0 24 24" focusable="false">${TRASH_ICON_PATHS}</svg>
         </button>
       </div>
     </div>
@@ -178,13 +175,7 @@ export function addNoteSectionRow(listNode, emptyNode, item = {}, { skipLimit = 
       </div>
       <div class="note-section-field note-section-field-remove">
         <button class="note-section-remove" type="button" aria-label="删除段落" title="删除段落">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <path d="M4 7h16"></path>
-            <path d="M9 3h6"></path>
-            <path d="M10 11v6"></path>
-            <path d="M14 11v6"></path>
-            <path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"></path>
-          </svg>
+          <svg viewBox="0 0 24 24" focusable="false">${TRASH_ICON_PATHS}</svg>
         </button>
       </div>
     </div>
@@ -347,61 +338,31 @@ function closeAllFixedPropertyMenus(listNode) {
 }
 
 // ===== AI 模型平台 =====
+// 行构建本体由 ui/provider-row.js 的 createProviderRow 承担（与 ASR 行共用），
+// 此处只提供 AI 侧差异：模型字段固定为文本输入 + 下拉拉取按钮、Key 占位符
+// 随 requiresKey 变化、报文走 ai-providers-*。导出签名保持不变。
 
-export function renderAiProviders(listNode, emptyNode, items, { presets = PRESETS, defaultModel = "", onRenderDefaultModel = null } = {}) {
-  listNode.innerHTML = "";
-  const list = Array.isArray(items) ? items : [];
-  list.forEach((item) => addAiProviderRow(listNode, emptyNode, item, { presets }));
-  updateAiProvidersEmptyState(listNode, emptyNode);
-  if (onRenderDefaultModel) {
-    onRenderDefaultModel(list);
-  }
-}
-
-function updateAiProvidersEmptyState(listNode, emptyNode) {
-  const hasRows = listNode.children.length > 0;
-  emptyNode.hidden = hasRows;
-}
-
-export function renderDefaultModelSelect(selectNode, items, defaultModel = "") {
-  const list = Array.isArray(items) ? items : [];
-  selectNode.innerHTML = '<option value="">未设置</option>' + list
-    .map((item) => {
-      const label = String(item.model || item.name || "").trim();
-      return `<option value="${escapeHtml(item.id)}">${escapeHtml(label)}</option>`;
-    })
-    .join("");
-  if (defaultModel && list.some((item) => item.id === defaultModel)) {
-    selectNode.value = defaultModel;
-  } else {
-    selectNode.value = "";
-  }
-}
-
-function generateAiProviderId() {
-  return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
-}
-
-export function addAiProviderRow(listNode, emptyNode, item = {}, { presets = PRESETS } = {}) {
-  const id = String(item.id || generateAiProviderId());
-  const presetId = String(item.presetId || "custom");
-  const preset = presets.find((p) => p.id === presetId) || presets[presets.length - 1];
-  const baseUrl = String(item.baseUrl ?? preset.baseUrl ?? "");
-  const model = String(item.model || "");
-  const requiresKey = item.requiresKey !== false && preset.requiresKey !== false;
-  const hasSavedKey = Boolean(item.hasSavedKey);
-
-  const row = document.createElement("div");
-  row.className = "ai-provider-row";
-  row.dataset.providerId = id;
-  row.dataset.hasSavedKey = hasSavedKey ? "1" : "0";
-  row.dataset.currentPresetId = presetId;
-  row.innerHTML = `
-    <select class="ai-provider-preset" title="平台">
-      ${presets.map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === presetId ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}
-    </select>
-    <input class="ai-provider-baseurl" type="text" placeholder="baseUrl（如 https://api.openai.com/v1）" value="${escapeHtml(baseUrl)}" />
-    <input class="ai-provider-apikey" type="password" placeholder="${hasSavedKey ? "已保存" : (requiresKey ? "API Key" : "API Key（可选）")}" autocomplete="off" />
+const aiProviderRow = createProviderRow({
+  rowClass: "ai-provider-row",
+  presetClass: "ai-provider-preset",
+  presetSelectTitle: "平台",
+  baseUrlClass: "ai-provider-baseurl",
+  baseUrlPlaceholder: "baseUrl（如 https://api.openai.com/v1）",
+  apikeyClass: "ai-provider-apikey",
+  modelClass: "ai-provider-model",
+  testClass: "ai-provider-test",
+  removeClass: "ai-provider-remove",
+  statusClass: "ai-provider-status",
+  idPrefix: "p_",
+  statusSuccessMinMs: AI_PROVIDER_STATUS_SUCCESS_MIN_MS,
+  statusTimerKey: "_aiProviderStatusTimer",
+  resolvePreset: (presets, presetId) => presets.find((p) => p.id === presetId) || presets[presets.length - 1],
+  resolveModel: (item) => String(item.model || ""),
+  apiKeyPlaceholder: ({ item, preset, hasSavedKey }) => {
+    const requiresKey = item.requiresKey !== false && preset?.requiresKey !== false;
+    return hasSavedKey ? "已保存" : (requiresKey ? "API Key" : "API Key（可选）");
+  },
+  buildModelField: (preset, model) => `
     <div class="ai-provider-model-wrapper">
       <input class="ai-provider-model" type="text" placeholder="模型名（如 gpt-4o-mini）" value="${escapeHtml(model)}" />
       <button type="button" class="ai-provider-model-toggle" title="从 baseUrl 拉取可用模型" aria-label="从 baseUrl 拉取可用模型">
@@ -410,83 +371,28 @@ export function addAiProviderRow(listNode, emptyNode, item = {}, { presets = PRE
         </svg>
       </button>
       <ul class="ai-provider-model-dropdown" hidden></ul>
-    </div>
-    <button type="button" class="secondary-btn ai-provider-test">测试</button>
-    <button type="button" class="ai-provider-remove" aria-label="删除" title="删除">
-      <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-        <path d="M4 7h16"></path>
-        <path d="M9 3h6"></path>
-        <path d="M10 11v6"></path>
-        <path d="M14 11v6"></path>
-        <path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"></path>
-      </svg>
-    </button>
-    <p class="ai-provider-status" hidden></p>
-  `;
-
-  row.querySelector(".ai-provider-preset").addEventListener("change", (e) => {
-    const previousPreset = presets.find((p) => p.id === row.dataset.currentPresetId) || null;
-    const next = presets.find((p) => p.id === e.target.value);
-    if (!next) return;
-    const baseUrlInput = row.querySelector(".ai-provider-baseurl");
-    const currentBaseUrl = baseUrlInput.value.trim();
-    if (!currentBaseUrl || (previousPreset && currentBaseUrl === previousPreset.baseUrl)) {
-      baseUrlInput.value = next.baseUrl;
-    }
+    </div>`,
+  onPresetChange: (row, _previousPreset, next) => {
+    // AI 行不清空已输 Key，只随新预设更新占位符（可选 Key 平台提示"（可选）"）
     const apikeyInput = row.querySelector(".ai-provider-apikey");
     apikeyInput.placeholder = row.dataset.hasSavedKey === "1"
       ? "已保存"
       : (next.requiresKey ? "API Key" : "API Key（可选）");
-    row.dataset.currentPresetId = next.id;
-  });
+  },
+  wireRowExtras: wireAiModelControls,
+  buildTestPayload: ({ row, baseUrl, apiKey, model }) => ({
+    type: "ai-providers-test",
+    providerId: row.dataset.providerId || "",
+    baseUrl,
+    apiKey,
+    model
+  }),
+  buildDeleteMessage: (providerId) => ({ type: "ai-providers-delete", providerId })
+});
 
-  row.querySelector(".ai-provider-remove")?.addEventListener("click", async () => {
-    if (!confirm("确定要删除这个平台吗？")) return;
-    if (row.dataset.providerId) {
-      try {
-        await sendRuntimeMessage({ type: "ai-providers-delete", providerId: row.dataset.providerId });
-      } catch {}
-    }
-    row.remove();
-    updateAiProvidersEmptyState(listNode, emptyNode);
-  });
-
-  row.querySelector(".ai-provider-test")?.addEventListener("click", async () => {
-    const statusNode = row.querySelector(".ai-provider-status");
-    const baseUrl = row.querySelector(".ai-provider-baseurl").value.trim();
-    const apiKey = row.querySelector(".ai-provider-apikey").value.trim();
-    const model = row.querySelector(".ai-provider-model").value.trim();
-    if (!baseUrl) {
-      showAiProviderStatus(statusNode, "请填写 baseUrl", true);
-      return;
-    }
-    if (!model) {
-      showAiProviderStatus(statusNode, "请填写模型名", true);
-      return;
-    }
-    showAiProviderStatus(statusNode, "正在测试...");
-    const resp = await sendRuntimeMessage({
-      type: "ai-providers-test",
-      providerId: row.dataset.providerId || "",
-      baseUrl,
-      apiKey,
-      model
-    });
-    if (resp?.ok) {
-      const providerId = row.dataset.providerId || "";
-      try {
-        await onTestSuccess(providerId);
-        const newRow = listNode.querySelector(`.ai-provider-row[data-provider-id="${CSS.escape(providerId)}"]`);
-        const newStatusNode = newRow?.querySelector(".ai-provider-status");
-        showAiProviderStatus(newStatusNode, "连接成功");
-      } catch (error) {
-        showAiProviderStatus(statusNode, `连接成功，但保存失败：${error.message || "未知错误"}`, true);
-      }
-    } else {
-      showAiProviderStatus(statusNode, `失败：${resp?.error || "未知错误"}`, true);
-    }
-  });
-
+// 模型下拉交互（AI 专属，经 wireRowExtras 接入工厂）：点击 toggle 从 baseUrl
+// 拉取可用模型列表，选中写回输入框；手输模型或选中选项时收起下拉。
+function wireAiModelControls(row, { showStatus }) {
   row.querySelector(".ai-provider-model-toggle")?.addEventListener("click", async (e) => {
     e.stopPropagation();
     const statusNode = row.querySelector(".ai-provider-status");
@@ -496,7 +402,7 @@ export function addAiProviderRow(listNode, emptyNode, item = {}, { presets = PRE
     const dropdown = row.querySelector(".ai-provider-model-dropdown");
 
     if (!baseUrl) {
-      showAiProviderStatus(statusNode, "请先填写 baseUrl", true);
+      showStatus(statusNode, "请先填写 baseUrl", true);
       return;
     }
 
@@ -588,12 +494,41 @@ export function addAiProviderRow(listNode, emptyNode, item = {}, { presets = PRE
     const dropdown = row.querySelector(".ai-provider-model-dropdown");
     if (dropdown) dropdown.hidden = true;
   });
-
-  listNode.appendChild(row);
-  updateAiProvidersEmptyState(listNode, emptyNode);
 }
 
-export function collectAiProviders(listNode, { presets = PRESETS, generateId = generateAiProviderId } = {}) {
+function closeAllModelDropdowns() {
+  document.querySelectorAll(".ai-provider-model-dropdown").forEach((dropdown) => {
+    dropdown.hidden = true;
+  });
+}
+
+export function renderAiProviders(listNode, emptyNode, items, { presets = PRESETS, defaultModel = "", onRenderDefaultModel = null } = {}) {
+  const list = aiProviderRow.render(listNode, emptyNode, items, { presets });
+  if (onRenderDefaultModel) {
+    onRenderDefaultModel(list);
+  }
+}
+
+export function renderDefaultModelSelect(selectNode, items, defaultModel = "") {
+  const list = Array.isArray(items) ? items : [];
+  selectNode.innerHTML = '<option value="">未设置</option>' + list
+    .map((item) => {
+      const label = String(item.model || item.name || "").trim();
+      return `<option value="${escapeHtml(item.id)}">${escapeHtml(label)}</option>`;
+    })
+    .join("");
+  if (defaultModel && list.some((item) => item.id === defaultModel)) {
+    selectNode.value = defaultModel;
+  } else {
+    selectNode.value = "";
+  }
+}
+
+export function addAiProviderRow(listNode, emptyNode, item = {}, { presets = PRESETS } = {}) {
+  aiProviderRow.add(listNode, emptyNode, item, { presets });
+}
+
+export function collectAiProviders(listNode, { presets = PRESETS, generateId = aiProviderRow.generateId } = {}) {
   return Array.from(listNode.querySelectorAll(".ai-provider-row")).map((row) => {
     const presetSelect = row.querySelector(".ai-provider-preset");
     const preset = presets.find((p) => p.id === presetSelect.value) || presets[presets.length - 1];
@@ -613,40 +548,7 @@ export function collectAiProviders(listNode, { presets = PRESETS, generateId = g
   });
 }
 
-function showAiProviderStatus(node, text, isError = false) {
-  if (!node) return;
-  node.hidden = false;
-  node.textContent = text;
-  node.dataset.error = isError ? "true" : "false";
-
-  if (!isError && AI_PROVIDER_STATUS_SUCCESS_MIN_MS > 0) {
-    const row = node.closest(".ai-provider-row");
-    if (!row) return;
-
-    if (row._aiProviderStatusTimer) clearTimeout(row._aiProviderStatusTimer);
-
-    const inputs = row.querySelectorAll("input, button");
-    const previouslyDisabled = Array.from(inputs).map((el) => el.disabled);
-    inputs.forEach((el) => (el.disabled = true));
-
-    row._aiProviderStatusTimer = setTimeout(() => {
-      row._aiProviderStatusTimer = null;
-      inputs.forEach((el, index) => {
-        if (previouslyDisabled[index] !== undefined) el.disabled = previouslyDisabled[index];
-      });
-    }, AI_PROVIDER_STATUS_SUCCESS_MIN_MS);
-  }
-}
-
-function closeAllModelDropdowns() {
-  document.querySelectorAll(".ai-provider-model-dropdown").forEach((dropdown) => {
-    dropdown.hidden = true;
-  });
-}
-
 // 测试成功后回调：重新保存设置并返回新渲染的行（由 options.js 注入，避免行构建器耦合保存流程）
-let onTestSuccess = async () => {};
-
 export function setTestSuccessHandler(handler) {
-  onTestSuccess = handler;
+  aiProviderRow.setTestSuccessHandler(handler);
 }

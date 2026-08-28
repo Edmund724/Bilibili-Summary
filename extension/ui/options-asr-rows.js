@@ -1,30 +1,17 @@
 // extension/ui/options-asr-rows.js
-// 设置页"语音转写平台"区块行构建器，平行克隆自 options-rows.js 的 AI 平台部分：
-// 预设下拉 → 自动填充 baseUrl/model/type；name 可编辑；Key 密码输入（已存时占位"已保存"）；
-// 编辑/删除（确认）/测试连接；radio 选择当前选用平台；行内状态行复用 ai-provider-status 样式。
+// 设置页"语音转写平台"区块行构建器：与 AI 平台行（options-rows.js）共用
+// ui/provider-row.js 的 createProviderRow，本文件只提供 ASR 侧真实差异：
+// 名称输入、模型字段随预设 modelOptions 在下拉/文本间切换、选用 radio、
+// asr-providers-* 报文。行内删除按钮与状态行复用 ai-provider-remove /
+// ai-provider-status 类名（既有耦合，DOM 契约保持不变）。
 // 行构建器只依赖参数与回调，不直接访问 DOM 全局。
 
 import { ASR_PROVIDER_PRESETS } from "../core/shared-defaults.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../core/runtime.js";
+import { createProviderRow } from "./provider-row.js";
 
 const ASR_STATUS_SUCCESS_MIN_MS = 2000;
-
-function generateAsrProviderId() {
-  return `asr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
-}
-
-export function renderAsrProviders(listNode, emptyNode, items, { presets = ASR_PROVIDER_PRESETS, activeId = "" } = {}) {
-  listNode.innerHTML = "";
-  const list = Array.isArray(items) ? items : [];
-  list.forEach((item) => addAsrProviderRow(listNode, emptyNode, item, { presets, activeId }));
-  updateAsrProvidersEmptyState(listNode, emptyNode);
-}
-
-function updateAsrProvidersEmptyState(listNode, emptyNode) {
-  const hasRows = listNode.children.length > 0;
-  emptyNode.hidden = hasRows;
-}
 
 // 模型名字段：预设带 modelOptions 时渲染为下拉框（如 SiliconFlow 的 ASR 模型），
 // 否则保持可自由编辑的文本输入，供本地 Whisper / 自定义端点使用。
@@ -48,80 +35,53 @@ function buildAsrModelField(preset, model) {
   return `<select class="asr-provider-model" title="模型名">${optionsHtml}</select>`;
 }
 
-export function addAsrProviderRow(listNode, emptyNode, item = {}, { presets = ASR_PROVIDER_PRESETS, activeId = "" } = {}) {
-  const id = String(item.id || generateAsrProviderId());
-  const presetId = String(item.presetId || "custom");
-  const preset = presets.find((p) => p.id === presetId) || null;
-  const baseUrl = String(item.baseUrl ?? preset?.baseUrl ?? "");
-  const name = String(item.name || preset?.name || "自定义");
-  const model = String(item.model ?? preset?.model ?? "");
-  const hasSavedKey = Boolean(item.hasSavedKey);
-  const isActive = String(activeId || "") === id;
-
-  const row = document.createElement("div");
-  row.className = "asr-provider-row";
-  row.dataset.providerId = id;
-  row.dataset.hasSavedKey = hasSavedKey ? "1" : "0";
-  row.dataset.currentPresetId = presetId;
-  row.innerHTML = `
-    <select class="asr-provider-preset" title="平台预设">
-      ${presets.map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === presetId ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}
-    </select>
-    <input class="asr-provider-name" type="text" placeholder="平台名称" value="${escapeHtml(name)}" />
-    <input class="asr-provider-baseurl" type="text" placeholder="baseUrl（如 https://api.siliconflow.cn/v1）" value="${escapeHtml(baseUrl)}" />
-    <input class="asr-provider-apikey" type="password" placeholder="${hasSavedKey ? "已保存" : "API Key"}" autocomplete="off" />
-    ${buildAsrModelField(preset, model)}
+const asrProviderRow = createProviderRow({
+  rowClass: "asr-provider-row",
+  presetClass: "asr-provider-preset",
+  presetSelectTitle: "平台预设",
+  baseUrlClass: "asr-provider-baseurl",
+  baseUrlPlaceholder: "baseUrl（如 https://api.siliconflow.cn/v1）",
+  apikeyClass: "asr-provider-apikey",
+  modelClass: "asr-provider-model",
+  testClass: "asr-provider-test",
+  removeClass: "ai-provider-remove",
+  statusClass: "ai-provider-status",
+  idPrefix: "asr_",
+  statusSuccessMinMs: ASR_STATUS_SUCCESS_MIN_MS,
+  statusTimerKey: "_asrStatusTimer",
+  resolvePreset: (presets, presetId) => presets.find((p) => p.id === presetId) || null,
+  resolveModel: (item, preset) => String(item.model ?? preset?.model ?? ""),
+  apiKeyPlaceholder: ({ hasSavedKey }) => (hasSavedKey ? "已保存" : "API Key"),
+  buildHeaderFields: ({ item, preset }) => {
+    const name = String(item.name || preset?.name || "自定义");
+    return `<input class="asr-provider-name" type="text" placeholder="平台名称" value="${escapeHtml(name)}" />`;
+  },
+  buildModelField: buildAsrModelField,
+  buildTailFields: ({ isActive }) => `
     <label class="asr-provider-active" title="选用该平台自动生成字幕">
       <input class="asr-provider-active-radio" type="radio" name="asrActiveProvider" ${isActive ? "checked" : ""} />
       选用
-    </label>
-    <button type="button" class="secondary-btn asr-provider-test">测试</button>
-    <button type="button" class="ai-provider-remove" aria-label="删除" title="删除">
-      <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-        <path d="M4 7h16"></path>
-        <path d="M9 3h6"></path>
-        <path d="M10 11v6"></path>
-        <path d="M14 11v6"></path>
-        <path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"></path>
-      </svg>
-    </button>
-    <p class="ai-provider-status" hidden></p>
-  `;
-
-  // 预设切换：baseUrl 未改过（空或仍是上一预设默认值）时跟随新预设；
-  // 模型名与名称无条件跟随——上一平台的模型对新平台无意义；
-  // API Key 输入框清空，避免旧平台的 Key 在测试/保存时误发给新平台。
-  row.querySelector(".asr-provider-preset").addEventListener("change", (e) => {
-    const previousPreset = presets.find((p) => p.id === row.dataset.currentPresetId) || null;
-    const next = presets.find((p) => p.id === e.target.value);
-    if (!next) return;
-    const baseUrlInput = row.querySelector(".asr-provider-baseurl");
-    const currentBaseUrl = baseUrlInput.value.trim();
-    if (!currentBaseUrl || (previousPreset && currentBaseUrl === previousPreset.baseUrl)) {
-      baseUrlInput.value = next.baseUrl;
-    }
-    // 模型名随预设切换重建：带 modelOptions 的预设渲染为下拉框，否则为文本输入。
+    </label>`,
+  onPresetChange: (row, _previousPreset, next) => {
+    // 模型名随预设切换重建：带 modelOptions 的预设渲染为下拉框，否则为文本输入；
+    // 模型名与名称无条件跟随——上一平台的模型对新平台无意义；
+    // API Key 输入框清空，避免旧平台的 Key 在测试/保存时误发给新平台。
     row.querySelector(".asr-provider-model").outerHTML = buildAsrModelField(next, next.model || "");
     row.querySelector(".asr-provider-name").value = next.name || "";
     row.querySelector(".asr-provider-apikey").value = "";
-    row.dataset.currentPresetId = next.id;
-  });
-
-  // 测试连接：按 type 走票 01 探针；成功时回调保存（由 options.js 注入 setAsrTestSuccessHandler）
-  row.querySelector(".asr-provider-test")?.addEventListener("click", async () => {
-    const statusNode = row.querySelector(".ai-provider-status");
-    const baseUrl = row.querySelector(".asr-provider-baseurl").value.trim();
-    const apiKey = row.querySelector(".asr-provider-apikey").value.trim();
-    const model = row.querySelector(".asr-provider-model").value.trim();
-    if (!baseUrl) {
-      showAsrProviderStatus(statusNode, "请填写 baseUrl", true);
-      return;
-    }
-    if (!model) {
-      showAsrProviderStatus(statusNode, "请填写模型名", true);
-      return;
-    }
-    showAsrProviderStatus(statusNode, "正在测试...");
+  },
+  wireRowExtras: (row, { listNode }) => {
+    // 选用：即时持久化 activeAsrProviderId
+    row.querySelector(".asr-provider-active-radio")?.addEventListener("change", async () => {
+      if (!row.querySelector(".asr-provider-active-radio").checked) return;
+      const providerId = row.dataset.providerId || "";
+      try {
+        await sendRuntimeMessage({ type: "save-settings", settings: { activeAsrProviderId: providerId } });
+      } catch {}
+      setActiveAsrProvider(listNode, providerId);
+    });
+  },
+  buildTestPayload: ({ row, presets, baseUrl, apiKey, model }) => {
     const preset = presets.find((p) => p.id === row.dataset.currentPresetId) || null;
     const provider = {
       id: row.dataset.providerId || "",
@@ -134,53 +94,20 @@ export function addAsrProviderRow(listNode, emptyNode, item = {}, { presets = AS
     if (apiKey) {
       provider.apiKey = apiKey;
     }
-    const resp = await sendRuntimeMessage({ type: "asr-providers-test", provider });
-    if (resp?.ok) {
-      const providerId = row.dataset.providerId || "";
-      try {
-        await onTestSuccess(providerId);
-        const newRow = listNode.querySelector(`.asr-provider-row[data-provider-id="${CSS.escape(providerId)}"]`);
-        const newStatusNode = newRow?.querySelector(".ai-provider-status");
-        showAsrProviderStatus(newStatusNode, "连接成功");
-      } catch (error) {
-        showAsrProviderStatus(statusNode, `连接成功，但保存失败：${error.message || "未知错误"}`, true);
-      }
-    } else {
-      showAsrProviderStatus(statusNode, `失败：${resp?.error || "未知错误"}`, true);
-    }
-  });
+    return { type: "asr-providers-test", provider };
+  },
+  buildDeleteMessage: (providerId) => ({ type: "asr-providers-delete", providerId })
+});
 
-  // 删除：确认后调后台删除；若删的是当前选用平台，清空 activeAsrProviderId（onDelete 注入处理）
-  row.querySelector(".ai-provider-remove")?.addEventListener("click", async () => {
-    if (!confirm("确定要删除这个平台吗？")) return;
-    const providerId = row.dataset.providerId || "";
-    if (providerId) {
-      try {
-        await sendRuntimeMessage({ type: "asr-providers-delete", providerId });
-      } catch {}
-    }
-    row.remove();
-    updateAsrProvidersEmptyState(listNode, emptyNode);
-    if (typeof onDelete === "function") {
-      onDelete(providerId);
-    }
-  });
-
-  // 选用：即时持久化 activeAsrProviderId
-  row.querySelector(".asr-provider-active-radio")?.addEventListener("change", async () => {
-    if (!row.querySelector(".asr-provider-active-radio").checked) return;
-    const providerId = row.dataset.providerId || "";
-    try {
-      await sendRuntimeMessage({ type: "save-settings", settings: { activeAsrProviderId: providerId } });
-    } catch {}
-    setActiveAsrProvider(listNode, providerId);
-  });
-
-  listNode.appendChild(row);
-  updateAsrProvidersEmptyState(listNode, emptyNode);
+export function renderAsrProviders(listNode, emptyNode, items, { presets = ASR_PROVIDER_PRESETS, activeId = "" } = {}) {
+  asrProviderRow.render(listNode, emptyNode, items, { presets, activeId });
 }
 
-export function collectAsrProviders(listNode, { presets = ASR_PROVIDER_PRESETS, generateId = generateAsrProviderId } = {}) {
+export function addAsrProviderRow(listNode, emptyNode, item = {}, { presets = ASR_PROVIDER_PRESETS, activeId = "" } = {}) {
+  asrProviderRow.add(listNode, emptyNode, item, { presets, activeId });
+}
+
+export function collectAsrProviders(listNode, { presets = ASR_PROVIDER_PRESETS, generateId = asrProviderRow.generateId } = {}) {
   return Array.from(listNode.querySelectorAll(".asr-provider-row")).map((row) => {
     const presetSelect = row.querySelector(".asr-provider-preset");
     const preset = presets.find((p) => p.id === presetSelect.value) || null;
@@ -214,39 +141,11 @@ export function getActiveAsrProviderId(listNode) {
   return row?.dataset.providerId || "";
 }
 
-function showAsrProviderStatus(node, text, isError = false) {
-  if (!node) return;
-  node.hidden = false;
-  node.textContent = text;
-  node.dataset.error = isError ? "true" : "false";
-
-  if (!isError && ASR_STATUS_SUCCESS_MIN_MS > 0) {
-    const row = node.closest(".asr-provider-row");
-    if (!row) return;
-
-    if (row._asrStatusTimer) clearTimeout(row._asrStatusTimer);
-
-    const inputs = row.querySelectorAll("input, button");
-    const previouslyDisabled = Array.from(inputs).map((el) => el.disabled);
-    inputs.forEach((el) => (el.disabled = true));
-
-    row._asrStatusTimer = setTimeout(() => {
-      row._asrStatusTimer = null;
-      inputs.forEach((el, index) => {
-        if (previouslyDisabled[index] !== undefined) el.disabled = previouslyDisabled[index];
-      });
-    }, ASR_STATUS_SUCCESS_MIN_MS);
-  }
-}
-
 // 测试成功 / 删除后的回调，由 options.js 注入，避免行构建器耦合保存流程
-let onTestSuccess = async () => {};
-let onDelete = async () => {};
-
 export function setAsrTestSuccessHandler(handler) {
-  onTestSuccess = handler;
+  asrProviderRow.setTestSuccessHandler(handler);
 }
 
 export function setAsrDeleteHandler(handler) {
-  onDelete = handler;
+  asrProviderRow.setDeleteHandler(handler);
 }
