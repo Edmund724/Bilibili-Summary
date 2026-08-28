@@ -438,3 +438,33 @@ describe("plan.mode==='map-reduce' 才编排（不归并/超预算判定）", ()
 
   // shouldMerge / 归并层行为由 07 票在 tests/ai/merge.test.js 覆盖；此处不再锁定空壳语义。
 });
+
+describe("缓存写入最终失败的上浮（LRU 淘汰后重试仍失败）", () => {
+  it("存储写持续失败 → 经 port notice 上浮一次，编排不中断、照常成稿回吐", async () => {
+    const { fetchMock } = buildSequencedMock();
+    vi.stubGlobal("fetch", fetchMock);
+    // 存储写入持续失败（模拟容量不足）：所有 save 都走「淘汰→重试→失败」链
+    globalThis.chrome.storage.local.set.mockRejectedValue(new Error("quota"));
+    const port = makePort();
+
+    const context = makeContext();
+    const plan = (await import("../../extension/ai/budgeter.js")).buildBudgetPlan({
+      body: context.subtitleBody,
+      chapters: []
+    });
+
+    const result = await mod.orchestrateMapReduce({ provider: makeProvider(), context, plan, port });
+
+    expect(result.aborted).toBe(false);
+    expect(result.draft).toBe("# 视频笔记：《测试视频》\n完整笔记正文。");
+
+    // 上浮恰好一次：notice 通道（与进度 notice 同型），其余只 logError
+    const postMessages = port.postMessage.mock.calls.map((c) => c[0]);
+    const cacheNotices = postMessages.filter(
+      (m) => m.type === "notice" && String(m.data || "").includes("缓存写入失败")
+    );
+    expect(cacheNotices).toHaveLength(1);
+    // 编排本体不受影响：token + done 照常回吐
+    expect(postMessages.some((m) => m.type === "done")).toBe(true);
+  });
+});

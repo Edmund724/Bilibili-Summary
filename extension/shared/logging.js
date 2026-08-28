@@ -19,3 +19,9 @@ export function logWarn(...args) {
     console.warn(...args);
   }
 }
+
+export function logError(...args) {
+  if (shouldDebugLog()) {
+    console.error(...args);
+  }
+}

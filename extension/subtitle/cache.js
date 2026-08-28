@@ -1,6 +1,10 @@
-import { logWarn } from "../shared/logging.js";
+import { logWarn, logError } from "../shared/logging.js";
+import { parseBvidFromCacheKey, writeWithEviction } from "../core/cache-lru.js";
 
 export const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
+// ASR 变体 source key 前缀：fetcher 以 subtitleId "asr:<providerId>:<model>:<lang>"
+// 组键（经 buildSubtitleSourceKey 的 id_ 分支），用于识别/清理过期 ASR 转写变体。
+export const ASR_SOURCE_KEY_PREFIX = "id_asr:";
 
 export function getSubtitleCacheKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "" }) {
   const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
@@ -32,15 +36,46 @@ export async function loadSubtitleFromCache(cacheKey) {
 }
 
 export async function saveSubtitleToCache(cacheKey, body) {
-  try {
-    await chrome.storage.local.set({
-      [cacheKey]: {
-        body,
-        timestamp: Date.now()
-      }
+  const result = await writeWithEviction({
+    family: CACHE_KEY_PREFIX,
+    bvid: parseBvidFromCacheKey(cacheKey, CACHE_KEY_PREFIX),
+    write: () =>
+      chrome.storage.local.set({
+        [cacheKey]: {
+          body,
+          timestamp: Date.now()
+        }
+      })
+  });
+  if (!result.ok) {
+    logError("[BOC] failed to save subtitle cache after eviction", {
+      cacheKey,
+      error: result.error?.message || result.error
     });
+  }
+  return result;
+}
+
+/**
+ * ASR 孤儿清理：删除同 (bvid, cid) 下除 keepKey 外的 ASR 变体缓存键
+ * （不同 provider/model/language 的旧转写，键含 "id_asr:" source key）。
+ * 平台字幕轨（id_/url_/lang_ 且非 asr:）不是孤儿，一律保留。
+ * 返回删除的键数组；失败 logWarn 并返回 []，不抛异常。
+ */
+export async function clearStaleAsrSubtitleCache({ bvid, cid, keepKey = "" } = {}) {
+  try {
+    const keyPrefix = `${CACHE_KEY_PREFIX}${bvid}_${cid}_${ASR_SOURCE_KEY_PREFIX}`;
+    const all = await chrome.storage.local.get(null);
+    const staleKeys = Object.keys(all || {}).filter(
+      (key) => typeof key === "string" && key.startsWith(keyPrefix) && key !== keepKey
+    );
+    if (staleKeys.length > 0) {
+      await chrome.storage.local.remove(staleKeys);
+    }
+    return staleKeys;
   } catch (error) {
-    logWarn("[BOC] failed to save subtitle cache", error);
+    logWarn("[BOC] failed to clear stale asr subtitle cache entries", { bvid, cid, error });
+    return [];
   }
 }
 

@@ -175,11 +175,22 @@ describe("容错：读写失败 logWarn 且不抛异常", () => {
     await expect(mod.loadRawSegments("boc_lvs_raw_x")).resolves.toBeNull();
   });
 
-  it("save 写失败静默记录不抛（小结与原始段）", async () => {
+  it("save 写失败先淘汰重试：重试成功返回 { ok:true } 且不抛", async () => {
     storage.local.set.mockRejectedValueOnce(new Error("write boom"));
-    await expect(mod.saveSegmentSummary("boc_lvs_summary_x", "小结")).resolves.toBeUndefined();
+    await expect(mod.saveSegmentSummary("boc_lvs_summary_x", "小结")).resolves.toMatchObject({ ok: true });
 
     storage.local.set.mockRejectedValueOnce(new Error("write boom"));
-    await expect(mod.saveRawSegments("boc_lvs_raw_x", [])).resolves.toBeUndefined();
+    await expect(mod.saveRawSegments("boc_lvs_raw_x", [])).resolves.toMatchObject({ ok: true });
+  });
+
+  it("save 持续失败（淘汰后重试仍失败）返回 { ok:false, error } 且不抛异常", async () => {
+    storage.local.set.mockRejectedValue(new Error("quota"));
+    const summaryResult = await mod.saveSegmentSummary("boc_lvs_summary_x", "小结");
+    expect(summaryResult.ok).toBe(false);
+    expect(summaryResult.error).toBeInstanceOf(Error);
+
+    const rawResult = await mod.saveRawSegments("boc_lvs_raw_x", []);
+    expect(rawResult.ok).toBe(false);
+    expect(rawResult.error).toBeInstanceOf(Error);
   });
 });

@@ -1,10 +1,13 @@
 // 「段缓存」模块：分段小结与原始字幕段按 (bvid, cid, 字幕轨 source key, 段序号) 落盘，
 // 二次总结/追问按需命中复用，中止/失败后已落盘的段小结下次复用、不重复付费。
-// 键位风格对齐 extension/subtitle/cache.js；存储值同为 { <payload>, timestamp }，
-// 容错语义一致：读写失败 logWarn 且不抛异常。
+// 键位风格对齐 extension/subtitle/cache.js；存储值同为 { <payload>, timestamp }。
+// 容错语义：读取失败静默返回 null；写入经 core/cache-lru.js 的统一 LRU 淘汰
+// （每族仅保留最近 3 个视频），淘汰后重试仍失败时 logError 并返回 { ok:false }
+// 供调用方按各自通道上浮一次；全程不抛异常。
 
-import { logWarn } from "../shared/logging.js";
+import { logError } from "../shared/logging.js";
 import { buildSubtitleSourceKey } from "../subtitle/cache.js";
+import { parseBvidFromCacheKey, writeWithEviction } from "../core/cache-lru.js";
 
 // 分段小结缓存键前缀。
 export const SEGMENT_SUMMARY_PREFIX = "boc_lvs_summary_";
@@ -41,19 +44,29 @@ export async function loadSegmentSummary(key) {
 }
 
 /**
- * 保存分段小结：落盘 { summary, timestamp }。写失败 logWarn 且不抛异常。
+ * 保存分段小结：落盘 { summary, timestamp }。写入走统一 LRU 淘汰
+ * （写失败先淘汰旧视频再重试一次）；最终失败 logError、不抛异常，
+ * 返回 { ok:false, error } 供调用方上浮，成功返回 { ok:true }。
  */
 export async function saveSegmentSummary(key, summary) {
-  try {
-    await chrome.storage.local.set({
-      [key]: {
-        summary,
-        timestamp: Date.now()
-      }
+  const result = await writeWithEviction({
+    family: SEGMENT_SUMMARY_PREFIX,
+    bvid: parseBvidFromCacheKey(key, SEGMENT_SUMMARY_PREFIX),
+    write: () =>
+      chrome.storage.local.set({
+        [key]: {
+          summary,
+          timestamp: Date.now()
+        }
+      })
+  });
+  if (!result.ok) {
+    logError("[BOC] failed to save segment summary cache after eviction", {
+      key,
+      error: result.error?.message || result.error
     });
-  } catch (error) {
-    logWarn("[BOC] failed to save segment summary cache", { key, error });
   }
+  return result;
 }
 
 /**
@@ -69,17 +82,70 @@ export async function loadRawSegments(key) {
 }
 
 /**
- * 保存原始字幕段：落盘 { segments, timestamp }。写失败 logWarn 且不抛异常。
+ * 保存原始字幕段：落盘 { segments, timestamp }。容错语义同 saveSegmentSummary
+ * （LRU 淘汰 + 最终失败 logError 并返回 { ok:false }）。
  */
 export async function saveRawSegments(key, segments) {
-  try {
-    await chrome.storage.local.set({
-      [key]: {
-        segments,
-        timestamp: Date.now()
-      }
+  const result = await writeWithEviction({
+    family: RAW_SEGMENT_PREFIX,
+    bvid: parseBvidFromCacheKey(key, RAW_SEGMENT_PREFIX),
+    write: () =>
+      chrome.storage.local.set({
+        [key]: {
+          segments,
+          timestamp: Date.now()
+        }
+      })
+  });
+  if (!result.ok) {
+    logError("[BOC] failed to save raw segments cache after eviction", {
+      key,
+      error: result.error?.message || result.error
     });
-  } catch (error) {
-    logWarn("[BOC] failed to save raw segments cache", { key, error });
+  }
+  return result;
+}
+
+// 从原始段缓存键尾段解析段序号（键形如 `${前缀}${bvid}_${cid}_${sourceKey}_${index}`）。
+function segmentIndexFromKey(key, keyPrefix) {
+  const n = Number(String(key).slice(keyPrefix.length));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * 跨会话回退读取：按 (bvid, cid, 字幕轨 source key) 枚举已落盘的原始字幕段键，
+ * 按段序返回与 plan.segments 同构的数组（{ index, from, to, items }）。
+ * from/to 由 items 首末项推导（对齐 budgeter.splitByBudget 的段边界语义）。
+ * 缺 bvid/cid / 无命中 / 读失败 → []（回退只补空，绝不抛错）。
+ */
+export async function loadStoredRawSegments({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "" } = {}) {
+  try {
+    if (!bvid || !cid) {
+      return [];
+    }
+    const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
+    const keyPrefix = `${RAW_SEGMENT_PREFIX}${bvid}_${cid}_${sourceKey}_`;
+    const all = await chrome.storage.local.get(null);
+    const keys = Object.keys(all || {})
+      .filter((key) => typeof key === "string" && key.startsWith(keyPrefix))
+      .sort((a, b) => segmentIndexFromKey(a, keyPrefix) - segmentIndexFromKey(b, keyPrefix));
+
+    const out = [];
+    for (const key of keys) {
+      const items = await loadRawSegments(key);
+      if (Array.isArray(items) && items.length > 0) {
+        const first = items[0] || {};
+        const last = items[items.length - 1] || {};
+        out.push({
+          index: segmentIndexFromKey(key, keyPrefix),
+          from: Number(first.from) || 0,
+          to: Number(last.to) || Number(first.from) || 0,
+          items
+        });
+      }
+    }
+    return out;
+  } catch {
+    return [];
   }
 }

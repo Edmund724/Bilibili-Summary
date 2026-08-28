@@ -24,6 +24,7 @@ import {
 import {
   buildSubtitleCandidates,
   clearSubtitleCacheByKey,
+  clearStaleAsrSubtitleCache,
   saveSubtitleToCache,
   loadSubtitleFromCache,
   getSubtitleCacheKey
@@ -455,8 +456,12 @@ export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, sub
     throw mismatchError;
   }
 
-  // 存入缓存
-  await saveSubtitleToCache(cacheKey, body);
+  // 存入缓存（写入带 LRU 淘汰：失败先清理旧视频再重试一次）
+  const saveResult = await saveSubtitleToCache(cacheKey, body);
+  if (saveResult && saveResult.ok === false) {
+    // 淘汰后重试仍失败：经既有消息栏一次性上浮，不阻断主流程。
+    setMessage("字幕已加载，但本地缓存写入失败（已自动清理旧缓存仍失败），重启浏览器后需重新抓取。");
+  }
 
   clipState.setSelectedSubtitleId(subtitleId ? String(subtitleId) : state.clip.selectedSubtitleId);
   clipState.setSelectedSubtitleUrl(url);
@@ -563,9 +568,12 @@ async function maybeRunAsrFallback({ runId }) {
     provider.language = asrRuntime.asrLanguage || "auto";
     const platformName = provider.name || "语音识别平台";
     const model = String(provider.model || "").trim();
+    // 固定本轮视频身份：孤儿清理/缓存键都以发起转写时的 bvid+cid 为准。
+    const bvid = state.clip.bvid;
+    const cid = state.clip.cid;
     const cacheKey = getSubtitleCacheKey({
-      bvid: state.clip.bvid,
-      cid: state.clip.cid,
+      bvid,
+      cid,
       subtitleId: `asr:${runtimeActiveId}:${model}:${provider.language}`
     });
 
@@ -630,9 +638,18 @@ async function maybeRunAsrFallback({ runId }) {
       .then(async (body) => {
         // 成果即刻落缓存：按 bvid/cid/provider 键控，与后续 UI 状态无关。
         // 历史上写缓存在 ensureRunActive 之后，转写一旦被并发抓取顶掉，
-        // 几小时成果直接丢弃。
+        // 几小时成果直接丢弃。写入带 LRU 淘汰（失败先清理旧视频再重试一次）。
         if (Array.isArray(body) && body.length > 0) {
-          await saveSubtitleToCache(cacheKey, body);
+          const saveResult = await saveSubtitleToCache(cacheKey, body);
+          if (saveResult && saveResult.ok === false) {
+            // 淘汰后重试仍失败：经既有消息栏一次性上浮，不阻断主流程。
+            setMessage("语音识别结果已生成，但本地缓存写入失败（已自动清理旧缓存仍失败），仅本次会话有效。");
+          } else {
+            // 孤儿清理：新 ASR 转写落盘后，移除同视频其它 provider/model/language
+            // 的过期 ASR 变体键；平台字幕轨不是孤儿，保留。清理只在写入成功后
+            // 执行——写失败时旧变体仍是唯一可用副本，不能删。
+            await clearStaleAsrSubtitleCache({ bvid, cid, keepKey: cacheKey });
+          }
         }
         return body;
       })

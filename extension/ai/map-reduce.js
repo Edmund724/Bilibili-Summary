@@ -151,8 +151,19 @@ export async function runCompletion({ provider, messages, thinkingLevel, signal,
 /**
  * 单段小结：先查缓存命中直接复用（04 填空后生效），未命中则构造 prompt 调模型并落盘。
  * 返回小结字符串；中止（signal.aborted）时抛出标记 aborted 的错误，由上层统一收束。
+ * 落盘经段缓存的 LRU 淘汰写入；淘汰后重试仍失败时经 notifyCacheWriteError 上浮
+ * （编排层保证整个运行期只提示一次），不再中断编排。
  */
-async function summarizeSegment({ provider, context, segment, total, signal, thinkingLevel, runCompletionImpl }) {
+async function summarizeSegment({
+  provider,
+  context,
+  segment,
+  total,
+  signal,
+  thinkingLevel,
+  runCompletionImpl,
+  notifyCacheWriteError
+}) {
   const rawKey = getRawSegmentKey({
     bvid: context?.bvid,
     cid: context?.cid,
@@ -177,7 +188,11 @@ async function summarizeSegment({ provider, context, segment, total, signal, thi
   }
 
   // 原始字幕段落盘（04 实现落盘；06 按需检索时可跨会话复用）。
-  await saveRawSegments(rawKey, segment.items || []);
+  // 淘汰后重试仍失败 → 上浮一次（编排层去重），不中断本段小结。
+  const savedRaw = await saveRawSegments(rawKey, segment.items || []);
+  if (savedRaw && savedRaw.ok === false && typeof notifyCacheWriteError === "function") {
+    notifyCacheWriteError();
+  }
 
   if (signal?.aborted) {
     throw makeAbortedError();
@@ -202,7 +217,10 @@ async function summarizeSegment({ provider, context, segment, total, signal, thi
   const trimmed = String(summary || "").trim();
   // 小结 ≤10k 保留（约 20%）；超出时尾部截断兜底（本票不做归并，靠此 clamp 保预算）
   const clamped = trimmed.length > SEGMENT_SUMMARY_CHARS ? trimmed.slice(0, SEGMENT_SUMMARY_CHARS) : trimmed;
-  await saveSegmentSummary(summaryKey, clamped);
+  const savedSummary = await saveSegmentSummary(summaryKey, clamped);
+  if (savedSummary && savedSummary.ok === false && typeof notifyCacheWriteError === "function") {
+    notifyCacheWriteError();
+  }
   return clamped;
 }
 
@@ -248,6 +266,22 @@ export async function orchestrateMapReduce({
     return { draft: "", segmentSummaries, aborted: true };
   };
 
+  // 缓存写入最终失败（LRU 淘汰后重试仍失败）的 user-visible 上浮：复用 Map-Reduce
+  // 协议既有的 notice 通道，整个运行期只提示一次（后续失败仅 logError，不打扰）。
+  let cacheWriteNoticeShown = false;
+  const notifyCacheWriteError = () => {
+    if (cacheWriteNoticeShown) {
+      return;
+    }
+    cacheWriteNoticeShown = true;
+    const notice = "本地字幕缓存写入失败（已自动清理旧视频缓存仍失败），本次结果可能无法跨会话复用。";
+    if (typeof onProgress === "function") {
+      onProgress(notice);
+    } else if (port && typeof port.postMessage === "function") {
+      port.postMessage({ type: "notice", data: notice });
+    }
+  };
+
   const worker = async (segment, i) => {
     const summary = await summarizeSegment({
       provider,
@@ -256,7 +290,8 @@ export async function orchestrateMapReduce({
       total,
       signal,
       thinkingLevel,
-      runCompletionImpl: runCompletionImpl
+      runCompletionImpl: runCompletionImpl,
+      notifyCacheWriteError
     });
     return { segment, summary };
   };

@@ -9,7 +9,8 @@ import { retrieveRawSegments } from "./raw-retrieval.js";
 import { formatSegmentItem } from "./map-reduce.js";
 import {
   getSegmentSummaryKey,
-  loadSegmentSummary as loadSegmentSummaryFromCache
+  loadSegmentSummary as loadSegmentSummaryFromCache,
+  loadStoredRawSegments as loadStoredRawSegmentsFromCache
 } from "./segment-cache.js";
 
 // 组装某段小结/原始段的缓存键（与 map-reduce.js 使用同一套键位）。
@@ -86,13 +87,20 @@ export function lastAssistantContent(history = []) {
  * 解析追问上下文：超预算视频 + 已有历史 + 已能拼出「成稿笔记 + 分段小结」时，
  * 返回供 streamChat 复用的压缩上下文（subtitleMarkdown 换成压缩摘要，subtitleBody 置空）；
  * 其余情况（≤100k / 首轮 / 尚未成稿）返回 null，表示走完整 Map-Reduce。
+ *
+ * 段来源两级：会话内直接用内存 plan.segments（行为与既有路径逐字节一致）；
+ * 跨会话（恢复会话 / 新会话，内存段已不在）且 plan.segments 为空时，回退到段缓存
+ * 落盘的原始字幕段（loadStoredRawSegments，键位与 map-reduce 落盘完全一致），
+ * 仅补空缺、不覆盖内存段；两级皆空则维持返回 null 交回完整 Map-Reduce。
+ * bvid/cid 取自追问上下文（context 由侧边栏组装，含视频身份字段）。
  */
 export async function resolveFollowupContext({
   context = {},
   plan = null,
   history = [],
   userPrompt = "",
-  loadSummaries = loadSegmentSummaries
+  loadSummaries = loadSegmentSummaries,
+  loadStoredSegments = loadStoredRawSegmentsFromCache
 } = {}) {
   if (plan?.mode !== "map-reduce") {
     return null;
@@ -106,7 +114,23 @@ export async function resolveFollowupContext({
     return null;
   }
 
-  const segmentSummaries = await loadSummaries({ context, plan });
+  // 段来源：内存优先，空缺时跨会话回退（仅此处触达段缓存）。
+  const inMemorySegments = Array.isArray(plan?.segments) ? plan.segments : [];
+  let segments = inMemorySegments;
+  if (segments.length === 0) {
+    const stored = await loadStoredSegments({
+      bvid: context?.bvid,
+      cid: context?.cid,
+      subtitleId: context?.selectedSubtitleId,
+      subtitleUrl: context?.selectedSubtitleUrl,
+      lang: context?.subtitleLang
+    });
+    if (Array.isArray(stored) && stored.length > 0) {
+      segments = stored;
+    }
+  }
+
+  const segmentSummaries = await loadSummaries({ context, plan: { ...plan, segments } });
   if (!hasFinalNote({ note, segmentSummaries })) {
     return null;
   }
@@ -116,7 +140,7 @@ export async function resolveFollowupContext({
     note,
     segmentSummaries,
     userPrompt,
-    retrieveRaw: buildRetrieveRaw({ context, plan })
+    retrieveRaw: buildRetrieveRaw({ context, plan: { segments } })
   });
 
   return { ...context, subtitleMarkdown, subtitleBody: [] };
