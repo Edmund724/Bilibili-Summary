@@ -74,6 +74,7 @@ let cacheMock;
 let asrStoreMock;
 let pipelineMock;
 let stateMod;
+let uiRenderer;
 
 beforeEach(async () => {
   resetModuleState();
@@ -83,6 +84,7 @@ beforeEach(async () => {
   asrStoreMock = await import("../../extension/asr/asr-provider-store.js");
   pipelineMock = await import("../../extension/asr/pipeline.js");
   stateMod = await import("../../extension/core/state.js");
+  uiRenderer = await import("../../extension/ui/ui-renderer.js");
 
   for (const m of [gatewayMock, cacheMock, asrStoreMock, pipelineMock]) {
     for (const key of Object.keys(m)) {
@@ -216,5 +218,44 @@ describe("ASR 转写中并发 refreshClip（修复：共享转写、成果落缓
 
     const broadcastCalls = sendSpy.mock.calls.map((c) => c[0]).filter((m) => m?.type === "boc-subtitle-status");
     expect(broadcastCalls.some((m) => m.phase === "asr-failed")).toBe(true);
+  });
+
+  it("转写进行中辅助抓取失败：不清上下文（fetchState 保持 loading），共享转写完成后正常收尾", async () => {
+    const pending = stubPendingPipeline();
+
+    // 第一次抓取开始转写
+    const first = fetcher.refreshClip();
+    await vi.waitFor(() => expect(pipelineMock.runAsrPipeline).toHaveBeenCalledTimes(1));
+
+    // 第二次抓取（转写中的 popup-refresh）前半段失败——转写期间高频重复
+    // 请求 B 站 meta/subtitle API 时常见的限流场景。历史上 resetClipState
+    // 会把 fetchState 清成 idle，侧边栏等待轮询误判后提前放行空字幕。
+    gatewayMock.fetchVideoMeta.mockRejectedValue(new Error("HTTP 412"));
+    const second = fetcher.refreshClip();
+    await vi.waitFor(() => {
+      const { setStatus } = uiRenderer;
+      expect(setStatus.mock.calls.some((c) => String(c[0]).includes("继续等待音频转写"))).toBe(true);
+    });
+
+    // 关键断言 1：上下文未被清掉——fetchState 保持 loading、title 保留
+    expect(stateMod.state.clip.subtitleFetchState).toBe("loading");
+    expect(stateMod.state.clip.title).toBe("t");
+
+    // 转写"完成"：失败的那次抓取跟随共享转写一起收尾
+    pending[0].resolve([
+      { from: 0, to: 1.2, content: "转写成果" },
+      { from: 1.5, to: 290, content: "第二条" }
+    ]);
+    await second;
+    await first.catch(() => {});
+
+    // 关键断言 2：共享转写成果正常进入状态并落缓存
+    expect(stateMod.state.clip.subtitleFetchState).toBe("ready");
+    expect(stateMod.state.clip.subtitleBody.length).toBe(2);
+    expect(cacheMock.saveSubtitleToCache).toHaveBeenCalledTimes(1);
+    // 发起者 fetchRunId 已过期，UI 收尾由失败的等待者完成；完成提示只出现一次
+    const { setStatus } = uiRenderer;
+    const doneCount = setStatus.mock.calls.map((c) => String(c[0])).filter((s) => s.includes("语音识别完成")).length;
+    expect(doneCount).toBe(1);
   });
 });

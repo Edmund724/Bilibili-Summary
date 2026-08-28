@@ -6,7 +6,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createSubtitleWaiter } from "../../extension/pages/sidepanel-subtitle-wait.js";
+import { createSubtitleWaiter, isContextPending } from "../../extension/pages/sidepanel-subtitle-wait.js";
 
 const POLL_MS = 4000;
 
@@ -162,5 +162,35 @@ describe("createSubtitleWaiter", () => {
     const pollsBefore = harness.deps.pollContext.mock.calls.length;
     harness.waiter.kick(); // 无等待在跑时 kick 是 no-op
     expect(harness.deps.pollContext.mock.calls.length).toBe(pollsBefore);
+  });
+});
+
+// isContextPending：等待判定纯函数。回归背景：content 侧转写进行中可能因
+// 辅助抓取失败把快照状态清成 idle（resetClipState），仅凭快照会提前放行
+// 空字幕 → 模型编造"无公开字幕"总结；转写广播活跃标志是兜底信号。
+describe("isContextPending", () => {
+  it("loading 且字幕体为空：pending", () => {
+    expect(isContextPending({ subtitleFetchState: "loading", subtitleBody: [] })).toBe(true);
+  });
+
+  it("字幕体非空：不 pending（就绪优先于一切信号）", () => {
+    expect(isContextPending({ subtitleFetchState: "loading", subtitleBody: [{ from: 0, to: 1, content: "x" }] })).toBe(false);
+  });
+
+  it("快照状态被清（idle）但转写广播活跃：仍 pending（兜底信号）", () => {
+    expect(
+      isContextPending({ subtitleFetchState: "idle", subtitleBody: [] }, { asrTranscribingActive: true })
+    ).toBe(true);
+  });
+
+  it("非 loading 且无广播：不 pending（抓取失败/无人声/未启用转写，放行凭标题总结）", () => {
+    expect(isContextPending({ subtitleFetchState: "idle", subtitleBody: [] })).toBe(false);
+    expect(isContextPending({ subtitleFetchState: "error", subtitleBody: [] })).toBe(false);
+    expect(isContextPending({ subtitleFetchState: "empty", subtitleBody: [] })).toBe(false);
+  });
+
+  it("快照为 null（读取失败）：不 pending，由 ok=false 走失败路径", () => {
+    expect(isContextPending(null)).toBe(false);
+    expect(isContextPending(undefined, { asrTranscribingActive: true })).toBe(false);
   });
 });

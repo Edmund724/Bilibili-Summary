@@ -40,7 +40,7 @@ import { renderMarkdown, stripThinkBlocks } from "../ui/markdown.js";
 import { linkifyAssistantTimestamps } from "../ui/timestamp-nav.js";
 import { normalizeMarkdownForSectionPaste } from "../notes/paste.js";
 import { createChatRuntime } from "./sidepanel-chat-runtime.js";
-import { createSubtitleWaiter } from "./sidepanel-subtitle-wait.js";
+import { createSubtitleWaiter, isContextPending } from "./sidepanel-subtitle-wait.js";
 import { createConversationStore } from "./sidepanel-conversation-store.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
@@ -83,15 +83,21 @@ const DEFAULT_AI_PREFS = {
 // 这里只组装 deps：轮询读当前上下文、提示走消息区 notice、定时器用 window。
 // 引用的 loadContextState / 通知函数都是函数声明（有提升），回调执行时才读
 // contextData，放在广播监听之前只为保证监听触发时组装已完成。
+// asr-transcribing 广播活跃标志：content 侧转写进行中的兜底信号。快照的
+// subtitleFetchState 可能在转写中因辅助抓取失败被 content 清掉（resetClipState），
+// 此时靠这个标志继续等待，不放行空字幕。
+let asrTranscribingActive = false;
 const SUBTITLE_WAIT_POLL_MS = 4000;
 const subtitleWaiter = createSubtitleWaiter({
   pollIntervalMs: SUBTITLE_WAIT_POLL_MS,
   pollContext: async () => {
     const ok = await loadContextState({ forceRefresh: false, silent: true }).catch(() => false);
-    const body = Array.isArray(contextData?.subtitleBody) ? contextData.subtitleBody : [];
+    // loadContextState 无论走哪个分支都会先更新 liveContextData；等待期间
+    // 可能有流式守卫冻结 contextData，读 liveContextData 保证数据不断供。
+    const snapshot = ok ? (liveContextData || contextData) : null;
     return {
-      ok,
-      pending: ok && contextData?.subtitleFetchState === "loading" && body.length === 0
+      ok: Boolean(snapshot),
+      pending: isContextPending(snapshot, { asrTranscribingActive })
     };
   },
   showWaitingNotice: () => showConversationContextNotice("正在等待音频转写完成，完成后自动开始总结…", 0),
@@ -113,7 +119,10 @@ chrome.runtime.onMessage.addListener((message) => {
   if (notice) {
     notice.hidden = message.phase !== "asr-transcribing";
   }
-  if (message.phase === "asr-done" || message.phase === "asr-failed") {
+  if (message.phase === "asr-transcribing") {
+    asrTranscribingActive = true;
+  } else if (message.phase === "asr-done" || message.phase === "asr-failed") {
+    asrTranscribingActive = false;
     subtitleWaiter.kick();
   }
 });
@@ -1067,7 +1076,14 @@ async function ensureCurrentContextForSend() {
     return false;
   }
   const ready = await subtitleWaiter.wait();
-  if (!ready || !contextData) {
+  if (!ready) {
+    resetConversationView("当前页面上下文读取失败。");
+    return false;
+  }
+  // 等待期间 contextData 可能停在旧快照（守卫分支或就绪瞬间），放行前重取
+  // 一次，确保发送出去的是转写完成后的完整字幕。
+  await loadContextState({ forceRefresh: false, silent: true }).catch(() => null);
+  if (!contextData) {
     resetConversationView("当前页面上下文读取失败。");
     return false;
   }

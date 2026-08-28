@@ -374,6 +374,14 @@ export async function refreshClip() {
     if (isStaleRunError(error)) {
       return;
     }
+    // 有 ASR 转写进行中：本轮辅助抓取的失败绝不能清上下文（resetClipState
+    // 会把 subtitleFetchState 置回 idle，等待转写的侧边栏轮询会误判"非转写中"
+    // 提前放行空字幕）。改为等待共享转写结果继续收尾。
+    if (activeAsrTranscribe) {
+      setStatus(`抓取失败：${getErrorMessage(error)}，继续等待音频转写…`);
+      await awaitActiveAsrTranscribe(runId);
+      return;
+    }
     clipState.setSubtitleFetchState("error");
     resetClipState();
     clipState.setSubtitleFetchState("error");
@@ -601,7 +609,7 @@ async function maybeRunAsrFallback({ runId }) {
           activeAsrTranscribe = null;
         }
       });
-    activeAsrTranscribe = { cacheKey, promise: transcribePromise };
+    activeAsrTranscribe = { cacheKey, promise: transcribePromise, platformName };
 
     const body = await transcribePromise;
 
@@ -626,6 +634,27 @@ async function maybeRunAsrFallback({ runId }) {
     broadcastSubtitleStatus("asr-failed");
     applyNoSubtitleState();
     return "error";
+  }
+}
+
+// 等待进行中的共享转写并按其结果收尾（refreshClip 辅助抓取失败时的兜底路径：
+// 不清上下文，跟着共享转写一起完成）。转写失败由发起者的 catch 负责文案，
+// 这里静默退出；runId 守卫只影响 UI 收尾，成果已在共享单元内落缓存。
+async function awaitActiveAsrTranscribe(runId) {
+  const active = activeAsrTranscribe;
+  if (!active) {
+    return;
+  }
+  try {
+    const sharedBody = await active.promise;
+    if (!Array.isArray(sharedBody) || sharedBody.length === 0) {
+      setStatus("未识别到语音内容，该视频可能没有人声。");
+      broadcastSubtitleStatus("asr-done");
+      return;
+    }
+    await finishAsrFallback({ runId, body: sharedBody, platformName: active.platformName });
+  } catch {
+    // 共享转写失败/中止：发起者路径已负责状态与文案
   }
 }
 

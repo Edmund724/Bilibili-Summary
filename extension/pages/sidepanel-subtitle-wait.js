@@ -15,6 +15,26 @@
 //   - kick() 与轮询去重：同一时刻最多一轮 pollContext 在跑；
 //   - finish（就绪/失败/失效）后挂着的定时器必须作废，notice 必须清理。
 
+// 「上下文是否仍在抓取/转写中」的判定（sidepanel 组装 pollContext 用，纯函数可测）。
+// 两个信号缺一不可互为兜底：
+//   - 快照的 subtitleFetchState：主信号。content 侧在转写进行中也可能因辅助
+//     抓取失败等边界把状态清掉（历史上 resetClipState 置 idle 曾导致提前放行
+//     空字幕、模型编造"无公开字幕"总结）；
+//   - asrTranscribingActive：兜底信号。sidepanel 收到 content 的
+//     boc-subtitle-status(asr-transcribing) 广播置 true，收到 asr-done/asr-failed
+//     置 false。转写广播仍活跃时，即使快照状态被清也继续等待。
+// 字幕体非空即视为就绪，不受上述信号影响。
+export function isContextPending(snapshot, { asrTranscribingActive = false } = {}) {
+  if (!snapshot) {
+    return false;
+  }
+  const body = Array.isArray(snapshot.subtitleBody) ? snapshot.subtitleBody : [];
+  if (body.length > 0) {
+    return false;
+  }
+  return snapshot.subtitleFetchState === "loading" || asrTranscribingActive === true;
+}
+
 /**
  * @param {object} deps
  *   pollContext:      () => Promise<{ok: boolean, pending: boolean}>
