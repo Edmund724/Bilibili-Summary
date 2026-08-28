@@ -161,18 +161,6 @@ export function extractConversationBaseTitle(title) {
   return parts[0] || normalizedRaw;
 }
 
-export function truncateConversationTitle(title, maxChars = 22) {
-  const value = String(title || "").trim();
-  const match = value.match(/^(.*?)(-P\d+)$/i);
-  if (match) {
-    const baseTitle = String(match[1] || "").trim();
-    const suffix = String(match[2] || "").trim();
-    const truncatedBase = baseTitle.length > maxChars ? `${baseTitle.slice(0, maxChars)}...` : baseTitle;
-    return `${truncatedBase}${suffix}`;
-  }
-  return value.length > maxChars ? `${value.slice(0, maxChars)}...` : value;
-}
-
 export function buildConversationTitleDisplay(title, maxChars = 22) {
   const value = String(title || "").trim();
   const match = value.match(/^(.*?)(-P\d+)$/i);

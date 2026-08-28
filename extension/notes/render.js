@@ -1,4 +1,4 @@
-// extension/note-rendering.js
+// extension/notes/render.js
 // Note/export rendering logic (Markdown, SRT, TXT, frontmatter, chapters, subtitles, comments).
 
 import {
@@ -33,15 +33,6 @@ export function buildChapterLines(chapters, withHours = false) {
     const fromText = formatCompactTimestamp(item.from, withHours);
     return `- \`${fromText}\` ${item.title}`;
   });
-}
-
-export function buildFolderTemplateContext(meta, created = formatLocalDate()) {
-  return {
-    created: sanitizeFolderTemplateValue(created),
-    upload_date: sanitizeFolderTemplateValue(meta?.uploadDate || ""),
-    author: sanitizeFolderTemplateValue(meta?.author || ""),
-    bvid: sanitizeFolderTemplateValue(meta?.bvid || "")
-  };
 }
 
 export function buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml) {
@@ -460,33 +451,6 @@ export function isYamlDateValue(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
 }
 
-export function normalizeFolder(input) {
-  return String(input || "").trim().replace(/^\/+|\/+$/g, "");
-}
-
-export function resolveFolderTemplate(template, meta) {
-  const normalized = normalizeFolder(template);
-  if (!normalized) {
-    return "";
-  }
-
-  const allowedKeys = new Set(["created", "upload_date", "author", "bvid"]);
-  const context = buildFolderTemplateContext(meta);
-  const resolved = String(normalized).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, rawKey) => {
-    const key = String(rawKey || "").trim().toLowerCase();
-    if (!allowedKeys.has(key)) {
-      return "";
-    }
-    return context[key] || "";
-  });
-
-  return resolved
-    .split("/")
-    .map((segment) => sanitizeFolderTemplateValue(segment))
-    .filter(Boolean)
-    .join("/");
-}
-
 export function shouldShowHoursInSubtitle(body) {
   const maxTo = (body || []).reduce((max, item) => {
     const to = Number(item?.to || 0);
@@ -507,11 +471,4 @@ export function shouldShowHoursInNote(meta, body) {
   }, 0);
   const duration = Number(meta?.videoDuration || 0) || 0;
   return Math.max(subtitleMaxTo, chapterMaxTo, duration) >= 3600;
-}
-
-export function sanitizeFolderTemplateValue(value) {
-  return String(value || "")
-    .replace(/[\/\\:*?"<>|]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }

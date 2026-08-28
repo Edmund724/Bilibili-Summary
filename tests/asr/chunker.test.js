@@ -1,52 +1,16 @@
 // chunker.js 测试：WAV 编码器正确性 / buildChunkPlan 各平台规则 /
-// decideChunks 边界与连续性 / processAudio 整链与坏字节诊断 /
-// buildWavChunks 直测。
-// 全部纯 Node/vitest，解码宿主用合成宿主注入，不依赖真实 AudioContext。
+// decideChunks 边界与连续性 / buildWavChunks 直测。
+// 全部纯 Node/vitest，不依赖真实 AudioContext。
 
 import { describe, expect, it } from "vitest";
 import {
   encodeWav,
   decideChunks,
   buildChunkPlan,
-  processAudio,
   buildWavChunks,
   validateDecodedAudio,
   makeDecodedBuffer
 } from "../../extension/asr/chunker.js";
-
-// 合成解码宿主：把传入 buffer 视为 48kHz 双声道音频，重采样为 16kHz 单声道。
-// 模拟 decodeHost 契约：返回 { sampleRate:16000, length, getChannelData(0) }。
-// 内容默认固定样本值（大时长用例避免生成正弦波拖慢测试）；wave:true 时生成
-// 440Hz 正弦波（双声道同相，取任一通道做重采样即可），用于小片段用例。
-function makeSynthDecodeHost({ sampleRate = 48000, channels = 2, durationSec, freq = 440, wave = false } = {}) {
-  return async function synthDecodeHost(arrayBuffer) {
-    const frameCount = Math.round(durationSec * sampleRate);
-    const channelData = [];
-    for (let c = 0; c < channels; c++) {
-      const data = new Float32Array(frameCount);
-      for (let i = 0; i < frameCount; i++) {
-        data[i] = wave ? Math.sin((2 * Math.PI * freq * i) / sampleRate) : 0.25;
-      }
-      channelData.push(data);
-    }
-    // 重采样到 16kHz 单声道：近邻取整平均两声道
-    const targetRate = 16000;
-    const outLength = Math.max(1, Math.round((frameCount / sampleRate) * targetRate));
-    const out = new Float32Array(outLength);
-    for (let i = 0; i < outLength; i++) {
-      const srcIdx = Math.floor((i * sampleRate) / targetRate);
-      out[i] = (channelData[0][srcIdx] + channelData[1][srcIdx]) / 2;
-    }
-    return {
-      sampleRate: targetRate,
-      length: outLength,
-      getChannelData: (ch) => {
-        if (ch !== 0) throw new Error("仅支持单声道通道 0");
-        return out;
-      }
-    };
-  };
-}
 
 // 读取 WAV 头各字段（对照 44 字节标准布局）
 function readWavHeader(blob, bytes) {
@@ -299,104 +263,3 @@ describe("validateDecodedAudio 直测", () => {
     expect(validateDecodedAudio(ok)).toBe(1);
   });
 });
-
-describe("processAudio 整链与坏字节诊断", () => {
-  it("按 plan 切片并编码：61 分钟 10 分钟片 → 7 个 WAV，startSec 连续", async () => {
-    const host = makeSynthDecodeHost({ durationSec: 61 * 60 });
-    const audio = new ArrayBuffer(8);
-    const plan = { chunkSeconds: 10 * 60 };
-    const chunks = await processAudio(audio, { decodeHost: host, plan });
-
-    expect(chunks.length).toBe(7);
-    chunks.forEach((c, i) => {
-      expect(c.index).toBe(i);
-      expect(c.startSec).toBeCloseTo(i * 600, 9);
-      expect(c.wavBlob).toBeInstanceOf(Blob);
-      expect(c.wavBlob.type).toBe("audio/wav");
-    });
-    // 最后一片 1 分钟：PCM 字节数 = 16000*2*60
-    const lastBytes = new Uint8Array(await chunks[6].wavBlob.arrayBuffer());
-    expect(lastBytes.byteLength).toBe(44 + 16000 * 2 * 60);
-    // 整链总时长 = 61 分钟；前 6 片各 10 分钟、最后 1 分钟
-    expect(chunks[6].startSec + 60).toBeCloseTo(61 * 60, 9);
-  });
-
-  it("切片时长与宿主采样率一致（16k 单声道 WAV 头部校验）", async () => {
-    const host = makeSynthDecodeHost({ durationSec: 8 * 60 });
-    const chunks = await processAudio(new ArrayBuffer(8), {
-      decodeHost: host,
-      plan: { chunkSeconds: 3 * 60 }
-    });
-    expect(chunks.length).toBe(3);
-    for (const c of chunks) {
-      const bytes = new Uint8Array(await c.wavBlob.arrayBuffer());
-      const h = readWavHeader(c.wavBlob, bytes);
-      expect(h.sampleRate).toBe(16000);
-      expect(h.numChannels).toBe(1);
-      expect(h.bitsPerSample).toBe(16);
-    }
-    // 第 3 片 startSec = 6 分钟（2 片 × 3 分钟），PCM 字节数 = 16000*2*120
-    expect(chunks[2].startSec).toBeCloseTo(6 * 60, 9);
-    const lastBytes = new Uint8Array(await chunks[2].wavBlob.arrayBuffer());
-    expect(lastBytes.byteLength).toBe(44 + 16000 * 2 * 120);
-  });
-
-  it("decodeHost 抛错 → message 含「音频解码失败」且附头 32 字节 hex 诊断", async () => {
-    const rawError = new Error("bad container");
-    const badHost = async () => {
-      throw rawError;
-    };
-    const audio = new Uint8Array([
-      0x00, 0x01, 0x02, 0x03, 0xff, 0xfe, 0xfd, 0xfc, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80,
-      0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0x00
-    ]).buffer;
-
-    await expect(
-      processAudio(audio, { decodeHost: badHost, plan: { chunkSeconds: 600 } })
-    ).rejects.toThrow(/音频解码失败/);
-
-    try {
-      await processAudio(audio, { decodeHost: badHost, plan: { chunkSeconds: 600 } });
-    } catch (err) {
-      expect(err.message).toContain("00010203fffefdfc1020304050607080");
-      expect(err.diagnostic).toBe("00010203fffefdfc1020304050607080aabbccddeeff11223344556677889900");
-    }
-  });
-
-  it("坏字节小于 32 字节时 hex 诊断按实际长度输出", async () => {
-    const badHost = async () => {
-      throw new Error("boom");
-    };
-    const audio = new Uint8Array([0xde, 0xad, 0xbe, 0xef]).buffer;
-    try {
-      await processAudio(audio, { decodeHost: badHost, plan: {} });
-    } catch (err) {
-      expect(err.diagnostic).toBe("deadbeef");
-      expect(err.message).toContain("deadbeef");
-    }
-  });
-
-  it("解码结果为零时长 → 显式报错而非静默产出空切片", async () => {
-    const zeroHost = async () => ({
-      sampleRate: 16000,
-      length: 0,
-      getChannelData: () => new Float32Array(0)
-    });
-    await expect(
-      processAudio(new ArrayBuffer(8), { decodeHost: zeroHost, plan: { chunkSeconds: 600 } })
-    ).rejects.toThrow(/解码结果时长为零/);
-  });
-
-  it("解码诊断为静音（峰值 < 0.001 且时长 > 0）→ 显式报错", async () => {
-    const silentHost = async () => ({
-      sampleRate: 16000,
-      length: 16000,
-      getChannelData: () => new Float32Array(16000),
-      diagnostic: { durationSec: 1, peak: 0 }
-    });
-    await expect(
-      processAudio(new ArrayBuffer(8), { decodeHost: silentHost, plan: {} })
-    ).rejects.toThrow(/疑似静音/);
-  });
-});
-

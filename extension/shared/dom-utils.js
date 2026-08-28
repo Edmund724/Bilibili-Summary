@@ -1,17 +1,20 @@
-// Reader-domain DOM helpers shared across modules.
+// Dependency-free DOM helpers shared across modules.
 //
-// getReaderElement is the local replacement for core/runtime.js's byId:
-// reading reader DOM ids is a reader-internal concern, and keeping it here
-// (document.getElementById + throw) keeps the reader modules free of a static
-// import of core/runtime.js, which would otherwise form an import cycle back
-// through subtitle/fetcher.js.
-export function getReaderElement(id) {
+// byId is the single DOM-id lookup helper (document.getElementById + throw).
+// It deliberately lives in this leaf rather than core/runtime.js: reader
+// modules must never import core/runtime.js, which would otherwise form an
+// import cycle back through subtitle/fetcher.js.
+export function byId(id) {
   const node = document.getElementById(id);
   if (!node) {
     throw new Error(`Missing node: ${id}`);
   }
   return node;
 }
+
+// Reader-domained alias of byId; same lookup, kept so reader call sites read
+// naturally. New code should prefer byId.
+export const getReaderElement = byId;
 
 // Pure DOM visibility check (originally duplicated in reader-impl.js and
 // ai/player-ai.js with identical semantics; both now import this copy).

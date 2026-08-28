@@ -31,19 +31,6 @@ export async function getAsrProviderKey(providerId) {
   return String(keys[providerId] || "").trim();
 }
 
-// 写入/清空单个 provider 的 Key（空串则删除）。
-export async function saveAsrProviderKey(providerId, apiKey) {
-  const keys = await loadAsrProviderKeys();
-  const trimmed = String(apiKey || "").trim();
-  if (trimmed) {
-    keys[providerId] = trimmed;
-  } else {
-    delete keys[providerId];
-  }
-  await chrome.storage.local.set({ [ASR_PROVIDER_KEYS_STORAGE]: keys });
-  return keys;
-}
-
 // 读取 provider 列表，Key 不明文回传，只带 hasSavedKey 占位。
 export async function loadAsrProviders() {
   const [syncData, keys] = await Promise.all([
@@ -295,23 +282,4 @@ function buildMultipartBody(boundary, fields) {
     offset += c.length;
   }
   return out;
-}
-
-// ===== 工具：bytes -> base64 =====
-
-// 分段编码避免 String.fromCharCode 栈溢出（32768 字节/段）。
-function bytesToBase64(bytes) {
-  // 环境差异：浏览器有 btoa，Node 有 Buffer。优先 btoa。
-  if (typeof btoa === "function") {
-    let binary = "";
-    const chunkSize = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
-    }
-    return btoa(binary);
-  }
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(bytes).toString("base64");
-  }
-  throw new Error("当前环境不支持 base64 编码（无 btoa / Buffer）");
 }

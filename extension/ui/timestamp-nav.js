@@ -11,10 +11,8 @@
 // here). The tab-polling helpers `waitForTabComplete` / `delay` are sourced
 // from the shared transport helpers (../shared/tab-utils.js).
 //
-// Module-local constant:
-//   - TIMESTAMP_PATTERN: moved verbatim from sidepanel.js. NOTE: markdown.js
-//     keeps a deliberate PARALLEL-LOCAL copy of the same regex source (used only
-//     by isTimestampOnlyInlineCode); the two must stay byte-identical.
+// TIMESTAMP_PATTERN has a single home in ./markdown.js — this module imports
+// it instead of keeping a parallel copy.
 // Exported functions:
 //   - parseTimestampToSeconds(value)            pure; "mm:ss"/"hh:mm:ss" -> seconds
 //   - unwrapTimestampInlineCode(text)           pure; strips backticks around timestamp-only inline code
@@ -27,9 +25,7 @@
 // retry-wrapped send is injected as a dep (sidepanel provides it).
 import { formatCompactTimestamp } from "../shared/string-utils.js";
 import { waitForTabComplete } from "../shared/tab-utils.js";
-import { isTimestampOnlyInlineCode } from "./markdown.js";
-
-const TIMESTAMP_PATTERN = /\b\d{1,3}:\d{2}(?::\d{2})?\b/g;
+import { isTimestampOnlyInlineCode, TIMESTAMP_PATTERN } from "./markdown.js";
 
 export function parseTimestampToSeconds(value) {
   const parts = String(value || "")

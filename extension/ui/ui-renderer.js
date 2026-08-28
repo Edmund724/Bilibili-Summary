@@ -1,6 +1,6 @@
 import { state, uiState } from "../core/state.js";
+import { byId } from "../shared/dom-utils.js";
 import {
-  byId,
   requestOpenOptions,
   replaceReaderModeUrl
 } from "../core/runtime.js";

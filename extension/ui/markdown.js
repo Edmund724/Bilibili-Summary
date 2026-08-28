@@ -5,27 +5,14 @@
 // no sidepanel module-level state. The ONLY external dependency is escapeHtml
 // (sourced from shared/string-utils.js).
 //
-// Module-local constants:
-//   - TIMESTAMP_PATTERN: a deliberate PARALLEL-LOCAL copy of sidepanel.js's
-//     TIMESTAMP_PATTERN (same regex source /\b\d{1,3}:\d{2}(?::\d{2})?\b/g).
-//     sidepanel's TIMESTAMP_PATTERN is NOT moved here — it belongs to ticket 04
-//     (timestamp-nav, used by linkifyAssistantTimestamps). This local copy exists
-//     only so isTimestampOnlyInlineCode's body stays verbatim-correct without
-//     referencing a sidepanel symbol. Keep the two in sync if the source ever
-//     changes (they must stay byte-identical regex sources).
-//   - TIMESTAMP_INLINE_CODE_REST_PATTERN: moved verbatim from sidepanel.js;
-//     used only by isTimestampOnlyInlineCode.
+// Shared constants:
+//   - TIMESTAMP_PATTERN: the single copy of the timestamp regex
+//     (/\b\d{1,3}:\d{2}(?::\d{2})?\b/g); timestamp-nav.js imports it from here.
+//   - TIMESTAMP_INLINE_CODE_REST_PATTERN: used only by isTimestampOnlyInlineCode.
 import { escapeHtml } from "../shared/string-utils.js";
 
-const TIMESTAMP_PATTERN = /\b\d{1,3}:\d{2}(?::\d{2})?\b/g;
+export const TIMESTAMP_PATTERN = /\b\d{1,3}:\d{2}(?::\d{2})?\b/g;
 const TIMESTAMP_INLINE_CODE_REST_PATTERN = /^[\s,，、;；:：\-–—~～至到]+$/;
-
-export function sanitizeMarkdownHeadingText(value) {
-  return String(value || "")
-    .replace(/\s+/g, " ")
-    .replace(/^#+\s*/, "")
-    .trim() || "AI问答";
-}
 
 export function isTimestampOnlyInlineCode(value) {
   const text = String(value || "").trim();

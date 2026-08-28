@@ -1,24 +1,22 @@
 # State Encapsulation Contract
 
 This document defines how the extension's shared state is read and written. It lives in
-`extension/state.js` and is exported as `state` plus one named object per namespace.
+`extension/core/state.js` and is exported as `state` plus one named object per namespace.
 
 ## Namespaces
 
-There are three namespaces, each exposed two ways (they are the **same** object):
+There are four namespaces, each exposed two ways (they are the **same** object):
 
 | Namespace       | Structured alias  | Business object   |
 | --------------- | ----------------- | ----------------- |
-| `clipState`     | `state.clip`       | clip/subtitle state |
-| `playerAiState` | `state.playerAi`   | player-AI UI state |
-| `uiState`       | `state.ui`         | UI/chrome state    |
+| `readerState`   | `state.reader`    | reader state      |
+| `clipState`     | `state.clip`      | clip/subtitle state |
+| `playerAiState` | `state.playerAi`  | player-AI UI state |
+| `uiState`       | `state.ui`        | UI/chrome state   |
 
-The reader namespace is exposed **only** as `state.reader` (the standalone `readerState` alias was
-removed in issue 07):
-
-| Namespace | Access path    | Business object |
-| --------- | -------------- | --------------- |
-| reader    | `state.reader` | reader state    |
+The module exports `state, clipState, playerAiState, uiState`; the short aliases (`state.reader`,
+`state.clip`, …) live on the `state` target itself. Both spellings of each namespace are the same
+object — prefer the `xxxState` spelling in new code.
 
 Plus a single flat settings object:
 

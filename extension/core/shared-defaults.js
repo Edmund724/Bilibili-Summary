@@ -135,8 +135,11 @@ export function normalizeAiThinkingLevel(value) {
   return value === "low" || value === "high" ? value : "off";
 }
 
-// ASR 转写语言档位（auto / zh / en），auto 为默认。枚举与
-// ASR_LANGUAGE_OPTIONS 保持一致；非法值回落 auto。
+// ASR 转写语言档位（全局设置 asrLanguage，auto / zh / en），auto 为默认，
+// 非法值回落 auto。zh/en 由适配器转为查询参数传给平台：SiliconFlow 辰星
+// （XingChen）系列模型只有传 ?language=english 才走英文转写，否则纯英文
+// 音频静默返回空文本；本地 Whisper 忽略该参数（服务端自动识别）。
+// 该设置只出现在 popup 顶部。
 export function normalizeAsrLanguage(value) {
   const lang = String(value || "").trim().toLowerCase();
   return lang === "zh" || lang === "en" ? lang : "auto";
@@ -145,17 +148,7 @@ export function normalizeAsrLanguage(value) {
 // ===== ASR（语音转写）平台预设 =====
 // 字段含义见 spec.md 第 4 节。type 决定走哪个适配器，共一种：
 //   openai-transcriptions：OpenAI 兼容 multipart 端点（SiliconFlow / 本地 Whisper / 自定义）
-// maxBytes / maxDurationSec 用于切片决策；supportsTimestamps 决定时间戳合成方式。
-// ASR 转写语言档位（全局设置 asrLanguage）：auto（自动检测）/ zh / en。
-// zh/en 由适配器转为查询参数传给平台：SiliconFlow 辰星（XingChen）系列模型
-// 只有传 ?language=english 才走英文转写，否则纯英文音频静默返回空文本；
-// 本地 Whisper 忽略该参数（服务端自动识别）。该设置只出现在 popup 顶部。
-export const ASR_LANGUAGE_OPTIONS = [
-  { value: "auto", label: "自动检测（推荐）" },
-  { value: "zh", label: "中文" },
-  { value: "en", label: "English（英文视频选此项）" }
-];
-
+// supportsTimestamps 决定时间戳合成方式。
 export const ASR_PROVIDER_PRESETS = [
   {
     id: "siliconflow-sensevoice",
@@ -170,8 +163,6 @@ export const ASR_PROVIDER_PRESETS = [
       { value: "XingChenAGI/XingChenASR-Diarize-V3.0", label: "XingChenAGI/XingChenASR-Diarize-V3.0" },
       { value: "XingChenAGI/XingChenASR-V3.2-Ultra", label: "XingChenAGI/XingChenASR-V3.2-Ultra" }
     ],
-    maxBytes: 50 * 1024 * 1024, // 50MB
-    maxDurationSec: 60 * 60, // 1 小时
     supportsTimestamps: true,
     note: "模型名从下拉四选一；Qwen/Qwen3-ASR-1.7B 为收费模型。英文视频请在插件页顶部切换为 English 后重新刷新。"
   },
@@ -181,8 +172,6 @@ export const ASR_PROVIDER_PRESETS = [
     type: "openai-transcriptions",
     baseUrl: "http://localhost:8000/v1",
     model: "whisper-large-v3",
-    maxBytes: 0, // 取决于本地部署，0 表示不限制
-    maxDurationSec: 0, // 不限制
     supportsTimestamps: true, // verbose_json segments
     note: "本地部署，音频不上传任何外部服务。model 可按本地部署情况修改。"
   },
@@ -192,8 +181,6 @@ export const ASR_PROVIDER_PRESETS = [
     type: "openai-transcriptions",
     baseUrl: "",
     model: "",
-    maxBytes: 0,
-    maxDurationSec: 0,
     supportsTimestamps: true, // 自动探测
     language: "auto",
     note: "兼容 OpenAI transcriptions 协议的自定义端点。"
@@ -204,10 +191,6 @@ export const ASR_PROVIDER_PRESETS = [
 const ASR_PROVIDER_TYPES = new Set([
   "openai-transcriptions"
 ]);
-
-export function getAsrPresetById(id) {
-  return ASR_PROVIDER_PRESETS.find((p) => p.id === id) || null;
-}
 
 // 归一化单个 ASR provider：字段齐全 + type 合法值校验。
 // 与 normalizeAiProvider 平行：持久化层只存"明文可回传"字段，
@@ -225,8 +208,6 @@ export function normalizeAsrProvider(item) {
     type,
     baseUrl: String(item.baseUrl || "").trim().replace(/\/+$/, ""),
     model: String(item.model || "").trim(),
-    maxBytes: Number(item.maxBytes) || 0,
-    maxDurationSec: Number(item.maxDurationSec) || 0,
     supportsTimestamps: item.supportsTimestamps !== false,
     enabled: item.enabled !== false
   };
@@ -248,10 +229,6 @@ export const PRESETS = [
   { id: "ollama",        name: "Ollama (本地)", baseUrl: "http://localhost:11434/v1", requiresKey: false },
   { id: "custom",        name: "自定义",      baseUrl: "", requiresKey: true }
 ];
-
-export function getPresetById(id) {
-  return PRESETS.find((p) => p.id === id) || null;
-}
 
 export function normalizeBaseUrl(value) {
   return String(value || "").trim().replace(/\/+$/, "");
@@ -500,7 +477,7 @@ export const DEFAULT_SETTINGS = {
   defaultModel: "",
   aiThinkingLevel: "off",
   // ===== ASR（语音转写）回退配置 =====
-  asrProviders: [],          // [{id, name, type, baseUrl, model, language, maxBytes, maxDurationSec, ...}]
+  asrProviders: [],          // [{id, name, type, baseUrl, model, language, ...}]
   activeAsrProviderId: "",   // 当前选用的 ASR 平台 id
   asrAutoFallback: true,     // 无字幕轨时自动走 ASR；false 则仅提示
   asrLanguage: "auto"        // 转写语言档位（auto/zh/en），zh/en 传给平台

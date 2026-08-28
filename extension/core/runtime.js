@@ -171,11 +171,3 @@ export async function getSettings(timeoutMs = 5000) {
     return { ...DEFAULT_SETTINGS };
   }
 }
-
-export function byId(id) {
-  const node = document.getElementById(id);
-  if (!node) {
-    throw new Error(`Missing node: ${id}`);
-  }
-  return node;
-}

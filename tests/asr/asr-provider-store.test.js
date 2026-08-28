@@ -113,32 +113,11 @@ describe("loadAsrProviders / saveAsrProviders", () => {
   });
 });
 
-describe("saveAsrProviderKey / getAsrProviderKey", () => {
-  it("写入并读取单个 Key", async () => {
-    const { saveAsrProviderKey, getAsrProviderKey } = await loadModule();
-    await saveAsrProviderKey("p1", "my-key");
-    expect(await getAsrProviderKey("p1")).toBe("my-key");
-  });
-
-  it("空串删除已存 Key", async () => {
-    const { saveAsrProviderKey, getAsrProviderKey } = await loadModule();
-    await saveAsrProviderKey("p1", "my-key");
-    await saveAsrProviderKey("p1", "   ");
-    expect(await getAsrProviderKey("p1")).toBe("");
-  });
-
-  it("getAsrProviderKey 空 id 返回空串", async () => {
+describe("getAsrProviderKey", () => {
+  it("空 id 返回空串", async () => {
     const { getAsrProviderKey } = await loadModule();
     expect(await getAsrProviderKey("")).toBe("");
     expect(await getAsrProviderKey(null)).toBe("");
-  });
-
-  it("读取已存 Key 通过 loadAsrProviderKeys 返回全量映射", async () => {
-    const { saveAsrProviderKey, loadAsrProviderKeys } = await loadModule();
-    await saveAsrProviderKey("p1", "k1");
-    await saveAsrProviderKey("p2", "k2");
-    const keys = await loadAsrProviderKeys();
-    expect(keys).toEqual({ p1: "k1", p2: "k2" });
   });
 });
 

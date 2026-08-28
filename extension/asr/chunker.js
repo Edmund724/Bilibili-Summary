@@ -1,10 +1,9 @@
 // extension/asr/chunker.js
-// 音频解码 + 切片 + WAV 编码（16bit PCM / 16kHz / 单声道）。
-// Service Worker 没有 AudioContext，解码与重采样抽成「宿主」注入式接口：
-//   - 服务层用 offscreen 文档宿主（见 offscreen-bridge.js，接 entry/offscreen.js 基建）；
-//   - offscreen 文档侧直接用 buildWavChunks 把解码结果切成 WAV 块，跨 context 只回传 base64；
-//   - Firefox 无 offscreen（Chrome MV3 专属），由 side panel 页面侧充当宿主（spec 备忘 7）；
-//   接口参数化，调用方可按环境替换宿主。
+// WAV 编码（16bit PCM / 16kHz / 单声道）+ 切片。
+// Service Worker 没有 AudioContext：解码与重采样由 offscreen 文档宿主完成
+// （见 offscreen-bridge.js，接 entry/offscreen.js 基建），本模块只负责
+// 编码、切片计划与解码结果校验；offscreen 文档侧用 buildWavChunks 把
+// 解码结果切成 WAV 块，跨 context 只回传 base64。
 // 核心模块不直接碰 AudioContext，Node/vitest 下可独立测试。WAV header 手写，不引依赖。
 
 // ===== WAV 编码 =====
@@ -110,7 +109,7 @@ export function makeDecodedBuffer(channelData, { sampleRate = 16000, diagnostic 
 //   - 峰值≈0 且时长 > 0 → 解码出来疑似静音（音轨获取或容器解码出了问题），
 //     直接报错，避免上游把空音频转写出误导性的"未识别到语音内容"；
 //   - 时长 ≤ 0（空采样/采样率异常）→ 报错，绝不静默产出空切片。
-// processAudio 与 offscreen 文档侧共用（解码产物一致，校验口径也必须一致）。
+// buildWavChunks 与 offscreen 文档侧共用（解码产物一致，校验口径也必须一致）。
 export function validateDecodedAudio(audioBuffer) {
   // 解码诊断：offscreen 宿主会附带 {durationSec, peak}
   const diag = audioBuffer?.diagnostic;
@@ -131,48 +130,10 @@ export function validateDecodedAudio(audioBuffer) {
   return totalDurationSec;
 }
 
-// ===== 整链：校验 → 切片 → 编码 =====
-
-// 解码宿主契约：decodeHost 为 async (arrayBuffer) => { sampleRate, length,
-// getChannelData(ch) }（AudioBuffer 鸭子类型），返回的必须是已重采样为
-// 16000Hz 单声道的 buffer——重采样是宿主职责，核心模块只依赖该契约做切片与
-// 编码。默认宿主见 offscreen-bridge.js 的 createOffscreenChunkHost（offscreen
-// 文档直出切片）；Firefox 无 offscreen 时由 side panel 页面侧实现同契约宿主传入（spec 备忘 7）。
-//
-// 返回 [{ index, startSec, wavBlob }]，wavBlob 为 16bit PCM WAV（16kHz 单声道）。
-// decodeHost 抛错（坏字节/不支持的容器）→ 包装为 Error：message 含「音频解码失败」，
-// 并附原始文件头前 32 字节的 hex 诊断（.diagnostic 字段 + message 内）。
-export async function processAudio(arrayBuffer, { decodeHost, plan }) {
-  let audioBuffer;
-  try {
-    audioBuffer = await decodeHost(arrayBuffer);
-  } catch {
-    const diagnostic = hexDiagnostic(arrayBuffer);
-    const err = new Error(`音频解码失败（文件头 32 字节: ${diagnostic}）`);
-    err.diagnostic = diagnostic;
-    throw err;
-  }
-
-  const totalDurationSec = validateDecodedAudio(audioBuffer);
-  const chunks = decideChunks(totalDurationSec, plan);
-  const channelData = audioBuffer.getChannelData(0);
-
-  return chunks.map((chunk) => {
-    const startSample = Math.round(chunk.startSec * audioBuffer.sampleRate);
-    const sampleCount = Math.round(chunk.durationSec * audioBuffer.sampleRate);
-    return {
-      index: chunk.index,
-      startSec: chunk.startSec,
-      wavBlob: encodeWav(
-        channelData.subarray(startSample, startSample + sampleCount),
-        audioBuffer.sampleRate
-      )
-    };
-  });
-}
+// ===== 切片编码：校验 → 切片 → 编码 =====
 
 // 直接按切片计划把已解码音频切成 WAV 块（offscreen 文档侧用，跨 context
-// 只回传 base64 字符串，不复用 processAudio 的解码宿主注入）。
+// 只回传 base64 字符串；解码与重采样由宿主侧完成后把结果传入）。
 // 返回 [{ index, startSec, durationSec, wavBlob }]，durationSec 由
 // decideChunks 产出（页面上游依赖该字段推算片边界）。
 export function buildWavChunks(audioBuffer, plan) {
@@ -191,16 +152,5 @@ export function buildWavChunks(audioBuffer, plan) {
       )
     };
   });
-}
-
-// 文件头字节 → 小写 hex（默认前 32 字节），解码失败时附在错误信息里定位问题
-function hexDiagnostic(arrayBuffer, maxBytes = 32) {
-  const bytes = new Uint8Array(arrayBuffer);
-  const head = bytes.subarray(0, Math.min(maxBytes, bytes.length));
-  let hex = "";
-  for (let i = 0; i < head.length; i++) {
-    hex += head[i].toString(16).padStart(2, "0");
-  }
-  return hex;
 }
 

@@ -7,9 +7,11 @@ import {
   ASR_PROVIDER_PRESETS,
   DEFAULT_SETTINGS,
   normalizeAsrProvider,
-  normalizeAsrLanguage,
-  getAsrPresetById
+  normalizeAsrLanguage
 } from "../../extension/core/shared-defaults.js";
+
+// 本地查找助手：生产代码没有按 id 查预设的导出（按需直接遍历预设表）。
+const presetById = (id) => ASR_PROVIDER_PRESETS.find((p) => p.id === id) || null;
 
 describe("ASR_PROVIDER_PRESETS", () => {
   it("包含三个内置预设（SiliconFlow/本地 Whisper/自定义）", () => {
@@ -29,24 +31,22 @@ describe("ASR_PROVIDER_PRESETS", () => {
       expect(validTypes.has(p.type)).toBe(true);
       expect(typeof p.baseUrl).toBe("string");
       expect(typeof p.model).toBe("string");
-      expect(typeof p.maxBytes).toBe("number");
-      expect(typeof p.maxDurationSec).toBe("number");
       expect(typeof p.supportsTimestamps).toBe("boolean");
       expect(typeof p.note).toBe("string");
     }
   });
 
   it("SiliconFlow 与本地 Whisper 同为 openai-transcriptions", () => {
-    expect(getAsrPresetById("siliconflow-sensevoice").type).toBe("openai-transcriptions");
-    expect(getAsrPresetById("local-whisper").type).toBe("openai-transcriptions");
+    expect(presetById("siliconflow-sensevoice").type).toBe("openai-transcriptions");
+    expect(presetById("local-whisper").type).toBe("openai-transcriptions");
   });
 
   it("SiliconFlow 已支持返回时间戳，supportsTimestamps=true", () => {
-    expect(getAsrPresetById("siliconflow-sensevoice").supportsTimestamps).toBe(true);
+    expect(presetById("siliconflow-sensevoice").supportsTimestamps).toBe(true);
   });
 
   it("SiliconFlow 提供 4 个 ASR 模型下拉选项（Qwen3 标明收费）", () => {
-    const sf = getAsrPresetById("siliconflow-sensevoice");
+    const sf = presetById("siliconflow-sensevoice");
     expect(Array.isArray(sf.modelOptions)).toBe(true);
     expect(sf.modelOptions.map((o) => o.value)).toEqual([
       "Qwen/Qwen3-ASR-1.7B",
@@ -57,10 +57,6 @@ describe("ASR_PROVIDER_PRESETS", () => {
     expect(sf.modelOptions[0].label).toContain("收费");
     // 默认 model 必须是有效下拉选项，保证新建行下拉框有默认选中项
     expect(sf.modelOptions.some((o) => o.value === sf.model)).toBe(true);
-  });
-
-  it("getAsrPresetById 未知 id 返回 null", () => {
-    expect(getAsrPresetById("nonexistent")).toBeNull();
   });
 });
 
@@ -73,8 +69,6 @@ describe("normalizeAsrProvider", () => {
       type: "openai-transcriptions",
       baseUrl: "https://api.siliconflow.cn/v1/",
       model: "FunAudioLLM/SenseVoiceSmall",
-      maxBytes: 52428800,
-      maxDurationSec: 3600,
       supportsTimestamps: false
     });
     expect(out).toEqual({
@@ -84,8 +78,6 @@ describe("normalizeAsrProvider", () => {
       type: "openai-transcriptions",
       baseUrl: "https://api.siliconflow.cn/v1",
       model: "FunAudioLLM/SenseVoiceSmall",
-      maxBytes: 52428800,
-      maxDurationSec: 3600,
       supportsTimestamps: false,
       enabled: true
     });
@@ -158,19 +150,6 @@ describe("normalizeAsrProvider", () => {
       id: "p2", type: "openai-transcriptions", baseUrl: "x", model: "y", enabled: "yes"
     });
     expect(enabledTruthy.enabled).toBe(true);
-  });
-
-  it("maxBytes / maxDurationSec 非数字回落 0（不限制）", () => {
-    const out = normalizeAsrProvider({
-      id: "p1",
-      type: "openai-transcriptions",
-      baseUrl: "x",
-      model: "y",
-      maxBytes: "abc",
-      maxDurationSec: null
-    });
-    expect(out.maxBytes).toBe(0);
-    expect(out.maxDurationSec).toBe(0);
   });
 });
 

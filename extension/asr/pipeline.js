@@ -41,7 +41,7 @@ const ADAPTERS = {
 // 并发窗口：最多 limit 个任务同时执行，按完成顺序收集结果（无顺序依赖，
 // 合成阶段按片 index 排序即可）。返回与 tasks 等长的结果数组。
 // 个别任务失败（非 STALE_RUN）收集为 Error 结果；STALE_RUN 中止并上抛。
-async function runWithConcurrency(tasks, limit = 2) {
+export async function runWithConcurrency(tasks, limit = 2) {
   const results = new Array(tasks.length);
   let nextIndex = 0;
   const worker = async () => {
@@ -99,7 +99,7 @@ async function transcribeChunk({ chunk, provider, ensureActive, onProgress }) {
 //   无 → 整片一条粗粒度字幕 {from:startSec, to:startSec+durationSec}。
 // to 不超过片末边界（chunk.durationSec 由 pipeline 推算，此处兜底取
 // 入参 durationSec）；content trim。
-export function synthesizeChunk({ startSec, durationSec, result }) {
+function synthesizeChunk({ startSec, durationSec, result }) {
   const out = [];
   const chunkDur = Number(result?.durationSec || 0) || Number(durationSec) || 0;
   if (result?.segments && result.segments.length > 0) {
@@ -130,7 +130,7 @@ export function synthesizeChunk({ startSec, durationSec, result }) {
 
 // 全部片段合成 → 按 from 排序 → content 拼接 trim 为空返回 []（上层提示
 // "未识别到语音内容"）。
-export function mergeChunkResults(chunks, results) {
+function mergeChunkResults(chunks, results) {
   const merged = [];
   for (let i = 0; i < chunks.length; i += 1) {
     const chunk = chunks[i];
@@ -222,5 +222,3 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
   ensureActive();
   return collectResults(results);
 }
-
-export { ensureRunActive, retryAsync, runWithConcurrency };
