@@ -23,9 +23,13 @@ import {
   saveAsrProviders,
   deleteAsrProvider,
   loadAsrProviderKeys,
+  getAsrProviderKey,
   testAsrConnection
 } from "../asr/asr-provider-store.js";
-import { createProviderMessageHandlers } from "../core/provider-handlers.js";
+import {
+  createProviderMessageHandlers,
+  createAsrRuntimeConfigHandler
+} from "../core/provider-handlers.js";
 import {
   getAiSidepanelState,
   resolveAiSidepanelContext,
@@ -206,6 +210,13 @@ const asrProviderHandlers = createProviderMessageHandlers({
   pickTestProvider: (message) => ({ provider: message.provider || {} })
 });
 
+// 内容脚本 ASR 回退的运行时配置：settings 归一化结果 + 激活平台 Key 一次
+// 回包，provider-store 存储层不再进内容 bundle（契约见 provider-handlers.js）。
+const handleGetAsrRuntimeConfig = createAsrRuntimeConfigHandler({
+  getMergedSettings,
+  getAsrProviderKey
+});
+
 // ===== 通用 offscreen 任务通道 =====
 
 // 把任务转发给"临时创建的 offscreen 文档"执行：asr-decode-prepare 建文档 +
@@ -275,6 +286,7 @@ const messageHandlers = new Map([
   ["asr-providers-delete", asrProviderHandlers.remove],
   ["get-asr-provider-key", asrProviderHandlers.get],
   ["asr-providers-test", asrProviderHandlers.test],
+  ["get-asr-runtime-config", handleGetAsrRuntimeConfig],
   ["offload-task", handleOffloadTask],
   ["ai-sidepanel-get-state", handleAiSidepanelGetState],
   ["ai-sidepanel-resolve-context", handleAiSidepanelResolveContext],

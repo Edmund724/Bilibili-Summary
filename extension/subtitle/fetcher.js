@@ -4,7 +4,7 @@ import { normalizeDownloadFormat } from "../core/validators.js";
 import { sleep } from "../shared/utils.js";
 import { state, clipState } from "../core/state.js";
 import { extractBvid, computeCurrentClipSignature } from "../bilibili/video-id-shared.js";
-import { getSettings } from "../core/runtime.js";
+import { getSettings, sendRuntimeMessage } from "../core/runtime.js";
 import { byId } from "../shared/dom-utils.js";
 import { ensureRunActive, isStaleRunError, getErrorMessage, toReadableText, isRetryableNetworkError } from "../shared/error-helpers.js";
 import { logInfo, logWarn } from "../shared/logging.js";
@@ -47,10 +47,6 @@ import {
   readVideoDescription,
   applyNoSubtitleState
 } from "./ui.js";
-import {
-  loadAsrProviders,
-  getAsrProviderKey
-} from "../asr/asr-provider-store.js";
 import { runAsrPipeline } from "../asr/pipeline.js";
 
 // The fetcher is always loaded at startup through the message-handler / entry
@@ -500,6 +496,31 @@ function broadcastSubtitleStatus(phase) {
 // 只能从头重转。key 为 ASR 缓存键（bvid/cid/provider/model/language）。
 let activeAsrTranscribe = null;
 
+// ASR 回退运行时配置：经 background 消息获取（与 getSettings 同一传输层，
+// 形状也镜像 getSettings 的超时 + 降级语义）。失败/超时按"无 ASR 配置"
+// 处理：logWarn 后返回 null，调用方静默跳过本轮回退（与旧存储读取失败同
+// 语义），不做 UI 提示。无缓存——回退每次尝试现查，避免 Key 过期问题。
+async function requestAsrRuntimeConfig(timeoutMs = 5000) {
+  try {
+    const timeoutPromise = new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error("get-asr-runtime-config timeout")), timeoutMs);
+    });
+    const response = await Promise.race([
+      sendRuntimeMessage({ type: "get-asr-runtime-config" }),
+      timeoutPromise
+    ]);
+    if (!response?.ok) {
+      throw new Error(response?.error || "get-asr-runtime-config failed");
+    }
+    return response;
+  } catch (error) {
+    logWarn("[BOC] get-asr-runtime-config failed, skipping asr fallback this round", {
+      error: getErrorMessage(error)
+    });
+    return null;
+  }
+}
+
 // 无字幕轨时的语音识别回退入口。流程：
 //   skip（未启用开关 / 无激活平台）→ 返回 "skip"，调用方走原有无字幕提示
 //   （提示文案已追加引导句，见 applyNoSubtitleState 调用处）；
@@ -511,33 +532,41 @@ async function maybeRunAsrFallback({ runId }) {
   try {
     ensureRunActive(runId);
 
-    // 设置判定：开关未启用或没有激活平台 → skip（与现状行为一致，仅文案变化）
+    // 设置判定：开关未启用或没有激活平台 → skip（与现状行为一致，仅文案变化）。
+    // 快速出口先于消息请求：回退关闭时不产生 background 往返。
     const settings = state.settings || (await getSettings());
     const enabled = settings.asrAutoFallback === true;
     const activeId = String(settings.activeAsrProviderId || "").trim();
     if (!enabled || !activeId) {
       return "skip";
     }
-    const providers = await loadAsrProviders();
+
+    // provider 列表 + 激活平台 Key 改经 background 消息获取（provider-store
+    // 存储层不再进内容 bundle）。响应是 background 侧的一次性一致快照
+    // （activeAsrProviderId/activeKey/asrLanguage 同源），provider 选择与
+    // 开关判定仍留在内容侧；不做内容侧缓存（低频调用，缓存会引入 Key 过期）。
+    const asrRuntime = await requestAsrRuntimeConfig();
     ensureRunActive(runId);
-    const activeProvider = (providers || []).find((p) => p.id === activeId);
+    if (!asrRuntime || asrRuntime.asrAutoFallback === false) {
+      return "skip";
+    }
+    const runtimeActiveId = String(asrRuntime.activeAsrProviderId || "").trim();
+    const activeProvider = (asrRuntime.providers || []).find((p) => p.id === runtimeActiveId);
     if (!activeProvider) {
       return "skip";
     }
 
-    // 组装 provider（含已存 Key），准备跑管线
-    const apiKey = await getAsrProviderKey(activeId);
-    ensureRunActive(runId);
-    const provider = { ...activeProvider, apiKey };
+    // 组装 provider（附激活平台已存 Key），准备跑管线
+    const provider = { ...activeProvider, apiKey: String(asrRuntime.activeKey || "") };
     // 生效转写语言：全局 asrLanguage 设置（popup 顶部切换，默认 auto）。
     // auto 不传语言参数，交服务端自动检测。
-    provider.language = settings.asrLanguage || "auto";
+    provider.language = asrRuntime.asrLanguage || "auto";
     const platformName = provider.name || "语音识别平台";
     const model = String(provider.model || "").trim();
     const cacheKey = getSubtitleCacheKey({
       bvid: state.clip.bvid,
       cid: state.clip.cid,
-      subtitleId: `asr:${activeId}:${model}:${provider.language}`
+      subtitleId: `asr:${runtimeActiveId}:${model}:${provider.language}`
     });
 
     // 缓存命中：直接收尾（校验通过才用，不通过则清掉重新生成）

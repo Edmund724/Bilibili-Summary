@@ -61,11 +61,10 @@ vi.mock("../../extension/subtitle/cache.js", async (importOriginal) => {
     getSubtitleCacheKey: vi.fn(({ subtitleId }) => `boc_subtitle_cache_${subtitleId || "x"}`)
   };
 });
-// ASR 依赖 mock：provider store / pipeline / audio-source / offscreen-bridge
-vi.mock("../../extension/asr/asr-provider-store.js", () => ({
-  loadAsrProviders: vi.fn(async () => []),
-  getAsrProviderKey: vi.fn(async () => "")
-}));
+// ASR 依赖 mock：pipeline / audio-source / offscreen-bridge。provider 配置
+// 不再经 asr-provider-store 内容侧直读（已收口到 background 的
+// get-asr-runtime-config 消息），mock 改走 chrome.runtime.sendMessage 的
+// 消息桩回包（见 beforeEach / setAsrRuntimeConfig）。
 vi.mock("../../extension/asr/pipeline.js", () => ({
   runAsrPipeline: vi.fn(async () => [])
 }));
@@ -79,7 +78,6 @@ vi.mock("../../extension/asr/offscreen-bridge.js", () => ({
 let fetcher;
 let gatewayMock;
 let cacheMock;
-let asrStoreMock;
 let pipelineMock;
 let audioSourceMock;
 let offscreenBridgeMock;
@@ -92,7 +90,6 @@ beforeEach(async () => {
   fetcher = await import("../../extension/subtitle/fetcher.js");
   gatewayMock = await import("../../extension/bilibili/gateway.js");
   cacheMock = await import("../../extension/subtitle/cache.js");
-  asrStoreMock = await import("../../extension/asr/asr-provider-store.js");
   pipelineMock = await import("../../extension/asr/pipeline.js");
   audioSourceMock = await import("../../extension/asr/audio-source.js");
   offscreenBridgeMock = await import("../../extension/asr/offscreen-bridge.js");
@@ -100,16 +97,22 @@ beforeEach(async () => {
   uiRendererMock = await import("../../extension/ui/ui-renderer.js");
   stateMod = await import("../../extension/core/state.js");
 
-  for (const m of [gatewayMock, cacheMock, asrStoreMock, pipelineMock, audioSourceMock, offscreenBridgeMock, uiMock, uiRendererMock]) {
+  for (const m of [gatewayMock, cacheMock, pipelineMock, audioSourceMock, offscreenBridgeMock, uiMock, uiRendererMock]) {
     for (const key of Object.keys(m)) {
       if (typeof m[key] === "function" && m[key].mockReset) {
         m[key].mockReset();
       }
     }
   }
-  // 默认：无字幕 + ASR 未配置（skip 分支）
-  asrStoreMock.loadAsrProviders.mockResolvedValue([]);
-  asrStoreMock.getAsrProviderKey.mockResolvedValue("");
+  // 默认：无字幕 + ASR 未配置（skip 分支）——运行时配置回空 provider 列表
+  globalThis.__asrRuntimeConfig = {
+    ok: true,
+    providers: [],
+    activeAsrProviderId: "p1",
+    activeKey: "",
+    asrLanguage: "auto",
+    asrAutoFallback: true
+  };
   pipelineMock.runAsrPipeline.mockResolvedValue([]);
   offscreenBridgeMock.createOffscreenChunkHost.mockImplementation(() => async () => []);
   cacheMock.loadSubtitleFromCache.mockResolvedValue(null);
@@ -121,20 +124,42 @@ beforeEach(async () => {
     activeAsrProviderId: "p1"
   };
   globalThis.__syncSettings = syncSettings;
-  globalThis.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
-    if (message?.type === "get-settings") {
-      callback?.({ ok: true, settings: syncSettings });
-      return undefined;
-    }
-    callback?.({ ok: true });
-    return undefined;
-  });
+  installContentMessageMock();
   stateMod.state.settings = {
     ...stateMod.state.settings,
     asrAutoFallback: true,
     activeAsrProviderId: "p1"
   };
 });
+
+// 统一消息桩：get-settings 回 __syncSettings，get-asr-runtime-config 回
+// __asrRuntimeConfig（fetcher 的 ASR 运行时配置 seam），其余消息默认 ok:true。
+function installContentMessageMock() {
+  globalThis.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+    if (message?.type === "get-settings") {
+      callback?.({ ok: true, settings: globalThis.__syncSettings });
+      return undefined;
+    }
+    if (message?.type === "get-asr-runtime-config") {
+      callback?.(globalThis.__asrRuntimeConfig);
+      return undefined;
+    }
+    callback?.({ ok: true });
+    return undefined;
+  });
+}
+
+// 更新 get-settings 返回的设置（fetcher 的 getSettings 读 chrome.runtime.sendMessage）
+function setSyncSettings(patch) {
+  globalThis.__syncSettings = { ...globalThis.__syncSettings, ...patch };
+  installContentMessageMock();
+}
+
+// 更新 get-asr-runtime-config 回包（provider 列表 + 激活平台 Key 的消息 seam）
+function setAsrRuntimeConfig(patch) {
+  globalThis.__asrRuntimeConfig = { ...globalThis.__asrRuntimeConfig, ...patch };
+  installContentMessageMock();
+}
 
 // 走 refreshClip 的无字幕出口：给 DOM 补 preview 节点（applyNoSubtitleState
 // 用 byId 写空值），gateway mock 返回空字幕轨。
@@ -154,20 +179,6 @@ async function runRefreshClipWithNoSubtitles() {
   });
   gatewayMock.fetchSubtitleBundle.mockResolvedValue({ tracks: [], chapters: [] });
   await fetcher.refreshClip();
-}
-
-// 更新 get-settings 返回的设置（fetcher 的 getSettings 读 chrome.runtime.sendMessage）
-function setSyncSettings(patch) {
-  const settings = { ...globalThis.__syncSettings, ...patch };
-  globalThis.__syncSettings = settings;
-  globalThis.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
-    if (message?.type === "get-settings") {
-      callback?.({ ok: true, settings });
-      return undefined;
-    }
-    callback?.({ ok: true });
-    return undefined;
-  });
 }
 
 describe("maybeRunAsrFallback skip 分支", () => {
@@ -195,7 +206,24 @@ describe("maybeRunAsrFallback skip 分支", () => {
   });
 
   it("激活平台 id 不在已配置列表中：返回 skip", async () => {
-    asrStoreMock.loadAsrProviders.mockResolvedValue([{ id: "other", type: "openai-transcriptions", name: "其他" }]);
+    setAsrRuntimeConfig({ providers: [{ id: "other", type: "openai-transcriptions", name: "其他" }] });
+    await runRefreshClipWithNoSubtitles();
+
+    expect(pipelineMock.runAsrPipeline).not.toHaveBeenCalled();
+    expect(uiMock.applyNoSubtitleState).toHaveBeenCalled();
+  });
+
+  it("运行时配置消息失败：视为无 ASR 配置，静默跳过回退", async () => {
+    // get-asr-runtime-config 回包失败（存储读取失败等）→ 与旧内容侧直读
+    // 存储失败同语义：跳过回退走无字幕提示，不崩、不转写。
+    globalThis.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+      if (message?.type === "get-asr-runtime-config") {
+        callback?.({ ok: false, error: "storage boom" });
+        return undefined;
+      }
+      callback?.({ ok: true });
+      return undefined;
+    });
     await runRefreshClipWithNoSubtitles();
 
     expect(pipelineMock.runAsrPipeline).not.toHaveBeenCalled();
@@ -205,10 +233,12 @@ describe("maybeRunAsrFallback skip 分支", () => {
 
 describe("maybeRunAsrFallback 成功与缓存", () => {
   it("配置齐全：管线产出字幕 → 塞伪轨道 + ready + 写缓存 + 完成提示", async () => {
-    asrStoreMock.loadAsrProviders.mockResolvedValue([
-      { id: "p1", type: "openai-transcriptions", name: "本地 Whisper", model: "whisper-large-v3", supportsTimestamps: true }
-    ]);
-    asrStoreMock.getAsrProviderKey.mockResolvedValue("sk-local");
+    setAsrRuntimeConfig({
+      providers: [
+        { id: "p1", type: "openai-transcriptions", name: "本地 Whisper", model: "whisper-large-v3", supportsTimestamps: true }
+      ],
+      activeKey: "sk-local"
+    });
     pipelineMock.runAsrPipeline.mockResolvedValue([
       { from: 0, to: 1.2, content: "你好" },
       { from: 1.5, to: 2.4, content: "世界" }
@@ -217,10 +247,10 @@ describe("maybeRunAsrFallback 成功与缓存", () => {
     await runRefreshClipWithNoSubtitles();
 
     expect(pipelineMock.runAsrPipeline).toHaveBeenCalledTimes(1);
-    // 语言档位来自全局 asrLanguage 设置，注入 provider.language
+    // 语言档位来自运行时配置快照的 asrLanguage，激活平台 Key 经 seam 注入
     expect(pipelineMock.runAsrPipeline).toHaveBeenCalledWith(
       expect.objectContaining({
-        provider: expect.objectContaining({ language: "auto", model: "whisper-large-v3" })
+        provider: expect.objectContaining({ language: "auto", model: "whisper-large-v3", apiKey: "sk-local" })
       })
     );
 
@@ -238,9 +268,12 @@ describe("maybeRunAsrFallback 成功与缓存", () => {
   });
 
   it("缓存命中：不发 playurl、不下载、不转写，直接 ready 收尾", async () => {
-    asrStoreMock.loadAsrProviders.mockResolvedValue([
-      { id: "p1", type: "openai-transcriptions", name: "本地 Whisper", model: "whisper-large-v3", supportsTimestamps: true }
-    ]);
+    setAsrRuntimeConfig({
+      providers: [
+        { id: "p1", type: "openai-transcriptions", name: "本地 Whisper", model: "whisper-large-v3", supportsTimestamps: true }
+      ],
+      activeKey: "sk-local"
+    });
     cacheMock.loadSubtitleFromCache.mockResolvedValue([
       { from: 0, to: 1, content: "缓存句" },
       { from: 2, to: 290, content: "足够长的缓存字幕" }
@@ -264,9 +297,12 @@ describe("maybeRunAsrFallback 成功与缓存", () => {
 
 describe("maybeRunAsrFallback 空结果与失败", () => {
   it("空结果：文案「未识别到语音内容」出现，落回无字幕状态", async () => {
-    asrStoreMock.loadAsrProviders.mockResolvedValue([
-      { id: "p1", type: "openai-transcriptions", name: "本地 Whisper", model: "whisper-large-v3" }
-    ]);
+    setAsrRuntimeConfig({
+      providers: [
+        { id: "p1", type: "openai-transcriptions", name: "本地 Whisper", model: "whisper-large-v3" }
+      ],
+      activeKey: "sk-local"
+    });
     pipelineMock.runAsrPipeline.mockResolvedValue([]);
 
     await runRefreshClipWithNoSubtitles();
@@ -280,9 +316,12 @@ describe("maybeRunAsrFallback 空结果与失败", () => {
   });
 
   it("管线失败：错误文案进状态，不崩，applyNoSubtitleState 被调用", async () => {
-    asrStoreMock.loadAsrProviders.mockResolvedValue([
-      { id: "p1", type: "openai-transcriptions", name: "本地 Whisper", model: "whisper-large-v3" }
-    ]);
+    setAsrRuntimeConfig({
+      providers: [
+        { id: "p1", type: "openai-transcriptions", name: "本地 Whisper", model: "whisper-large-v3" }
+      ],
+      activeKey: "sk-local"
+    });
     pipelineMock.runAsrPipeline.mockRejectedValue(new Error("音频解码失败"));
 
     await runRefreshClipWithNoSubtitles();

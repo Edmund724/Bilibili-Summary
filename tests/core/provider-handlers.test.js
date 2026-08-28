@@ -7,7 +7,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
-import { createProviderMessageHandlers } from "../../extension/core/provider-handlers.js";
+import { createProviderMessageHandlers, createAsrRuntimeConfigHandler } from "../../extension/core/provider-handlers.js";
 
 // 捕获（可能异步的）sendResponse：回包即 resolve，测试 await response 即可
 function makeChannel() {
@@ -233,5 +233,79 @@ describe("test（嵌套 provider 装配，ASR 家族覆写）", () => {
     expect(handlers.test({}, {}, withoutProvider.sendResponse)).toBe(true);
     expect(await withoutProvider.response).toEqual({ ok: true });
     expect(deps.probe).toHaveBeenLastCalledWith({});
+  });
+});
+
+// ===== get-asr-runtime-config（内容脚本 ASR 回退的运行时配置 seam）=====
+
+function makeRuntimeDeps(overrides = {}) {
+  return {
+    getMergedSettings: vi.fn(async () => ({
+      asrProviders: [{ id: "p1", type: "openai-transcriptions", name: "本地 Whisper", model: "whisper-large-v3" }],
+      activeAsrProviderId: " p1 ",
+      asrLanguage: "auto",
+      asrAutoFallback: true
+    })),
+    getAsrProviderKey: vi.fn(async () => "sk-local"),
+    ...overrides
+  };
+}
+
+describe("get-asr-runtime-config（createAsrRuntimeConfigHandler）", () => {
+  it("回包一致快照：providers 无 Key，仅激活平台附 activeKey，异步路径返回 true", async () => {
+    const deps = makeRuntimeDeps();
+    const handler = createAsrRuntimeConfigHandler(deps);
+    const { sendResponse, response } = makeChannel();
+
+    expect(handler({}, {}, sendResponse)).toBe(true);
+    expect(await response).toEqual({
+      ok: true,
+      providers: [{ id: "p1", type: "openai-transcriptions", name: "本地 Whisper", model: "whisper-large-v3" }],
+      activeAsrProviderId: "p1",
+      activeKey: "sk-local",
+      asrLanguage: "auto",
+      asrAutoFallback: true
+    });
+    // Key 单查只针对激活平台 id（trim 后），列表不附带任何 Key 材料
+    expect(deps.getAsrProviderKey).toHaveBeenCalledTimes(1);
+    expect(deps.getAsrProviderKey).toHaveBeenCalledWith("p1");
+  });
+
+  it("无激活平台时不读 Key 存储，activeKey 为空串", async () => {
+    const deps = makeRuntimeDeps({
+      getMergedSettings: vi.fn(async () => ({
+        asrProviders: [],
+        activeAsrProviderId: "",
+        asrLanguage: "zh",
+        asrAutoFallback: false
+      }))
+    });
+    const handler = createAsrRuntimeConfigHandler(deps);
+    const { sendResponse, response } = makeChannel();
+
+    handler({}, {}, sendResponse);
+    expect(await response).toEqual({
+      ok: true,
+      providers: [],
+      activeAsrProviderId: "",
+      activeKey: "",
+      asrLanguage: "zh",
+      asrAutoFallback: false
+    });
+    expect(deps.getAsrProviderKey).not.toHaveBeenCalled();
+  });
+
+  it("settings 读取失败回包 { ok: false, error }", async () => {
+    const deps = makeRuntimeDeps({
+      getMergedSettings: vi.fn(async () => {
+        throw new Error("storage timeout");
+      })
+    });
+    const handler = createAsrRuntimeConfigHandler(deps);
+    const { sendResponse, response } = makeChannel();
+
+    handler({}, {}, sendResponse);
+    expect(await response).toEqual({ ok: false, error: "storage timeout" });
+    expect(deps.getAsrProviderKey).not.toHaveBeenCalled();
   });
 });
