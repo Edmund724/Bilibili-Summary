@@ -25,3 +25,8 @@ docs/agents/domain.md
 
 # Generated reports / scratch outputs that may land in the root
 architecture-review-*.html
+
+# Domain docs (session-generated, kept local)
+/CONTEXT.md
+/docs/adr/
+docs/harness-compaction-context-excerpt.md
