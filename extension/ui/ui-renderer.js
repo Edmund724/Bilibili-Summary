@@ -13,7 +13,7 @@ import { escapeHtml } from "../shared/string-utils.js";
 import { READING_HEADER_ICONS } from "./icons.js";
 import { buildSubtitlePreview } from "../notes/render.js";
 import { isAiSubtitle } from "../subtitle/selection.js";
-import { DEFAULT_SETTINGS } from "../core/shared-defaults.js";
+import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import {
   ids,
   buildReaderStepperControl,

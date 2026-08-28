@@ -123,6 +123,22 @@ export function buildCanonicalVideoUrl(bvid, pageIndex = 1) {
 //        || extractBvid(currentMetaContextUrl)
 //   if bvid -> "https://www.bilibili.com/video/${bvid}/"
 //   else      -> context?.url || currentMetaContextUrl  (stringified + trimmed)
+export function isSupportedBilibiliPage(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    if (parsed.hostname !== "www.bilibili.com") {
+      return false;
+    }
+    return (
+      parsed.pathname === "/list/watchlater" ||
+      parsed.pathname === "/list/watchlater/" ||
+      parsed.pathname.startsWith("/video/")
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function buildCanonicalVideoUrlFromContext(context, currentMetaContextUrl) {
   const bvid = String(
     context?.bvid ||

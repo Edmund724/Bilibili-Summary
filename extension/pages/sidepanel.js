@@ -19,11 +19,13 @@
 import {
   DEFAULT_INITIAL_QUICK_PROMPTS,
   DEFAULT_PRESET_PROMPTS,
-  PLAYER_AI_QUICK_ACTION_STORAGE_KEY,
+  PLAYER_AI_QUICK_ACTION_STORAGE_KEY
+} from "../core/defaults.js";
+import {
   normalizeAiInitialQuickPrompts,
   normalizeAiPresetPrompts,
   normalizeAiThinkingLevel
-} from "../core/shared-defaults.js";
+} from "../core/validators.js";
 
 import {
   buildContextKey,

@@ -1,11 +1,8 @@
-import {
-  DEFAULT_SETTINGS,
-  normalizeAsrLanguage,
-  normalizeDownloadFormat,
-  formatLocalDate,
-  isSupportedBilibiliPage,
-  sleep
-} from "../core/shared-defaults.js";
+import { DEFAULT_SETTINGS } from "../core/defaults.js";
+import { normalizeAsrLanguage } from "../core/presets.js";
+import { normalizeDownloadFormat } from "../core/validators.js";
+import { isSupportedBilibiliPage } from "../bilibili/video-id-shared.js";
+import { formatLocalDate, sleep } from "../shared/utils.js";
 import { escapeHtml, sanitizeFileName } from "../shared/string-utils.js";
 
 const el = {

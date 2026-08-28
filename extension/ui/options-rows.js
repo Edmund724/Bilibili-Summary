@@ -4,8 +4,8 @@
 // 本文件只提供 AI 侧真实差异：模型字段形态、模型下拉拉取、报文形状与既有导出签名。
 // 行构建器只依赖参数与回调，不直接访问 DOM 全局；验证函数不触碰 DOM。
 
+import { PRESETS } from "../core/presets.js";
 import {
-  PRESETS,
   normalizeFixedPropertyType,
   normalizeFixedPropertyValue,
   isFixedPropertyRowEffectivelyEmpty,
@@ -13,7 +13,7 @@ import {
   validateNotePlaceholderSections,
   normalizeNoteSectionPosition,
   validateAiProviders
-} from "../core/shared-defaults.js";
+} from "../core/validators.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../core/runtime.js";
 import { createProviderRow, TRASH_ICON_PATHS } from "./provider-row.js";

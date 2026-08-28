@@ -1,13 +1,13 @@
 // extension/notes/render.js
 // Note/export rendering logic (Markdown, SRT, TXT, frontmatter, chapters, subtitles, comments).
 
+import { DEFAULT_SETTINGS } from "../core/defaults.js";
+import { formatLocalDate } from "../shared/utils.js";
 import {
-  DEFAULT_SETTINGS,
-  formatLocalDate,
   normalizeFixedPropertyType,
   isFixedPropertyRowEffectivelyEmpty,
   normalizeNotePlaceholderSections
-} from "../core/shared-defaults.js";
+} from "../core/validators.js";
 import { escapeYaml, formatCompactTimestamp, formatTimestamp, sanitizeFileName, resolveFrontmatterTemplateValue, parseFrontmatterArrayItems, pushOptionalLines } from "../shared/string-utils.js";
 import { normalizeChapters } from "../subtitle/selection.js";
 import { normalizeHotComments } from "../bilibili/bili-api-shared.js";

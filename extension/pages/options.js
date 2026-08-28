@@ -1,8 +1,6 @@
+import { DEFAULT_SETTINGS, DEFAULT_INITIAL_QUICK_PROMPTS } from "../core/defaults.js";
+import { PRESETS, ASR_PROVIDER_PRESETS } from "../core/presets.js";
 import {
-  DEFAULT_SETTINGS,
-  DEFAULT_INITIAL_QUICK_PROMPTS,
-  PRESETS,
-  ASR_PROVIDER_PRESETS,
   normalizeDownloadFormat,
   normalizePlayerAiQuickPrompt,
   normalizeFixedFrontmatterProperties,
@@ -10,7 +8,7 @@ import {
   validateFixedFrontmatterProperties,
   validateNotePlaceholderSections,
   validateAiProviders
-} from "../core/shared-defaults.js";
+} from "../core/validators.js";
 import { sendRuntimeMessage } from "../core/runtime.js";
 import {
   renderFixedPropertyRows,

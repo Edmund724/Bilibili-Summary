@@ -3,8 +3,9 @@
 // 从 extension/entry/background.js 提取的深模块：只与 chrome.storage / fetch 交互，
 // 不涉及消息路由。所有函数返回 Promise，由 background.js 的消息处理函数调用。
 
+import { DEFAULT_SETTINGS } from "./defaults.js";
+import { normalizeAsrProvider, normalizeAsrLanguage } from "./presets.js";
 import {
-  DEFAULT_SETTINGS,
   normalizeDownloadFormat,
   normalizeIncludeHotCommentsInNote,
   normalizeEnablePlayerAiQuickAction,
@@ -22,10 +23,8 @@ import {
   normalizeAiInitialQuickPrompts,
   normalizeAiPresetPrompts,
   normalizeDefaultModel,
-  normalizeAiThinkingLevel,
-  normalizeAsrProvider,
-  normalizeAsrLanguage
-} from "./shared-defaults.js";
+  normalizeAiThinkingLevel
+} from "./validators.js";
 import { createProviderStore } from "./provider-store.js";
 
 // ===== 设置归一化 + 存储 =====

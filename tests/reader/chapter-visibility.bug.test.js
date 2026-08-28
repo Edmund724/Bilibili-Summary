@@ -18,7 +18,7 @@ let state;
 let reader; // reader/index.js facade
 let presenter;
 let uiRenderer;
-let sharedDefaults;
+let defaultsModule;
 
 async function loadModules() {
   setLocationUrl(READER_MODE_URL);
@@ -26,7 +26,7 @@ async function loadModules() {
   reader = await import("../../extension/reader/index.js");
   presenter = await import("../../extension/reader/presenter.js");
   uiRenderer = await import("../../extension/ui/ui-renderer.js");
-  sharedDefaults = await import("../../extension/core/shared-defaults.js");
+  defaultsModule = await import("../../extension/core/defaults.js");
 }
 
 // B 站页面侧的播放器宿主链（不在扩展模板里，需手动补）
@@ -190,7 +190,7 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
     // 若 DEFAULT_SETTINGS 缺失该 key，storage 里没有历史值时读到的语义依赖
     // `?? true` 兜底，且 background 归一化只处理旧 key readerChapterVisibility。
     expect(
-      Object.prototype.hasOwnProperty.call(sharedDefaults.DEFAULT_SETTINGS, "readerChapterVisible"),
+      Object.prototype.hasOwnProperty.call(defaultsModule.DEFAULT_SETTINGS, "readerChapterVisible"),
       "DEFAULT_SETTINGS 缺少 readerChapterVisible（8c2e4ff 把 readerChapterVisibility 改名后未同步默认值/归一化）"
     ).toBe(true);
   });

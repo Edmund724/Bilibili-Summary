@@ -1,5 +1,5 @@
 import { state, uiState, playerAiState, clipState } from "./state.js";
-import { DEFAULT_SETTINGS } from "./shared-defaults.js";
+import { DEFAULT_SETTINGS } from "./defaults.js";
 
 import {
   replaceReaderModeUrl

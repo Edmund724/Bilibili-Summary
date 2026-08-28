@@ -22,9 +22,9 @@ import {
   normalizeReaderLetterSpacing,
   normalizeReaderLineHeight,
   normalizeReaderContentWidth,
-  normalizeReaderTranscriptVisible,
-  sleep
-} from "../core/shared-defaults.js";
+  normalizeReaderTranscriptVisible
+} from "../core/validators.js";
+import { sleep } from "../shared/utils.js";
 import { isReaderMode, isWatchlaterPage, cleanVideoUrl } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";

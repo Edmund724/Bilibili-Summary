@@ -1,14 +1,10 @@
-// shared-defaults.js ASR 预设与规范化测试：
+// presets.js / defaults.js ASR 预设与规范化测试：
 // 验证 ASR_PROVIDER_PRESETS 字段齐全、normalizeAsrProvider type 合法值校验、
 // DEFAULT_SETTINGS 新增的 4 个 ASR 默认项。
 
 import { describe, expect, it } from "vitest";
-import {
-  ASR_PROVIDER_PRESETS,
-  DEFAULT_SETTINGS,
-  normalizeAsrProvider,
-  normalizeAsrLanguage
-} from "../../extension/core/shared-defaults.js";
+import { ASR_PROVIDER_PRESETS, normalizeAsrProvider, normalizeAsrLanguage } from "../../extension/core/presets.js";
+import { DEFAULT_SETTINGS } from "../../extension/core/defaults.js";
 
 // 本地查找助手：生产代码没有按 id 查预设的导出（按需直接遍历预设表）。
 const presetById = (id) => ASR_PROVIDER_PRESETS.find((p) => p.id === id) || null;

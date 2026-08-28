@@ -13,7 +13,7 @@
 // Content-side adapters (getCurrentAid / readRuntimeVideoDuration / fetchSubtitleBody /
 // fetchHotComments) are thin wrappers over the pure orchestration + contentFetchJson.
 
-import { formatLocalDate } from "../core/shared-defaults.js";
+import { formatLocalDate } from "../shared/utils.js";
 import { toReadableText } from "../shared/error-helpers.js";
 import { sendRuntimeMessage, isExtensionContextInvalidated } from "../core/runtime.js";
 import { state } from "../core/state.js";

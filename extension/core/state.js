@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS } from "./shared-defaults.js";
+import { DEFAULT_SETTINGS } from "./defaults.js";
 
 /**
  * State namespace objects.

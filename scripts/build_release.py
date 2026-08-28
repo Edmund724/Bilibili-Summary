@@ -38,7 +38,7 @@ def prepare_release_dir(path: Path):
 
 def disable_firefox_player_ai_quick_action(release_folder: Path):
     # After the directory restructure, options.css lives under pages/ and the
-    # normalizeEnablePlayerAiQuickAction helper is defined in core/shared-defaults.js
+    # normalizeEnablePlayerAiQuickAction helper is defined in core/validators.js
     # (the service worker in entry/background.js only imports it). Targeting the
     # right files keeps the Firefox-only disable change from being silently skipped.
     options_css = release_folder / "pages" / "options.css"
@@ -49,14 +49,14 @@ def disable_firefox_player_ai_quick_action(release_folder: Path):
                 ".player-ai-quick-action-settings { display: none !important; }\n"
             )
 
-    shared_defaults_js = release_folder / "core" / "shared-defaults.js"
-    if shared_defaults_js.exists():
-        source = shared_defaults_js.read_text(encoding="utf-8")
+    validators_js = release_folder / "core" / "validators.js"
+    if validators_js.exists():
+        source = validators_js.read_text(encoding="utf-8")
         source = source.replace(
             "export function normalizeEnablePlayerAiQuickAction(value) {\n  return value === true;\n}",
             "export function normalizeEnablePlayerAiQuickAction(_value) {\n  return false;\n}",
         )
-        shared_defaults_js.write_text(source, encoding="utf-8")
+        validators_js.write_text(source, encoding="utf-8")
 
 
 def build_variant(manifest: dict, browser: str, version: str):
@@ -118,7 +118,7 @@ def main():
         raise SystemExit("manifest.json is missing a version")
 
     # Version-consistency guard: the extension version lives in three places
-    # (manifest.json, extension/core/shared-defaults.js via build-content-classic.js,
+    # (manifest.json, extension/core/defaults.js via build-content-classic.js,
     # and package.json). Fail fast if package.json drifts from manifest.json
     # before stamping release folders with a stale version.
     package_version = load_package_version().strip()

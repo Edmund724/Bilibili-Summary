@@ -1,5 +1,5 @@
 import { state, clipState } from "../core/state.js";
-import { formatLocalDate } from "../core/shared-defaults.js";
+import { formatLocalDate } from "../shared/utils.js";
 import { logWarn } from "../shared/logging.js";
 import { fetchHotComments } from "../bilibili/gateway.js";
 import { normalizeChapters } from "./selection.js";

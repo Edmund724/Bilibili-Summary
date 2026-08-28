@@ -16,7 +16,7 @@
 // NOTE: the module header deliberately avoids the words "import"/"from" (they
 // would trip the validate-tree-imports.mjs export resolution on this file's own
 // parsed import statements).
-import { sleep } from "../core/shared-defaults.js";
+import { sleep } from "./utils.js";
 
 export async function waitForTabComplete(tabId, timeoutMs = 15000) {
   const startedAt = Date.now();

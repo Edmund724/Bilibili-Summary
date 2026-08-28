@@ -1,5 +1,5 @@
 import { state } from "../core/state.js";
-import { BOC_VERSION } from "../core/shared-defaults.js";
+import { BOC_VERSION } from "../core/defaults.js";
 
 import { isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
 import { startUrlWatcher, getSettings, sendRuntimeMessage } from "../core/runtime.js";

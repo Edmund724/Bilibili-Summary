@@ -1,5 +1,7 @@
 import { setMessage } from "../ui/ui-renderer.js";
-import { DEFAULT_SETTINGS, normalizeDownloadFormat, sleep } from "../core/shared-defaults.js";
+import { DEFAULT_SETTINGS } from "../core/defaults.js";
+import { normalizeDownloadFormat } from "../core/validators.js";
+import { sleep } from "../shared/utils.js";
 import { state, clipState } from "../core/state.js";
 import { extractBvid, computeCurrentClipSignature } from "../bilibili/video-id-shared.js";
 import { getSettings } from "../core/runtime.js";

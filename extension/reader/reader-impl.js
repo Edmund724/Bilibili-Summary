@@ -15,7 +15,7 @@
 import { state, uiState } from "../core/state.js";
 import { logInfo, logWarn } from "../shared/logging.js";
 import { getReaderElement, isVisibleReaderControl } from "../shared/dom-utils.js";
-import { sleep } from "../core/shared-defaults.js";
+import { sleep } from "../shared/utils.js";
 import { isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import * as pageContext from "./page-context.js";

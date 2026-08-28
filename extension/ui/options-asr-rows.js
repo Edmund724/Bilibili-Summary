@@ -6,7 +6,7 @@
 // ai-provider-status 类名（既有耦合，DOM 契约保持不变）。
 // 行构建器只依赖参数与回调，不直接访问 DOM 全局。
 
-import { ASR_PROVIDER_PRESETS } from "../core/shared-defaults.js";
+import { ASR_PROVIDER_PRESETS } from "../core/presets.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../core/runtime.js";
 import { createProviderRow } from "./provider-row.js";

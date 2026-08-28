@@ -1,12 +1,12 @@
 import {
   DEFAULT_SETTINGS,
-  PLAYER_AI_QUICK_ACTION_STORAGE_KEY,
-  PRESETS,
-  ASR_PROVIDER_PRESETS,
-  normalizePlayerAiQuickPrompt,
-  isSupportedBilibiliPage,
-  sleep
-} from "../core/shared-defaults.js";
+  DEFAULT_PLAYER_AI_QUICK_PROMPT,
+  PLAYER_AI_QUICK_ACTION_STORAGE_KEY
+} from "../core/defaults.js";
+import { PRESETS, ASR_PROVIDER_PRESETS } from "../core/presets.js";
+import { normalizePlayerAiQuickPrompt } from "../core/validators.js";
+import { isSupportedBilibiliPage } from "../bilibili/video-id-shared.js";
+import { sleep } from "../shared/utils.js";
 import {
   getMergedSettings,
   saveSettings,

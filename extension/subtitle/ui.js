@@ -1,4 +1,4 @@
-import { BOC_VERSION } from "../core/shared-defaults.js";
+import { BOC_VERSION } from "../core/defaults.js";
 import { loadSubtitle } from "./fetcher.js";
 import { buildSubtitlePreview } from "../notes/render.js";
 import { isAiSubtitle } from "./selection.js";
@@ -7,7 +7,8 @@ import { cleanVideoUrl } from "../bilibili/video-id-shared.js";
 import { getSettings } from "../core/runtime.js";
 import { byId } from "../shared/dom-utils.js";
 import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
-import { DEFAULT_SETTINGS, normalizeDownloadFormat } from "../core/shared-defaults.js";
+import { DEFAULT_SETTINGS } from "../core/defaults.js";
+import { normalizeDownloadFormat } from "../core/validators.js";
 import { state, clipState } from "../core/state.js";
 import { setMessage } from "../ui/ui-renderer.js";
 import { ids } from "../reader/index.js";

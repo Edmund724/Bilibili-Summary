@@ -16,14 +16,14 @@ import {
 import {
   extractBvid,
   extractPageIndexFromUrl,
-  buildCanonicalVideoUrl
+  buildCanonicalVideoUrl,
+  isSupportedBilibiliPage
 } from "../bilibili/video-id-shared.js";
 import {
   pickPreferredSubtitle as pickPreferredSubtitleTrack,
   normalizeSubtitleTracks
 } from "../subtitle/selection.js";
 import { buildSubtitleSectionLines, shouldShowHoursInNote } from "../notes/render.js";
-import { isSupportedBilibiliPage } from "../core/shared-defaults.js";
 import { getMergedSettings } from "../core/ai-provider-store.js";
 
 // ===== 页内状态（由 background.js 注入：ensureReaderContentReady / sendMessageToTab）=====

@@ -76,7 +76,7 @@ vi.mock("../../extension/subtitle/cache.js", () => ({
   getSubtitleCacheKey: vi.fn(() => "boc_subtitle_cache_test")
 }));
 
-// 以下依赖保持真实加载：state / shared-defaults / url-utils / error-helpers
+// 以下依赖保持真实加载：state / defaults / validators / utils / url-utils / error-helpers
 // / runtime / selection 仅依赖纯函数或 state。
 //（若这些模块的 import 链被进一步破坏，这里会暴露为“红在别处”。）
 

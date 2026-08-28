@@ -1,5 +1,5 @@
 import { state, clipState, uiState } from "./state.js";
-import { DEFAULT_SETTINGS } from "./shared-defaults.js";
+import { DEFAULT_SETTINGS } from "./defaults.js";
 import { ensureUiReady, setStatus, setMessage } from "../ui/ui-renderer.js";
 import {
   enterReaderMode,

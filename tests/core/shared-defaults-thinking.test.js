@@ -1,8 +1,9 @@
-// shared-defaults.js 纯函数归一化测试：
+// defaults.js / validators.js 纯函数归一化测试：
 // aiThinkingLevel（思考档位）默认 off，非法值回落 off。
 
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, normalizeAiThinkingLevel } from "../../extension/core/shared-defaults.js";
+import { DEFAULT_SETTINGS } from "../../extension/core/defaults.js";
+import { normalizeAiThinkingLevel } from "../../extension/core/validators.js";
 
 describe("normalizeAiThinkingLevel", () => {
   it("off / low / high 原样保留", () => {

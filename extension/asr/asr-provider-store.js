@@ -9,7 +9,7 @@
 // 与 AI 平台存储完全隔离：用不同的 storage key（asrProviders / asrProviderKeys），
 // 不和对话平台混用同一个列表。
 
-import { normalizeAsrProvider, normalizeBaseUrl } from "../core/shared-defaults.js";
+import { normalizeAsrProvider, normalizeBaseUrl } from "../core/presets.js";
 import { createProviderStore } from "../core/provider-store.js";
 import { getMergedSettings } from "../core/ai-provider-store.js";
 
