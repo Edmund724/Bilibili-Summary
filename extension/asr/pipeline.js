@@ -1,6 +1,6 @@
 // extension/asr/pipeline.js
 // ASR 管线编排：取音轨 → offscreen 下载/解码切片 → 按平台 type 分发适配器逐片
-// 转写（openai-transcriptions 最多 2 片并发）→ 时间戳加片偏移
+// 转写（openai-transcriptions 最多 5 片并发）→ 时间戳加片偏移
 // 合并为 B 站字幕格式 [{from,to,content}]。
 //
 // 每步都做 ensureRunActive(runId) 守卫：转写中切换视频，旧任务立即中止，
@@ -142,7 +142,7 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
   }
   const host = chunkHost || createOffscreenChunkHost();
 
-  // 切片计划：openai-transcriptions 统一 10 分钟一片。
+  // 切片计划：openai-transcriptions 统一 20 分钟一片。
   const plan = buildChunkPlan(type);
 
   // 取音轨
@@ -169,7 +169,7 @@ export async function runAsrPipeline({ bvid, cid, durationSec, provider, runId, 
     return { ...chunk, durationSec: endSec - chunk.startSec };
   });
 
-  // 逐片转写：并发窗口取映射表 concurrency 元数据（openai-transcriptions 2）；
+  // 逐片转写：并发窗口取映射表 concurrency 元数据（openai-transcriptions 5）；
   // 结果按片 index 有序，合成阶段排序。
   const total = chunks.length;
   const concurrency = Number(entry.concurrency) || 1;
