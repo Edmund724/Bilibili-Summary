@@ -26,6 +26,7 @@ import {
   normalizeAsrProvider,
   normalizeAsrLanguage
 } from "./shared-defaults.js";
+import { createProviderStore } from "./provider-store.js";
 
 // ===== 设置归一化 + 存储 =====
 
@@ -117,6 +118,9 @@ export async function saveSettings(settings) {
 }
 
 // ===== AI 模型平台存储 =====
+// 列表 CRUD（load/save/delete/Key 读写）委托给通用工厂 createProviderStore，
+// 本模块只提供 storage key 与 AI 专属的 normalizeProvider。不变式
+// “apiKey 永不进同步列表”由工厂统一保证。
 
 const AI_PROVIDER_KEYS_STORAGE = "aiProviderKeys";
 
@@ -135,67 +139,30 @@ function normalizeAiProvider(item) {
   };
 }
 
+const providerStore = createProviderStore({
+  listStorageKey: "aiProviders",
+  keysStorageKey: AI_PROVIDER_KEYS_STORAGE,
+  normalizeProvider: normalizeAiProvider
+});
+
 export async function loadAiProviders() {
-  const [syncData, keys] = await Promise.all([
-    chrome.storage.sync.get(["aiProviders"]),
-    loadAiProviderKeys()
-  ]);
-  const list = Array.isArray(syncData.aiProviders) ? syncData.aiProviders : [];
-  return list
-    .map(normalizeAiProvider)
-    .filter(Boolean)
-    .map((p) => ({ ...p, hasSavedKey: Boolean(keys[p.id]) }));
+  return providerStore.loadProviders();
 }
 
 export async function saveAiProviders(items) {
-  const rawList = Array.isArray(items) ? items : [];
-  const keys = await loadAiProviderKeys();
-  const nextList = [];
-  for (const raw of rawList) {
-    const normalized = normalizeAiProvider(raw);
-    if (!normalized) continue;
-    nextList.push(normalized);
-    const incomingKey = String(raw?.apiKey || "").trim();
-    if (incomingKey) {
-      keys[normalized.id] = incomingKey;
-    }
-  }
-  await Promise.all([
-    chrome.storage.sync.set({ aiProviders: nextList }),
-    chrome.storage.local.set({ [AI_PROVIDER_KEYS_STORAGE]: keys })
-  ]);
-  // 返回带 hasSavedKey 的列表，方便前端渲染占位
-  return nextList.map((p) => ({ ...p, hasSavedKey: Boolean(keys[p.id]) }));
+  return providerStore.saveProviders(items);
 }
 
 export async function deleteAiProvider(providerId) {
-  const list = await loadAiProviders();
-  const next = list.filter((p) => p.id !== providerId);
-  await chrome.storage.sync.set({ aiProviders: next });
-  const keys = await loadAiProviderKeys();
-  if (keys && providerId in keys) {
-    delete keys[providerId];
-    await chrome.storage.local.set({ [AI_PROVIDER_KEYS_STORAGE]: keys });
-  }
-  return next;
+  return providerStore.deleteProvider(providerId);
 }
 
 export async function loadAiProviderKeys() {
-  const localData = await chrome.storage.local.get([AI_PROVIDER_KEYS_STORAGE]);
-  const keys = localData?.[AI_PROVIDER_KEYS_STORAGE];
-  return keys && typeof keys === "object" ? keys : {};
+  return providerStore.loadKeys();
 }
 
 export async function saveAiProviderKey(providerId, apiKey) {
-  const keys = await loadAiProviderKeys();
-  const trimmed = String(apiKey || "").trim();
-  if (trimmed) {
-    keys[providerId] = trimmed;
-  } else {
-    delete keys[providerId];
-  }
-  await chrome.storage.local.set({ [AI_PROVIDER_KEYS_STORAGE]: keys });
-  return keys;
+  return providerStore.saveKey(providerId, apiKey);
 }
 
 // ===== 连接测试 / 模型探测 =====

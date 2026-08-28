@@ -2,8 +2,8 @@
 // 覆盖 openai-transcriptions 探针的成功与失败分支、apiKey 缺失时回退
 // 读取已存 Key、非法 provider 的兜底。
 // 探针只与 fetch / chrome.storage 交互，用 vi.stubGlobal 替换 fetch 与 chrome。
-// 注意：本仓库 jsdom 环境里 FormData/Blob 均存在，openai-transcriptions
-// 探针走 FormData 分支；multipart 手拼降级分支（无 FormData 环境）不在本文件覆盖。
+// 本仓库 jsdom 环境里 FormData/Blob 均存在，openai-transcriptions 探针始终构造
+// 真实 FormData；需要脱离全局 fetch 时可注入 options.transport（见文末用例）。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
@@ -140,5 +140,22 @@ describe("apiKey 缺失时回退读取已存 Key", () => {
     const [, init] = fetchMock.mock.calls[0];
     // 请求用的 Authorization 来自已存 Key
     expect(init.headers.Authorization).toBe("Bearer stored-key-1");
+  });
+});
+
+describe("注入 transport", () => {
+  it("注入 fake transport 时代其发请求，全局 fetch 不被调用", async () => {
+    const transport = vi.fn(async (url, init) => jsonResponse(200, { text: "ok" }));
+    const { testAsrConnection } = await loadModule();
+    const resp = await testAsrConnection(baseProvider({ apiKey: "sk-1" }), { transport });
+    expect(resp.ok).toBe(true);
+    expect(transport).toHaveBeenCalledTimes(1);
+    const [url, init] = transport.mock.calls[0];
+    expect(url).toBe("https://example.com/v1/audio/transcriptions");
+    expect(init.method).toBe("POST");
+    expect(init.headers.Authorization).toBe("Bearer sk-1");
+    expect(init.body).toBeInstanceOf(FormData);
+    // 全局 fetch（本文件的 fetchMock）未被触碰
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -1,14 +1,16 @@
 // extension/asr/asr-provider-store.js
 // ASR（语音转写）平台 Provider/Key 的设置存储 + 连通性探针。
-// 镜像 extension/core/ai-provider-store.js 的模式：provider 列表持久化在
-// chrome.storage.sync，API Key 单独存放在 chrome.storage.local，不随列表
-// 明文回传（列表只带 hasSavedKey 布尔占位）。本模块只与 chrome.storage /
-// fetch 交互，不涉及消息路由——background.js 的处理函数调用这里。
+// 列表 CRUD 委托给 extension/core/provider-store.js 的 createProviderStore
+// （与 AI 平台存储共用同一工厂）：provider 列表持久化在 chrome.storage.sync，
+// API Key 单独存放在 chrome.storage.local，不随列表明文回传（列表只带
+// hasSavedKey 布尔占位）。本模块只与 chrome.storage / fetch 交互，不涉及
+// 消息路由——background.js 的处理函数调用这里。
 //
 // 与 AI 平台存储完全隔离：用不同的 storage key（asrProviders / asrProviderKeys），
 // 不和对话平台混用同一个列表。
 
 import { normalizeAsrProvider, normalizeBaseUrl } from "../core/shared-defaults.js";
+import { createProviderStore } from "../core/provider-store.js";
 import { getMergedSettings } from "../core/ai-provider-store.js";
 
 // ===== ASR 平台列表存储 =====
@@ -16,72 +18,37 @@ import { getMergedSettings } from "../core/ai-provider-store.js";
 const ASR_PROVIDER_KEYS_STORAGE = "asrProviderKeys";
 const ASR_PROVIDERS_STORAGE = "asrProviders";
 
+const providerStore = createProviderStore({
+  listStorageKey: ASR_PROVIDERS_STORAGE,
+  keysStorageKey: ASR_PROVIDER_KEYS_STORAGE,
+  normalizeProvider: normalizeAsrProvider
+});
+
 // 读取已存 API Key（providerId -> apiKey 的映射）。Key 单独存 local，
 // 不随 sync 的 provider 列表明文回传。
 export async function loadAsrProviderKeys() {
-  const localData = await chrome.storage.local.get([ASR_PROVIDER_KEYS_STORAGE]);
-  const keys = localData?.[ASR_PROVIDER_KEYS_STORAGE];
-  return keys && typeof keys === "object" ? keys : {};
+  return providerStore.loadKeys();
 }
 
 // 读取单个 provider 的已存 Key（按 id 查）。供探针在不要求用户重输 Key 时使用。
 export async function getAsrProviderKey(providerId) {
-  if (!providerId) return "";
-  const keys = await loadAsrProviderKeys();
-  return String(keys[providerId] || "").trim();
+  return providerStore.getKey(providerId);
 }
 
 // 读取 provider 列表，Key 不明文回传，只带 hasSavedKey 占位。
 export async function loadAsrProviders() {
-  const [syncData, keys] = await Promise.all([
-    chrome.storage.sync.get([ASR_PROVIDERS_STORAGE]),
-    loadAsrProviderKeys()
-  ]);
-  const list = Array.isArray(syncData[ASR_PROVIDERS_STORAGE]) ? syncData[ASR_PROVIDERS_STORAGE] : [];
-  return list
-    .map(normalizeAsrProvider)
-    .filter(Boolean)
-    .map((p) => ({ ...p, hasSavedKey: Boolean(keys[p.id]) }));
+  return providerStore.loadProviders();
 }
 
 // 保存 provider 列表。列表中若带 apiKey 字段则一并写入 Key 存储，
 // 但回传列表只带 hasSavedKey 占位（Key 不明文出现在 sync 列表里）。
 export async function saveAsrProviders(items) {
-  const rawList = Array.isArray(items) ? items : [];
-  const keys = await loadAsrProviderKeys();
-  const nextList = [];
-  for (const raw of rawList) {
-    const normalized = normalizeAsrProvider(raw);
-    if (!normalized) continue;
-    nextList.push(normalized);
-    const incomingKey = String(raw?.apiKey || "").trim();
-    if (incomingKey) {
-      keys[normalized.id] = incomingKey;
-    }
-  }
-  await Promise.all([
-    chrome.storage.sync.set({ [ASR_PROVIDERS_STORAGE]: nextList }),
-    chrome.storage.local.set({ [ASR_PROVIDER_KEYS_STORAGE]: keys })
-  ]);
-  // 返回带 hasSavedKey 的列表，方便前端渲染占位
-  return nextList.map((p) => ({ ...p, hasSavedKey: Boolean(keys[p.id]) }));
+  return providerStore.saveProviders(items);
 }
 
 // 删除 provider，其已存 Key 一并清理（不残留孤儿 Key）。
 export async function deleteAsrProvider(providerId) {
-  const list = await loadAsrProviders();
-  const next = list.filter((p) => p.id !== providerId).map((p) => {
-    // 列表项带 hasSavedKey 占位，归一化函数不接受该字段，剥掉再存
-    const { hasSavedKey: _omit, ...rest } = p;
-    return rest;
-  });
-  await chrome.storage.sync.set({ [ASR_PROVIDERS_STORAGE]: next });
-  const keys = await loadAsrProviderKeys();
-  if (keys && providerId in keys) {
-    delete keys[providerId];
-    await chrome.storage.local.set({ [ASR_PROVIDER_KEYS_STORAGE]: keys });
-  }
-  return next.map((p) => ({ ...p, hasSavedKey: Boolean(keys[p.id]) }));
+  return providerStore.deleteProvider(providerId);
 }
 
 // ===== 静音 WAV 生成（探针用） =====
@@ -135,8 +102,10 @@ function writeAscii(view, offset, str) {
 
 // 按 provider.type 分发到对应探针。provider 可直接带 apiKey（前端测试按钮
 // 用户重输的场景），也可不带（由 providerId 从已存 Key 读取）。
+// 可选第二参 options.transport：注入传输函数（测试用 fake transport），
+// 缺省在调用时取全局 fetch（而非模块加载时绑定）。
 // 返回 { ok: boolean, error?: string }。
-export async function testAsrConnection(provider) {
+export async function testAsrConnection(provider, { transport } = {}) {
   const normalized = normalizeAsrProvider(provider);
   if (!normalized) {
     return { ok: false, error: "平台配置不完整或 type 非法" };
@@ -163,7 +132,8 @@ export async function testAsrConnection(provider) {
       baseUrl: normalized.baseUrl,
       apiKey,
       model: normalized.model,
-      language
+      language,
+      transport
     });
   }
   // normalizeAsrProvider 已校验 type，理论上到不了这里
@@ -176,7 +146,7 @@ export async function testAsrConnection(provider) {
 // 语言档位（provider.language）以查询参数附带：选 zh/en 时同时验证该语言的
 // 请求链路（SiliconFlow 辰星只有 ?language=english 才启用英文识别，静音探针
 // 的 200 即证明该参数被接受）。
-async function probeOpenAiTranscriptions({ baseUrl, apiKey, model, language }) {
+async function probeOpenAiTranscriptions({ baseUrl, apiKey, model, language, transport }) {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
   if (!normalizedBaseUrl) {
     return { ok: false, error: "请填写 baseUrl" };
@@ -186,9 +156,6 @@ async function probeOpenAiTranscriptions({ baseUrl, apiKey, model, language }) {
   }
 
   const wavBytes = buildSilentWavBytes(1, 16000);
-  // jsdom / Node 测试环境无原生 FormData/Blob 时降级用 multipart 手拼
-  const hasFormData = typeof FormData !== "undefined" && typeof Blob !== "undefined";
-  let body;
   const headers = {};
   if (apiKey) {
     headers["Authorization"] = `Bearer ${apiKey}`;
@@ -201,30 +168,22 @@ async function probeOpenAiTranscriptions({ baseUrl, apiKey, model, language }) {
     ? `?language=${lang === "zh" ? "zh" : "english"}`
     : "";
 
-  if (hasFormData) {
-    const form = new FormData();
-    form.append("file", new Blob([wavBytes], { type: "audio/wav" }), "probe.wav");
-    form.append("model", model);
-    form.append("response_format", "verbose_json");
-    // 不把 language 放 multipart 字段（SiliconFlow 只认查询参数）
-    body = form;
-    // 千万不要手动设 Content-Type，浏览器自动带 boundary
-  } else {
-    const boundary = "----bocAsrProbe" + Math.random().toString(36).slice(2);
-    headers["Content-Type"] = `multipart/form-data; boundary=${boundary}`;
-    body = buildMultipartBody(boundary, [
-      { name: "file", filename: "probe.wav", contentType: "audio/wav", data: wavBytes },
-      { name: "model", value: model },
-      { name: "response_format", value: "verbose_json" }
-    ]);
-  }
+  const form = new FormData();
+  form.append("file", new Blob([wavBytes], { type: "audio/wav" }), "probe.wav");
+  form.append("model", model);
+  form.append("response_format", "verbose_json");
+  // 不把 language 放 multipart 字段（SiliconFlow 只认查询参数）
+  // 千万不要手动设 Content-Type，浏览器自动带 boundary
+
+  // 传输层可注入（测试用 fake transport）；默认在调用时取全局 fetch。
+  const doFetch = transport || ((...args) => fetch(...args));
 
   let response;
   try {
-    response = await fetch(`${normalizedBaseUrl}/audio/transcriptions${query}`, {
+    response = await doFetch(`${normalizedBaseUrl}/audio/transcriptions${query}`, {
       method: "POST",
       headers,
-      body
+      body: form
     });
   } catch (error) {
     return { ok: false, error: `无法连接：${error?.message || error}` };
@@ -239,47 +198,4 @@ async function probeOpenAiTranscriptions({ baseUrl, apiKey, model, language }) {
     detail = (await response.text()).slice(0, 200);
   } catch {}
   return { ok: false, error: `HTTP ${response.status}${detail ? `: ${detail}` : ""}` };
-}
-
-// ===== 工具：multipart 手拼（无 FormData 环境降级用） =====
-
-function buildMultipartBody(boundary, fields) {
-  const parts = [];
-  const encoder = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
-  const crlf = "\r\n";
-
-  for (const field of fields) {
-    parts.push(`--${boundary}${crlf}`);
-    if (field.filename) {
-      parts.push(
-        `Content-Disposition: form-data; name="${field.name}"; filename="${field.filename}"${crlf}`
-      );
-      parts.push(`Content-Type: ${field.contentType}${crlf}${crlf}`);
-      // 二进制数据后续单独 append
-      parts.push({ binary: field.data });
-      parts.push(crlf);
-    } else {
-      parts.push(`Content-Disposition: form-data; name="${field.name}"${crlf}${crlf}`);
-      parts.push(`${field.value}${crlf}`);
-    }
-  }
-  parts.push(`--${boundary}--${crlf}`);
-
-  // 统一编码为 Uint8Array
-  const chunks = parts.map((part) => {
-    if (part && typeof part === "object" && part.binary) {
-      return part.binary;
-    }
-    const str = String(part);
-    return encoder ? encoder.encode(str) : Buffer.from(str, "utf-8");
-  });
-  let total = 0;
-  for (const c of chunks) total += c.length;
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const c of chunks) {
-    out.set(c, offset);
-    offset += c.length;
-  }
-  return out;
 }
