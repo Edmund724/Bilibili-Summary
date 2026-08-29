@@ -141,6 +141,25 @@ describe("retrieveRawSegments / matchByKeyword：关键词命中", () => {
   });
 });
 
+describe("retrieveRawSegments / matchByKeyword：停用词伪分词与过滤", () => {
+  const raw = [seg(1, 0, 600, ["这期内容很精彩"]), seg(2, 600, 1200, ["总结要点", "贝叶斯公式"])];
+
+  it("长词优先切分：讲解 整体被过滤，不把 解 并入相邻块（先讲解总结 → 命中 总结）", () => {
+    // 若按单字 讲 先切，会切出 解总结 这类碎片而漏掉 总结 关键词。
+    expect(matchByKeyword("先讲解总结", raw).map((s) => s.index)).toEqual([2]);
+  });
+
+  it("泛词不触发关键词命中：什么/内容 均为停用词，不因段里含 内容 而误命中", () => {
+    expect(matchByKeyword("什么内容", raw)).toEqual([]);
+    expect(retrieveRawSegments({ prompt: "这个什么内容啊", rawSegments: raw })).toEqual([]);
+  });
+
+  it("停用词夹在关键词间不影响命中：贝叶斯了就是公式 → 仍命中第 2 段", () => {
+    expect(matchByKeyword("贝叶斯了就是公式", raw).map((s) => s.index)).toEqual([2]);
+    expect(retrieveRawSegments({ prompt: "讲讲贝叶斯和公式", rawSegments: raw }).map((s) => s.index)).toEqual([2]);
+  });
+});
+
 describe("retrieveRawSegments：未命中回退（维持压缩上下文）", () => {
   const raw = [seg(1, 0, 600, ["开场白内容"]), seg(2, 600, 1200, ["贝叶斯公式推导"])];
   const chapters = [{ from: 0, to: 600, title: "开场白" }];
