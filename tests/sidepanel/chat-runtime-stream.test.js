@@ -87,9 +87,49 @@ describe("appendToken 流式 markdown 渲染", () => {
     expect(node.querySelectorAll("li")).toHaveLength(2);
     expect(node.querySelector("p")).toBeTruthy();
 
-    // 光标始终在渲染内容之后
-    const children = [...node.children];
-    expect(children[children.length - 1].className).toBe("sp-msg-cursor");
+    // 光标始终接在末块容器（sp-stream-tail）尾部、渲染内容之后
+    const tailEl = node.querySelector(".sp-stream-tail");
+    expect(tailEl.lastElementChild.className).toBe("sp-msg-cursor");
+  });
+});
+
+describe("appendToken 稳定前缀 + 末块增量渲染", () => {
+  it("多帧 flush：前缀未增长时 stable 容器不重渲染（只渲染一次），tail 每帧更新；finalize 后与全量渲染一致", () => {
+    const runtime = createChatRuntime(makeDeps());
+    const node = runtime.appendAssistantPlaceholder();
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+
+    // 帧 1：两个段落 → stable = 第一段（空行边界），tail = 末段 + 光标
+    runtime.appendToken(node, "第一段\n\n第二段开头");
+    raf.mock.calls[0][0]();
+    const stableEl = node.querySelector(".sp-stream-stable");
+    const tailEl = node.querySelector(".sp-stream-tail");
+    expect(stableEl.innerHTML).toBe(renderMarkdown("第一段"));
+    expect(tailEl.querySelector("p").textContent).toBe("第二段开头");
+    expect(tailEl.lastElementChild.className).toBe("sp-msg-cursor");
+
+    // 篡改 stable 内容，用于探测后续帧是否重渲染了 stable
+    stableEl.innerHTML = "SENTINEL";
+
+    // 帧 2：tail 增长（无新空行边界）→ stable 不重渲染，tail 每帧更新
+    runtime.appendToken(node, "，仍在增长");
+    raf.mock.calls[1][0]();
+    expect(stableEl.innerHTML).toBe("SENTINEL");
+    expect(tailEl.querySelector("p").textContent).toBe("第二段开头，仍在增长");
+    expect(tailEl.lastElementChild.className).toBe("sp-msg-cursor");
+
+    // 帧 3：新空行边界出现 → stable 增长并重渲染一次
+    runtime.appendToken(node, "\n\n第三段");
+    raf.mock.calls[2][0]();
+    expect(stableEl.innerHTML).toBe(renderMarkdown("第一段\n\n第二段开头，仍在增长"));
+    expect(tailEl.querySelector("p").textContent).toBe("第三段");
+
+    // finalize：流式双容器被整体替换，最终 DOM 与 renderMarkdown(全文) 一致
+    const fullText = "第一段\n\n第二段开头，仍在增长\n\n第三段";
+    runtime.finalizeAssistant(node);
+    expect(node.querySelector(".sp-stream-stable")).toBeNull();
+    expect(node.querySelector(".sp-stream-tail")).toBeNull();
+    expect(node.querySelector(".sp-msg-assistant-body").innerHTML).toBe(renderMarkdown(fullText));
   });
 });
 

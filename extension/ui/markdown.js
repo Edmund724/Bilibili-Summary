@@ -179,6 +179,58 @@ export function renderMarkdown(text) {
   return out.join("");
 }
 
+// splitMarkdownTail — 流式增量渲染的切分纯函数：把文本切成"已稳定的前缀块"
+// 与"仍在增长的末块"，调用方对 stable 只在其增长时渲染一次，tail 每帧重渲染。
+//
+// 切分规则：
+//   1. 只在"空行连续段"的起点切（连续空行按一个边界处理），且该空行段之后
+//      必须还有非空行——排除文末换行产生的尾随空行，保证 stable 随流式追加
+//      只增不减、不会因尾随空行出现又消失而来回抖动；取满足条件的最后一个
+//      切点（最后一个空行边界）。
+//   2. 切点之前围栏必须闭合。围栏开合判定与 renderMarkdown 的 ``` 成对摘出
+//      （/```([\s\S]*?)```/g 按出现顺序两两配对）一致：``` 每出现一次开/闭
+//      一次，前缀内累计出现奇数次即处于未闭合围栏中（escapeHtml 不改写
+//      反引号，转义前后计数一致）。
+//   3. 找不到满足条件的切点（全文无空行，或所有空行边界都落在未闭合围栏内）
+//      时安全退化：stableText 为空串、tailText 为全文，等价于全量渲染。
+// 切点落在空行上，而 markdown 的块级结构（标题/表格/列表/段落）都以空行或
+// 单换行为界且不跨空行延续成块，因此 renderMarkdown(stable) 与
+// renderMarkdown(tail) 堆叠渲染与 renderMarkdown(全文) 等价。
+export function splitMarkdownTail(text) {
+  const source = String(text || "");
+  const lines = source.split("\n");
+  let lastNonBlank = -1;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (lines[index].trim() !== "") {
+      lastNonBlank = index;
+      break;
+    }
+  }
+  if (lastNonBlank < 0) {
+    return { stableText: "", tailText: source };
+  }
+  let fenceOpen = false;
+  let cut = -1;
+  for (let index = 0; index < lastNonBlank; index += 1) {
+    const line = lines[index];
+    const blank = line.trim() === "";
+    if (blank && !fenceOpen && (index === 0 || lines[index - 1].trim() !== "")) {
+      cut = index; // 循环上界 lastNonBlank 保证该空行段之后仍有非空行
+    }
+    const fences = line.match(/```/g);
+    if (fences && fences.length % 2 === 1) {
+      fenceOpen = !fenceOpen;
+    }
+  }
+  if (cut < 0) {
+    return { stableText: "", tailText: source };
+  }
+  return {
+    stableText: lines.slice(0, cut).join("\n"),
+    tailText: lines.slice(cut).join("\n")
+  };
+}
+
 export function renderInline(text) {
   return text
     .replace(/`([^`]+)`/g, (_, c) => (isTimestampOnlyInlineCode(c) ? c : `<code>${c}</code>`))

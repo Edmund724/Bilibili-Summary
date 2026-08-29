@@ -19,7 +19,7 @@
 // Top-level side effects: NONE (no document/chrome/window access at module
 // scope) — unlike sidepanel.js, this module evaluates cleanly under a Node test
 // harness without a DOM shim.
-import { renderMarkdown, stripThinkBlocks } from "../ui/markdown.js";
+import { renderMarkdown, splitMarkdownTail, stripThinkBlocks } from "../ui/markdown.js";
 import { linkifyAssistantTimestamps } from "../ui/timestamp-nav.js";
 
 const STREAM_SLOW_NOTICE_MS = 15000;
@@ -315,34 +315,55 @@ export function createChatRuntime(deps) {
   // =========================================================================
   // appendToken
   // =========================================================================
-  // 流式渲染优化：流式过程中按帧批量做增量 markdown 渲染（每帧最多一次
-  // renderMarkdown + innerHTML，不再逐 token 全量渲染，避免长回复 O(n²)）。
-  // 流式期间即显示正确的 markdown 结构（换行/缩进/列表等），而不是等流结束
-  // 才由 finalizeAssistant / handleAssistantStopped 出口渲染。光标 span 保留
-  // 在渲染内容之后——innerHTML 整体赋值会清掉光标，所以每帧重建时重新接回。
+  // 流式渲染优化：流式过程中按帧做"稳定前缀 + 末块"增量 markdown 渲染。
+  // 流式节点的 DOM 为两个堆叠的块级容器（.sp-stream-stable / .sp-stream-tail，
+  // 无额外样式——markdown 输出本就是块级，与单容器渲染等价）：
+  //   - stable：切点前已稳定的前缀块（splitMarkdownTail 按最后一个空行边界
+  //     切分，且切点前围栏已闭合），只在增长时渲染一次；
+  //   - tail：最后一个未完块（表格/列表单换行分块、未闭合围栏整段都在
+  //     tail），每帧重渲染。
+  // 长回复流式期间不再每帧全量 renderMarkdown + innerHTML 重建。光标 span
+  // 每帧重接到 tail 尾部（tail 的 innerHTML 赋值会清掉它）。思考节点随首帧
+  // 渲染移除（与旧的整节点 innerHTML 覆盖行为一致）。
   let tokenFlushFrame = 0;
 
   // 流式 token 累加器（原挂在 assistant 节点的 dataset.raw，每 token 全量
   // 拼接旧串，O(n²) 复制——全仓读取方仅同流的 flush / finalize / stopped）。
-  // 现改为 WeakMap 按节点存放 { base, pending: string[] }：append 推入
-  // pending；flush 时 text = base + pending.join("")，渲染照旧（仍全量
-  // renderMarkdown + innerHTML），渲染后 text 收进 base、清空 pending，
-  // 每帧拼接量与帧间隔成正比，总复制量 O(n)。finalize / stopped 从这里
-  // 取全量文本。随占位节点初始化（appendAssistantPlaceholder），跨消息
-  // 天然隔离。
+  // 现改为 WeakMap 按节点存放 { base, pending, stableText, stableEl, tailEl }：
+  // append 推入 pending；flush 时 text = base + pending.join("")，剥 think 后
+  // 切分渲染，渲染后 text 收进 base、清空 pending，每帧拼接量与帧间隔成正比，
+  // 总复制量 O(n)。stableText 记录该节点上次渲染过的稳定前缀，用于跳过未
+  // 增长的 stable 重渲染。finalize / stopped 从 base + pending 取全量文本。
+  // 随占位节点初始化（appendAssistantPlaceholder），跨消息天然隔离。
   const tokenStreamStates = new WeakMap();
 
   function resetTokenStreamState(node) {
-    tokenStreamStates.set(node, { base: "", pending: [] });
+    tokenStreamStates.set(node, { base: "", pending: [], stableText: "", stableEl: null, tailEl: null });
   }
 
   function getTokenStreamState(node) {
     let state = tokenStreamStates.get(node);
     if (!state) {
-      state = { base: "", pending: [] };
+      state = { base: "", pending: [], stableText: "", stableEl: null, tailEl: null };
       tokenStreamStates.set(node, state);
     }
     return state;
+  }
+
+  // 流式双容器懒创建（首帧 flush 时挂上；finalize / stopped 的整体重渲染会
+  // 自然清掉它们）
+  function ensureStreamContainers(node, state) {
+    if (state.stableEl && state.tailEl) {
+      return;
+    }
+    const stableEl = document.createElement("div");
+    stableEl.className = "sp-stream-stable";
+    const tailEl = document.createElement("div");
+    tailEl.className = "sp-stream-tail";
+    node.appendChild(stableEl);
+    node.appendChild(tailEl);
+    state.stableEl = stableEl;
+    state.tailEl = tailEl;
   }
 
   // 全量流式文本 = base + 未 flush 的 pending（不做清空，供 finalize/stopped 只读）
@@ -378,10 +399,26 @@ export function createChatRuntime(deps) {
       tokenFlushFrame = 0;
       const state = getTokenStreamState(node);
       const text = state.base + state.pending.join("");
+      // think 块先剥除再切分，保证未闭合的 <think> 不会横跨 stable/tail 切点
+      // （renderMarkdown 内部的再 strip 是无害幂等）。
+      const cleaned = stripThinkBlocks(text);
+      const { stableText, tailText } = splitMarkdownTail(cleaned);
+      ensureStreamContainers(node, state);
+      // 首帧渲染即移除思考节点（与旧的整节点 innerHTML 覆盖行为一致）
+      const thinking = node.querySelector(".sp-thinking");
+      if (thinking) {
+        thinking.remove();
+      }
+      // 稳定前缀只在增长时渲染一次；末块每帧重渲染
+      if (state.stableText !== stableText) {
+        state.stableText = stableText;
+        state.stableEl.innerHTML = renderMarkdown(stableText);
+      }
+      // 先取光标引用再重写 tail（innerHTML 赋值会清掉 tail 内的旧光标）
       const cursor = node.querySelector(".sp-msg-cursor");
-      node.innerHTML = renderMarkdown(text || "");
+      state.tailEl.innerHTML = renderMarkdown(tailText);
       if (cursor) {
-        node.appendChild(cursor);
+        state.tailEl.appendChild(cursor);
       }
       scrollToBottom();
       state.base = text;
