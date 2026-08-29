@@ -118,6 +118,11 @@ export function createChatRuntime(deps) {
   // scroll 监听与恢复点经 setAutoScroll 写入，token flush / finalize /
   // error / stopped 的非强制滚动在此读取。
   let shouldAutoScrollMessages = true;
+  // 候选5：offscreen 侧已确认缓存字幕体的 contextKey（从其每次回执的
+  // cachedContextKey 读到）。追问消息据此省略整份 subtitleBody——长视频单份
+  // 字幕体可达数 MB，逐条追问经 port 重传纯属浪费。null = 未确认（首条消息、
+  // port 断连、字幕体缺失错误之后），必然全量携带。
+  let lastAckedContextKey = null;
 
   // ---- internal helpers ----
   function setStreamingUiState(isStreaming, { stopping = false } = {}) {
@@ -181,6 +186,12 @@ export function createChatRuntime(deps) {
 
     port.onMessage.addListener((msg) => {
       if (!msg) return;
+      // 候选5：offscreen 每次回执都带 cachedContextKey（其单槽字幕体缓存当前
+      // 持有的 key）——推进 lastAcked，后续追问省略 subtitleBody。字幕体缺失
+      // 错误不带该字段，由下方 error 分支显式重置。
+      if (typeof msg.cachedContextKey === "string" && msg.cachedContextKey) {
+        lastAckedContextKey = msg.cachedContextKey;
+      }
       if (msg.type === "reasoning") {
         handleFirstStreamToken();
         if (!thinkingNode) thinkingNode = createThinkingNode(activeAssistantNode);
@@ -194,6 +205,12 @@ export function createChatRuntime(deps) {
       } else if (msg.type === "stopped") {
         handleAssistantStopped(activeAssistantNode, msg.reason || "已停止生成");
       } else if (msg.type === "error") {
+        // 候选5：offscreen 单槽缓存缺失（文档被回收后重启 / 槽 key 不匹配）回
+        // 「字幕体缺失」→ 重置 lastAcked 让下一条消息重发全文。本条不自动重发，
+        // 避免失败风暴；用户重发时自然走全量。
+        if (msg.code === "subtitle-body-missing") {
+          lastAckedContextKey = null;
+        }
         showAssistantError(activeAssistantNode, msg.error || "未知错误");
       } else if (msg.type === "notice") {
         deps.ui.showConversationContextNotice(msg.data, 4000);
@@ -206,18 +223,32 @@ export function createChatRuntime(deps) {
 
     port.onDisconnect.addListener(() => {
       activePort = null;
+      // 候选5：断连意味着 offscreen 文档可能已被回收，其单槽字幕体缓存随文档
+      // 消失——重置 lastAcked，下一条消息重发全文（宁多传不错发）。
+      lastAckedContextKey = null;
       clearStreamRuntimeState();
       setStreamingUiState(false);
     });
+
+    // 候选5：字幕体省略传输——offscreen 已确认缓存当前上下文的字幕体
+    //（lastAckedContextKey === contextKey）时本条消息不再重传整份 subtitleBody；
+    // contextKey 始终携带，offscreen 据此校验单槽匹配并在缺失时报错触发重置。
+    // 其余元数据/history/aiSystemPrompt 保持全量（体积小且每条都可能变）。
+    const context = {
+      ...sidepanelState.contextData,
+      aiSystemPrompt: sidepanelState.aiPrefs.aiSystemPrompt
+    };
+    const contextKey = String(sidepanelState.currentContextKey || "").trim();
+    if (contextKey && lastAckedContextKey === contextKey) {
+      delete context.subtitleBody;
+    }
 
     port.postMessage({
       action: "chat",
       providerId,
       thinkingLevel: sidepanelState.aiThinkingLevel,
-      context: {
-        ...sidepanelState.contextData,
-        aiSystemPrompt: sidepanelState.aiPrefs.aiSystemPrompt
-      },
+      context,
+      contextKey,
       prompt: text,
       // 历史只走顶层 history（offscreen/ai 侧统一读 msg.history）；
       // 不再向 context 里塞 chatHistory 副本（无任何读取方的死负载）。

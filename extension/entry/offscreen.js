@@ -10,11 +10,18 @@ import { logWarn } from "../shared/logging.js";
 import { shouldCloseAfterAsrTask } from "./offscreen-lifecycle.js";
 import { createAsrDecodeHandler } from "./offscreen-asr.js";
 import { ASR_DECODE_PORT_NAME, ASR_DECODE_ACTION } from "../asr/protocol.js";
+// 候选5：聊天字幕体单槽缓存（纯逻辑在 ./offscreen-subtitle-slot.js，可测）。
+import { createSubtitleBodySlot } from "./offscreen-subtitle-slot.js";
 
 let activeAbortController = null;
 let pendingCostGuard = null;
 let idleTimeoutId = null;
 var STREAM_IDLE_TIMEOUT_MS = 90000;
+
+// 候选5：聊天字幕体单槽缓存。SP 侧只在 lastAckedContextKey 变化时随消息携带
+// 全量 subtitleBody，后续追问由本槽补齐；槽随本文档生灭，文档被回收后 SP 的
+// port 断连会重置其 lastAcked，时序缝隙里漏网的缺失消息走 settle 的错误回执。
+const subtitleSlot = createSubtitleBodySlot();
 
 // 同一文档双通道存活计数：聊天（"offscreen-chat" 端口）用计数维护，
 // 解码任务（"asr-decode" 端口）用存活端口集合维护——终态判定要排除
@@ -85,18 +92,33 @@ chrome.runtime.onConnect.addListener((port) => {
     }
     if (msg.action !== "chat") return;
 
+    // 候选5：先结算字幕体。SP 侧 lastAckedContextKey 命中时消息不带
+    // subtitleBody，由单槽缓存补写进 msg.context；槽缺失/key 不匹配直接回
+    // 错误且不带 cachedContextKey——SP 据此重置 lastAcked，让下一条消息重发
+    // 全文（本条不自动重发，避免失败风暴）。
+    const settled = subtitleSlot.settle(msg);
+    if (!settled.ok) {
+      port.postMessage({ type: "error", error: settled.error, code: settled.code });
+      return;
+    }
+    // 自此所有 chat 回执都附带 cachedContextKey（槽内已确认的 key）：SP 读它
+    // 推进 lastAckedContextKey，后续追问省略 subtitleBody。包装只劫持
+    // postMessage，端口事件监听不受影响；下游 ladder/streamChat/map-reduce
+    // 只经 port.postMessage 回吐，包装对它们透明。
+    const ackedPort = withCachedContextKey(port, settled.contextKey);
+
     try {
       abortActiveRequest();
       activeAbortController = new AbortController();
 
-      const resolved = await resolveProviderWithKey(port, msg.providerId);
+      const resolved = await resolveProviderWithKey(ackedPort, msg.providerId);
       if (resolved.error) {
         clearActiveRequestState();
         return;
       }
       const { provider, apiKey } = resolved;
 
-      armIdleTimeout(activeAbortController, port);
+      armIdleTimeout(activeAbortController, ackedPort);
 
       // 阶梯分派策略（预算内单次流式 → 超预算 Map-Reduce → 追问压缩/成本护栏）
       // 在 ai/ladder.js（策略模块由 ladder 自行引入默认实现）；此处只接线：
@@ -106,17 +128,17 @@ chrome.runtime.onConnect.addListener((port) => {
         {
           msg,
           provider: { ...provider, apiKey },
-          port,
+          port: ackedPort,
           signal: activeAbortController.signal
         },
         {
           askCostGuard,
-          onActivity: function () { armIdleTimeout(activeAbortController, port); },
+          onActivity: function () { armIdleTimeout(activeAbortController, ackedPort); },
           pauseIdleTimeout: clearIdleTimeout
         }
       );
     } catch (e) {
-      port.postMessage({ type: "error", error: String(e?.message || e) });
+      ackedPort.postMessage({ type: "error", error: String(e?.message || e) });
     } finally {
       clearIdleTimeout();
       clearActiveRequestState();
@@ -185,6 +207,16 @@ function askCostGuard(port, message) {
     pendingCostGuard = { resolve };
     port.postMessage({ type: "cost-guard", data: { message } });
   });
+}
+
+// 候选5：给 port 的出站消息统一附带 cachedContextKey（本侧单槽缓存当前确认
+// 持有的字幕体 key）。SP 从任意一条 chat 回执读它推进 lastAckedContextKey，
+// 后续追问省略 subtitleBody。只包装 postMessage 一个入口；事件监听器仍挂
+// 在原 port 上（本包装只作为下游回吐的发送通道）。
+function withCachedContextKey(port, contextKey) {
+  return {
+    postMessage: (data) => port.postMessage({ ...data, cachedContextKey: contextKey })
+  };
 }
 
 // 取「选中的平台 + 其 API Key」：provider 来自 ai-providers-list，key 来自 get-ai-provider-key。

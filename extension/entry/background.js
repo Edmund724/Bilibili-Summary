@@ -233,7 +233,11 @@ function handleOffloadTask(message, sender, sendResponse) {
 function handleAiSidepanelGetState(message, sender, sendResponse) {
   const tabId = Number(message.tabId || 0) || 0;
   const forceRefresh = message.forceRefresh === true;
-  getAiSidepanelState(tabId, { forceRefresh }, {
+  // 候选5：透传 SP 上次全量快照的签名给 content 判短路（不可信输入按空串
+  // 处理，空串 = 不短路走全量）；getAiSidepanelState 命中短路时返回
+  // { unchanged: true }，经下方统一包装成 { ok, payload } 回给 SP。
+  const ifSignature = String(message.ifSignature || "");
+  getAiSidepanelState(tabId, { forceRefresh, ifSignature }, {
     ensureReaderContentReady,
     sendMessageToTab
   })

@@ -287,16 +287,20 @@ function bindEvents() {
   });
   window.addEventListener("resize", updateModelSelectWidth);
   document.addEventListener("click", handleDocumentClick);
+  // 候选5：可见性/聚焦/切签恢复这三类高频同步一律 forceRefresh=false——
+  // 全网络重拉（content 侧 popup-refresh → refreshClip 全量重抓字幕）不是
+  // 它们的语义，状态是否有变交给签名短路判定：content 侧未变时一次往返即
+  // 返回 unchanged，不再有任何字幕/热评网络开销。
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
-      scheduleLiveContextSync(true);
+      scheduleLiveContextSync(false);
     }
   });
   window.addEventListener("focus", () => {
-    scheduleLiveContextSync(true);
+    scheduleLiveContextSync(false);
   });
   chrome.tabs.onActivated.addListener(() => {
-    scheduleLiveContextSync(true);
+    scheduleLiveContextSync(false);
   });
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (!tab?.active) {
@@ -305,6 +309,10 @@ function bindEvents() {
     if (!changeInfo.url && changeInfo.status !== "complete") {
       return;
     }
+    // URL 变化保持 forceRefresh=true：切 P/切视频必须全网络重拉（会与
+    // debounce 里已挂起的 false 合并取强）。status==="complete" 保持 false：
+    // 若 content 已随加载重建了状态，签名必然不同会走全量；相同则短路，
+    // 不再借完成事件做无谓的强制重拉。
     scheduleLiveContextSync(Boolean(changeInfo.url));
   });
   chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -556,9 +564,23 @@ async function loadContextState({ forceRefresh = false, silent = false } = {}) {
   const resp = await sendRuntimeMessage({
     type: "ai-sidepanel-get-state",
     tabId: tab.id,
-    forceRefresh
+    forceRefresh,
+    // 候选5：带上次全量快照的签名，content 侧状态未变时一次往返即短路返回
+    //（不重发整份字幕体、不拉热评）。forceRefresh=true 时 content 忽略签名，
+    // 手动刷新语义不变。liveContextData 为空（首次/此前失败）时签名为空串，
+    // content 必走全量。
+    ifSignature: String(sidepanelState.liveContextData?.signature || "")
   }).catch((error) => ({ ok: false, error: error.message }));
   sidepanelState.liveTabUrl = String(tab.url || "").trim();
+
+  // 候选5：content 状态未变 → 保持现状不动（不 applyContextPayload、不重渲染、
+  // 不刷新 live 快照、不转 spinner）。liveContextData 仍持有带 signature 的
+  // 上次全量 payload：既是下一轮 ifSignature 的来源，也是等待轮询
+  // （subtitle-wait）的判定数据源——返回 true 让轮询按旧快照继续判 pending，
+  // ASR 完成时签名必然变化（subtitleFetchState/body.length），全量快照自然到位。
+  if (resp?.ok && resp?.payload?.unchanged === true) {
+    return true;
+  }
 
   if (!resp?.ok || !resp.payload) {
     sidepanelState.liveContextData = null;

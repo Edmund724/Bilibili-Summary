@@ -109,3 +109,111 @@ describe("getAiSidepanelState：转写未完成窗口期", () => {
     expect(getContextCalls).toBe(2); // 首查 + refresh 后复查
   });
 });
+
+// ===== 候选5：签名短路（ifSignature 透传 + unchanged 提前返回） =====
+// 本文件只锁 resolver 层的契约：ifSignature 原样带给 content、unchanged 提前
+// 返回（热评/popup-refresh 全部跳过）、全量路径 signature 透传到返回 payload。
+// content 侧的短路判定本体在 tests/core/message-handler-signature.test.js。
+
+const CONTENT_SIGNATURE = "sig-content-v1";
+
+// 模拟已实现签名短路的 content：ifSignature 与当前签名一致且未强制刷新 →
+// 回 unchanged；否则回全量 payload（附 signature）。签名对 resolver 是不透明串。
+function makeSignatureAwareResponder(sent) {
+  return vi.fn(async (_tabId, message) => {
+    sent.push(message);
+    if (message.type === "sidepanel-get-context") {
+      if (
+        message.forceRefresh !== true &&
+        typeof message.ifSignature === "string" &&
+        message.ifSignature &&
+        message.ifSignature === CONTENT_SIGNATURE
+      ) {
+        return { ok: true, unchanged: true, signature: CONTENT_SIGNATURE };
+      }
+      return {
+        ok: true,
+        payload: {
+          url: "https://www.bilibili.com/video/BV1test/",
+          title: "五小时访谈",
+          bvid: "BV1test",
+          aid: "1",
+          cid: "101",
+          subtitleBody: [{ from: 0, to: 5, content: "第一句" }],
+          subtitleFetchState: "ready",
+          signature: CONTENT_SIGNATURE
+        }
+      };
+    }
+    if (message.type === "sidepanel-get-hot-comments") {
+      return { ok: true, comments: [{ uname: "u", like: 1, message: "m" }] };
+    }
+    if (message.type === "popup-refresh") {
+      return { ok: true };
+    }
+    return { ok: true };
+  });
+}
+
+describe("getAiSidepanelState：签名短路（候选5）", () => {
+  let sent;
+
+  beforeEach(() => {
+    sent = [];
+    vi.stubGlobal("chrome", {
+      ...globalThis.chrome,
+      tabs: {
+        ...(globalThis.chrome?.tabs || {}),
+        get: vi.fn(async () => ({ id: 1, url: "https://www.bilibili.com/video/BV1test/" }))
+      }
+    });
+  });
+
+  function runGetState(options) {
+    return getAiSidepanelState(
+      1,
+      options,
+      {
+        ensureReaderContentReady: vi.fn(async () => {}),
+        sendMessageToTab: makeSignatureAwareResponder(sent)
+      }
+    );
+  }
+
+  it("ifSignature 命中：透传 { unchanged: true }，不发 popup-refresh、不拉热评", async () => {
+    const result = await runGetState({ ifSignature: CONTENT_SIGNATURE });
+
+    // SP 收到 unchanged 后跳过 apply/渲染，保持现有快照不动
+    expect(result).toEqual({ unchanged: true });
+
+    // 一次往返即结束：短路后没有任何后续消息
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ type: "sidepanel-get-context", ifSignature: CONTENT_SIGNATURE, forceRefresh: false });
+    expect(sent.some((m) => m.type === "sidepanel-get-hot-comments")).toBe(false);
+    expect(sent.some((m) => m.type === "popup-refresh")).toBe(false);
+  });
+
+  it("ifSignature 未命中：走全量路径，signature 透传到 payload 且照拉热评", async () => {
+    const payload = await runGetState({ ifSignature: "stale-signature" });
+
+    expect(payload.title).toBe("五小时访谈");
+    expect(payload.signature).toBe(CONTENT_SIGNATURE);
+    expect(payload.hotComments).toHaveLength(1);
+    expect(payload.isVideoContext).toBe(true);
+    expect(sent.some((m) => m.type === "sidepanel-get-hot-comments")).toBe(true);
+  });
+
+  it("forceRefresh=true 绕过短路：签名命中仍走 popup-refresh 全量路径", async () => {
+    const payload = await runGetState({ forceRefresh: true, ifSignature: CONTENT_SIGNATURE });
+
+    expect(payload.title).toBe("五小时访谈");
+    expect(payload.signature).toBe(CONTENT_SIGNATURE);
+    expect(sent.some((m) => m.type === "popup-refresh")).toBe(true);
+  });
+
+  it("旧调用方不带 ifSignature：不短路，全量返回（向后兼容）", async () => {
+    const payload = await runGetState({});
+    expect(payload.title).toBe("五小时访谈");
+    expect(sent[0].ifSignature).toBe("");
+  });
+});

@@ -170,7 +170,7 @@ export async function resolveAiSidepanelPageRef(contextRef) {
 // 后台进行"，回退读取当前快照（subtitleFetchState 会告知转写进行中）。
 const REFRESH_WAIT_MS = 10000;
 
-export async function getAiSidepanelState(tabId, { forceRefresh = false } = {}, tabOps = {}) {
+export async function getAiSidepanelState(tabId, { forceRefresh = false, ifSignature = "" } = {}, tabOps = {}) {
   const { ensureReaderContentReady, sendMessageToTab } = tabOps;
   if (!tabId) {
     throw new Error("缺少标签页信息");
@@ -195,7 +195,22 @@ export async function getAiSidepanelState(tabId, { forceRefresh = false } = {}, 
 
   await ensureReaderContentReady(tab.id);
 
-  let contextResp = await sendMessageToTab(tab.id, { type: "sidepanel-get-context" });
+  let contextResp = await sendMessageToTab(tab.id, {
+    type: "sidepanel-get-context",
+    forceRefresh,
+    // 候选5：透传 SP 上次全量快照的签名；content 判定状态未变时整份省略。
+    // forceRefresh=true 时 content 侧忽略签名，语义不变。
+    ifSignature
+  });
+
+  // 候选5 签名短路：content 状态与 SP 快照一致 → 不取字幕、不发 popup-refresh、
+  // 也不拉热评（下方热评块不可达），直接向上透传 unchanged（background 原样
+  // 包进 payload 回给 SP，SP 据此跳过 apply/渲染）。短路只发生在首查——后面
+  // needsRefresh 分支的复查不带签名，必然回全量。
+  if (contextResp?.ok && contextResp?.unchanged === true) {
+    return { unchanged: true };
+  }
+
   const hasPayload = Boolean(contextResp?.ok && contextResp?.payload);
   const hasLoadedClip = Boolean(
     contextResp?.payload?.bvid ||
@@ -229,6 +244,8 @@ export async function getAiSidepanelState(tabId, { forceRefresh = false } = {}, 
     throw new Error("当前页面上下文读取失败");
   }
 
+  // 候选5：热评网络拉取只发生在全量路径——unchanged 已在上方提前返回，走到
+  // 这里必然是全量（或 forceRefresh 后的复查），为热评多一次往返才值得。
   let hotComments = [];
   try {
     const commentsResp = await sendMessageToTab(tab.id, { type: "sidepanel-get-hot-comments" });
