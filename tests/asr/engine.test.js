@@ -387,3 +387,83 @@ describe("中止探针", () => {
     expect(summary.aborted).toBe(true);
   });
 });
+
+describe("HTTP 状态码重试判定（isRetryableNetworkError 按状态收紧）", () => {
+  // 对齐适配器（openai-transcriptions）抛出的 HTTP 错误形状：message + err.status
+  function makeHttpError(status, detail = "") {
+    const err = new Error(`HTTP ${status}${detail ? `: ${detail}` : ""}`);
+    err.status = status;
+    return err;
+  }
+
+  it("401：确定性鉴权失败，经 retryAsync 一次尝试即跳过计 failed（不重试）", async () => {
+    const transcribe = vi.fn(async () => {
+      throw makeHttpError(401, "invalid api key");
+    });
+    const engine = createTranscriptionEngine({ transcribe });
+
+    engine.push(makeChunk(0));
+    const summary = await engine.close();
+
+    // 旧消息启发式（"http " 即重试）会重试 3 次；收紧后按 status 判定只试 1 次
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(summary.completedChunks).toBe(0);
+    expect(summary.failedChunks).toBe(1);
+    expect(summary.failures[0].error).toMatchObject({
+      message: "HTTP 401: invalid api key",
+      status: 401
+    });
+  });
+
+  it("429：限流可重试，重试一次后成功", async () => {
+    let attempts = 0;
+    const transcribe = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw makeHttpError(429);
+      }
+      return { text: "限流重试成功" };
+    });
+
+    const result = await transcribeChunk({ chunk: makeChunk(0), transcribe });
+
+    expect(result).toEqual({ text: "限流重试成功", durationSec: 600 });
+    expect(transcribe).toHaveBeenCalledTimes(2);
+  });
+
+  it("500：服务端错误可重试，耗尽 retries=2（共 3 次尝试）计 failed", async () => {
+    const transcribe = vi.fn(async () => {
+      throw makeHttpError(500, "internal error");
+    });
+    const engine = createTranscriptionEngine({ transcribe });
+
+    engine.push(makeChunk(0));
+    const summary = await engine.close();
+
+    expect(transcribe).toHaveBeenCalledTimes(3);
+    expect(summary.completedChunks).toBe(0);
+    expect(summary.failedChunks).toBe(1);
+    expect(summary.failures[0].error).toMatchObject({ message: "HTTP 500: internal error", status: 500 });
+  });
+
+  it("400：参数类确定性失败，不重试一次尝试即失败", async () => {
+    const transcribe = vi.fn(async () => {
+      throw makeHttpError(400, "bad request");
+    });
+    const engine = createTranscriptionEngine({ transcribe });
+
+    engine.push(makeChunk(0));
+    const summary = await engine.close();
+
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(summary.failedChunks).toBe(1);
+  });
+
+  it("无 status 的错误维持消息启发式：网关 'HTTP 404' 消息仍判可重试（其他域行为不回退）", () => {
+    // bilibili 网关只把状态码写进消息文本（无 err.status），收紧不得误伤
+    expect(errorHelpers.isRetryableNetworkError(new Error("HTTP 404"))).toBe(true);
+    expect(errorHelpers.isRetryableNetworkError(new Error("请求失败：502"))).toBe(true);
+    // 非正数的 status 不是有效 HTTP 状态码（适配器 -1 哨兵）→ 落回消息启发式
+    expect(errorHelpers.isRetryableNetworkError({ message: "响应体不是合法 JSON", status: -1 })).toBe(false);
+  });
+});

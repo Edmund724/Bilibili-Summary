@@ -9,9 +9,13 @@
 //   - 转写语言：provider.language 为 zh/en 时以查询参数 ?language=zh|english
 //     传给平台（SiliconFlow 辰星/SenseVoice 的英文识别依赖该参数）；auto 省略，
 //     交服务端自动检测；
-//   - 兼容性降级：非 2xx 或响应体无 segments → 以 response_format=json
-//     自动重试一次（只取 text），返回里省略 segments 表达"无时间戳"，
-//     调用方据此合成整片粗粒度字幕。
+//   - 成功/降级/失败三分（契约）：2xx 且有 segments → 成功返回；2xx 但无
+//     segments（平台不支持 verbose_json，如 SiliconFlow 只回 { text }）→ 以
+//     response_format=json 降级 POST 一次（只取 text），返回里省略 segments
+//     表达"无时间戳"，调用方据此合成整片粗粒度字幕；HTTP 非 2xx → 直接抛
+//     `HTTP <status>`（err.status 带状态码），不再降级——重试与否交给调用方
+//     retryAsync 按状态码判定（408/429/5xx 可重试，其余 4xx 不重试），避免
+//     38MB 级 wav 对注定失败的请求做第二次全量重传。
 
 // 把识别语言转成平台查询参数：?language=zh / ?language=english。
 // SiliconFlow 辰星 / SenseVoice 系列的英文识别依赖 ?language=english（multipart
@@ -114,6 +118,15 @@ async function postTranscription({ wavBlob, provider, signal, responseFormat }) 
 
 // 统一入口。返回 { text, segments? }；segments 缺省表示该平台无时间戳，
 // 调用方（pipeline）据此合成整片粗粒度字幕。
+//
+// 成功/降级/失败三分（契约）：
+//   - 2xx 且有 segments → 成功返回（带句级时间戳）；
+//   - 2xx 但无 segments，或 2xx 但响应体不是合法 JSON（响应到了、体不符，
+//     属平台兼容问题）→ json 降级第二次 POST（降级的唯一合法场景）；
+//   - HTTP 非 2xx（status>0）→ 直接抛 `HTTP <status>: <detail>`（err.status
+//     带状态码，消息格式与降级失败路径一致），不发第二次 POST；
+//   - fetch 抛错（网络层）→ 原样上抛，保持可被 isRetryableNetworkError
+//     消息启发式命中的形态（如 "Failed to fetch"）。
 export async function transcribe({ wavBlob, startSec, durationSec, provider, signal, onProgress }) {
   // 首次尝试 verbose_json：平台支持则带句级时间戳。
   const first = await postTranscription({ wavBlob, provider, signal, responseFormat: "verbose_json" });
@@ -122,8 +135,18 @@ export async function transcribe({ wavBlob, startSec, durationSec, provider, sig
     return { text: first.text, segments: first.segments };
   }
 
-  // 兼容性降级：非 2xx 或响应体无 segments（如 SiliconFlow 只回 { text }）
-  // → 以 response_format=json 重试一次，只取 text。
+  // HTTP 非 2xx：确定性失败直接抛，不再发第二次全量 POST（单片 wav 38MB 级，
+  // 对 401/403/400 这类重试也注定失败的请求是纯浪费）。可重试性（408/429/5xx）
+  // 由调用方 retryAsync 按 err.status 判定。
+  if (first.status > 0) {
+    const err = new Error(`HTTP ${first.status}${first.detail ? `: ${first.detail}` : ""}`);
+    err.status = first.status;
+    throw err;
+  }
+
+  // 兼容性降级（唯一合法场景）：2xx 但响应体无 segments（平台不支持
+  // verbose_json，如 SiliconFlow 只回 { text }），或 2xx 但响应体不是合法
+  // JSON（status=-1，体不符）→ 以 response_format=json 重试一次，只取 text。
   const second = await postTranscription({ wavBlob, provider, signal, responseFormat: "json" });
   onProgress?.();
   if (second.status === 0) {

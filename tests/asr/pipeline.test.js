@@ -143,6 +143,95 @@ describe("openai-transcriptions 适配器", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("2xx 但响应体不是合法 JSON（status=-1）：仍走 json 降级（平台兼容问题，共 2 次 fetch）", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        // 响应到了但 json() 解析失败 → postTranscription 返回 status=-1
+        json: async () => {
+          throw new SyntaxError("Unexpected token < in JSON");
+        }
+      })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ text: "降级文本" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = await import("../../extension/asr/adapters/openai-transcriptions.js");
+    const result = await adapter.transcribe({
+      wavBlob: new Blob([new Uint8Array(8)]),
+      startSec: 0,
+      durationSec: 60,
+      provider: OPENAI_PROVIDER
+    });
+
+    expect(result).toEqual({ text: "降级文本" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("verbose_json 500：直接抛 HTTP 错误且只 fetch 1 次（非 2xx 不再降级第二次 POST）", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      text: async () => "internal error"
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = await import("../../extension/asr/adapters/openai-transcriptions.js");
+    // 单片 wav 38MB 级：非 2xx 后断言绝不发生第二次全量重传
+    const wavBlob = new Blob([new Uint8Array(16000 * 2 * 2)]);
+
+    await expect(
+      adapter.transcribe({ wavBlob, startSec: 0, durationSec: 60, provider: OPENAI_PROVIDER })
+    ).rejects.toMatchObject({ message: "HTTP 500: internal error", status: 500 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("verbose_json 401：确定性鉴权失败直接抛且只 fetch 1 次（不再降级）", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      text: async () => "invalid api key"
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = await import("../../extension/asr/adapters/openai-transcriptions.js");
+
+    await expect(
+      adapter.transcribe({
+        wavBlob: new Blob([new Uint8Array(8)]),
+        startSec: 0,
+        durationSec: 60,
+        provider: OPENAI_PROVIDER
+      })
+    ).rejects.toMatchObject({ message: "HTTP 401: invalid api key", status: 401 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetch 网络拒绝：错误原样上抛，消息形态可被 isRetryableNetworkError 命中", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = await import("../../extension/asr/adapters/openai-transcriptions.js");
+    const { isRetryableNetworkError } = await import("../../extension/shared/error-helpers.js");
+
+    let caught = null;
+    try {
+      await adapter.transcribe({
+        wavBlob: new Blob([new Uint8Array(8)]),
+        startSec: 0,
+        durationSec: 60,
+        provider: OPENAI_PROVIDER
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    // 网络层错误不被适配器包装：原样上抛，交 retryAsync 消息启发式判定可重试
+    expect(caught).toBeInstanceOf(TypeError);
+    expect(caught.message).toBe("Failed to fetch");
+    expect(isRetryableNetworkError(caught)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("FormData 字段断言：body 为 FormData、model 正确、绝无 Content-Type 头、apiKey 带 Bearer", async () => {
     let captured = null;
     let capturedUrl = null;

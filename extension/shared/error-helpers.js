@@ -56,6 +56,16 @@ export function isStaleRunError(error) {
 }
 
 export function isRetryableNetworkError(error) {
+  // 显式 HTTP 状态码优先判定（err.status 为正数才视为真实状态码）：408（请求
+  // 超时）/ 429（限流）/ >=500（服务端错误）可重试；其余 4xx（400/401/403/404…）
+  // 是确定性失败，原样重发只会再次失败，不重试。status<=0 不是有效 HTTP 状态码
+  // （ASR 适配器用 -1 表示响应体解析失败等自造哨兵）；无 status 的错误（如
+  // bilibili 网关只把状态码写进消息文本）维持下方消息启发式不变。
+  const status = Number(error?.status);
+  if (Number.isFinite(status) && status > 0) {
+    return status === 408 || status === 429 || status >= 500;
+  }
+
   const message = getErrorMessage(error, "").toLowerCase();
   if (!message) {
     return false;
