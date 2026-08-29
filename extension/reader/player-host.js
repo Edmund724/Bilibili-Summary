@@ -54,6 +54,79 @@ let headerHideTimer = 0;           // readingHeaderHideTimer
 let videoEventsBound = false;      // readingVideoEventsBound
 let layoutBound = false;           // readingLayoutBound
 
+// ===== 候选10 批1：rAF 合帧布局调度与脏检查快照 =====
+//
+// scroll/resize 与 250ms sync tick 原先各自同步跑一次 layoutReaderPlayerHost
+// （读 rect → 写 style → 读 clientHeight → 写 spacer），一帧内多次读写交错会
+// 反复强制布局。事件路径现在只经 scheduleReaderLayout 置脏（rafId 即脏标志），
+// 一帧至多跑一次「读→算→写」；同一帧内重复 scroll/tick 触发自动合并。
+// layoutRafId 非 0 即表示「有未消费的布局请求」，cancel 路径见下。
+let layoutRafId = 0;
+
+// layoutReaderPlayerHost 上次写组快照：模式（native/slot）、宿主与视图节点、
+// CSS 变量与 slot 分支的 8 个 setProperty 值。与本次计算结果全同则整组跳写，
+// 避免每拍 tick / 每个滚动事件的无谓样式失效；模式切换（native↔slot）或
+// 宿主/视图节点换新时强制写全量，防止旧快照掩盖新节点上的缺省样式。
+let lastLayoutSnapshot = null;
+
+// （候选10 批1 spacer 的脏检查采用「读内联现值比较」，无需模块级缓存字段：
+// 内联样式读取是纯字符串操作，无布局开销；列表整段重建换新 spacer 节点
+// （style.height 为空）或外部篡改时天然不命中、强制重写。）
+
+function runScheduledReaderLayout() {
+  layoutRafId = 0;
+  // 阅读视图节点已被移除（扩展根被清理 / 测试 teardown 等）时直接丢弃本帧：
+  // layoutReaderPlayerHost 经 byId 取节点，缺失会抛错；视图不在就没有可布局
+  // 的对象，静默丢弃比让异常冒进 scroll 回调更安全。
+  if (!document.getElementById(ids.readingView)) {
+    return;
+  }
+  layoutReaderPlayerHost();
+}
+
+// 事件/tick 路径的布局入口：合并一帧内重复请求。直接调用
+// layoutReaderPlayerHost 的路径（挂载/loadedmetadata/恢复重试等一次性场景）
+// 保持同步语义不变。
+export function scheduleReaderLayout() {
+  if (layoutRafId) {
+    return;
+  }
+  layoutRafId = window.requestAnimationFrame(runScheduledReaderLayout);
+}
+
+// 取消挂起的合帧布局：stop/close 路径（clearLayoutTimersForSyncStop /
+// unbindReaderLayout）调用，避免关掉阅读视图后还跑一帧。
+function cancelScheduledReaderLayout() {
+  if (layoutRafId) {
+    window.cancelAnimationFrame(layoutRafId);
+    layoutRafId = 0;
+  }
+}
+
+// ===== 候选10 批2：字幕分批渲染的「同步补渲染」seam =====
+//
+// SYNC 域（sync.js）的跳转/跟随定位要求「目标条目未上屏时先同步补渲染到目标
+// index 再滚动」，但分批渲染任务归 LIFECYCLE（lifecycle.js）所有，而
+// SYNC → LIFECYCLE 是依赖图禁止的边（LIFECYCLE → SYNC + LAYOUT 才合法）。
+// 与 sync-adapter.js（SYNC 注册、LAYOUT 调用）互为镜像：LIFECYCLE 在模块加载
+// 时把补渲染实现注册进本基座，SYNC 经 flushReadingTranscriptToIndex 调用，
+// 依赖图保持无环。
+let transcriptFlushHandler = null;
+
+export function setReadingTranscriptFlush(handler) {
+  transcriptFlushHandler = typeof handler === "function" ? handler : null;
+}
+
+// 供 SYNC 域调用：目标 index 未上屏时同步补渲染。无注册实现（如测试只挂骨架、
+// 或列表本就无需分批）时直接返回 true，调用方的后续 querySelector 行为与
+// 未引入分批渲染前一致。
+export function flushReadingTranscriptToIndex(targetIndex) {
+  if (!transcriptFlushHandler) {
+    return true;
+  }
+  return Boolean(transcriptFlushHandler(targetIndex));
+}
+
 // ===== reader facade accessors for closure state =====
 //
 // These accessors are the seam between the layout (player-host.js) closure and
@@ -72,6 +145,10 @@ export function setVideoEventsBound(bound) {
 // remaining layout timers it owns the lifecycle of. playerRetryTimer 分支已随
 // 变量迁入 ./lifecycle.js（属主清除），不再在此清理。
 export function clearLayoutTimersForSyncStop() {
+  // 挂起的合帧布局同属 stop 路径要清理的“布局定时器”：取消后关闭阅读视图
+  // 不会再补跑一帧 layout（即便补跑也会被 layoutReaderPlayerHost 的
+  // readingViewOpen 守卫拦下，这里显式取消是按候选10要求的兜底）。
+  cancelScheduledReaderLayout();
   if (miniDismissTimer) {
     window.clearTimeout(miniDismissTimer);
     miniDismissTimer = 0;
@@ -109,6 +186,12 @@ export function updateReadingTranscriptTailSpacer() {
   const transcriptList = document.getElementById(ids.readingTranscriptList);
   const hostHeight = inlineHost?.clientHeight || transcriptList?.clientHeight || 0;
   const spacerHeight = Math.max(hostHeight, Math.round(window.innerHeight * 0.92), 320);
+  // 候选10 批1 脏检查：现值与目标一致则跳写（250ms tick / 每帧追加都会调到）。
+  // 读现值而非缓存快照：换新 spacer 节点（重建后 style.height 为空）或外部
+  // 篡改时自动重写，无需额外的节点身份失效逻辑。
+  if (spacer.style.height === `${spacerHeight}px`) {
+    return;
+  }
   spacer.style.height = `${spacerHeight}px`;
 }
 
@@ -116,7 +199,14 @@ export function updateReadingTranscriptTailSpacer() {
 // reading view); lives in the base layer so neither dependent module needs a
 // back-edge to this one.
 export function renderReadingStatus(text) {
-  getReaderElement(ids.readingStatus).textContent = String(text || "");
+  const node = getReaderElement(ids.readingStatus);
+  const next = String(text || "");
+  // 候选10 批1：250ms tick 会反复写同一文案，值未变时跳过 textContent 写入，
+  // 避免无谓的 DOM 变更（节点缺失时仍按原样经 byId 抛错，行为不变）。
+  if (node.textContent === next) {
+    return;
+  }
+  node.textContent = next;
 }
 
 async function ensureReaderPlayerControlsRecovered(
@@ -351,10 +441,12 @@ function bindReaderLayout() {
   if (layoutBound) {
     return;
   }
-  window.addEventListener("resize", layoutReaderPlayerHost);
-  window.addEventListener("scroll", layoutReaderPlayerHost, { passive: true });
-  document.addEventListener("fullscreenchange", layoutReaderPlayerHost);
-  document.addEventListener("webkitfullscreenchange", layoutReaderPlayerHost);
+  // 候选10 批1：滚动/缩放/全屏事件只置脏标志 + rAF 合帧，一帧至多一次
+  // 「读→算→写」；同步 layout 入口保留给挂载等一次性路径。
+  window.addEventListener("resize", scheduleReaderLayout);
+  window.addEventListener("scroll", scheduleReaderLayout, { passive: true });
+  document.addEventListener("fullscreenchange", scheduleReaderLayout);
+  document.addEventListener("webkitfullscreenchange", scheduleReaderLayout);
   layoutBound = true;
 }
 
@@ -362,11 +454,13 @@ export function unbindReaderLayout() {
   if (!layoutBound) {
     return;
   }
-  window.removeEventListener("resize", layoutReaderPlayerHost);
-  window.removeEventListener("scroll", layoutReaderPlayerHost);
-  document.removeEventListener("fullscreenchange", layoutReaderPlayerHost);
-  document.removeEventListener("webkitfullscreenchange", layoutReaderPlayerHost);
+  window.removeEventListener("resize", scheduleReaderLayout);
+  window.removeEventListener("scroll", scheduleReaderLayout);
+  document.removeEventListener("fullscreenchange", scheduleReaderLayout);
+  document.removeEventListener("webkitfullscreenchange", scheduleReaderLayout);
   layoutBound = false;
+  // 解绑即意味着阅读视图收尾：取消挂起的合帧布局，关闭后不再补跑一帧。
+  cancelScheduledReaderLayout();
 }
 
 export function layoutReaderPlayerHost() {
@@ -411,15 +505,36 @@ export function layoutReaderPlayerHost() {
       renderedHeight *= scale;
     }
 
-    clearNativeReaderFloatingStyles(playerHostNode);
-    cleanupReaderPlayerHostNode(playerHostNode);
-    readingView.style.setProperty("--boc-reader-player-rendered-width", `${Math.round(renderedWidth)}px`);
-    readingView.style.setProperty("--boc-reader-player-rendered-height", `${Math.round(renderedHeight)}px`);
+    const cssWidth = `${Math.round(renderedWidth)}px`;
+    const cssHeight = `${Math.round(renderedHeight)}px`;
+    // 候选10 批1 脏检查：与上次快照全同（同模式/同节点/同 CSS 变量值）则整组
+    // 跳写（含浮动样式清理与控制条恢复排队）；模式或节点变化强制写全量。
+    const unchanged =
+      lastLayoutSnapshot &&
+      lastLayoutSnapshot.mode === "native" &&
+      lastLayoutSnapshot.viewEl === readingView &&
+      lastLayoutSnapshot.hostEl === playerHostNode &&
+      lastLayoutSnapshot.cssWidth === cssWidth &&
+      lastLayoutSnapshot.cssHeight === cssHeight;
+    lastLayoutSnapshot = {
+      mode: "native",
+      viewEl: readingView,
+      hostEl: playerHostNode,
+      cssWidth,
+      cssHeight,
+      slot: null
+    };
+    if (!unchanged) {
+      clearNativeReaderFloatingStyles(playerHostNode);
+      cleanupReaderPlayerHostNode(playerHostNode);
+      readingView.style.setProperty("--boc-reader-player-rendered-width", cssWidth);
+      readingView.style.setProperty("--boc-reader-player-rendered-height", cssHeight);
+      queueEnsureReaderPlayerControlsRecovered({
+        reason: "layout-native",
+        delayMs: 120
+      });
+    }
     updateReadingTranscriptTailSpacer();
-    queueEnsureReaderPlayerControlsRecovered({
-      reason: "layout-native",
-      delayMs: 120
-    });
     return;
   }
 
@@ -441,17 +556,50 @@ export function layoutReaderPlayerHost() {
   const targetWidth = Math.min(rect.width, targetHeight * aspectRatio);
   const left = rect.left + (rect.width - targetWidth) / 2;
 
-  readingView.style.setProperty("--boc-reader-player-rendered-width", `${Math.round(targetWidth)}px`);
-  readingView.style.setProperty("--boc-reader-player-rendered-height", `${Math.round(targetHeight)}px`);
-  playerHostNode.style.setProperty("position", "fixed", "important");
-  playerHostNode.style.setProperty("left", `${Math.round(left)}px`, "important");
-  playerHostNode.style.setProperty("top", `${Math.round(rect.top)}px`, "important");
-  playerHostNode.style.setProperty("width", `${Math.round(targetWidth)}px`, "important");
-  playerHostNode.style.setProperty("height", `${Math.round(targetHeight)}px`, "important");
-  playerHostNode.style.setProperty("margin", "0", "important");
-  playerHostNode.style.setProperty("z-index", "2147483647", "important");
-  playerHostNode.style.setProperty("max-width", "none", "important");
-  playerHostNode.style.setProperty("max-height", "none", "important");
+  const cssWidth = `${Math.round(targetWidth)}px`;
+  const cssHeight = `${Math.round(targetHeight)}px`;
+  // slot 分支的 8 个 setProperty 值快照（margin/zIndex/max-* 为常量，一并记录，
+  // 与 native 快照对齐；任何一项变化都强制整组重写）。
+  const slotStyles = {
+    position: "fixed",
+    left: `${Math.round(left)}px`,
+    top: `${Math.round(rect.top)}px`,
+    width: cssWidth,
+    height: cssHeight,
+    margin: "0",
+    zIndex: "2147483647",
+    maxWidth: "none",
+    maxHeight: "none"
+  };
+  const unchanged =
+    lastLayoutSnapshot &&
+    lastLayoutSnapshot.mode === "slot" &&
+    lastLayoutSnapshot.viewEl === readingView &&
+    lastLayoutSnapshot.hostEl === playerHostNode &&
+    lastLayoutSnapshot.cssWidth === cssWidth &&
+    lastLayoutSnapshot.cssHeight === cssHeight &&
+    JSON.stringify(lastLayoutSnapshot.slot) === JSON.stringify(slotStyles);
+  lastLayoutSnapshot = {
+    mode: "slot",
+    viewEl: readingView,
+    hostEl: playerHostNode,
+    cssWidth,
+    cssHeight,
+    slot: slotStyles
+  };
+  if (!unchanged) {
+    readingView.style.setProperty("--boc-reader-player-rendered-width", cssWidth);
+    readingView.style.setProperty("--boc-reader-player-rendered-height", cssHeight);
+    playerHostNode.style.setProperty("position", slotStyles.position, "important");
+    playerHostNode.style.setProperty("left", slotStyles.left, "important");
+    playerHostNode.style.setProperty("top", slotStyles.top, "important");
+    playerHostNode.style.setProperty("width", slotStyles.width, "important");
+    playerHostNode.style.setProperty("height", slotStyles.height, "important");
+    playerHostNode.style.setProperty("margin", slotStyles.margin, "important");
+    playerHostNode.style.setProperty("z-index", slotStyles.zIndex, "important");
+    playerHostNode.style.setProperty("max-width", slotStyles.maxWidth, "important");
+    playerHostNode.style.setProperty("max-height", slotStyles.maxHeight, "important");
+  }
   updateReadingTranscriptTailSpacer();
 }
 
@@ -483,6 +631,9 @@ export function cleanupReaderPlayerHost() {
   const readingView = getReaderElement(ids.readingView);
   readingView?.style.removeProperty("--boc-reader-player-rendered-width");
   readingView?.style.removeProperty("--boc-reader-player-rendered-height");
+  // 候选10 批1：CSS 变量已在上面移除，布局写组快照必须失效——否则下次打开
+  // 阅读视图且尺寸未变时，脏检查会误判“无需重写”，变量缺失导致布局塌掉。
+  lastLayoutSnapshot = null;
   const playerHostNode = playerHost;
   if (!playerHostNode) {
     return;

@@ -155,6 +155,20 @@ export function isAiSubtitle(item) {
 }
 
 
+// 候选10 批1：写入端统一保证 subtitleBody 按 from 升序（稳定排序，同 from
+// 保持原有相对顺序，与读路径旧线性扫描的命中顺序一致）。core.js 的
+// findActiveSubtitleIndex 二分查找依赖该不变量；读路径一律不排序。
+// 返回新数组，不原地修改入参（调用方持有的原引用保持不变）。
+export function sortSubtitleBodyByFrom(body) {
+  if (!Array.isArray(body)) {
+    return body;
+  }
+  return [...body].sort(
+    (a, b) => (Number(a?.from || 0) || 0) - (Number(b?.from || 0) || 0)
+  );
+}
+
+
 function normalizeSubtitleUrl(url) {
   if (!url) {
     return "";
@@ -211,8 +225,32 @@ function normalizeChapterTime(value) {
 }
 
 
+// 候选10 批1：归一化结果按「输入数组引用」缓存（WeakMap）。sync tick /
+// renderReadingView / notes 渲染每拍都拿同一 state.clip.chapters 引用重复做
+// map→filter→sort→Set 归一化，引用相同即零分配复用。已核实全部调用方
+// （fetcher / core.findActiveChapterIndex / lifecycle.renderReadingView /
+// notes/render / mapChaptersFromPlayerData）都不会原地修改传入数组——写路径
+// 一律经 clipState.setChapters(新数组) 整体替换引用；返回结果同样只被只读
+// 遍历，不会被调用方修改，缓存不会失真。
+const normalizeChaptersCache = new WeakMap();
+
 export function normalizeChapters(chapters) {
-  const normalized = (chapters || [])
+  if (Array.isArray(chapters)) {
+    const cached = normalizeChaptersCache.get(chapters);
+    if (cached) {
+      return cached;
+    }
+    const normalized = normalizeChaptersUncached(chapters);
+    normalizeChaptersCache.set(chapters, normalized);
+    return normalized;
+  }
+  // 与原实现一致：null/undefined 按空数组归一化；其余非数组输入仍走
+  // .map 原路径（不缓存）。
+  return normalizeChaptersUncached(chapters || []);
+}
+
+function normalizeChaptersUncached(chapters) {
+  const normalized = chapters
     .map((item) => ({
       title: String(item?.title || "").trim(),
       from: Number(item?.from || 0) || 0,

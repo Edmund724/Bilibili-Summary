@@ -19,6 +19,7 @@ import {
   normalizeChapters,
   normalizeSubtitleTracks,
   pickPreferredSubtitle,
+  sortSubtitleBodyByFrom,
   validateSubtitleByDuration
 } from "./selection.js";
 import {
@@ -413,7 +414,9 @@ export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, sub
         clipState.setSelectedSubtitleId(subtitleId ? String(subtitleId) : state.clip.selectedSubtitleId);
         clipState.setSelectedSubtitleUrl(url);
         clipState.setSelectedSubtitleLang(lang);
-        clipState.setSubtitleBody(cachedBody);
+        // 候选10 批1：落 state 前稳定排序，保证「subtitleBody 按 from 升序」
+        // 不变量（findActiveSubtitleIndex 二分依赖）；旧缓存条目可能无序。
+        clipState.setSubtitleBody(sortSubtitleBodyByFrom(cachedBody));
         clipState.setSubtitleFetchState("ready");
         clipState.setNoSubtitleReason(null);
         await refreshDerivedContent();
@@ -428,7 +431,9 @@ export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, sub
   // 从网络获取
   const subtitle = await fetchSubtitleBody(url);
   ensureRunActive(runId);
-  const body = Array.isArray(subtitle.body) ? subtitle.body : [];
+  // 候选10 批1：B站 CC 接口返回的 body 实践上有序但接口并不承诺；在这里
+  // （写入端）稳定排序一次，落缓存与落 state 都是有序副本，读路径不做排序。
+  const body = sortSubtitleBodyByFrom(Array.isArray(subtitle.body) ? subtitle.body : []);
   if (body.length === 0) {
     throw new Error("字幕文件为空。");
   }

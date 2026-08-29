@@ -34,7 +34,8 @@ import {
   getPlayerHost,
   bindReadingViewVideo,
   queueEnsureReaderPlayerMounted,
-  layoutReaderPlayerHost,
+  scheduleReaderLayout,
+  flushReadingTranscriptToIndex,
   stopReaderPlayerObserver,
   unbindReaderPlayerControlsHover,
   closeReaderCleanup,
@@ -103,7 +104,9 @@ export function syncReadingViewPlayback(forceScroll = false) {
   }
 
   if (state.reader.readingNativePageMode) {
-    layoutReaderPlayerHost();
+    // 候选10 批1：每拍 250ms 的 native 布局改走 rAF 合帧调度（与 scroll 事件
+    // 同一调度），一帧至多一次「读→算→写」；layout 内部带脏检查，稳态零写。
+    scheduleReaderLayout();
   }
 
   const runtimeVideo = getRuntimeVideoElement();
@@ -134,25 +137,56 @@ export function syncReadingViewPlayback(forceScroll = false) {
   renderReadingStatus(`当前进度 ${formatCompactTimestamp(currentTime, currentTime >= 3600)}`);
 }
 
+// 候选10 批1：上次激活高亮的缓存（字幕 + 章节各一份）。index 未变且上次写入的
+// 节点仍连接在文档时，整段跳过 querySelector 与 classList 写。列表整段重建
+// （renderReadingView）会使旧节点脱离文档、缓存自动失效回退到现查；分批渲染
+// 未追到目标时节点为 null，同样回退现查（条目上屏后的下一拍自然补上高亮）。
+const lastActiveItems = {
+  subtitle: { index: -1, node: null },
+  chapter: { index: -1, node: null }
+};
+
+// 解析本次应激活的节点：命中缓存时返回 unchanged=true（DOM 已是目标状态，
+// 不需要任何 querySelector / classList 写）；未命中时按旧逻辑现查 next 与
+// current——current 优先复用缓存里的旧激活节点（它就是上次被本函数加上
+// is-active 的节点，语义等价且省一次 querySelector），旧节点已脱离文档时
+// 退回 ".is-active" 现查，行为与原实现一致。
+function resolveActiveItem(cached, index, list, className) {
+  if (cached.node?.isConnected && cached.index === index) {
+    return { next: cached.node, current: cached.node, unchanged: true };
+  }
+  const next = list.querySelector(`[data-index="${index}"]`);
+  const current = cached.node?.isConnected
+    ? cached.node
+    : list.querySelector(`.${className}.is-active`);
+  return { next, current, unchanged: false };
+}
+
 function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll = false) {
   const transcriptList = getReaderElement(ids.readingTranscriptList);
   const chapterList = getReaderElement(ids.readingChapterList);
-  const nextTranscript = transcriptList.querySelector(`[data-index="${subtitleIndex}"]`);
-  const nextChapter = chapterList.querySelector(`[data-index="${chapterIndex}"]`);
-  const currentTranscript = transcriptList.querySelector(".boc-reading-item.is-active");
-  const currentChapter = chapterList.querySelector(".boc-reading-chapter.is-active");
+  const subtitleHit = resolveActiveItem(lastActiveItems.subtitle, subtitleIndex, transcriptList, "boc-reading-item");
+  const chapterHit = resolveActiveItem(lastActiveItems.chapter, chapterIndex, chapterList, "boc-reading-chapter");
 
-  if (currentTranscript && currentTranscript !== nextTranscript) {
-    currentTranscript.classList.remove("is-active");
+  if (!subtitleHit.unchanged) {
+    if (subtitleHit.current && subtitleHit.current !== subtitleHit.next) {
+      subtitleHit.current.classList.remove("is-active");
+    }
+    if (subtitleHit.next) {
+      subtitleHit.next.classList.add("is-active");
+    }
+    lastActiveItems.subtitle.index = subtitleIndex;
+    lastActiveItems.subtitle.node = subtitleHit.next;
   }
-  if (currentChapter && currentChapter !== nextChapter) {
-    currentChapter.classList.remove("is-active");
-  }
-  if (nextTranscript) {
-    nextTranscript.classList.add("is-active");
-  }
-  if (nextChapter) {
-    nextChapter.classList.add("is-active");
+  if (!chapterHit.unchanged) {
+    if (chapterHit.current && chapterHit.current !== chapterHit.next) {
+      chapterHit.current.classList.remove("is-active");
+    }
+    if (chapterHit.next) {
+      chapterHit.next.classList.add("is-active");
+    }
+    lastActiveItems.chapter.index = chapterIndex;
+    lastActiveItems.chapter.node = chapterHit.next;
   }
 
   if (shouldScroll && state.reader.readingAutoScroll) {
@@ -162,11 +196,29 @@ function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll = false
       state.reader.setActiveChapterIndex(chapterIndex);
       return;
     }
-    if (nextTranscript) {
-      scrollReadingTranscriptItemIntoView(nextTranscript);
+    let scrollTranscriptNode = subtitleHit.next;
+    // 候选10 批2：字幕列表分批渲染后，跳转/跟随的目标条目可能还没追加上屏。
+    // 先同步补渲染到目标 index 再取节点滚动，保证「跳不过去」不发生；章节
+    // 列表始终整段渲染，无此问题。
+    if (!scrollTranscriptNode && subtitleIndex >= 0) {
+      flushReadingTranscriptToIndex(subtitleIndex);
+      scrollTranscriptNode = transcriptList.querySelector(`[data-index="${subtitleIndex}"]`);
+      if (scrollTranscriptNode) {
+        // 补渲染后才拿到节点：同步补上 is-active 并刷新缓存，与「节点本就在屏」
+        // 的路径保持等价（否则高亮要拖到下一拍才出现）。
+        if (subtitleHit.current && subtitleHit.current !== scrollTranscriptNode) {
+          subtitleHit.current.classList.remove("is-active");
+        }
+        scrollTranscriptNode.classList.add("is-active");
+        lastActiveItems.subtitle.index = subtitleIndex;
+        lastActiveItems.subtitle.node = scrollTranscriptNode;
+      }
     }
-    if (nextChapter) {
-      scrollReadingRailItemIntoView(nextChapter);
+    if (scrollTranscriptNode) {
+      scrollReadingTranscriptItemIntoView(scrollTranscriptNode);
+    }
+    if (chapterHit.next) {
+      scrollReadingRailItemIntoView(chapterHit.next);
     }
   }
 
@@ -288,5 +340,10 @@ export function updateReaderFollowState() {
   }
   const mode =
     !state.reader.readingAutoScroll ? "off" : isManualScrollPaused() ? "manual" : "auto";
+  // 候选10 批1：值未变时跳过 setAttribute。先读现值而非缓存上次写入值：
+  // closeReadingView 会 removeAttribute，读现值能自动从外部移除中自愈。
+  if (readingView.getAttribute("data-boc-reader-follow") === mode) {
+    return;
+  }
   readingView.setAttribute("data-boc-reader-follow", mode);
 }

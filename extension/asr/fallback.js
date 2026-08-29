@@ -25,7 +25,7 @@ import {
   saveSubtitleToCache,
   clearStaleAsrSubtitleCache
 } from "../subtitle/cache.js";
-import { validateSubtitleByDuration } from "../subtitle/selection.js";
+import { validateSubtitleByDuration, sortSubtitleBodyByFrom } from "../subtitle/selection.js";
 
 // STALE_RUN 信号构造：在本模块里只表示"调用方让位、零 UI 写入"（fetcher 的
 // catch 对 STALE_RUN 静默返回），不再表示转写被中止——切视频不取消任务。
@@ -143,7 +143,9 @@ export function createAsrFallback(deps) {
           clipState.setSelectedSubtitleId("asr");
           clipState.setSelectedSubtitleUrl("");
           clipState.setSelectedSubtitleLang(`语音识别（${platformName}）`);
-          clipState.setSubtitleBody(cachedBody);
+          // 候选10 批1：ASR 缓存命中同样落 state 前稳定排序（旧缓存条目可能
+          // 无序），维持「subtitleBody 按 from 升序」不变量供读路径二分。
+          clipState.setSubtitleBody(sortSubtitleBodyByFrom(cachedBody));
           clipState.setSubtitleFetchState("ready");
           clipState.setNoSubtitleReason(null);
           await refreshDerivedContent();
@@ -341,7 +343,9 @@ export function createAsrFallback(deps) {
     clipState.setSelectedSubtitleId("asr");
     clipState.setSelectedSubtitleUrl("");
     clipState.setSelectedSubtitleLang(`语音识别（${platformName}）`);
-    clipState.setSubtitleBody(body);
+    // 候选10 批1：pipeline 产物本身已按 from 排序，这里统一再走一次稳定排序
+    // 收口（含共享转写/缓存副本路径），保证「subtitleBody 按 from 升序」不变量。
+    clipState.setSubtitleBody(sortSubtitleBodyByFrom(body));
     clipState.setSubtitleFetchState("ready");
     clipState.setNoSubtitleReason(null);
     return refreshDerivedContent().then(() => {

@@ -69,15 +69,44 @@ export function getReadingTranscriptPlaceholderText() {
   return "当前视频无字幕。";
 }
 
+// 候选10 批1：二分命中回扫上限。写入端已保证 subtitleBody 按 from 升序
+// （fetcher / asr fallback 落 state 前统一经 sortSubtitleBodyByFrom 稳定排序），
+// 正常顺序字幕区间互不重叠，二分候选点（最后一个 from <= currentTime 的条目）
+// 就是唯一可能命中者，第一步即返回或即无命中。回扫只为兼容写入端排序前遗留
+// 的重叠区间脏缓存，上限之外的深层重叠本就不会出现在正常数据里。
+const ACTIVE_SUBTITLE_BACKWARD_SCAN_LIMIT = 8;
+
+// to 缺省/非法时视为 from + 2（与旧线性扫描逐字一致）。
+function subtitleActiveRange(item) {
+  const from = Number(item?.from || 0) || 0;
+  const rawTo = Number(item?.to || 0) || 0;
+  return { from, to: rawTo > from ? rawTo : from + 2 };
+}
+
 export function findActiveSubtitleIndex(currentTime) {
   const items = Array.isArray(state.clip.subtitleBody) ? state.clip.subtitleBody : [];
-  for (let index = 0; index < items.length; index += 1) {
-    const item = items[index];
-    const from = Number(item?.from || 0) || 0;
-    const rawTo = Number(item?.to || 0) || 0;
-    const to = rawTo > from ? rawTo : from + 2;
+  // 二分定位最后一个 from <= currentTime 的条目（subtitleBody 按 from 升序，
+  // 由写入端 sortSubtitleBodyByFrom 保证）。旧实现为线性扫描，长视频 1500+
+  // 条时每拍 250ms 全量扫一遍，是阅读视图常驻开销的大头之一。
+  let lo = 0;
+  let hi = items.length - 1;
+  let candidate = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if ((Number(items[mid]?.from || 0) || 0) <= currentTime) {
+      candidate = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (candidate < 0) {
+    return -1;
+  }
+  for (let i = candidate, scanned = 0; i >= 0 && scanned <= ACTIVE_SUBTITLE_BACKWARD_SCAN_LIMIT; i -= 1, scanned += 1) {
+    const { from, to } = subtitleActiveRange(items[i]);
     if (currentTime >= from && currentTime < to) {
-      return index;
+      return i;
     }
   }
   return -1;
