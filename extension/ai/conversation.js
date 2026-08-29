@@ -54,7 +54,7 @@ export function normalizeConversations(value) {
         return null;
       }
       const contextTitle = String(item?.contextTitle || "").trim();
-      const contextRef = buildConversationContextRef(item?.contextRef || item?.contextSnapshot || item);
+      const contextRef = buildAiContextRef(item?.contextRef || item?.contextSnapshot || item);
       const contextUrl = String(item?.contextUrl || "").trim();
       return {
         id,
@@ -88,25 +88,30 @@ export function resolveConversationStorageKey(rawKey, contextRef, contextUrl = "
 
 // ============ 上下文引用 ============
 
-export function buildConversationContextRef(context) {
-  if (!context || typeof context !== "object") {
-    return null;
-  }
+// AI 上下文 ref 单一构造器：15 字段（14 个视频身份/字幕轨字段 + chapters）。
+// 原三份手写挑选清单（context-resolver 的解析入参归一化、会话持久化 contextRef、
+// 占位上下文）统一收敛于此；bvid 缺失时从 url 回落提取；chapters 为数组时
+// 透传、缺失/非法时 undefined（消费方均以 Array.isArray 容忍，旧持久化会话
+// 的 ref 无此字段也自然落到 undefined）。
+export function buildAiContextRef(context) {
+  const value = context && typeof context === "object" ? context : {};
+  const url = String(value.url || "").trim();
   return {
-    title: String(context.title || "").trim(),
-    url: String(context.url || "").trim(),
-    author: String(context.author || "").trim(),
-    uploadDate: String(context.uploadDate || "").trim(),
-    bvid: String(context.bvid || "").trim(),
-    cid: String(context.cid || "").trim(),
-    aid: String(context.aid || "").trim(),
-    pageIndex: Number(context.pageIndex) > 0 ? Number(context.pageIndex) : 1,
-    pageCount: Number(context.pageCount) > 0 ? Number(context.pageCount) : 0,
-    pageTitle: String(context.pageTitle || "").trim(),
-    subtitleLang: String(context.subtitleLang || "").trim(),
-    selectedSubtitleId: String(context.selectedSubtitleId || "").trim(),
-    selectedSubtitleUrl: String(context.selectedSubtitleUrl || "").trim(),
-    isVideoContext: context.isVideoContext !== false
+    title: String(value.title || "").trim(),
+    url,
+    author: String(value.author || "").trim(),
+    uploadDate: String(value.uploadDate || "").trim(),
+    bvid: String(value.bvid || extractBvid(url) || "").trim(),
+    cid: String(value.cid || "").trim(),
+    aid: String(value.aid || "").trim(),
+    pageIndex: Number(value.pageIndex) > 0 ? Number(value.pageIndex) : 1,
+    pageCount: Number(value.pageCount) > 0 ? Number(value.pageCount) : 0,
+    pageTitle: String(value.pageTitle || "").trim(),
+    subtitleLang: String(value.subtitleLang || "").trim(),
+    selectedSubtitleId: String(value.selectedSubtitleId || "").trim(),
+    selectedSubtitleUrl: String(value.selectedSubtitleUrl || "").trim(),
+    chapters: Array.isArray(value.chapters) ? value.chapters : undefined,
+    isVideoContext: value.isVideoContext !== false
   };
 }
 
@@ -115,22 +120,9 @@ export function buildContextPlaceholder(ref) {
     return null;
   }
   return {
-    title: String(ref.title || "").trim(),
-    url: String(ref.url || "").trim(),
-    author: String(ref.author || "").trim(),
-    uploadDate: String(ref.uploadDate || "").trim(),
-    bvid: String(ref.bvid || "").trim(),
-    cid: String(ref.cid || "").trim(),
-    aid: String(ref.aid || "").trim(),
-    pageIndex: Number(ref.pageIndex) > 0 ? Number(ref.pageIndex) : 1,
-    pageCount: Number(ref.pageCount) > 0 ? Number(ref.pageCount) : 0,
-    pageTitle: String(ref.pageTitle || "").trim(),
-    subtitleLang: String(ref.subtitleLang || "").trim(),
-    selectedSubtitleId: String(ref.selectedSubtitleId || "").trim(),
-    selectedSubtitleUrl: String(ref.selectedSubtitleUrl || "").trim(),
+    ...buildAiContextRef(ref),
     subtitleMarkdown: "",
-    hotComments: [],
-    isVideoContext: ref.isVideoContext !== false
+    hotComments: []
   };
 }
 

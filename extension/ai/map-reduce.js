@@ -13,8 +13,8 @@ import { normalizeThinkingLevel, isContextLengthOverflow } from "./client.js";
 import { runMapBounded, DEFAULT_MAP_CONCURRENCY } from "./pool.js";
 import { shouldMerge, mergeSummaries } from "./merge.js";
 import {
-  getSegmentSummaryKey,
-  getRawSegmentKey,
+  buildRawSegmentCacheKey,
+  buildSegmentSummaryCacheKey,
   loadSegmentSummary,
   saveSegmentSummary,
   saveRawSegments
@@ -164,22 +164,8 @@ async function summarizeSegment({
   runCompletionImpl,
   notifyCacheWriteError
 }) {
-  const rawKey = getRawSegmentKey({
-    bvid: context?.bvid,
-    cid: context?.cid,
-    subtitleId: context?.selectedSubtitleId,
-    subtitleUrl: context?.selectedSubtitleUrl,
-    lang: context?.subtitleLang,
-    segmentIndex: segment.index
-  });
-  const summaryKey = getSegmentSummaryKey({
-    bvid: context?.bvid,
-    cid: context?.cid,
-    subtitleId: context?.selectedSubtitleId,
-    subtitleUrl: context?.selectedSubtitleUrl,
-    lang: context?.subtitleLang,
-    segmentIndex: segment.index
-  });
+  const rawKey = buildRawSegmentCacheKey(context, segment.index);
+  const summaryKey = buildSegmentSummaryCacheKey(context, segment.index);
 
   // 缓存命中直接复用，跳过 map 调用与无谓的原始段落盘（04 填空后生效）。
   const cached = await loadSegmentSummary(summaryKey);

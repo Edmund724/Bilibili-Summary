@@ -14,7 +14,6 @@ import {
   isBiliUrl
 } from "../bilibili/gateway.js";
 import {
-  extractBvid,
   extractPageIndexFromUrl,
   buildCanonicalVideoUrl,
   isSupportedBilibiliPage
@@ -25,31 +24,12 @@ import {
 } from "../subtitle/selection.js";
 import { buildSubtitleSectionLines, shouldShowHoursInNote } from "../notes/render.js";
 import { getMergedSettings } from "../core/ai-provider-store.js";
+import { buildAiContextRef } from "./conversation.js";
 
 // ===== 页内状态（由 background.js 注入：ensureReaderContentReady / sendMessageToTab）=====
 // 在消息路由中直接读取，避免把注入生命周期耦合进本模块。
 
 // ===== 上下文解析 =====
-
-function normalizeAiContextRef(ref) {
-  const value = ref && typeof ref === "object" ? ref : {};
-  return {
-    title: String(value.title || "").trim(),
-    url: String(value.url || "").trim(),
-    author: String(value.author || "").trim(),
-    uploadDate: String(value.uploadDate || "").trim(),
-    bvid: String(value.bvid || extractBvid(value.url) || "").trim(),
-    cid: String(value.cid || "").trim(),
-    aid: String(value.aid || "").trim(),
-    pageIndex: Number(value.pageIndex) > 0 ? Number(value.pageIndex) : 1,
-    pageCount: Number(value.pageCount) > 0 ? Number(value.pageCount) : 0,
-    pageTitle: String(value.pageTitle || "").trim(),
-    subtitleLang: String(value.subtitleLang || "").trim(),
-    selectedSubtitleId: String(value.selectedSubtitleId || "").trim(),
-    selectedSubtitleUrl: String(value.selectedSubtitleUrl || "").trim(),
-    isVideoContext: value.isVideoContext !== false
-  };
-}
 
 function pickPageForAiContext(pages, ref) {
   const safePages = Array.isArray(pages) ? pages : [];
@@ -90,7 +70,7 @@ function buildAiConversationMarkdown(meta, body, settings) {
 }
 
 export async function resolveAiSidepanelContext(contextRef) {
-  const ref = normalizeAiContextRef(contextRef);
+  const ref = buildAiContextRef(contextRef);
   if (!ref.isVideoContext || !ref.bvid) {
     return {
       title: ref.title,
@@ -163,6 +143,11 @@ export async function resolveAiSidepanelContext(contextRef) {
     subtitleLang: String(selectedTrack.lanDoc || selectedTrack.lan || "").trim(),
     selectedSubtitleId: String(selectedTrack.id || "").trim(),
     selectedSubtitleUrl: String(selectedTrack.subtitleUrl || "").trim(),
+    // 章节透传（来源与本文件 buildAiConversationMarkdown 渲染用的同一份
+    // subtitleBundle.chapters）：供侧边栏回传 offscreen 后做章节对齐切段
+    // （budgeter）与追问章节名检索（raw-retrieval）。旧持久化会话 ref 无此
+    // 字段时为 undefined，下游 Array.isArray 守卫均已容忍。
+    chapters: Array.isArray(subtitleBundle.chapters) ? subtitleBundle.chapters : [],
     subtitleBody: body,
     subtitleMarkdown: buildAiConversationMarkdown(contextMeta, body, settings),
     subtitleOptions: tracks.map((item) => ({
@@ -176,7 +161,7 @@ export async function resolveAiSidepanelContext(contextRef) {
 }
 
 export async function resolveAiSidepanelPageRef(contextRef) {
-  const ref = normalizeAiContextRef(contextRef);
+  const ref = buildAiContextRef(contextRef);
   if (!ref.isVideoContext || !ref.bvid) {
     return {
       url: ref.url,

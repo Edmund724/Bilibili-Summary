@@ -31,6 +31,34 @@ export function getRawSegmentKey({ bvid, cid, subtitleId = "", subtitleUrl = "",
   return `${RAW_SEGMENT_PREFIX}${bvid}_${cid}_${sourceKey}_${segmentIndex}`;
 }
 
+// AI 上下文对象 → 段缓存键位字段的唯一映射（bvid/cid + 字幕轨 source key 三元组，
+// 上下文字段名 selectedSubtitleId/selectedSubtitleUrl/subtitleLang 映射为键位入参
+// subtitleId/subtitleUrl/lang）。落盘（map-reduce）与复用（followup-router）共用，
+// 键位不再各自手拼，预热缓存永不因键位漂移而失效。
+export function segmentCacheKeyFields(context) {
+  return {
+    bvid: context?.bvid,
+    cid: context?.cid,
+    subtitleId: context?.selectedSubtitleId,
+    subtitleUrl: context?.selectedSubtitleUrl,
+    lang: context?.subtitleLang
+  };
+}
+
+/**
+ * 从 AI 上下文 + 段序号拼分段小结缓存键（与 getSegmentSummaryKey 手拼逐字节一致）。
+ */
+export function buildSegmentSummaryCacheKey(context, segmentIndex) {
+  return getSegmentSummaryKey({ ...segmentCacheKeyFields(context), segmentIndex });
+}
+
+/**
+ * 从 AI 上下文 + 段序号拼原始字幕段缓存键（与 getRawSegmentKey 手拼逐字节一致）。
+ */
+export function buildRawSegmentCacheKey(context, segmentIndex) {
+  return getRawSegmentKey({ ...segmentCacheKeyFields(context), segmentIndex });
+}
+
 /**
  * 读取已落盘的分段小结：命中返回 item.summary（string），未命中/读失败返回 null。
  */

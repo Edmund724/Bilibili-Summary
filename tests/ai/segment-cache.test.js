@@ -166,6 +166,88 @@ describe("键含 bvid+cid+段，键风格对齐 getSubtitleCacheKey", () => {
   });
 });
 
+describe("上下文键位构造器：与原手拼键逐字节一致（预热缓存不失效）", () => {
+  const context = {
+    bvid: "BV1ctx",
+    cid: "7",
+    selectedSubtitleId: "sub-9",
+    selectedSubtitleUrl: "https://s.example.com/sub/9.json?auth=1",
+    subtitleLang: "zh-CN",
+    // 上下文里的其余字段不得混入键位
+    title: "测试视频",
+    subtitleBody: [{ from: 0, to: 5, content: "x" }]
+  };
+
+  it("buildSegmentSummaryCacheKey(context, i) === getSegmentSummaryKey(手拼 6 字段)", () => {
+    for (const segmentIndex of [0, 1, 3]) {
+      const unified = mod.buildSegmentSummaryCacheKey(context, segmentIndex);
+      const manual = mod.getSegmentSummaryKey({
+        bvid: context.bvid,
+        cid: context.cid,
+        subtitleId: context.selectedSubtitleId,
+        subtitleUrl: context.selectedSubtitleUrl,
+        lang: context.subtitleLang,
+        segmentIndex
+      });
+      expect(unified).toBe(manual);
+      expect(unified).toBe(`boc_lvs_summary_${context.bvid}_${context.cid}_id_sub-9_${segmentIndex}`);
+    }
+  });
+
+  it("buildRawSegmentCacheKey(context, i) === getRawSegmentKey(手拼 6 字段)", () => {
+    for (const segmentIndex of [0, 1, 3]) {
+      const unified = mod.buildRawSegmentCacheKey(context, segmentIndex);
+      const manual = mod.getRawSegmentKey({
+        bvid: context.bvid,
+        cid: context.cid,
+        subtitleId: context.selectedSubtitleId,
+        subtitleUrl: context.selectedSubtitleUrl,
+        lang: context.subtitleLang,
+        segmentIndex
+      });
+      expect(unified).toBe(manual);
+      expect(unified).toBe(`boc_lvs_raw_${context.bvid}_${context.cid}_id_sub-9_${segmentIndex}`);
+    }
+  });
+
+  it("segmentCacheKeyFields：selectedSubtitleId/Url/Lang 映射为键位入参且只挑键位字段", () => {
+    expect(mod.segmentCacheKeyFields(context)).toEqual({
+      bvid: "BV1ctx",
+      cid: "7",
+      subtitleId: "sub-9",
+      subtitleUrl: "https://s.example.com/sub/9.json?auth=1",
+      lang: "zh-CN"
+    });
+    expect(mod.segmentCacheKeyFields(null)).toEqual({
+      bvid: undefined,
+      cid: undefined,
+      subtitleId: undefined,
+      subtitleUrl: undefined,
+      lang: undefined
+    });
+  });
+
+  it("统一构造器落盘 → 旧手拼键可读回（跨写读方一致）", async () => {
+    const summaryKey = mod.buildSegmentSummaryCacheKey(context, 2);
+    const rawKey = mod.buildRawSegmentCacheKey(context, 2);
+    await mod.saveSegmentSummary(summaryKey, "统一键位小结");
+    await mod.saveRawSegments(rawKey, [{ from: 0, to: 5, content: "x" }]);
+
+    const legacySummaryKey = mod.getSegmentSummaryKey({
+      bvid: context.bvid,
+      cid: context.cid,
+      subtitleId: context.selectedSubtitleId,
+      subtitleUrl: context.selectedSubtitleUrl,
+      lang: context.subtitleLang,
+      segmentIndex: 2
+    });
+    expect(await mod.loadSegmentSummary(legacySummaryKey)).toBe("统一键位小结");
+    expect(await mod.loadRawSegments(legacySummaryKey.replace("boc_lvs_summary_", "boc_lvs_raw_"))).toEqual([
+      { from: 0, to: 5, content: "x" }
+    ]);
+  });
+});
+
 describe("容错：读写失败 logWarn 且不抛异常", () => {
   it("load 读失败返回 null（小结与原始段）", async () => {
     storage.local.get.mockRejectedValueOnce(new Error("read boom"));

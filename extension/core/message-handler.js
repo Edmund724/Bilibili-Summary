@@ -154,6 +154,9 @@ export function bindRuntimeEvents() {
           selectedSubtitleId: state.clip.selectedSubtitleId || "",
           selectedSubtitleUrl: state.clip.selectedSubtitleUrl || "",
           subtitleOptions: state.clip.subtitles || [],
+          // 章节透传（fetcher 写入 state.clip.chapters）：供侧边栏回传 offscreen
+          // 后做章节对齐切段（budgeter）与追问章节名检索（raw-retrieval）。
+          chapters: Array.isArray(state.clip.chapters) ? state.clip.chapters : [],
           hotComments: []
         }
       });

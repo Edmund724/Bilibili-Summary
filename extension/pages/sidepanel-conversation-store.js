@@ -16,8 +16,8 @@
 // sidepanel.js 不在本模块的 import 图中。
 
 import {
+  buildAiContextRef,
   buildContextKey,
-  buildConversationContextRef,
   buildContextPlaceholder,
   buildConversationTitle,
   generateConversationId,
@@ -415,7 +415,7 @@ export function createConversationStore(deps) {
         contextUrl: String(context.url || "").trim(),
         isVideoContext: context.isVideoContext !== false,
         pinnedContext: true,
-        contextRef: buildConversationContextRef(context),
+        contextRef: buildAiContextRef(context),
         resolvedContext: { ...context }
       };
       setCurrentConversationMeta(meta);
@@ -429,7 +429,7 @@ export function createConversationStore(deps) {
       isVideoContext: meta?.isVideoContext !== false,
       createdAt: Number(meta?.createdAt) || now,
       updatedAt: now,
-      contextRef: meta?.contextRef || buildConversationContextRef(context),
+      contextRef: meta?.contextRef || buildAiContextRef(context),
       messages: chat.map((item) => ({ role: item.role, content: String(item.content || "") }))
     };
     const filtered = saved().filter((item) => item.id !== currentId);
@@ -511,7 +511,7 @@ export function createConversationStore(deps) {
       contextKey: getCurrentContextKey(),
       contextTitle: String(resolved.title || meta?.contextTitle || "").trim(),
       contextUrl: String(resolved.url || meta?.contextUrl || "").trim(),
-      contextRef: buildConversationContextRef(resolved),
+      contextRef: buildAiContextRef(resolved),
       resolvedContext: { ...resolved }
     });
     requireDep("updateContextChip", updateContextChip)();

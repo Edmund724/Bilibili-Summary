@@ -8,22 +8,11 @@ import { hasFinalNote, buildFollowupSubtitleMarkdown } from "./followup-context.
 import { retrieveRawSegments } from "./raw-retrieval.js";
 import { formatSegmentItem } from "./map-reduce.js";
 import {
-  getSegmentSummaryKey,
+  buildSegmentSummaryCacheKey,
+  segmentCacheKeyFields,
   loadSegmentSummary as loadSegmentSummaryFromCache,
   loadStoredRawSegments as loadStoredRawSegmentsFromCache
 } from "./segment-cache.js";
-
-// 组装某段小结/原始段的缓存键（与 map-reduce.js 使用同一套键位）。
-function buildCacheKey({ context, keyBuilder, segment }) {
-  return keyBuilder({
-    bvid: context?.bvid,
-    cid: context?.cid,
-    subtitleId: context?.selectedSubtitleId,
-    subtitleUrl: context?.selectedSubtitleUrl,
-    lang: context?.subtitleLang,
-    segmentIndex: segment?.index
-  });
-}
 
 /**
  * 从段缓存按段顺序加载全部分段小结（跳过 null/空，保持段序）。
@@ -33,7 +22,7 @@ export async function loadSegmentSummaries({ context = {}, plan = null, loadSumm
   const segments = Array.isArray(plan?.segments) ? plan.segments : [];
   const out = [];
   for (const segment of segments) {
-    const key = buildCacheKey({ context, keyBuilder: getSegmentSummaryKey, segment });
+    const key = buildSegmentSummaryCacheKey(context, segment?.index);
     const summary = await loadSummary(key);
     if (typeof summary === "string" && summary.trim().length > 0) {
       out.push(summary);
@@ -118,13 +107,7 @@ export async function resolveFollowupContext({
   const inMemorySegments = Array.isArray(plan?.segments) ? plan.segments : [];
   let segments = inMemorySegments;
   if (segments.length === 0) {
-    const stored = await loadStoredSegments({
-      bvid: context?.bvid,
-      cid: context?.cid,
-      subtitleId: context?.selectedSubtitleId,
-      subtitleUrl: context?.selectedSubtitleUrl,
-      lang: context?.subtitleLang
-    });
+    const stored = await loadStoredSegments(segmentCacheKeyFields(context));
     if (Array.isArray(stored) && stored.length > 0) {
       segments = stored;
     }
