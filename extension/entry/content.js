@@ -4,7 +4,7 @@ import { BOC_VERSION } from "../core/defaults.js";
 import { isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
 import { getSettings, sendRuntimeMessage } from "../core/runtime.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
-import { logWarn } from "../shared/logging.js";
+import { logInfo, logWarn } from "../shared/logging.js";
 
 import {
   bindPlayerAiQuickActionLayoutEvents,
@@ -15,7 +15,6 @@ import {
 
 import { ensureUiReady } from "../ui/ui-renderer.js";
 import {
-  logInfo,
   installReaderDebugHelpers,
   bindSettingsWatcher,
   bindReaderPresenter,

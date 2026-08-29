@@ -138,16 +138,3 @@ export function isSupportedBilibiliPage(url) {
     return false;
   }
 }
-
-export function buildCanonicalVideoUrlFromContext(context, currentMetaContextUrl) {
-  const bvid = String(
-    context?.bvid ||
-      extractBvid(context?.url) ||
-      extractBvid(currentMetaContextUrl) ||
-      ""
-  ).trim();
-  if (bvid) {
-    return `https://www.bilibili.com/video/${bvid}/`;
-  }
-  return String(context?.url || currentMetaContextUrl || "").trim();
-}

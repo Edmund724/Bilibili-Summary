@@ -231,7 +231,7 @@ export function splitMarkdownTail(text) {
   };
 }
 
-export function renderInline(text) {
+function renderInline(text) {
   return text
     .replace(/`([^`]+)`/g, (_, c) => (isTimestampOnlyInlineCode(c) ? c : `<code>${c}</code>`))
     .replace(/\*\*([^*\n]+)\*\*/g, (_, c) => `<strong>${c}</strong>`)

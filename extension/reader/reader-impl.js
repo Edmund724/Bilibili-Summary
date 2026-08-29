@@ -103,7 +103,7 @@ export const ids = {
 // These accessors are the seam between the reader-impl (layout) closure and
 // the sync/lifecycle modules that depend on it. The scroll-pause variables
 // moved to ./scroll-state.js, the shared leaf both domains read and write
-// directly; the closure flags they read (videoEventsBound) stay here.
+// directly; sync.js resets the videoEventsBound flag through setVideoEventsBound.
 
 export function isReaderViewOpen() {
   return state.reader.readingViewOpen;
@@ -115,10 +115,6 @@ export function getPlayerHost() {
 
 export function setVideoEventsBound(bound) {
   videoEventsBound = Boolean(bound);
-}
-
-export function isVideoEventsBound() {
-  return videoEventsBound;
 }
 
 // Timer/flag accessors used by sync.js's stopReadingViewSync to clear the
@@ -200,7 +196,7 @@ export function renderReadingStatus(text) {
   getReaderElement(ids.readingStatus).textContent = String(text || "");
 }
 
-export async function ensureReaderPlayerControlsRecovered(
+async function ensureReaderPlayerControlsRecovered(
   playerHostArg = playerHost,
   { reason = "unknown", retryDelayMs = 90 } = {}
 ) {
@@ -261,21 +257,9 @@ export async function ensureReaderPlayerControlsRecovered(
 // ===== page-frame.js (page frame helpers) =====
 //
 // Multi-page (分P) resolution lives in the pure page-context seam (issue 02);
-// re-exported through the facade so existing importers keep working unchanged.
+// consumers import ./page-context.js directly (established seam, see facade).
 
-export {
-  extractOid,
-  hasExplicitPageParam,
-  pickCidFromPages,
-  pickDurationFromPages,
-  pickPageFromPages,
-  pickPageIndexFromOid,
-  readCurrentPageFromPageState,
-  readPageFromPlayerDom,
-  resolvePageContext
-} from "./page-context.js";
-
-export function getReaderContentMaxPx() {
+function getReaderContentMaxPx() {
   if (state.reader.readingContentWidth === "compact") {
     return 680;
   }
@@ -291,11 +275,11 @@ export function getReaderContentMaxPx() {
   return 860;
 }
 
-export function getReaderPagePaddingPx() {
+function getReaderPagePaddingPx() {
   return Math.min(32, Math.max(16, window.innerWidth * 0.028));
 }
 
-export function getReaderMainWidthLimit() {
+function getReaderMainWidthLimit() {
   return Math.max(320, Math.min(getReaderContentMaxPx(), window.innerWidth - getReaderPagePaddingPx() * 2));
 }
 
@@ -314,7 +298,7 @@ export function clearReaderModePageState() {
   document.body.removeAttribute("data-boc-reading-active");
 }
 
-export function shouldForceNormalPageState(url = location.href) {
+function shouldForceNormalPageState(url = location.href) {
   return !isReaderMode(url) && !state.reader.readingViewOpen;
 }
 
@@ -495,7 +479,7 @@ export function restoreReadingMainInline() {
   mainOriginalNextSibling = null;
 }
 
-export function pruneReaderNonKeepBranches(node) {
+function pruneReaderNonKeepBranches(node) {
   if (!node?.children?.length) {
     return;
   }
@@ -514,7 +498,7 @@ export function pruneReaderNonKeepBranches(node) {
   });
 }
 
-export function hideReaderNoiseNodes(keepRoots = []) {
+function hideReaderNoiseNodes(keepRoots = []) {
   const keepSet = new Set(keepRoots.filter(Boolean));
   const selectors = [
     ".strip-ad-inner",
@@ -548,7 +532,7 @@ export function hideReaderNoiseNodes(keepRoots = []) {
   });
 }
 
-export function markReaderKeepSubtree(node) {
+function markReaderKeepSubtree(node) {
   if (!node) {
     return;
   }
@@ -558,7 +542,7 @@ export function markReaderKeepSubtree(node) {
   });
 }
 
-export function markReaderKeepPath(node) {
+function markReaderKeepPath(node) {
   let current = node;
   while (current && current !== document.body) {
     current.setAttribute("data-boc-reader-keep", "1");
@@ -567,7 +551,7 @@ export function markReaderKeepPath(node) {
   document.body.setAttribute("data-boc-reader-keep", "1");
 }
 
-export function findReaderTitleContainer() {
+function findReaderTitleContainer() {
   const title =
     document.querySelector("h1.video-title") ||
     document.querySelector("h1") ||
@@ -578,7 +562,7 @@ export function findReaderTitleContainer() {
   return title;
 }
 
-export function dismissReaderMiniPlayer(playerHostArg = playerHost) {
+function dismissReaderMiniPlayer(playerHostArg = playerHost) {
   const explicitClose = Array.from(document.querySelectorAll(".bpx-player-mini-close")).find(isVisibleReaderControl);
   if (explicitClose) {
     explicitClose.click();
@@ -695,7 +679,7 @@ export function alignReaderViewportToPlayer() {
 
 // ===== player-host.js (player host lifecycle) =====
 
-export function clearNativeReaderFloatingStyles(playerHostArg = playerHost) {
+function clearNativeReaderFloatingStyles(playerHostArg = playerHost) {
   if (!state.reader.readingNativePageMode || !playerHostArg) {
     return;
   }
@@ -862,7 +846,7 @@ export function isReaderPresentationStable(playerHostArg = playerHost) {
   return !hasNativeReaderPlayerLayoutIssue(playerHostArg);
 }
 
-export function bindReaderLayout() {
+function bindReaderLayout() {
   if (layoutBound) {
     return;
   }
@@ -970,7 +954,7 @@ export function layoutReaderPlayerHost() {
   updateReadingTranscriptTailSpacer();
 }
 
-export function cleanupReaderPlayerHostNode(playerHostNode) {
+function cleanupReaderPlayerHostNode(playerHostNode) {
   if (!playerHostNode) {
     return;
   }
@@ -1132,7 +1116,7 @@ export function scheduleReaderMiniPlayerDismiss(maxAttempts = 12, delayMs = 180)
   miniDismissTimer = window.setTimeout(run, 40);
 }
 
-export function getReaderControlsRoot(playerHostArg = playerHost) {
+function getReaderControlsRoot(playerHostArg = playerHost) {
   return (
     playerHostArg?.closest?.("#playerWrap") ||
     playerHostArg?.closest?.("#bilibili-player") ||
@@ -1142,7 +1126,7 @@ export function getReaderControlsRoot(playerHostArg = playerHost) {
   );
 }
 
-export function getReaderPlayerControlsState(playerHostArg = playerHost) {
+function getReaderPlayerControlsState(playerHostArg = playerHost) {
   const controlRoot = getReaderControlsRoot(playerHostArg);
   const nodes = [".bpx-player-control-wrap", ".bpx-player-control-mask", ".bpx-player-control-entity"].map(
     (selector) => {
@@ -1164,7 +1148,7 @@ export function getReaderPlayerControlsState(playerHostArg = playerHost) {
   };
 }
 
-export function hasReaderPlayerControlsIssue(playerHostArg = playerHost) {
+function hasReaderPlayerControlsIssue(playerHostArg = playerHost) {
   if (!state.reader.readingNativePageMode || !playerHostArg || isWatchlaterPage()) {
     return false;
   }
@@ -1173,7 +1157,7 @@ export function hasReaderPlayerControlsIssue(playerHostArg = playerHost) {
   return snapshot.hostHasNoCursor || (snapshot.anyPresent && snapshot.anyHidden);
 }
 
-export function queueEnsureReaderPlayerControlsRecovered({
+function queueEnsureReaderPlayerControlsRecovered({
   reason = "unknown",
   delayMs = 120,
   minIntervalMs = 480
@@ -1219,7 +1203,7 @@ export function queueEnsureReaderPlayerControlsRecovered({
   }, delayMs);
 }
 
-export function setReaderPlayerControlsVisible(visible, playerHostArg = playerHost) {
+function setReaderPlayerControlsVisible(visible, playerHostArg = playerHost) {
   if (!state.reader.readingNativePageMode || !playerHostArg) {
     return;
   }
@@ -1267,7 +1251,7 @@ export function setReaderPlayerControlsVisible(visible, playerHostArg = playerHo
   }
 }
 
-export function scheduleReaderPlayerControlsHide(playerHostArg = controlsHoverHost || playerHost) {
+function scheduleReaderPlayerControlsHide(playerHostArg = controlsHoverHost || playerHost) {
   if (controlsHideTimer) {
     window.clearTimeout(controlsHideTimer);
   }
@@ -1280,7 +1264,7 @@ export function scheduleReaderPlayerControlsHide(playerHostArg = controlsHoverHo
   }, 1200);
 }
 
-export function bindReaderPlayerControlsHover(playerHostArg = playerHost) {
+function bindReaderPlayerControlsHover(playerHostArg = playerHost) {
   if (!state.reader.readingNativePageMode || !isWatchlaterPage() || !playerHostArg) {
     return;
   }
@@ -1335,7 +1319,7 @@ export function unbindReaderPlayerControlsHover() {
   controlsHoverHost = null;
 }
 
-export function setReaderHeaderActionsVisible(visible) {
+function setReaderHeaderActionsVisible(visible) {
   const actions = document.querySelector(".boc-reading-actions");
   if (!actions) {
     return;
@@ -1347,7 +1331,7 @@ export function setReaderHeaderActionsVisible(visible) {
   actions.setAttribute("data-boc-icon-hidden", "1");
 }
 
-export function scheduleReaderHeaderActionsHide(delayMs = 10000) {
+function scheduleReaderHeaderActionsHide(delayMs = 10000) {
   if (headerHideTimer) {
     window.clearTimeout(headerHideTimer);
     headerHideTimer = 0;
@@ -1396,7 +1380,7 @@ export function bindReaderHeaderActionsHover() {
   scheduleReaderHeaderActionsHide();
 }
 
-export function unbindReaderHeaderActionsHover() {
+function unbindReaderHeaderActionsHover() {
   const header = headerHoverHost;
   if (headerHideTimer) {
     window.clearTimeout(headerHideTimer);
@@ -1414,7 +1398,7 @@ export function unbindReaderHeaderActionsHover() {
   setReaderHeaderActionsVisible(true);
 }
 
-export function normalizeReaderPlayerContainer(playerHostArg = playerHost) {
+function normalizeReaderPlayerContainer(playerHostArg = playerHost) {
   if (!playerHostArg) {
     return;
   }
@@ -1478,7 +1462,7 @@ export function normalizeReaderPlayerContainer(playerHostArg = playerHost) {
   playerAdjustedNodes = adjusted;
 }
 
-export function restoreReaderPlayerContainer() {
+function restoreReaderPlayerContainer() {
   const adjusted = Array.isArray(playerAdjustedNodes) ? playerAdjustedNodes : [];
   adjusted.forEach((item) => {
     const node = item?.node;

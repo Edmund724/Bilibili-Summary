@@ -131,7 +131,7 @@ export function syncReadingViewPlayback(forceScroll = false) {
   renderReadingStatus(`当前进度 ${formatCompactTimestamp(currentTime, currentTime >= 3600)}`);
 }
 
-export function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll = false) {
+function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll = false) {
   const transcriptList = getReaderElement(ids.readingTranscriptList);
   const chapterList = getReaderElement(ids.readingChapterList);
   const nextTranscript = transcriptList.querySelector(`[data-index="${subtitleIndex}"]`);
@@ -171,7 +171,7 @@ export function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll 
   state.reader.setActiveChapterIndex(chapterIndex);
 }
 
-export function scrollReadingRailItemIntoView(node) {
+function scrollReadingRailItemIntoView(node) {
   if (!node) {
     return;
   }
@@ -183,7 +183,7 @@ export function scrollReadingRailItemIntoView(node) {
   });
 }
 
-export function scrollReadingTranscriptItemIntoView(node) {
+function scrollReadingTranscriptItemIntoView(node) {
   if (!node) {
     return;
   }

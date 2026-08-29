@@ -22,7 +22,7 @@ export function buildContextKey(payload) {
   return normalizedUrl ? `url:${normalizedUrl}` : "";
 }
 
-export function normalizeContextUrlForKey(value) {
+function normalizeContextUrlForKey(value) {
   const text = String(value || "").trim();
   if (!text) {
     return "";
@@ -139,7 +139,7 @@ export function normalizeConversationTitle(title, contextTitle = "", contextRef 
   return appendConversationPageSuffix(baseTitle || "历史对话", contextRef || { url: contextUrl });
 }
 
-export function extractConversationBaseTitle(title) {
+function extractConversationBaseTitle(title) {
   const raw = String(title || "").trim();
   if (!raw) {
     return "当前页面";
@@ -172,7 +172,7 @@ export function buildConversationTitleDisplay(title, maxChars = 22) {
   };
 }
 
-export function appendConversationPageSuffix(title, context) {
+function appendConversationPageSuffix(title, context) {
   const baseTitle = String(title || "").trim() || "历史对话";
   const existingSuffixMatch = baseTitle.match(/-P\d+$/i);
   const cleanTitle = existingSuffixMatch ? baseTitle.replace(/-P\d+$/i, "").trim() : baseTitle;
@@ -180,7 +180,7 @@ export function appendConversationPageSuffix(title, context) {
   return pageSuffix ? `${cleanTitle}${pageSuffix}` : cleanTitle;
 }
 
-export function extractConversationPageSuffix(context) {
+function extractConversationPageSuffix(context) {
   const pageIndex = Number(context?.pageIndex || context?.page || 0) || extractPageIndexFromUrl(context?.url);
   return pageIndex > 1 ? `-P${pageIndex}` : "";
 }
@@ -234,7 +234,7 @@ export function doesTabMatchContextUrl(tabUrl, targetUrl) {
   return current.bvid === target.bvid && current.page === target.page;
 }
 
-export function extractVideoIdentity(url) {
+function extractVideoIdentity(url) {
   const text = String(url || "").trim();
   const bvid = extractBvid(text);
   let page = 1;

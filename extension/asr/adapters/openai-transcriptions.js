@@ -13,8 +13,6 @@
 //     自动重试一次（只取 text），返回里省略 segments 表达"无时间戳"，
 //     调用方据此合成整片粗粒度字幕。
 
-export const ADAPTER_TYPE = "openai-transcriptions";
-
 // 把识别语言转成平台查询参数：?language=zh / ?language=english。
 // SiliconFlow 辰星 / SenseVoice 系列的英文识别依赖 ?language=english（multipart
 // 字段不生效），只有显式选择 zh/en 才附带；auto 省略让服务端自动检测
@@ -29,7 +27,7 @@ export function buildTranscriptionUrl(baseUrl, language) {
 }
 
 // 构造 FormData（纯函数便于单测断言字段）
-export function buildTranscriptionForm(wavBlob, provider, responseFormat) {
+function buildTranscriptionForm(wavBlob, provider, responseFormat) {
   const form = new FormData();
   form.append("file", wavBlob, "chunk.wav");
   form.append("model", provider?.model || "");
@@ -42,7 +40,7 @@ export function buildTranscriptionForm(wavBlob, provider, responseFormat) {
 
 // 归一化 segments 列表：只保留 { start, end, text } 且 text 非空白，
 // start/end 转数字；无有效 segments 返回 undefined（调用方按无时间戳处理）。
-export function normalizeSegments(segments) {
+function normalizeSegments(segments) {
   if (!Array.isArray(segments) || segments.length === 0) {
     return undefined;
   }

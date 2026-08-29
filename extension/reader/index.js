@@ -3,7 +3,8 @@
 // The reader domain's public, stable interface. External modules import reader
 // capabilities ONLY from this file (plus the established seams:
 // ./page-context.js for pure multi-page resolution, ./presenter.js for the
-// bidirectional reader ↔ subtitle-fetcher channel).
+// bidirectional reader ↔ subtitle-fetcher channel and ./scroll-state.js for
+// the shared scroll-pause leaf).
 //
 // Implementation modules behind the facade (issue 06+):
 //   ./reader-impl.js   LAYOUT    page-frame + player-host + shared closure/ids
@@ -12,6 +13,9 @@
 //                               (depends on LAYOUT + SYNC)
 // The dependency graph is acyclic: SYNC → LAYOUT, LIFECYCLE → SYNC + LAYOUT.
 // External code must not import these directly.
+//
+// The facade only re-exports reader-domain capabilities. Shared logging is
+// not forwarded: import ../shared/logging.js directly.
 //
 // Import-cycle note (issue 08): the reader implementation modules deliberately
 // import nothing from core/runtime.js — they read reader DOM ids through local
@@ -29,8 +33,6 @@ export { closeReadingView } from "./lifecycle.js";
 export { renderReadingView } from "./lifecycle.js";
 // 渲染阅读视图状态栏文案（跨域共享，位于 LAYOUT 基座）
 export { renderReadingStatus } from "./reader-impl.js";
-// 设置阅读视图就绪标记（data-boc-reader-ready / aria-busy）
-export { setReadingViewReady } from "./lifecycle.js";
 // 应用阅读排版与可见性设置到 DOM
 export { applyReadingViewPresentation } from "./lifecycle.js";
 // 从设置初始化阅读状态
@@ -58,8 +60,7 @@ export { bindSettingsWatcher } from "./lifecycle.js";
 
 // 阅读视图的播放器绑定（LAYOUT）
 export { bindReadingViewVideo } from "./reader-impl.js";
-// 播放器宿主挂载观察（阅读模式期间）
-export { startReaderPlayerObserver } from "./reader-impl.js";
+// 停止播放器宿主挂载观察（启动由 LIFECYCLE/SYNC 在域内驱动，不经 facade）
 export { stopReaderPlayerObserver } from "./reader-impl.js";
 // 页面级状态守卫（非阅读页清理阅读模式标记）
 export { enforceNormalPageStateIfNeeded } from "./reader-impl.js";
@@ -71,22 +72,17 @@ export { ids } from "./reader-impl.js";
 export { isReaderViewOpen } from "./reader-impl.js";
 // 阅读视图手动滚动 / 程序化滚动的暂停状态函数移至 ./scroll-state.js 共享叶子，
 // 不再经本 facade 转发；消费方（core/message-handler.js、ui/ui-renderer.js）
-// 直接 import scroll-state.js。
-// 阅读模式下的播放器宿主 / 布局闭包状态访问器（供 reader 域内部模块使用）
-export { setVideoEventsBound, isVideoEventsBound } from "./reader-impl.js";
-// 日志（reader 域与外部共用，非 reader 专属能力）
-export { logInfo, logWarn } from "../shared/logging.js";
+// 直接 import scroll-state.js。日志同理：直接 import ../shared/logging.js。
+// 分P 解析同样不经 facade：消费方直接 import ./page-context.js（established seam）。
 
 // ===== sync.js (SYNC): playback↔transcript sync =====
 
 // 播放↔字幕同步域（原 transcript-sync.js 段，issue 06+）：定时器、滚动暂停、
 // 章节/字幕点击跳转与跟随状态均来自 ./sync.js（依赖 reader-impl.js 的 LAYOUT）。
+// 高亮/滚动等仅域内使用的函数不再经 facade 转发。
 export { startReadingViewSync } from "./sync.js";
 export { stopReadingViewSync } from "./sync.js";
 export { syncReadingViewPlayback } from "./sync.js";
-export { setActiveReadingItems } from "./sync.js";
-export { scrollReadingRailItemIntoView } from "./sync.js";
-export { scrollReadingTranscriptItemIntoView } from "./sync.js";
 export { jumpReadingTarget } from "./sync.js";
 export { onReadingChapterClick } from "./sync.js";
 export { onReadingTranscriptClick } from "./sync.js";

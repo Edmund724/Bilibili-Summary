@@ -72,7 +72,7 @@ export function pickPreferredSubtitle(
 }
 
 
-export function subtitlePriority(item) {
+function subtitlePriority(item) {
   const lan = String(item?.lan || "").toLowerCase();
   const label = String(item?.lanDoc || "").toLowerCase();
 
@@ -155,7 +155,7 @@ export function isAiSubtitle(item) {
 }
 
 
-export function normalizeSubtitleUrl(url) {
+function normalizeSubtitleUrl(url) {
   if (!url) {
     return "";
   }
@@ -196,7 +196,7 @@ export function mapChaptersFromPlayerData(data) {
 }
 
 
-export function normalizeChapterTime(value) {
+function normalizeChapterTime(value) {
   if (value === undefined || value === null || value === "") {
     return 0;
   }

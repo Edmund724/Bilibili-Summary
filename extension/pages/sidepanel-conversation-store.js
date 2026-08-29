@@ -49,7 +49,7 @@ import { sidepanelState } from "./sidepanel-state.js";
  * @param {object|null|undefined} conversation
  * @returns {boolean}
  */
-export function needsConversationPageHydration(conversation) {
+function needsConversationPageHydration(conversation) {
   if (!conversation?.isVideoContext) {
     return false;
   }

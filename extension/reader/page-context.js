@@ -16,7 +16,7 @@ import { extractPageIndex } from "../bilibili/video-id-shared.js";
 
 // ===== URL primitives =====
 
-export function hasExplicitPageParam(url) {
+function hasExplicitPageParam(url) {
   try {
     return new URL(url).searchParams.has("p");
   } catch {
@@ -24,7 +24,7 @@ export function hasExplicitPageParam(url) {
   }
 }
 
-export function extractOid(url) {
+function extractOid(url) {
   try {
     return String(new URL(url).searchParams.get("oid") || "").trim();
   } catch {
@@ -32,7 +32,7 @@ export function extractOid(url) {
   }
 }
 
-export function pickPageFromPages(pages, pageIndex) {
+function pickPageFromPages(pages, pageIndex) {
   const safePageIndex = Number(pageIndex) > 0 ? Number(pageIndex) : 1;
   const safePages = Array.isArray(pages) ? pages : [];
   const pageByIndex = safePages[safePageIndex - 1];
@@ -48,7 +48,7 @@ export function pickPageFromPages(pages, pageIndex) {
   return null;
 }
 
-export function pickCidFromPages(pages, pageIndex, fallbackCid = "") {
+function pickCidFromPages(pages, pageIndex, fallbackCid = "") {
   const matchedPage = pickPageFromPages(pages, pageIndex);
   if (matchedPage?.cid) {
     return String(matchedPage.cid);
@@ -66,7 +66,7 @@ export function pickCidFromPages(pages, pageIndex, fallbackCid = "") {
   throw new Error("没有找到当前分P的 CID。");
 }
 
-export function pickPageIndexFromOid(pages, oid, options = {}) {
+function pickPageIndexFromOid(pages, oid, options = {}) {
   const safeOid = String(oid || "").trim();
   if (!safeOid) {
     return 0;
@@ -88,7 +88,7 @@ export function pickPageIndexFromOid(pages, oid, options = {}) {
   return 0;
 }
 
-export function readCurrentPageFromPageState(pages, fallbackCid = "", options = {}) {
+function readCurrentPageFromPageState(pages, fallbackCid = "", options = {}) {
   const safePages = Array.isArray(pages) ? pages : [];
   const { ctx = {}, getVideo = defaultGetVideo } = options;
 
@@ -160,7 +160,7 @@ export function readCurrentPageFromPageState(pages, fallbackCid = "", options = 
   return safePages.length > 0 ? 1 : 0;
 }
 
-export function readPageFromPlayerDom(pages, options = {}) {
+function readPageFromPlayerDom(pages, options = {}) {
   const safePages = Array.isArray(pages) ? pages : [];
   const { ctx = {}, getVideo = defaultGetVideo } = options;
   const doc = ctx.document || document;
@@ -242,7 +242,7 @@ export function readPageFromPlayerDom(pages, options = {}) {
   return 0;
 }
 
-export function pickDurationFromPages(pages, pageIndex, fallbackDuration = 0) {
+function pickDurationFromPages(pages, pageIndex, fallbackDuration = 0) {
   const matchedPage = pickPageFromPages(pages, pageIndex);
   if (Number(matchedPage?.duration) > 0) {
     return Number(matchedPage.duration);
@@ -281,7 +281,7 @@ export function setNormalPageStateObserver(observer) {
   normalPageStateObserver = observer;
 }
 
-export function getNormalPageStateObserver() {
+function getNormalPageStateObserver() {
   return normalPageStateObserver;
 }
 

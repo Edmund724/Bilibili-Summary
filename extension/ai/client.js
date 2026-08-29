@@ -16,7 +16,7 @@ const OPENAI_COMPAT = {
 const MAX_STREAM_RETRIES = 2;
 
 // 思考档位：off 不发任何参数；low / high 映射到 OpenAI 兼容的 reasoning_effort。
-export const AI_THINKING_LEVELS = ["off", "low", "high"];
+const AI_THINKING_LEVELS = ["off", "low", "high"];
 
 export function normalizeThinkingLevel(value) {
   return AI_THINKING_LEVELS.includes(value) ? value : "off";

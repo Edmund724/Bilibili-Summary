@@ -25,7 +25,6 @@ import {
   renderReadingInfoPanel,
   closeReadingView,
   renderReadingView,
-  logWarn,
   syncReadingViewPlayback,
   updateReaderFollowState,
   stopReadingViewSync,
@@ -36,6 +35,8 @@ import {
 } from "../reader/index.js";
 // 滚动暂停 / 程序化滚动状态位于 reader 域的共享叶子模块（不再经 reader/index.js 转发）
 import { resetManualScrollPause, isProgrammaticScrolling } from "../reader/scroll-state.js";
+// 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
+import { logWarn } from "../shared/logging.js";
 import {
   refreshClip,
   loadSubtitle
@@ -48,7 +49,7 @@ import {
 
 // 打开设置页（原 core/runtime.js 提供；因 runtime 不得依赖 ui 域，且本模块是
 // 唯一使用方，搬到此处）。成功无提示；失败按扩展上下文是否失效给出对应文案。
-export function requestOpenOptions() {
+function requestOpenOptions() {
   sendRuntimeMessage({ type: "open-options" })
     .then((resp) => {
       if (!resp?.ok) {

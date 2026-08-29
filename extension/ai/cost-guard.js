@@ -18,7 +18,7 @@ export function shouldPromptCostGuard(estimatedCalls) {
 /**
  * 千分位格式化数字（如 1234567 → "1,234,567"）；非有限值回落到 "0"。
  */
-export function formatThousands(value) {
+function formatThousands(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "0";
   const [intPart, fracPart] = String(Math.trunc(Math.abs(n))).split(".");

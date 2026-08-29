@@ -226,12 +226,12 @@ export async function fetchSubtitleBundle(transport, { bvid, cid, aid }) {
   }
 }
 
-export async function fetchSubtitleBodyJson(transport, url) {
+async function fetchSubtitleBodyJson(transport, url) {
   const payload = await transport(url);
   return Array.isArray(payload?.body) ? payload.body : [];
 }
 
-export async function fetchHotCommentsJson(transport, aid, count = 18) {
+async function fetchHotCommentsJson(transport, aid, count = 18) {
   const safeAid = Number(aid || 0) || 0;
   const safeCount = Math.max(0, Number(count) || 0);
   if (!safeAid || !safeCount) {

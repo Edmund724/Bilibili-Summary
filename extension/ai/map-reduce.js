@@ -48,7 +48,7 @@ export function formatSegmentItem(item) {
  * 分段小结 prompt：对齐蓝本 _chunk_prompt——视频标题 + 第 index/N 个连续片段 +
  * 忠实压缩（保留重要事实、例子、论证关系与原有时间点），不做评价、不补外部知识。
  */
-export function buildChunkPrompt({ title, index, total, items }) {
+function buildChunkPrompt({ title, index, total, items }) {
   const segmentLines = (Array.isArray(items) ? items : []).map((item) => {
     const text = formatSegmentItem(item);
     return text.length > MAX_ITEM_CHARS ? text.slice(0, MAX_ITEM_CHARS) + "…" : text;
@@ -68,7 +68,7 @@ ${segmentLines.join("\n")}`;
  * 忠实复原脉络/观点/依据/时间点，不补外部知识，标题 `# 视频笔记：《{title}》`。
  * 材料中每条小结以 `### 片段 i` 标注。
  */
-export function buildNotePrompt({ title, material }) {
+function buildNotePrompt({ title, material }) {
   return `写一份翔实、自然的 Markdown 视频笔记。完整复原内容脉络、具体例子、核心观点及其依据，
 并在有帮助时加入关键时间点。不要加入外部知识或评价。
 
@@ -84,7 +84,7 @@ ${material}`;
 /**
  * 把所有分段小结汇总为一份成稿材料：每条前面 `### 片段 i` 标注。
  */
-export function buildMaterial(summaries) {
+function buildMaterial(summaries) {
   const list = Array.isArray(summaries) ? summaries : [];
   return list
     .map((summary, i) => `### 片段 ${i + 1}\n${String(summary || "")}`)
@@ -95,7 +95,7 @@ export function buildMaterial(summaries) {
  * 非流式 chat/completions 辅助（可注入 runCompletion 覆盖，默认用全局 fetch）。
  * 非 2xx 抛错；错误文案命中 context-length 溢出时标记 error.overflow = true（供外层兜底）。
  */
-export async function runCompletion({ provider, messages, thinkingLevel, signal, fetchImpl = globalThis.fetch }) {
+async function runCompletion({ provider, messages, thinkingLevel, signal, fetchImpl = globalThis.fetch }) {
   const baseUrl = String(provider?.baseUrl || "").trim().replace(/\/+$/, "");
   const model = provider?.model;
   const body = { model, messages, stream: false };

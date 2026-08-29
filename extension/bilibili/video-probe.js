@@ -13,7 +13,7 @@ export function findReaderPlayerHost(video) {
   );
 }
 
-export function isIgnoredReaderVideoCandidate(video) {
+function isIgnoredReaderVideoCandidate(video) {
   if (!video) {
     return true;
   }

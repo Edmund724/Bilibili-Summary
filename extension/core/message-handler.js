@@ -28,7 +28,6 @@ import {
   syncReadingViewPlayback,
   enterReaderMode,
   closeReadingView,
-  logWarn,
   isReaderViewOpen,
   renderReadingStatus,
   waitForVideoMetadata,
@@ -36,6 +35,8 @@ import {
 } from "../reader/index.js";
 // 滚动暂停重置位于 reader 域的共享叶子模块（不再经 reader/index.js 转发）
 import { resetManualScrollPause } from "../reader/scroll-state.js";
+// 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
+import { logWarn } from "../shared/logging.js";
 
 import {
   isReaderMode,

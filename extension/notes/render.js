@@ -14,7 +14,7 @@ import { normalizeHotComments } from "../bilibili/bili-api-shared.js";
 import { extractPageIndex, cleanVideoUrl } from "../bilibili/video-id-shared.js";
 import { state } from "../core/state.js";
 
-export function buildBilibiliEmbedIframe(meta, page = 1) {
+function buildBilibiliEmbedIframe(meta, page = 1) {
   const safeAid = encodeURIComponent(String(meta?.aid || "").trim());
   const safeBvid = encodeURIComponent(String(meta?.bvid || "").trim());
   const safeCid = encodeURIComponent(String(meta?.cid || "").trim());
@@ -23,7 +23,7 @@ export function buildBilibiliEmbedIframe(meta, page = 1) {
   return `<iframe src="https://player.bilibili.com/player.html?aid=${safeAid}&bvid=${safeBvid}&cid=${safeCid}&page=${safePage}&autoplay=0" scrolling="no" border="0" frameborder="no" framespacing="0" allow="fullscreen; picture-in-picture" allowfullscreen="true" style="height:100%;width:100%; aspect-ratio: 16 / 9;"> </iframe>`;
 }
 
-export function buildChapterLines(chapters, withHours = false) {
+function buildChapterLines(chapters, withHours = false) {
   const chapterItems = normalizeChapters(chapters);
   if (chapterItems.length === 0) {
     return [];
@@ -35,7 +35,7 @@ export function buildChapterLines(chapters, withHours = false) {
   });
 }
 
-export function buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml) {
+function buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml) {
   const enabled = getEnabledFrontmatterFields(settings);
   const fixedPropertyLines = getFixedFrontmatterPropertyLines(
     settings,
@@ -66,7 +66,7 @@ export function buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml) {
   return ["---", ...lines, "---"].join("\n");
 }
 
-export function buildFrontmatterTemplateContext(meta, created, tagsCsv, tagsYaml) {
+function buildFrontmatterTemplateContext(meta, created, tagsCsv, tagsYaml) {
   return {
     title: String(meta?.title || "").trim(),
     url: String(cleanVideoUrl() || "").trim(),
@@ -82,7 +82,7 @@ export function buildFrontmatterTemplateContext(meta, created, tagsCsv, tagsYaml
   };
 }
 
-export function buildHotCommentLines(comments) {
+function buildHotCommentLines(comments) {
   const items = normalizeHotComments(comments, 20);
   if (items.length === 0) {
     return [];
@@ -151,7 +151,7 @@ export function buildMarkdown(meta, body, settings) {
   return lines.join("\n");
 }
 
-export function buildNotePlaceholderLines(item, templateContext = {}) {
+function buildNotePlaceholderLines(item, templateContext = {}) {
   const title = String(item?.title || "").trim();
   if (!title) {
     return [];
@@ -164,7 +164,7 @@ export function buildNotePlaceholderLines(item, templateContext = {}) {
   return lines;
 }
 
-export function buildNotePlaceholderTemplateContext(meta, description) {
+function buildNotePlaceholderTemplateContext(meta, description) {
   return {
     title: String(meta?.title || "").trim(),
     author: String(meta?.author || "").trim(),
@@ -306,7 +306,7 @@ export function buildTxt(body, settings) {
     .join("\n");
 }
 
-export function formatFixedPropertyYamlLine(key, type, value, templateContext = {}) {
+function formatFixedPropertyYamlLine(key, type, value, templateContext = {}) {
   const normalizedType = normalizeFixedPropertyType(type);
   const resolvedValue = resolveFrontmatterTemplateValue(value, templateContext).trim();
 
@@ -345,7 +345,7 @@ export function formatFixedPropertyYamlLine(key, type, value, templateContext = 
   return `${key}: "${escapeYaml(resolvedValue)}"`;
 }
 
-export function formatSubtitleLine(item, settings, withHours) {
+function formatSubtitleLine(item, settings, withHours) {
   const text = String(item?.content || "").trim();
   if (!text) {
     return "";
@@ -356,7 +356,7 @@ export function formatSubtitleLine(item, settings, withHours) {
   return `\`${formatCompactTimestamp(item.from, withHours)}\` ${text}`;
 }
 
-export function getEnabledFrontmatterFields(settings) {
+function getEnabledFrontmatterFields(settings) {
   const defaultFields = Array.isArray(DEFAULT_SETTINGS.frontmatterFields)
     ? DEFAULT_SETTINGS.frontmatterFields
     : [];
@@ -373,7 +373,7 @@ export function getEnabledFrontmatterFields(settings) {
   return unique;
 }
 
-export function getFixedFrontmatterPropertyLines(settings, templateContext = {}) {
+function getFixedFrontmatterPropertyLines(settings, templateContext = {}) {
   const customPropertyKeyPattern = /^[\p{L}\p{N}_\-\s]+$/u;
   const systemFields = new Set(
     (Array.isArray(DEFAULT_SETTINGS.frontmatterFields) ? DEFAULT_SETTINGS.frontmatterFields : []).map((field) =>
@@ -408,7 +408,7 @@ export function getFixedFrontmatterPropertyLines(settings, templateContext = {})
   return lines;
 }
 
-export function groupNotePlaceholderSections(settings, templateContext = {}) {
+function groupNotePlaceholderSections(settings, templateContext = {}) {
   const groups = {
     before_intro: [],
     before_chapters: [],
@@ -425,11 +425,11 @@ export function groupNotePlaceholderSections(settings, templateContext = {}) {
   return groups;
 }
 
-export function isYamlDateValue(value) {
+function isYamlDateValue(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
 }
 
-export function shouldShowHoursInSubtitle(body) {
+function shouldShowHoursInSubtitle(body) {
   const maxTo = (body || []).reduce((max, item) => {
     const to = Number(item?.to || 0);
     return Number.isFinite(to) && to > max ? to : max;

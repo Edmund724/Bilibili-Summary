@@ -32,7 +32,7 @@ export async function loadSegmentSummaries({ context = {}, plan = null, loadSumm
 }
 
 // 单条命中的原始段渲染成注入文本块：逐条字幕项按 [起点-终点] 内容 拼行。
-export function renderRawSegment(segment) {
+function renderRawSegment(segment) {
   const items = Array.isArray(segment?.items) ? segment.items : [];
   return items
     .map((item) => formatSegmentItem(item))

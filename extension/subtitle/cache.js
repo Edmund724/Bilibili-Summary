@@ -1,10 +1,10 @@
 import { logWarn, logError } from "../shared/logging.js";
 import { parseBvidFromCacheKey, readLruIndex, writeWithEviction } from "../core/cache-lru.js";
 
-export const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
+const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
 // ASR 变体 source key 前缀：fetcher 以 subtitleId "asr:<providerId>:<model>:<lang>"
 // 组键（经 buildSubtitleSourceKey 的 id_ 分支），用于识别/清理过期 ASR 转写变体。
-export const ASR_SOURCE_KEY_PREFIX = "id_asr:";
+const ASR_SOURCE_KEY_PREFIX = "id_asr:";
 
 export function getSubtitleCacheKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "" }) {
   const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);

@@ -10,9 +10,9 @@ import { buildSubtitleSourceKey } from "../subtitle/cache.js";
 import { parseBvidFromCacheKey, readLruIndex, writeWithEviction } from "../core/cache-lru.js";
 
 // 分段小结缓存键前缀。
-export const SEGMENT_SUMMARY_PREFIX = "boc_lvs_summary_";
+const SEGMENT_SUMMARY_PREFIX = "boc_lvs_summary_";
 // 原始字幕段缓存键前缀。
-export const RAW_SEGMENT_PREFIX = "boc_lvs_raw_";
+const RAW_SEGMENT_PREFIX = "boc_lvs_raw_";
 
 /**
  * 分段小结缓存键：bvid + cid + 字幕轨 source key + 段序号。

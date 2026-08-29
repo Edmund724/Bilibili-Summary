@@ -27,7 +27,7 @@ import { formatCompactTimestamp } from "../shared/string-utils.js";
 import { waitForTabComplete } from "../shared/tab-utils.js";
 import { isTimestampOnlyInlineCode, TIMESTAMP_PATTERN } from "./markdown.js";
 
-export function parseTimestampToSeconds(value) {
+function parseTimestampToSeconds(value) {
   const parts = String(value || "")
     .trim()
     .split(":")
@@ -107,7 +107,7 @@ export function linkifyAssistantTimestamps(root, deps) {
   });
 }
 
-export async function jumpToAssistantTimestamp(seconds, label = "", deps = {}) {
+async function jumpToAssistantTimestamp(seconds, label = "", deps = {}) {
   const safeSeconds = Math.max(0, Number(seconds || 0) || 0);
   const targetUrl = String(deps.contextUrl || "").trim();
   if (!targetUrl) {

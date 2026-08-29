@@ -14,7 +14,7 @@
 // exported accessors (getPlayerHost/getPlayerRetryTimer/...), keeping the
 // closure in the base layer as the single source of truth.
 import { state, uiState } from "../core/state.js";
-import { logInfo, logWarn, shouldDebugLog } from "../shared/logging.js";
+import { logWarn } from "../shared/logging.js";
 import { getReaderElement } from "../shared/dom-utils.js";
 import {
   normalizeReaderTheme,
@@ -86,7 +86,7 @@ import {
   updateReaderFollowState
 } from "./sync.js";
 
-export function maybeRefreshReaderSubtitleInBackground() {
+function maybeRefreshReaderSubtitleInBackground() {
   if (state.clip.subtitleBody.length) {
     return;
   }
@@ -131,8 +131,6 @@ export function bindReaderPresenter() {
     }
   });
 }
-
-export { logInfo, logWarn, shouldDebugLog } from "../shared/logging.js";
 
 export function installReaderDebugHelpers() {
   const snapshotReader = (label = "manual") => createReaderDebugSnapshot(label);
@@ -182,7 +180,7 @@ export function bindSettingsWatcher() {
       });
   });
 }
-export function renderReadingSubtitleSelect() {
+function renderReadingSubtitleSelect() {
   const select = getReaderElement(ids.readingSubtitleSelect);
   const subtitles = state.clip.subtitles || [];
 
@@ -247,7 +245,7 @@ export async function enterReaderMode() {
   finishEnterReaderMode();
 }
 
-export function scheduleReaderPlayerRetry() {
+function scheduleReaderPlayerRetry() {
   if (getPlayerRetryTimer()) {
     window.clearTimeout(getPlayerRetryTimer());
     setPlayerRetryTimer(0);
@@ -270,7 +268,7 @@ export function scheduleReaderPlayerRetry() {
   setPlayerRetryTimer(window.setTimeout(tryMount, 500));
 }
 
-export function finishEnterReaderMode() {
+function finishEnterReaderMode() {
   if (!state.reader.readingViewOpen || !isReaderMode()) return;
 
   alignReaderViewportToPlayer();
@@ -282,7 +280,7 @@ export function finishEnterReaderMode() {
   bindReaderHeaderActionsHover();
 }
 
-export function openReaderViewShell(readingView = getReaderElement(ids.readingView)) {
+function openReaderViewShell(readingView = getReaderElement(ids.readingView)) {
   if (!readingView) {
     return;
   }
@@ -309,7 +307,7 @@ export function waitForVideoMetadata(timeoutMs = 5000) {
   });
 }
 
-export function syncReaderModeAfterMount() {
+function syncReaderModeAfterMount() {
   startReadingViewSync();
   startReaderPlayerObserver();
   layoutReaderPlayerHost();
@@ -317,7 +315,7 @@ export function syncReaderModeAfterMount() {
   updateReaderFollowState();
 }
 
-export function settleReaderModePresentation() {
+function settleReaderModePresentation() {
   if (!isReaderPresentationStable()) {
     setReadingViewReady(false);
     renderReadingStatus("正在稳定播放器布局...");
@@ -514,7 +512,7 @@ export function updateReaderChapterPresence(hasChapters) {
   document.body.dataset.bocReaderHasChapters = value;
 }
 
-export function getToggleLabel(key, value) {
+function getToggleLabel(key, value) {
   const labels = {
     fontScale: { xs: "最小", s: "偏小", m: "标准", l: "偏大", xl: "最大" },
     letterSpacing: { tighter: "最紧", tight: "偏紧", normal: "标准", relaxed: "偏松", loose: "最松" },
@@ -524,7 +522,7 @@ export function getToggleLabel(key, value) {
   return labels[key]?.[value] || "标准";
 }
 
-export function getReaderStepperConfig(settingKey) {
+function getReaderStepperConfig(settingKey) {
   const configs = {
     readerFontScale: {
       options: ["xs", "s", "m", "l", "xl"],
@@ -600,7 +598,7 @@ export function bindReaderStepperControl(node, settingKey) {
   node.dataset.bocBound = "1";
 }
 
-export function setReaderPreference(settingKey, nextValue) {
+function setReaderPreference(settingKey, nextValue) {
   const config = getReaderStepperConfig(settingKey);
   if (!config) {
     return;
@@ -682,7 +680,7 @@ export function renderReadingInfoPanel() {
   }
 }
 
-export function buildReadingSummaryItems() {
+function buildReadingSummaryItems() {
   const items = [];
   if (state.clip.title) {
     items.push({ label: "标题", value: state.clip.title });
@@ -732,11 +730,11 @@ export function updateReaderPreferences(next, { persist = true } = {}) {
   }
 }
 
-export function persistReaderSettings() {
+function persistReaderSettings() {
   persistReaderSettingsThroughSeam();
 }
 
-export function buildReadingMetaLine() {
+function buildReadingMetaLine() {
   const parts = [];
   if (state.clip.author) {
     parts.push(state.clip.author);
@@ -758,7 +756,7 @@ export function buildReadingMetaLine() {
   return parts.join(" · ");
 }
 
-export function setReadingViewReady(ready) {
+function setReadingViewReady(ready) {
   state.reader.setViewReady(Boolean(ready));
   const readingView = document.getElementById(ids.readingView);
   if (!readingView) {
@@ -768,7 +766,7 @@ export function setReadingViewReady(ready) {
   readingView.setAttribute("aria-busy", state.reader.readingViewReady ? "false" : "true");
 }
 
-export function createReaderDebugSnapshot(label = "manual") {
+function createReaderDebugSnapshot(label = "manual") {
   const pickNodeSnapshot = (selector) => {
     const node = document.querySelector(selector);
     if (!node) {

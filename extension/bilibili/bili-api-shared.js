@@ -68,7 +68,7 @@ export function buildBiliApiError(payload, fallbackMessage) {
 }
 
 
-export function isRetryableError(code) {
+function isRetryableError(code) {
   // -509: 请求过于频繁
   // -3: 参数错误（可能是临时性的）
   // 其他负数错误码也可能是临时性的

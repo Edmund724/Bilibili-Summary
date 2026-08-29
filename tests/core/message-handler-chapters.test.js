@@ -38,7 +38,6 @@ vi.mock("../../extension/reader/index.js", () => ({
   syncReadingViewPlayback: vi.fn(),
   enterReaderMode: vi.fn(async () => {}),
   closeReadingView: vi.fn(),
-  logWarn: vi.fn(),
   isReaderViewOpen: vi.fn(() => false),
   renderReadingStatus: vi.fn(),
   waitForVideoMetadata: vi.fn(async () => {}),
