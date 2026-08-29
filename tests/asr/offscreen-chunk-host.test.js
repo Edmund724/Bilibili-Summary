@@ -6,6 +6,8 @@
 // - progress 文本原样中继 onProgress；error 消息 reject 且带 code（asr-skip）；
 //   port 断连未 done → reject「音频解码中断」（真断连是唯一的任务取消路径，
 //   旧 isStale 每消息复核/跨 context 中止已随"转写与视频切换解耦"移除）
+// - prepare 响应带回的 ruleId 存进任务闭包，cleanup 原样带回（多任务并发时
+//   各删各的防盗链规则）
 // 参考 probes 测试的 mock 风格：beforeEach 重建 chrome stub，用例内直接
 // 捕获 connect 返回的 port 手动触发事件。
 
@@ -20,7 +22,8 @@ import { resetModuleState } from "../setup.js";
 function installConnectMock() {
   const connections = [];
   const sendMessage = vi.fn((_message, callback) => {
-    callback?.({ ok: true });
+    // prepare 响应带 ruleId（background 分配器返回），与真实契约一致
+    callback?.({ ok: true, ruleId: 32001 });
     return undefined;
   });
   const connect = vi.fn(() => {
@@ -121,10 +124,35 @@ describe("createOffscreenChunkHost 文本结果收包", () => {
       text: "片二",
       segments: [{ start: 0, end: 1, text: "第三句" }]
     });
-    // done 后 disconnect + cleanup 消息（sendOffloadMessage 带 type 前缀）
+    // done 后 disconnect + cleanup 消息（sendOffloadMessage 带 type 前缀，
+    // cleanup 携带 prepare 响应的 ruleId，只删本任务这条规则）
     expect(port.disconnect).toHaveBeenCalledTimes(1);
     expect(globalThis.chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      { type: "offload-task", taskType: "asr-decode-cleanup" },
+      { type: "offload-task", taskType: "asr-decode-cleanup", ruleId: 32001 },
+      expect.any(Function)
+    );
+  });
+
+  it("prepare 响应的 ruleId 存进任务闭包：cleanup 原样带回自己的 id", async () => {
+    const { connections, sendMessage } = installConnectMock();
+    sendMessage.mockImplementation((message, callback) => {
+      if (message?.taskType === "asr-decode-prepare") {
+        callback?.({ ok: true, ruleId: 32005 });
+        return undefined;
+      }
+      callback?.({ ok: true });
+      return undefined;
+    });
+    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const host = bridge.createOffscreenChunkHost();
+
+    const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    connections[0]._emit({ type: "done", totalChunks: 0, skippedSegments: 0, failedChunks: 0 });
+    await promise;
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      { type: "offload-task", taskType: "asr-decode-cleanup", ruleId: 32005 },
       expect.any(Function)
     );
   });
