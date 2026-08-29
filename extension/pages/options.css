@@ -112,10 +112,6 @@ textarea.settings-textarea {
   resize: vertical;
 }
 
-textarea.settings-textarea.settings-textarea-compact {
-  min-height: 84px;
-}
-
 .quick-prompts-grid {
   display: grid;
   gap: 8px;
@@ -154,11 +150,6 @@ select.input-error {
   margin: 0 0 10px;
   color: #6b7280;
   font-size: 13px;
-}
-
-.inline-hint {
-  margin-top: -6px;
-  margin-bottom: 10px;
 }
 
 .field-grid {
@@ -236,8 +227,7 @@ select.input-error {
   height: var(--fixed-property-control-size);
 }
 
-.fixed-property-type-button,
-.fixed-property-checkbox-wrap {
+.fixed-property-type-button {
   width: 100%;
   height: var(--fixed-property-control-size);
   border-radius: var(--fixed-property-control-radius);
@@ -421,10 +411,6 @@ select.input-error {
   font-size: 12px;
 }
 
-.fixed-property-checkbox-wrap {
-  display: none;
-}
-
 .mini-checkbox {
   display: flex;
   align-items: center;
@@ -538,48 +524,6 @@ button {
 
 .status[data-error="true"] {
   color: #b91c1c;
-}
-
-.about {
-  margin-top: 18px;
-}
-
-.about-card {
-  border: 1px solid #dbeafe;
-  background: linear-gradient(180deg, #f8fbff, #f1f7ff);
-  border-radius: 12px;
-  padding: 12px 14px;
-}
-
-.about-row {
-  margin: 0;
-  display: grid;
-  grid-template-columns: 98px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-}
-
-.about-row + .about-row {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed #dbeafe;
-}
-
-.about-label {
-  color: #4b5563;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.about a {
-  color: #2563eb;
-  text-decoration: none;
-  font-size: 13px;
-  word-break: break-all;
-}
-
-.about a:hover {
-  text-decoration: underline;
 }
 
 h2 {

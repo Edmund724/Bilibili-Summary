@@ -12,6 +12,7 @@
 import { normalizeAsrProvider, normalizeBaseUrl } from "../core/presets.js";
 import { createProviderStore } from "../core/provider-store.js";
 import { getMergedSettings } from "../core/settings-store.js";
+import { encodeWavBytes } from "./chunker.js";
 
 // ===== ASR 平台列表存储 =====
 
@@ -54,48 +55,12 @@ export async function deleteAsrProvider(providerId) {
 // ===== 静音 WAV 生成（探针用） =====
 
 // 构造 1 秒 16kHz 单声道 16bit PCM 静音 WAV（全零采样）。
-// 手写 WAV header + PCM，不引依赖。用于 openai-transcriptions 探针。
+// WAV header 复用 asr/chunker.js 的 encodeWavBytes：静音即全零 Float32 采样
+// （量化后仍为 0x0000，data 段全零）。用于 openai-transcriptions 探针。
 // 1 秒 16k 单声道 16bit = 16000 采样 * 2 字节 = 32000 字节 PCM。
 export function buildSilentWavBytes(durationSec = 1, sampleRate = 16000) {
-  const numChannels = 1;
-  const bitsPerSample = 16;
-  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
-  const blockAlign = (numChannels * bitsPerSample) / 8;
   const sampleCount = Math.max(1, Math.floor(Number(durationSec) * sampleRate));
-  const dataSize = sampleCount * blockAlign;
-
-  // RIFF chunk: 12 字节
-  // fmt subchunk: 16 字节
-  // data subchunk header: 8 字节
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-
-  // RIFF header
-  writeAscii(view, 0, "RIFF");
-  view.setUint32(4, 36 + dataSize, true); // chunk size
-  writeAscii(view, 8, "WAVE");
-
-  // fmt subchunk
-  writeAscii(view, 12, "fmt ");
-  view.setUint32(16, 16, true); // subchunk size
-  view.setUint16(20, 1, true); // audio format = PCM
-  view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, bitsPerSample, true);
-
-  // data subchunk（静音，PCM 全零即 0x0000，ArrayBuffer 默认全零无需再写）
-  writeAscii(view, 36, "data");
-  view.setUint32(40, dataSize, true);
-
-  return new Uint8Array(buffer);
-}
-
-function writeAscii(view, offset, str) {
-  for (let i = 0; i < str.length; i++) {
-    view.setUint8(offset + i, str.charCodeAt(i));
-  }
+  return encodeWavBytes(new Float32Array(sampleCount), sampleRate);
 }
 
 // ===== 连通性探针 =====

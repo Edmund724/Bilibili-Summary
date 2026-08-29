@@ -22,6 +22,7 @@ import {
   normalizeSubtitleTracks
 } from "../subtitle/selection.js";
 import { getMergedSettings } from "../core/settings-store.js";
+import { withTimeout } from "../shared/error-helpers.js";
 import { buildAiContextRef } from "./conversation.js";
 
 // ===== 页内状态（由 background.js 注入：ensureReaderContentReady / sendMessageToTab）=====
@@ -168,14 +169,6 @@ export async function resolveAiSidepanelPageRef(contextRef) {
 // 侧边栏把上下文清空、误报"不是 B 站视频页"）。限时等待，超时视为"抓取仍在
 // 后台进行"，回退读取当前快照（subtitleFetchState 会告知转写进行中）。
 const REFRESH_WAIT_MS = 10000;
-
-function withTimeout(promise, ms) {
-  let timer;
-  const timeout = new Promise((resolve) => {
-    timer = setTimeout(() => resolve(undefined), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
 
 export async function getAiSidepanelState(tabId, { forceRefresh = false } = {}, tabOps = {}) {
   const { ensureReaderContentReady, sendMessageToTab } = tabOps;

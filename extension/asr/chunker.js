@@ -8,9 +8,9 @@
 
 // ===== WAV 编码 =====
 
-// Float32 单声道采样（[-1,1]）→ 16bit PCM WAV，返回 Blob。
+// Float32 单声道采样（[-1,1]）→ 16bit PCM WAV 字节（Uint8Array）。
 // 44 字节 RIFF/WAVE header + PCM little-endian。16k 单声道 ≈ 1.9MB/分钟。
-export function encodeWav(monoFloat32, sampleRate = 16000) {
+export function encodeWavBytes(monoFloat32, sampleRate = 16000) {
   const numChannels = 1;
   const bitsPerSample = 16;
   const blockAlign = (numChannels * bitsPerSample) / 8;
@@ -47,7 +47,12 @@ export function encodeWav(monoFloat32, sampleRate = 16000) {
     pcmView.setInt16(i * 2, q > 32767 ? 32767 : q < -32768 ? -32768 : q, true);
   }
 
-  return new Blob([buffer], { type: "audio/wav" });
+  return new Uint8Array(buffer);
+}
+
+// encodeWavBytes 的 Blob 包装（转写上传用 Blob 形态）。
+export function encodeWav(monoFloat32, sampleRate = 16000) {
+  return new Blob([encodeWavBytes(monoFloat32, sampleRate)], { type: "audio/wav" });
 }
 
 // 写入 ASCII 字符串（RIFF/WAVE/fmt /data 标识）

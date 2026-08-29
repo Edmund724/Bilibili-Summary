@@ -153,18 +153,6 @@ export function setPlayerRetryTimer(timer) {
   playerRetryTimer = timer;
 }
 
-export function getControlsRecoveryTimer() {
-  return controlsRecoveryTimer;
-}
-
-export function setControlsRecoveryTimer(timer) {
-  controlsRecoveryTimer = timer;
-}
-
-export function setControlsRecoveryInFlight(inFlight) {
-  controlsRecoveryInFlight = Boolean(inFlight);
-}
-
 // Seam to the sync domain: sync.js registers its function table here at module
 // load (registerSyncAdapter), so the LAYOUT functions below (moveReadingMainInline's
 // scroll handler, bindReadingViewVideo's sync handler) can call into the sync
@@ -588,50 +576,6 @@ export function findReaderTitleContainer() {
     return null;
   }
   return title;
-}
-
-export function findReaderMetaContainer(titleNode = findReaderTitleContainer()) {
-  const title = titleNode?.matches?.("h1, [data-title]") ? titleNode : titleNode?.querySelector?.("h1, [data-title]");
-  if (!title) {
-    return null;
-  }
-
-  const candidates = [
-    title.nextElementSibling,
-    title.parentElement?.nextElementSibling,
-    title.parentElement,
-    title.parentElement?.parentElement,
-    ...(Array.from(title.parentElement?.parentElement?.children || []).slice(0, 6))
-  ].filter(Boolean);
-
-  for (const node of candidates) {
-    if (node.matches?.(".video-data, .video-info-detail, .video-info-meta")) {
-      return node;
-    }
-    if (node.querySelector?.(".view-text")) {
-      return node;
-    }
-  }
-
-  return null;
-}
-
-export function findReaderContentHost(playerHostArg = playerHost, titleNode = findReaderTitleContainer()) {
-  if (!playerHostArg && !titleNode) {
-    return null;
-  }
-
-  let current = titleNode || playerHostArg;
-  while (current && current !== document.body) {
-    const containsPlayer = playerHostArg ? current.contains(playerHostArg) : true;
-    const containsTitle = titleNode ? current.contains(titleNode) : true;
-    if (containsPlayer && containsTitle) {
-      return current;
-    }
-    current = current.parentElement;
-  }
-
-  return playerHostArg?.parentElement || titleNode?.parentElement || null;
 }
 
 export function dismissReaderMiniPlayer(playerHostArg = playerHost) {

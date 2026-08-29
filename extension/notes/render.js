@@ -8,7 +8,7 @@ import {
   isFixedPropertyRowEffectivelyEmpty,
   normalizeNotePlaceholderSections
 } from "../core/validators.js";
-import { escapeYaml, formatCompactTimestamp, formatTimestamp, sanitizeFileName, resolveFrontmatterTemplateValue, parseFrontmatterArrayItems, pushOptionalLines } from "../shared/string-utils.js";
+import { escapeYaml, formatCompactTimestamp, formatTimestamp, resolveFrontmatterTemplateValue, parseFrontmatterArrayItems, pushOptionalLines } from "../shared/string-utils.js";
 import { normalizeChapters } from "../subtitle/selection.js";
 import { normalizeHotComments } from "../bilibili/bili-api-shared.js";
 import { extractPageIndex, cleanVideoUrl } from "../bilibili/video-id-shared.js";
@@ -149,28 +149,6 @@ export function buildMarkdown(meta, body, settings) {
   }
 
   return lines.join("\n");
-}
-
-export function buildNoteFilename(meta) {
-  const includeDate = state.settings?.includeDateInFilename !== false;
-  const baseParts = [];
-
-  if (includeDate) {
-    baseParts.push(formatLocalDate());
-  }
-
-  baseParts.push(meta.title || meta.bvid || "bilibili-subtitle");
-
-  if (Number(meta.pageCount) > 1) {
-    baseParts.push(`P${Number(meta.pageIndex) > 0 ? Number(meta.pageIndex) : 1}`);
-    const pageTitle = String(meta.pageTitle || "").trim();
-    if (pageTitle) {
-      baseParts.push(pageTitle);
-    }
-  }
-
-  const baseName = sanitizeFileName(baseParts.filter(Boolean).join("-"));
-  return `${baseName || "bilibili-subtitle"}.md`;
 }
 
 export function buildNotePlaceholderLines(item, templateContext = {}) {

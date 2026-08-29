@@ -4,6 +4,7 @@ import { normalizeDownloadFormat } from "../core/validators.js";
 import { isSupportedBilibiliPage } from "../bilibili/video-id-shared.js";
 import { formatLocalDate, sleep } from "../shared/utils.js";
 import { escapeHtml, sanitizeFileName } from "../shared/string-utils.js";
+import { sendMessageToTab } from "../shared/tab-utils.js";
 
 const el = {
   status: document.getElementById("status"),
@@ -402,18 +403,6 @@ async function probeContentScriptVersion(tabId) {
     }
   }
   return "";
-}
-
-async function sendMessageToTab(tabId, message) {
-  return new Promise((resolve, reject) => {
-    chrome.tabs.sendMessage(tabId, message, (resp) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(resp);
-    });
-  });
 }
 
 async function sendToRuntime(message) {

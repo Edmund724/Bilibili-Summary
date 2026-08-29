@@ -25,7 +25,7 @@ import { createTranscriptionEngine } from "../asr/engine.js";
 import { transcribe as transcribeOpenAi } from "../asr/adapters/openai-transcriptions.js";
 import { isFragmentedMp4, createAdtsExtractor, parseAudioSpecificConfig } from "../asr/adts.js";
 import { ASR_CONCURRENCY } from "../shared/offscreen-constants.js";
-import { getErrorMessage } from "../shared/error-helpers.js";
+import { getErrorMessage, withTimeout } from "../shared/error-helpers.js";
 import { logWarn } from "../shared/logging.js";
 
 // ASR 解码任务中止哨兵：decodeSegment/onChunk 检查 aborted 后抛出，
@@ -451,7 +451,7 @@ async function decodeTo16kMono(audioBytes, startSec = 0) {
     let decoded = null;
     let decodeError = null;
     try {
-      decoded = await withTimeout(audioCtx.decodeAudioData(bytesToArrayBuffer(audioBytes)), ASR_DECODE_TIMEOUT_MS);
+      decoded = await withTimeout(audioCtx.decodeAudioData(bytesToArrayBuffer(audioBytes)), ASR_DECODE_TIMEOUT_MS, new Error("音频解码超时"));
     } catch (error) {
       decodeError = error;
     }
@@ -469,7 +469,7 @@ async function decodeTo16kMono(audioBytes, startSec = 0) {
     source.buffer = decoded;
     source.connect(offline.destination);
     source.start(0);
-    const rendered = await withTimeout(offline.startRendering(), ASR_DECODE_TIMEOUT_MS);
+    const rendered = await withTimeout(offline.startRendering(), ASR_DECODE_TIMEOUT_MS, new Error("音频解码超时"));
     const mono = rendered.getChannelData(0);
     if (!(mono.length > 0)) {
       throw new Error("音频解码失败：解码结果为空采样");
@@ -501,7 +501,8 @@ async function decodeSegmentTo16kMono(segment, audioCtx) {
   const targetRate = 16000;
   const segmentDecoded = await withTimeout(
     audioCtx.decodeAudioData(bytesToArrayBuffer(segment)),
-    ASR_DECODE_TIMEOUT_MS
+    ASR_DECODE_TIMEOUT_MS,
+    new Error("音频解码超时")
   );
   const segLen = Math.max(1, Math.round(segmentDecoded.duration * targetRate));
   const offline = new OfflineAudioContext(1, segLen, targetRate);
@@ -509,7 +510,7 @@ async function decodeSegmentTo16kMono(segment, audioCtx) {
   src.buffer = segmentDecoded;
   src.connect(offline.destination);
   src.start(0);
-  const segMono = (await withTimeout(offline.startRendering(), ASR_DECODE_TIMEOUT_MS)).getChannelData(0);
+  const segMono = (await withTimeout(offline.startRendering(), ASR_DECODE_TIMEOUT_MS, new Error("音频解码超时"))).getChannelData(0);
   if (!(segMono.length > 0)) {
     throw new Error("音频解码失败：解码结果为空采样");
   }
@@ -527,12 +528,4 @@ function bytesToArrayBuffer(bytes) {
     return new Uint8Array(bytes).buffer;
   }
   throw new Error("无法识别的音频数据格式");
-}
-
-function withTimeout(promise, ms) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error("音频解码超时")), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }

@@ -7,6 +7,7 @@ import { PRESETS, ASR_PROVIDER_PRESETS } from "../core/presets.js";
 import { normalizePlayerAiQuickPrompt } from "../core/validators.js";
 import { isSupportedBilibiliPage } from "../bilibili/video-id-shared.js";
 import { sleep } from "../shared/utils.js";
+import { sendMessageToTab, waitForTabComplete } from "../shared/tab-utils.js";
 import { getMergedSettings, normalizeSettings, saveSettings } from "../core/settings-store.js";
 import {
   loadAiProviders,
@@ -337,7 +338,7 @@ async function ensureReaderContentReady(tabId) {
 
   if (loadedVersion && loadedVersion !== EXPECTED_CONTENT_SCRIPT_VERSION) {
     await chrome.tabs.reload(tabId);
-    const ready = await waitForTabComplete(tabId);
+    const ready = await waitForTabComplete(tabId, { polls: 40 });
     if (!ready) {
       throw new Error("扩展更新后页面未及时恢复，请刷新浏览器网页重试");
     }
@@ -395,29 +396,6 @@ async function injectReaderContent(tabId) {
       throw error;
     }
   }
-}
-
-async function waitForTabComplete(tabId, retries = 40, delayMs = 250) {
-  for (let attempt = 0; attempt < retries; attempt += 1) {
-    const tab = await chrome.tabs.get(tabId).catch(() => null);
-    if (tab?.status === "complete") {
-      return true;
-    }
-    await sleep(delayMs);
-  }
-  return false;
-}
-
-async function sendMessageToTab(tabId, message) {
-  return new Promise((resolve, reject) => {
-    chrome.tabs.sendMessage(tabId, message, (resp) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(resp);
-    });
-  });
 }
 
 async function triggerReaderModeInTab(tabId, readerUrl = "", retries = 12, delayMs = 300) {
