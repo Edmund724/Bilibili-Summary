@@ -2,21 +2,16 @@
 // 关键点：转写调度已迁入 offscreen（engine + ASR_ADAPTERS，见 entry/offscreen.js
 // 与 engine.test.js），页面侧 pipeline 只做编排——取音轨 → 任务宿主（生产为
 // offscreen 桥，测试传合成宿主）收文本结果 → 合并/诊断。宿主契约：
-//   async ({ audioUrl, backupUrls, isStale?, onProgress? }) =>
+//   async ({ audioUrl, backupUrls, onProgress? }) =>
 //     { results, totalChunks, skippedSegments, failedChunks }
 // 网络层用 fake fetch（vi.stubGlobal("fetch")）断言 FormData 与请求体。
-// runId 作废（STALE_RUN）通过真实 state 验证。
+// 管线不带 runId/isStale 守卫：转写与视频切换解耦（切走视频任务照跑，
+// 中止只剩真断连），见 fallback 的 UI 门控与 offscreen-bridge。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 
 // ===== 模块级 mock：pipeline 的外部依赖 =====
-
-// 当前 runId 约定：ensureRunActive(runId) 要求 runId === state.clip.fetchRunId。
-// 测试用当前 fetchRunId 作为有效 runId；runId 作废用例显式修改 fetchRunId。
-function getValidRunId() {
-  return 0;
-}
 
 // 切片宿主走 offscreen 直连（jsdom 无 chrome.runtime.connect），mock 掉
 // audio-source 返回的 URL 即可（pipeline 不直接接触 offscreen 通道）。
@@ -244,7 +239,6 @@ describe("pipeline 时间戳合成与偏移合并", () => {
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      runId: getValidRunId(),
       onProgress: vi.fn(),
       chunkHost: makeSynthTaskHost([
         {
@@ -284,9 +278,8 @@ describe("pipeline 时间戳合成与偏移合并", () => {
     }
   });
 
-  it("任务参数：host 收到音轨地址与 isStale/onProgress 透传，进度文本原样中继", async () => {
+  it("任务参数：host 收到音轨地址与 onProgress 透传，进度文本原样中继，不再携带 isStale", async () => {
     const onProgress = vi.fn();
-    const isStale = () => false;
     const host = vi.fn(async ({ onProgress: relay }) => {
       relay?.("语音识别中 1 片…");
       return {
@@ -300,8 +293,6 @@ describe("pipeline 时间戳合成与偏移合并", () => {
     await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      runId: getValidRunId(),
-      isStale,
       onProgress,
       chunkHost: host
     });
@@ -310,8 +301,8 @@ describe("pipeline 时间戳合成与偏移合并", () => {
     const hostArgs = host.mock.calls[0][0];
     expect(hostArgs.audioUrl).toBe("https://example.com/audio.m4s");
     expect(hostArgs.backupUrls).toEqual([]);
-    // isStale 原样透传（offscreen 桥在每条 port 消息到达时复核）
-    expect(hostArgs.isStale).toBe(isStale);
+    // 守卫链已整体移除：宿主参数不再有 isStale（跨 context 中止只剩真断连）
+    expect(hostArgs.isStale).toBeUndefined();
     // 页面自身的阶段文案 + offscreen 引擎进度文本原样中继
     expect(onProgress).toHaveBeenCalledWith("无字幕轨，正在获取音频流…");
     expect(onProgress).toHaveBeenCalledWith("音频下载与解码中…");
@@ -322,7 +313,6 @@ describe("pipeline 时间戳合成与偏移合并", () => {
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      runId: getValidRunId(),
       onProgress: vi.fn(),
       chunkHost: makeSynthTaskHost([
         { startSec: 0, durationSec: 600, result: { text: "整片文本" } }
@@ -336,7 +326,6 @@ describe("pipeline 时间戳合成与偏移合并", () => {
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      runId: getValidRunId(),
       chunkHost: makeSynthTaskHost([
         {
           startSec: 0,
@@ -348,49 +337,14 @@ describe("pipeline 时间戳合成与偏移合并", () => {
     expect(body[0]).toEqual({ from: 0, to: 120, content: "越界句" });
   });
 
-  it("runId 作废：pipeline 各步守卫在 runId 不匹配时立即中止上抛", async () => {
+  it("转写与视频切换解耦：runId 过期（fetchRunId 前进）不再中止管线", async () => {
     const { clipState } = await import("../../extension/core/state.js");
-    // 模拟切换视频：fetchRunId 已前进，旧 runId 作废
+    // 模拟转写进行中视频被切换/并发刷新：fetchRunId 前进，任务照跑不中止
     clipState.setFetchRunId(99);
-    const host = makeSynthTaskHost([{ startSec: 0, durationSec: 60, result: { text: "x" } }]);
-
-    await expect(
-      pipeline.runAsrPipeline({
-        bvid: "BV1test",
-        cid: "101",
-        runId: 0,
-        onProgress: vi.fn(),
-        chunkHost: host
-      })
-    ).rejects.toThrow("Stale refresh run");
-    // 守卫先于任务发起：宿主未被调用
-    expect(host).not.toHaveBeenCalled();
-  });
-
-  it("isStale 注入：回调返回 true 时中止上抛 STALE_RUN（fetcher 传视频键比较）", async () => {
-    const host = makeSynthTaskHost([{ startSec: 0, durationSec: 60, result: { text: "x" } }]);
-    await expect(
-      pipeline.runAsrPipeline({
-        bvid: "BV1test",
-        cid: "101",
-        runId: getValidRunId(),
-        isStale: () => true,
-        onProgress: vi.fn(),
-        chunkHost: host
-      })
-    ).rejects.toMatchObject({ code: "STALE_RUN" });
-    expect(host).not.toHaveBeenCalled();
-  });
-
-  it("isStale 注入：返回 false 时即使 runId 过期也不中止（同视频并发抓取不误杀转写）", async () => {
-    const { clipState } = await import("../../extension/core/state.js");
-    clipState.setFetchRunId(99); // runId 已过期
 
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      runId: 0,
-      isStale: () => false, // 视频键未变
       onProgress: vi.fn(),
       chunkHost: makeSynthTaskHost([
         { startSec: 0, durationSec: 600, result: { text: "片文本" } }
@@ -405,7 +359,6 @@ describe("pipeline 空结果与诊断", () => {
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      runId: getValidRunId(),
       chunkHost: makeSynthTaskHost([
         { startSec: 0, durationSec: 60, result: { text: "   " } }
       ])
@@ -418,7 +371,6 @@ describe("pipeline 空结果与诊断", () => {
     await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      runId: getValidRunId(),
       chunkHost: makeSynthTaskHost([
         { startSec: 0, durationSec: 60, result: { text: "", _asrDiag: { noSpeech: true } } }
       ]),
@@ -446,7 +398,6 @@ describe("pipeline 空结果与诊断", () => {
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      runId: getValidRunId(),
       chunkHost: host,
       onEmptyDiagnostic
     });
@@ -470,7 +421,6 @@ describe("pipeline 空结果与诊断", () => {
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      runId: getValidRunId(),
       chunkHost: host,
       onEmptyDiagnostic
     });

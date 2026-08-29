@@ -14,7 +14,7 @@
 // 模块不 import extension/entry/ 与 extension/pages/ 的任何内容。
 
 import { ensureRunActive, isStaleRunError, getErrorMessage } from "../shared/error-helpers.js";
-import { logWarn } from "../shared/logging.js";
+import { logInfo, logWarn } from "../shared/logging.js";
 import { state, clipState } from "../core/state.js";
 import {
   getSubtitleCacheKey,
@@ -24,6 +24,14 @@ import {
   clearStaleAsrSubtitleCache
 } from "../subtitle/cache.js";
 import { validateSubtitleByDuration } from "../subtitle/selection.js";
+
+// STALE_RUN 信号构造：在本模块里只表示"调用方让位、零 UI 写入"（fetcher 的
+// catch 对 STALE_RUN 静默返回），不再表示转写被中止——切视频不取消任务。
+function throwStaleRun() {
+  const error = new Error("Stale refresh run");
+  error.code = "STALE_RUN";
+  throw error;
+}
 
 export function createAsrFallback(deps) {
   const {
@@ -38,12 +46,16 @@ export function createAsrFallback(deps) {
     broadcastSubtitleStatus
   } = deps;
 
-  // 进行中的 ASR 转写共享单元：同视频并发 refreshClip（侧边栏 focus/切 tab 的
-  // sync 都会经 popup-refresh 触发新一轮抓取）在此命中后等待同一 promise，
-  // 不再重启转写。历史上每次 refreshClip 都 fetchRunId+1，几小时的长视频转写
-  // 会被下一次 sync 静默打断——成果既不写缓存也不进总结上下文，用户再点抓取
-  // 只能从头重转。key 为 ASR 缓存键（bvid/cid/provider/model/language）。
-  let activeAsrTranscribe = null;
+  // 进行中的 ASR 转写共享单元（Map<cacheKey, { promise, platformName, videoKey }>）：
+  // 同视频并发 refreshClip（侧边栏 focus/切 tab 的 sync 都会经 popup-refresh
+  // 触发新一轮抓取）与"切走再切回"在此命中后等待同一 promise，不再重启转写。
+  // 历史上每次 refreshClip 都 fetchRunId+1，几小时的长视频转写会被下一次 sync
+  // 静默打断——成果既不写缓存也不进总结上下文，用户再点抓取只能从头重转。
+  // key 为 ASR 缓存键（bvid/cid/provider/model/language），videoKey 为
+  // bvid|cid 快照（供 fetcher 失败兜底按"当前视频"探针/等待）。
+  // 转写与视频切换解耦：切走视频不取消任务，任务在后台跑完、成果照落缓存，
+  // Map 记录只随任务终态按 cacheKey 清除。
+  const activeAsrTranscribes = new Map();
 
   // 无字幕轨时的语音识别回退入口。流程：
   //   skip（未启用开关 / 无激活平台 / offscreen 侧配置级 asr-skip）→ 返回
@@ -52,8 +64,16 @@ export function createAsrFallback(deps) {
   //   缓存命中 → 直接走成功收尾（不发 playurl、不下载、不转写）；
   //   成功 → 塞伪轨道 + setSubtitleBody + ready + 写缓存，返回 "done"；
   //   空结果 / 失败 → 落回 applyNoSubtitleState 并展示对应文案。
-  // runId 全程守卫：切换视频后旧任务立即中止（pipeline 内每步检查）。
+  // 过期语义与转写解耦：runId 守卫只拦截"发起前调用方已被顶掉"（早期快出，
+  // 零副作用）；转写一旦发起就不再因切视频/runId 前进而中止——isStale（bvid/cid
+  // 快照 vs 实时 clip）只门控 UI 应用点，成果一律落缓存并广播终态。
   async function maybeRunAsrFallback({ runId }) {
+    // 视频键快照在 try 内赋值（发起转写时的 bvid/cid）；catch 的 stale 收尾
+    // 复用同一判据。赋值前发生的错误（入口守卫阶段）不涉及转写，恒走 fresh
+    // 分类，UI 收尾与现状一致。
+    let bvid = "";
+    let cid = "";
+    let isStale = () => false;
     try {
       ensureRunActive(runId);
 
@@ -78,9 +98,15 @@ export function createAsrFallback(deps) {
       const language = String(settings.asrLanguage || "").trim() || "auto";
       const platformName = activeProvider.name || "语音识别平台";
       const model = String(activeProvider.model || "").trim();
-      // 固定本轮视频身份：孤儿清理/缓存键都以发起转写时的 bvid+cid 为准。
-      const bvid = state.clip.bvid;
-      const cid = state.clip.cid;
+      // 固定本轮视频身份：孤儿清理/缓存键/过期判据都以发起转写时的 bvid+cid
+      // 快照为准；videoKey 同时作为共享单元的"当前视频"探针键。
+      bvid = state.clip.bvid;
+      cid = state.clip.cid;
+      const videoKey = `${bvid}|${cid}`;
+      // 过期判据用"视频键是否已切换"而非 runId：runId 会把同视频的下一次
+      // refreshClip 误判为过期；换视频时 bvid/cid 变化才需要让 UI 收尾让位
+      // （转写本身照跑，成果照落缓存）。
+      isStale = () => `${state.clip.bvid}|${state.clip.cid}` !== videoKey;
       const cacheKey = getSubtitleCacheKey({
         bvid,
         cid,
@@ -116,29 +142,33 @@ export function createAsrFallback(deps) {
       setStatus(`无字幕轨，正在使用语音识别（${platformName}）生成字幕…`);
       broadcastSubtitleStatus("asr-transcribing");
 
-      // 同视频并发抓取（侧边栏 sync 触发的 popup-refresh 等）命中进行中的转写：
-      // 等待共享 promise 而不是重启——重启会让几小时成果作废且永不落缓存。
-      if (activeAsrTranscribe && activeAsrTranscribe.cacheKey === cacheKey) {
-        const sharedBody = await activeAsrTranscribe.promise;
+      // 同视频并发抓取（侧边栏 sync 触发的 popup-refresh 等）与"切走再切回"
+      // 命中进行中的转写：等待共享 promise 而不是重启——重启会让几小时成果
+      // 作废且永不落缓存。命中即共享，缓存写入由发起者的 promise 链负责。
+      const active = activeAsrTranscribes.get(cacheKey);
+      if (active) {
+        const sharedBody = await active.promise;
         if (!Array.isArray(sharedBody) || sharedBody.length === 0) {
+          if (isStale()) {
+            // 切走后共享转写以空结果到站：终态广播由发起者负责，这里静默让位
+            throwStaleRun();
+          }
           setStatus("未识别到语音内容，该视频可能没有人声。");
           return "empty";
         }
         return finishAsrFallback({ runId, body: sharedBody, platformName });
       }
 
-      // 过期判据用"视频键是否已切换"而非 runId：runId 会把同视频的下一次
-      // refreshClip 误判为过期（正是长视频转写被打断的根源）；换视频时
-      // bvid/cid 变化才真正需要中止转写（省 API 费用）。
-      const videoKey = `${state.clip.bvid}|${state.clip.cid}`;
-      const isStale = () => `${state.clip.bvid}|${state.clip.cid}` !== videoKey;
       let emptyDiag = "";
       const transcribePromise = runAsrPipeline({
-        bvid: state.clip.bvid,
-        cid: state.clip.cid,
-        runId,
-        isStale,
-        onProgress: (msg) => setStatus(msg),
+        bvid,
+        cid,
+        onProgress: (msg) => {
+          // 进度文案只服务当前视频的状态栏：切走后不再污染新视频 UI
+          if (!isStale()) {
+            setStatus(msg);
+          }
+        },
         onEmptyDiagnostic: (diagText) => {
           emptyDiag = diagText;
         }
@@ -162,17 +192,27 @@ export function createAsrFallback(deps) {
           return body;
         })
         .finally(() => {
-          if (activeAsrTranscribe && activeAsrTranscribe.cacheKey === cacheKey) {
-            activeAsrTranscribe = null;
-          }
+          // 任务终态即除名：按自身 cacheKey 删除，不影响其它视频的并发转写
+          activeAsrTranscribes.delete(cacheKey);
         });
-      activeAsrTranscribe = { cacheKey, promise: transcribePromise, platformName };
+      activeAsrTranscribes.set(cacheKey, { promise: transcribePromise, platformName, videoKey });
 
       const body = await transcribePromise;
 
       // 空结果：全部为空白 → 返回 "empty"，调用点呈现"未识别到语音内容"文案；
-      // 有诊断信息时直接拼进状态栏，用户转述即可定位问题层
+      // 有诊断信息时直接拼进状态栏，用户转述即可定位问题层。
+      // 切走后到站的空结果：不写任何 UI（新视频的状态栏不能被旧视频的文案
+      // 占用），但 asr-done 终态广播照发，让 sidepanel 的全局等待标志归位。
       if (!Array.isArray(body) || body.length === 0) {
+        if (isStale()) {
+          logInfo("[BOC] asr transcribe finished empty after video switch; terminal broadcast only", {
+            bvid,
+            cid,
+            ...(emptyDiag ? { diagnostic: emptyDiag } : {})
+          });
+          broadcastSubtitleStatus("asr-done");
+          throwStaleRun();
+        }
         setStatus(
           `未识别到语音内容，该视频可能没有人声。${emptyDiag ? `（诊断：${emptyDiag}）` : ""}`
         );
@@ -180,12 +220,41 @@ export function createAsrFallback(deps) {
         return "empty";
       }
 
+      // 切走后到站的成果：缓存已在上面的 promise 链落盘（键绑定发起时的
+      // bvid/cid，与当前 UI 无关），广播 asr-done 让全局标志归位并留痕；
+      // 不执行 finishAsrFallback（不写 clipState/DOM/reader，避免串台）。
+      // 用户切回原视频时经缓存命中或共享单元自动接上。
+      if (isStale()) {
+        logInfo("[BOC] asr transcribe finished after video switch; result cached, UI deferred", {
+          bvid,
+          cid,
+          itemCount: body.length
+        });
+        broadcastSubtitleStatus("asr-done");
+        return "done";
+      }
+
       return finishAsrFallback({ runId, body, platformName });
     } catch (error) {
-      // 失败兜底：错误文案进状态，不崩；落回原有无字幕状态。
-      // stale（换视频被顶掉）不广播：新视频的抓取流程会发出自己的阶段标记。
+      // 发起前/收尾守卫的 STALE_RUN（调用方被更新的抓取顶掉）：原样上抛，
+      // fetcher catch 对 STALE_RUN 静默返回，零 UI 写入。
       if (isStaleRunError(error)) {
         throw error;
+      }
+      // 切走视频后任务失败到站：转写不因切换中止，失败终态也要让 sidepanel
+      // 的全局等待标志归位（asr-skip 属良性跳过 → asr-done，其余 → asr-failed），
+      // logWarn 留痕；UI 零写入（状态栏/无字幕收尾属于当前视频），转成
+      // STALE_RUN 让 fetcher catch 静默吞掉。
+      if (isStale()) {
+        const phase = error?.code === "asr-skip" ? "asr-done" : "asr-failed";
+        logWarn("[BOC] asr transcribe failed after video switch; terminal broadcast only", {
+          bvid,
+          cid,
+          phase,
+          message: getErrorMessage(error)
+        });
+        broadcastSubtitleStatus(phase);
+        throwStaleRun();
       }
       // offscreen 配置级缺失/关闭/无激活平台 → asr-skip：静默跳过本轮回退，
       // 返回 "skip" 走原有无字幕提示（与设置闸门 skip 同语义，零用户可见
@@ -202,11 +271,20 @@ export function createAsrFallback(deps) {
     }
   }
 
-  // 等待进行中的共享转写并按其结果收尾（refreshClip 辅助抓取失败时的兜底路径：
-  // 不清上下文，跟着共享转写一起完成）。转写失败由发起者的 catch 负责文案，
-  // 这里静默退出；runId 守卫只影响 UI 收尾，成果已在共享单元内落缓存。
-  async function awaitActiveAsrTranscribe(runId) {
-    const active = activeAsrTranscribe;
+  // 等待当前视频进行中的共享转写并按其结果收尾（refreshClip 辅助抓取失败时的
+  // 兜底路径：不清上下文，跟着共享转写一起完成）。按 bvid/cid 匹配共享单元，
+  // 其它视频的后台转写不接——等待与收尾都只属于当前视频，避免把别的视频的
+  // 成果上到当前 UI。转写失败由发起者的 catch 负责文案，这里静默退出；runId
+  // 守卫只影响 UI 收尾，成果已在共享单元内落缓存。
+  async function awaitActiveAsrTranscribe({ runId, bvid, cid }) {
+    const videoKey = `${bvid}|${cid}`;
+    let active = null;
+    for (const entry of activeAsrTranscribes.values()) {
+      if (entry.videoKey === videoKey) {
+        active = entry;
+        break;
+      }
+    }
     if (!active) {
       return;
     }
@@ -247,10 +325,18 @@ export function createAsrFallback(deps) {
     });
   }
 
-  // 进行中转写探针：fetcher 的 refreshClip 失败兜底据此决定"继续等待音频转写"
-  // 还是走清上下文的错误路径（原模块级 activeAsrTranscribe 读访问的 seam 形态）。
-  function hasActiveAsrTranscribe() {
-    return activeAsrTranscribe !== null;
+  // 进行中转写探针（"当前视频在转写"语义，按 bvid/cid 匹配）：fetcher 的
+  // refreshClip 失败兜底据此决定"继续等待当前视频的音频转写"还是走清上下文
+  // 的错误路径。等待与收尾都只针对当前视频，其它视频的后台转写不拦截错误
+  // 路径、也不会把别的视频成果上到当前 UI。
+  function hasActiveAsrTranscribe({ bvid, cid }) {
+    const videoKey = `${bvid}|${cid}`;
+    for (const entry of activeAsrTranscribes.values()) {
+      if (entry.videoKey === videoKey) {
+        return true;
+      }
+    }
+    return false;
   }
 
   return { maybeRunAsrFallback, awaitActiveAsrTranscribe, hasActiveAsrTranscribe };

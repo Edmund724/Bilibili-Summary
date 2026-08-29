@@ -9,30 +9,11 @@
 // 页面职责只剩：回退决策由上游 fallback 承担；本模块负责取音轨地址、
 // 发任务、收文本结果、合并、空结果诊断。
 //
-// 每步都做 ensureRunActive(runId) 守卫：转写中切换视频，旧任务立即中止，
-// 不污染新视频状态。isStale（fetcher 传"视频键是否已切换"）还会注入
-// offscreen 桥——port 消息到达时复核，为真即断连取消（跨 context 中止）。
+// 本模块不做任何过期守卫：转写与视频切换解耦（切走视频任务照跑、成果照落
+// 缓存），中止只剩真断连（页面关闭/扩展重载 → port disconnect）。
 
 import { getSourceAudioUrl } from "./audio-source.js";
-import { ensureRunActive } from "../shared/error-helpers.js";
 import { createOffscreenChunkHost } from "./offscreen-bridge.js";
-
-// 过期检查统一入口：优先用注入的 isStale 回调（fetcher 传"视频键是否已切换"，
-// 同视频并发抓取不会误杀进行中的转写），未注入时回退 runId 比较（保住
-// pipeline 直连调用方与旧测试的守卫语义）。
-function makeEnsureActive({ runId, isStale }) {
-  if (typeof isStale === "function") {
-    return () => {
-      if (!isStale()) {
-        return;
-      }
-      const error = new Error("Stale refresh run");
-      error.code = "STALE_RUN";
-      throw error;
-    };
-  }
-  return () => ensureRunActive(runId);
-}
 
 // 把单片的转写结果合成 {from,to,content}[]：
 //   有 segments → 每条 = startSec + seg.start/end；
@@ -86,22 +67,18 @@ function mergeChunkResults(chunkResults) {
 
 // ===== 主入口 =====
 
-// runAsrPipeline({ bvid, cid, runId, isStale, onProgress, chunkHost, onEmptyDiagnostic })
+// runAsrPipeline({ bvid, cid, onProgress, chunkHost, onEmptyDiagnostic })
 // → [{from,to,content}]（空数组表示未识别到语音内容）。
-// isStale 可选注入"本次转写是否已过期"回调（返回 true 即中止上抛 STALE_RUN，
-// 同时透传给 offscreen 桥做跨 context 中止）；未注入时按 runId !==
-// state.clip.fetchRunId 判断。chunkHost 为可选注入的任务宿主（测试传合成
-// 宿主，生产默认走 createOffscreenChunkHost：offscreen 文档内下载+解码+切片
-// +逐片转写，每片完成即回传文本结果）。
-export async function runAsrPipeline({ bvid, cid, runId, isStale, onProgress, chunkHost, onEmptyDiagnostic }) {
+// 不做任何过期守卫（runId/视频键复核均已移除）：调用方（asr/fallback）自行
+// 决定 UI 应用时机，转写本身与视频切换解耦，跑完即返回。chunkHost 为可选
+// 注入的任务宿主（测试传合成宿主，生产默认走 createOffscreenChunkHost：
+// offscreen 文档内下载+解码+切片+逐片转写，每片完成即回传文本结果）。
+export async function runAsrPipeline({ bvid, cid, onProgress, chunkHost, onEmptyDiagnostic }) {
   const host = chunkHost || createOffscreenChunkHost();
-  const ensureActive = makeEnsureActive({ runId, isStale });
 
   // 取音轨（页面同域能力：playurl 依赖 B 站页面 cookie，走 contentFetchJson）
-  ensureActive();
   onProgress?.("无字幕轨，正在获取音频流…");
   const source = await getSourceAudioUrl({ bvid, cid });
-  ensureActive();
 
   // offscreen 文档内完成下载 → 解码 → 切片 → 逐片转写（engine 并发调度），
   // 每片完成即把文本结果经 port 发回；音频字节与 API Key 都不出 offscreen。
@@ -110,11 +87,8 @@ export async function runAsrPipeline({ bvid, cid, runId, isStale, onProgress, ch
   const { results, totalChunks, skippedSegments, failedChunks } = await host({
     audioUrl: source.url,
     backupUrls: source.backupUrls || [],
-    // stale 判据是页面闭包跨不过 port：桥在每条消息到达时复核本回调
-    isStale: typeof isStale === "function" ? isStale : undefined,
     onProgress
   });
-  ensureActive();
 
   const merged = mergeChunkResults(results);
   if (merged.length === 0 && typeof onEmptyDiagnostic === "function") {

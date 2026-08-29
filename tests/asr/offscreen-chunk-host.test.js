@@ -4,9 +4,8 @@
 // - 跨 port 只传文本结果：chunk-result 的 result 原样透传（无 Blob/base64），
 //   done 后按 index 排序汇总 { results, totalChunks, skippedSegments, failedChunks }
 // - progress 文本原样中继 onProgress；error 消息 reject 且带 code（asr-skip）；
-//   port 断连未 done → reject「音频解码中断」
-// - stale 中止跨 context：每条消息到达时复核注入的 isStale，为真即断连 +
-//   reject STALE_RUN
+//   port 断连未 done → reject「音频解码中断」（真断连是唯一的任务取消路径，
+//   旧 isStale 每消息复核/跨 context 中止已随"转写与视频切换解耦"移除）
 // 参考 probes 测试的 mock 风格：beforeEach 重建 chrome stub，用例内直接
 // 捕获 connect 返回的 port 手动触发事件。
 
@@ -196,48 +195,30 @@ describe("createOffscreenChunkHost 文本结果收包", () => {
   });
 });
 
-describe("stale 中止跨 context（isStale 在 port 消息到达时复核）", () => {
-  it("isStale 为真：首条消息到达即断连 + reject STALE_RUN，后续消息不再处理", async () => {
-    const { connections } = installConnectMock();
-    const bridge = await import("../../extension/asr/offscreen-bridge.js");
-    const host = bridge.createOffscreenChunkHost();
-    let stale = false;
-
-    const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [], isStale: () => stale });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const port = connections[0];
-
-    stale = true; // 转写中切换视频
-    port._emit({ type: "progress", text: "语音识别中 1 片…" });
-
-    await expect(promise).rejects.toMatchObject({ code: "STALE_RUN" });
-    // 主动断连：offscreen 侧 onDisconnect → aborted → 解码与引擎调度停止
-    expect(port.disconnect).toHaveBeenCalledTimes(1);
-    // done 后不再处理消息：不产生二次 finish
-    port._emit({ type: "done", totalChunks: 1, skippedSegments: 0, failedChunks: 0 });
-  });
-
-  it("isStale 为假：正常收包不受影响", async () => {
+describe("任务取消只剩真断连（isStale 跨 context 复核已移除）", () => {
+  it("转写中切换视频不再中止任务：即使调用方仍传 isStale 也不被消费，收包照常", async () => {
     const { connections } = installConnectMock();
     const bridge = await import("../../extension/asr/offscreen-bridge.js");
     const host = bridge.createOffscreenChunkHost();
 
+    // 旧契约按注入的 isStale 在每条 port 消息到达时断连 reject；新契约宿主
+    // 不再接收该参数——传了也被忽略，转写与视频切换解耦（abort 语义收敛到
+    // port.onDisconnect）
     const promise = host({
       audioUrl: "https://x/a.m4s",
       backupUrls: [],
-      isStale: () => false
+      isStale: () => true
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     const port = connections[0];
+
     port._emit({ type: "chunk-result", index: 0, startSec: 0, durationSec: 60, result: { text: "x" } });
     port._emit({ type: "done", totalChunks: 1, skippedSegments: 0, failedChunks: 0 });
 
-    const out = await promise;
-    expect(out.results).toHaveLength(1);
-    expect(out.results[0].result.text).toBe("x");
+    await expect(promise).resolves.toMatchObject({ totalChunks: 1 });
   });
 
-  it("未注入 isStale：不做跨 context 复核（runId 守卫留在 pipeline 侧）", async () => {
+  it("port 断连仍是唯一取消路径：未 done 断连 → reject「音频解码中断」", async () => {
     const { connections } = installConnectMock();
     const bridge = await import("../../extension/asr/offscreen-bridge.js");
     const host = bridge.createOffscreenChunkHost();
@@ -245,9 +226,8 @@ describe("stale 中止跨 context（isStale 在 port 消息到达时复核）", 
     const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [] });
     await new Promise((resolve) => setTimeout(resolve, 0));
     const port = connections[0];
-    port._emit({ type: "chunk-result", index: 0, startSec: 0, durationSec: 60, result: { text: "x" } });
-    port._emit({ type: "done", totalChunks: 1, skippedSegments: 0, failedChunks: 0 });
+    port._emitDisconnect();
 
-    await expect(promise).resolves.toMatchObject({ totalChunks: 1 });
+    await expect(promise).rejects.toThrow("音频解码中断：后台连接已断开");
   });
 });

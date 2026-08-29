@@ -351,12 +351,15 @@ export async function refreshClip() {
     if (isStaleRunError(error)) {
       return;
     }
-    // 有 ASR 转写进行中：本轮辅助抓取的失败绝不能清上下文（resetClipState
-    // 会把 subtitleFetchState 置回 idle，等待转写的侧边栏轮询会误判"非转写中"
-    // 提前放行空字幕）。改为等待共享转写结果继续收尾。
-    if (asrFallback.hasActiveAsrTranscribe()) {
+    // 当前视频有 ASR 转写进行中：本轮辅助抓取的失败绝不能清上下文（
+    // resetClipState 会把 subtitleFetchState 置回 idle，等待转写的侧边栏轮询
+    // 会误判"非转写中"提前放行空字幕）。改为等待共享转写结果继续收尾。
+    // 探针按当前视频 bvid/cid 匹配——切走视频后仍在后台跑的其它视频转写
+    // 不拦截本路径，其成果也不会串到当前 UI（转写与视频切换解耦，见
+    // asr/fallback.js）。
+    if (asrFallback.hasActiveAsrTranscribe({ bvid: state.clip.bvid, cid: state.clip.cid })) {
       setStatus(`抓取失败：${getErrorMessage(error)}，继续等待音频转写…`);
-      await asrFallback.awaitActiveAsrTranscribe(runId);
+      await asrFallback.awaitActiveAsrTranscribe({ runId, bvid: state.clip.bvid, cid: state.clip.cid });
       return;
     }
     clipState.setSubtitleFetchState("error");

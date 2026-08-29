@@ -12,9 +12,10 @@
 //   { type:"progress" } / { type:"chunk-result" } → { type:"done" } →
 //   汇总按片 index 对齐的文本结果返回 → 再发
 //   { taskType:"asr-decode-cleanup" } 清 dnr 规则。
-//   isStale 是页面闭包过不了 port：桥在每条 port 消息到达时复核（pipeline
-//   注入的回调），为真即 port.disconnect() + reject STALE_RUN——offscreen 侧
-//   断连 → aborted → 解码停止、引擎停止调度（现成机制）。
+//   转写与视频切换解耦：页面侧不做 stale 复核（旧实现曾按注入的过期回调在
+//   每条 port 消息到达时断连取消，已删）。任务取消只剩真断连——页面关闭/
+//   扩展重载 → port.onDisconnect → offscreen 侧 aborted → 解码停止、引擎
+//   停止调度（现成机制）。
 //
 // 本模块同时在 background 与页面两个环境加载：顶层不触碰 worker-only API
 // （chrome.declarativeNetRequest / chrome.offscreen 只在各自 handler 函数体内
@@ -37,17 +38,16 @@ const ASR_AUDIO_SESSION_RULE_ID = 32001;
 // 页面侧客户端：一次发起「下载 + 解码 + 切片 + 转写」任务，音频字节与
 // API Key 全程不出 offscreen（offscreen 自己 fetch、自己取配置），页面只收
 // 逐片文本结果。契约：
-//   async ({ audioUrl, backupUrls, isStale?, onProgress? }) =>
+//   async ({ audioUrl, backupUrls, onProgress? }) =>
 //     { results, totalChunks, skippedSegments, failedChunks }
 //     results 为按片 index 排序的 [{ index, startSec, durationSec, result }]，
 //     result 是适配器单片结果 { text, segments?, _asrDiag? }；
 //     totalChunks 为产出片数，skippedSegments 为解码失败跳过的段数，
 //     failedChunks 为转写失败跳过的片数（Q8a 口径：个别失败不整体失败）。
-// isStale 为真时（视频已切换）立即断连并 reject STALE_RUN；onProgress 中继
-// offscreen 引擎产出的进度文本。失败 reject 带用户可读文案；成功失败都会发
-// asr-decode-cleanup 清 dnr 规则。
+// onProgress 中继 offscreen 引擎产出的进度文本。失败 reject 带用户可读文案；
+// 成功失败都会发 asr-decode-cleanup 清 dnr 规则。
 export function createOffscreenChunkHost() {
-  return async function offscreenChunkHost({ audioUrl, backupUrls, isStale, onProgress }) {
+  return async function offscreenChunkHost({ audioUrl, backupUrls, onProgress }) {
     // 先让 background 建 offscreen 文档 + 加防盗链规则，再直连文档传任务
     const prepared = await sendOffloadMessage({ taskType: "asr-decode-prepare" });
     if (!prepared?.ok) {
@@ -81,15 +81,6 @@ export function createOffscreenChunkHost() {
       const port = chrome.runtime.connect({ name: "asr-decode" });
       port.onMessage.addListener((msg) => {
         if (!msg || typeof msg !== "object" || done) return;
-        // stale 中止的跨 context 检查：isStale 是页面闭包过不了 port，每条
-        // 消息到达时复核；为真即断连 + reject（offscreen 断连 → aborted →
-        // 解码与引擎调度停止，成果不再回传）
-        if (typeof isStale === "function" && isStale()) {
-          const error = new Error("Stale refresh run");
-          error.code = "STALE_RUN";
-          finish(reject, error);
-          return;
-        }
         if (msg.type === "progress") {
           // offscreen 引擎产出的进度文本（语音识别中 N 片…）原样中继
           try {

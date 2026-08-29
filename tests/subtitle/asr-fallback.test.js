@@ -206,13 +206,14 @@ describe("maybeRunAsrFallback 成功与缓存", () => {
     expect(pipelineArgs).toEqual(
       expect.objectContaining({
         bvid: BVID,
-        cid: CID,
-        runId: RUN_ID
+        cid: CID
       })
     );
     expect(pipelineArgs.provider).toBeUndefined();
     expect(pipelineArgs.durationSec).toBeUndefined();
-    expect(typeof pipelineArgs.isStale).toBe("function");
+    // 守卫链整体移除：pipeline 不再接收 runId/isStale（UI 门控留在 fallback）
+    expect(pipelineArgs.runId).toBeUndefined();
+    expect(pipelineArgs.isStale).toBeUndefined();
 
     // 伪轨道收尾：subtitles 首项为 asr 伪轨，body/选中态/ready 全部落位
     expect(state.clip.subtitleFetchState).toBe("ready");
@@ -338,22 +339,109 @@ describe("maybeRunAsrFallback 空结果与失败", () => {
     expect(deps.applyNoSubtitleState).toHaveBeenCalledTimes(1);
   });
 
-  it("stale run（转写中切换视频）：抛出 STALE_RUN，不广播 asr-failed、不落 applyNoSubtitleState", async () => {
+  it("stale run（转写中切换视频）：任务不中止、缓存照落、asr-done 照发、UI 零写入", async () => {
     const pending = stubPendingPipeline();
     const promise = fallback.maybeRunAsrFallback({ runId: RUN_ID });
     await vi.waitFor(() => expect(deps.runAsrPipeline).toHaveBeenCalledTimes(1));
 
-    // 换视频：bvid 变化 → isStale 判真，发起者 runId 也过期
+    // 切视频前的 UI 写入基线（发起阶段的转写提示）
+    const statusCallsAtSwitch = deps.setStatus.mock.calls.length;
+    const messageCallsAtSwitch = deps.setMessage.mock.calls.length;
+    const refreshCallsAtSwitch = deps.refreshDerivedContent.mock.calls.length;
+
+    // 换视频：bvid 变化 → isStale 判真；任务不再被中止，转写照常到站
     clipState.setBvid("BV1other");
     clipState.setFetchRunId(2);
     pending[0].resolve(TRANSCRIBED_BODY);
 
+    await expect(promise).resolves.toBe("done");
+
+    // 成果仍即刻落缓存（键绑定发起时的 bvid/cid，与当前 UI 无关）
+    expect(memoryStorage.get(asrCacheKey())?.body).toEqual(TRANSCRIBED_BODY);
+    // 终态广播照发：sidepanel 的全局 asrTranscribingActive 标志归位
+    expect(deps.broadcastSubtitleStatus.mock.calls.map((c) => c[0])).toEqual([
+      "asr-transcribing",
+      "asr-done"
+    ]);
+    // UI 零写入：切走后不碰状态栏/消息栏/clipState/reader（不执行 finishAsrFallback）
+    expect(deps.setStatus).toHaveBeenCalledTimes(statusCallsAtSwitch);
+    expect(deps.setMessage).toHaveBeenCalledTimes(messageCallsAtSwitch);
+    expect(deps.refreshDerivedContent).toHaveBeenCalledTimes(refreshCallsAtSwitch);
+    expect(deps.applyNoSubtitleState).not.toHaveBeenCalled();
+    expect(deps.notifyReaderPresenter).not.toHaveBeenCalled();
+    expect(state.clip.subtitleFetchState).toBe("idle");
+  });
+
+  it("stale run（切视频后空结果到站）：asr-done 照发、UI 零写入，调用方静默让位", async () => {
+    const pending = stubPendingPipeline();
+    const promise = fallback.maybeRunAsrFallback({ runId: RUN_ID });
+    await vi.waitFor(() => expect(deps.runAsrPipeline).toHaveBeenCalledTimes(1));
+
+    const statusCallsAtSwitch = deps.setStatus.mock.calls.length;
+    clipState.setBvid("BV1other");
+    clipState.setFetchRunId(2);
+    pending[0].resolve([]);
+
     await expect(promise).rejects.toMatchObject({ code: "STALE_RUN" });
 
-    const phases = deps.broadcastSubtitleStatus.mock.calls.map((c) => c[0]);
-    expect(phases).toEqual(["asr-transcribing"]); // stale 不补发 asr-failed
+    expect(deps.broadcastSubtitleStatus.mock.calls.map((c) => c[0])).toEqual([
+      "asr-transcribing",
+      "asr-done"
+    ]);
+    // 空结果文案不上新视频状态栏
+    expect(deps.setStatus).toHaveBeenCalledTimes(statusCallsAtSwitch);
     expect(deps.applyNoSubtitleState).not.toHaveBeenCalled();
-    // 成果仍即刻落缓存（写缓存在 UI 收尾守卫之前）
+    expect(memoryStorage.has(asrCacheKey())).toBe(false);
+  });
+
+  it("stale run（切视频后失败到站）：asr-failed 照发、UI 零写入", async () => {
+    const pending = stubPendingPipeline();
+    const promise = fallback.maybeRunAsrFallback({ runId: RUN_ID });
+    await vi.waitFor(() => expect(deps.runAsrPipeline).toHaveBeenCalledTimes(1));
+
+    const statusCallsAtSwitch = deps.setStatus.mock.calls.length;
+    clipState.setBvid("BV1other");
+    clipState.setFetchRunId(2);
+    pending[0].reject(new Error("音频解码失败"));
+
+    await expect(promise).rejects.toMatchObject({ code: "STALE_RUN" });
+
+    expect(deps.broadcastSubtitleStatus.mock.calls.map((c) => c[0])).toEqual([
+      "asr-transcribing",
+      "asr-failed"
+    ]);
+    expect(deps.setStatus).toHaveBeenCalledTimes(statusCallsAtSwitch);
+    expect(deps.applyNoSubtitleState).not.toHaveBeenCalled();
+  });
+
+  it("stale 进度门控：转写中切视频，onProgress 不再触发 setStatus", async () => {
+    let progress = null;
+    let resolvePipeline = null;
+    deps.runAsrPipeline.mockImplementation(
+      ({ onProgress }) =>
+        new Promise((resolve) => {
+          progress = onProgress;
+          resolvePipeline = resolve;
+        })
+    );
+    const promise = fallback.maybeRunAsrFallback({ runId: RUN_ID });
+    await vi.waitFor(() => expect(progress).toBeTruthy());
+
+    // fresh 阶段：进度文案照常上状态栏（现状行为不变）
+    progress("语音识别中 1 片…");
+    const callsAfterFresh = deps.setStatus.mock.calls.length;
+    expect(String(deps.setStatus.mock.calls[callsAfterFresh - 1][0])).toContain("语音识别中 1 片…");
+
+    // 切视频后：进度不再触发 setStatus（新视频状态栏不被旧任务污染）
+    clipState.setBvid("BV1other");
+    clipState.setFetchRunId(2);
+    progress("语音识别中 2 片…");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(deps.setStatus.mock.calls.length).toBe(callsAfterFresh);
+
+    // 任务本身照常到站：缓存照落、零 UI 收尾
+    resolvePipeline(TRANSCRIBED_BODY);
+    await expect(promise).resolves.toBe("done");
     expect(memoryStorage.get(asrCacheKey())?.body).toEqual(TRANSCRIBED_BODY);
   });
 
@@ -368,19 +456,23 @@ describe("maybeRunAsrFallback 空结果与失败", () => {
 
 describe("工厂单元导出", () => {
   it("hasActiveAsrTranscribe：无转写为 false，发起后为 true，完成清理后回到 false", async () => {
-    expect(fallback.hasActiveAsrTranscribe()).toBe(false);
+    expect(fallback.hasActiveAsrTranscribe({ bvid: BVID, cid: CID })).toBe(false);
 
     const pending = stubPendingPipeline();
     const promise = fallback.maybeRunAsrFallback({ runId: RUN_ID });
-    await vi.waitFor(() => expect(fallback.hasActiveAsrTranscribe()).toBe(true));
+    await vi.waitFor(() =>
+      expect(fallback.hasActiveAsrTranscribe({ bvid: BVID, cid: CID })).toBe(true)
+    );
 
     pending[0].resolve(TRANSCRIBED_BODY);
     await promise;
-    expect(fallback.hasActiveAsrTranscribe()).toBe(false);
+    expect(fallback.hasActiveAsrTranscribe({ bvid: BVID, cid: CID })).toBe(false);
   });
 
   it("awaitActiveAsrTranscribe：无进行中转写时静默返回，不触碰 UI", async () => {
-    await expect(fallback.awaitActiveAsrTranscribe(RUN_ID)).resolves.toBeUndefined();
+    await expect(
+      fallback.awaitActiveAsrTranscribe({ runId: RUN_ID, bvid: BVID, cid: CID })
+    ).resolves.toBeUndefined();
     expect(deps.setStatus).not.toHaveBeenCalled();
     expect(deps.broadcastSubtitleStatus).not.toHaveBeenCalled();
   });
