@@ -1,9 +1,11 @@
 import { state, uiState } from "../core/state.js";
 import { byId } from "../shared/dom-utils.js";
 import {
-  requestOpenOptions,
+  sendRuntimeMessage,
+  isExtensionContextInvalidated,
   replaceReaderModeUrl
 } from "../core/runtime.js";
+import { getErrorMessage, toReadableText } from "../shared/error-helpers.js";
 import {
   cleanVideoUrl,
   isReaderMode,
@@ -43,6 +45,24 @@ import {
   copyMarkdown,
   downloadSubtitle
 } from "../subtitle/ui.js";
+
+// 打开设置页（原 core/runtime.js 提供；因 runtime 不得依赖 ui 域，且本模块是
+// 唯一使用方，搬到此处）。成功无提示；失败按扩展上下文是否失效给出对应文案。
+export function requestOpenOptions() {
+  sendRuntimeMessage({ type: "open-options" })
+    .then((resp) => {
+      if (!resp?.ok) {
+        setMessage(`打开设置失败：${toReadableText(resp?.error, "未知错误")}`);
+      }
+    })
+    .catch((error) => {
+      if (isExtensionContextInvalidated(error)) {
+        setMessage("扩展刚刚更新，请刷新当前页面后重试。");
+        return;
+      }
+      setMessage(`打开设置失败：${getErrorMessage(error)}`);
+    });
+}
 
 export function buildUiHtml() {
   return `

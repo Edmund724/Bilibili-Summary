@@ -2,7 +2,7 @@ import { state } from "../core/state.js";
 import { BOC_VERSION } from "../core/defaults.js";
 
 import { isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
-import { startUrlWatcher, getSettings, sendRuntimeMessage } from "../core/runtime.js";
+import { getSettings, sendRuntimeMessage } from "../core/runtime.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { logWarn } from "../shared/logging.js";
 
@@ -33,7 +33,7 @@ import {
   subscribePlayerAiSync
 } from "../reader/presenter.js";
 
-import { bindRuntimeEvents } from "../core/message-handler.js";
+import { bindRuntimeEvents, bindUrlChangeHandler } from "../core/message-handler.js";
 
 globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
 
@@ -90,7 +90,10 @@ function init() {
   });
   bindNormalPageStateGuard();
   bindPlayerAiQuickActionLayoutEvents();
-  startUrlWatcher();
+  // URL 变化编排已搬到组合根（bindUrlChangeHandler）：监听 popstate/hashchange/
+  // boc:urlchange 并按序编排；runtime.startUrlWatcher 由其内部调用，只负责
+  // history 补丁与 boc:urlchange 广播。
+  bindUrlChangeHandler();
   getSettings().then((settings) => {
     state.setSettings(settings);
     hydrateReaderStateFromSettings(settings);

@@ -1,17 +1,12 @@
+// core/runtime.js 是纯共享层：settings 读写、state 导出、boc:urlchange 事件
+// 广播、replaceReaderModeUrl 等 URL 工具。URL 变化的编排（重置 clip → 刷字幕
+// → reader 同步 → player-ai 按钮同步）在组合根 core/message-handler.js 的
+// bindUrlChangeHandler 中。本文件不得 import ui/reader/ai/subtitle 任何域，
+// 否则会与 subtitle/fetcher.js → getSettings 形成 core↔subtitle 循环。
 import { state, clipState, uiState } from "./state.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
-import { ensureUiReady, setStatus, setMessage } from "../ui/ui-renderer.js";
-import {
-  enterReaderMode,
-  renderReadingStatus,
-  waitForVideoMetadata,
-  enforceNormalPageStateIfNeeded,
-  isReaderViewOpen
-} from "../reader/index.js";
-import { resetClipState, refreshClip } from "../subtitle/fetcher.js";
-import { schedulePlayerAiQuickActionSync } from "../ai/player-ai.js";
-import { computeCurrentClipSignature, isReaderMode } from "../bilibili/video-id-shared.js";
-import { getErrorMessage, isStaleRunError, toReadableText } from "../shared/error-helpers.js";
+import { computeCurrentClipSignature } from "../bilibili/video-id-shared.js";
+import { shouldDebugLog } from "../shared/logging.js";
 
 export function replaceReaderModeUrl(nextUrl) {
   const targetUrl = String(nextUrl || "").trim();
@@ -37,61 +32,18 @@ export function replaceReaderModeUrl(nextUrl) {
   }
 }
 
-const BOC_URL_CHANGE_EVENT = "boc:urlchange";
-let urlWatcherHandlerBound = false;
+export const BOC_URL_CHANGE_EVENT = "boc:urlchange";
 let urlWatcherHistoryPatched = false;
 
+// URL 变化事件广播（纯机制，无域依赖）：给 history.pushState/replaceState 打
+// 补丁，在原始调用后同步派发 boc:urlchange 自定义事件，取代原先的 1200ms 轮询。
+// popstate/hashchange 的监听与 handleUrlChange 编排在 core/message-handler.js。
 export function startUrlWatcher() {
   if (state.ui.urlWatcherStarted) {
     return;
   }
   uiState.setUrlWatcherStarted(true);
 
-  const handleUrlChange = () => {
-    const nextUrl = location.href;
-    const nextSignature = computeCurrentClipSignature();
-    if (nextSignature === state.clip.currentClipSignature) {
-      return;
-    }
-
-    clipState.setCurrentUrl(nextUrl);
-    clipState.setCurrentClipSignature(nextSignature);
-    enforceNormalPageStateIfNeeded(nextUrl);
-    ensureUiReady();
-    resetClipState();
-    schedulePlayerAiQuickActionSync();
-    const shouldEnterReaderMode = isReaderMode(nextUrl);
-    if (!isReaderViewOpen() && shouldEnterReaderMode) {
-      document.documentElement.setAttribute("data-boc-reader-mode", "1");
-      document.body.setAttribute("data-boc-reader-mode", "1");
-      renderReadingStatus("检测到阅读视图跳转，正在打开阅读模式...");
-      enterReaderMode().catch((error) => {
-        renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
-      });
-      return;
-    }
-    if (isReaderViewOpen() || shouldEnterReaderMode) {
-      renderReadingStatus("检测到视频变化，正在自动刷新字幕...");
-      waitForVideoMetadata().then(() => {
-        refreshClip().catch((error) => {
-          if (!isStaleRunError(error)) {
-            renderReadingStatus(`自动刷新失败：${getErrorMessage(error)}`);
-          }
-        });
-      });
-      return;
-    }
-    setStatus("检测到页面变化，请点击“刷新抓取”加载当前视频字幕。");
-  };
-
-  // URL 变化事件化：popstate/hashchange 加 history.pushState/replaceState
-  // 补丁（原始调用后派发自定义事件），取代原先的 1200ms 轮询。
-  if (!urlWatcherHandlerBound) {
-    window.addEventListener("popstate", handleUrlChange);
-    window.addEventListener("hashchange", handleUrlChange);
-    window.addEventListener(BOC_URL_CHANGE_EVENT, handleUrlChange);
-    urlWatcherHandlerBound = true;
-  }
   if (!urlWatcherHistoryPatched) {
     const originalPushState = history.pushState;
     const originalReplaceState = history.replaceState;
@@ -137,22 +89,6 @@ export function sendOffloadMessage(message) {
 export function isExtensionContextInvalidated(error) {
   const msg = String(error?.message || "");
   return msg.includes("Extension context invalidated");
-}
-
-export function requestOpenOptions() {
-  sendRuntimeMessage({ type: "open-options" })
-    .then((resp) => {
-      if (!resp?.ok) {
-        setMessage(`打开设置失败：${toReadableText(resp?.error, "未知错误")}`);
-      }
-    })
-    .catch((error) => {
-      if (isExtensionContextInvalidated(error)) {
-        setMessage("扩展刚刚更新，请刷新当前页面后重试。");
-        return;
-      }
-      setMessage(`打开设置失败：${getErrorMessage(error)}`);
-    });
 }
 
 // 归一化责任在 background(get-settings 处理器统一走 normalizeSettings),本函数只透传。

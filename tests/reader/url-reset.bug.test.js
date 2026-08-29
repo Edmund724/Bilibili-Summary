@@ -1,15 +1,16 @@
 // 反馈回路（5be8f39 嫌疑路径）：replaceState 补丁派发的 boc:urlchange
 // 是否会在进入阅读模式时清空已抓取的章节。
 //
-// startUrlWatcher 给 history.replaceState 打补丁后会同步派发 boc:urlchange，
+// startUrlWatcher（history 补丁 + boc:urlchange 广播）派发的事件由组合根
+// message-handler 的 handleUrlChange 消费：
 // handleUrlChange 在 clip 签名不匹配时 resetClipState()（chapters 清空）。
 // 5be8f39 的修复是"先更新签名再调 replaceState"。这里同时验证：
 //   F1. 修复后的 replaceReaderModeUrl：已抓取章节在切换阅读模式 URL 后保留
 //   F2. 旧调用模式（replaceState 前不更新签名）：同样的 URL 切换会清空章节
 //       —— 证明本回路确实 red-capable（能在这个 bug 上变红）
 //
-// 单独成文件：startUrlWatcher 会全局补丁 history.replaceState 并注册 window
-// 监听器，vitest 按文件隔离环境，避免污染其它 reader 测试。
+// 单独成文件：bindUrlChangeHandler 会全局补丁 history.replaceState 并注册
+// window 监听器，vitest 按文件隔离环境，避免污染其它 reader 测试。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NORMAL_PAGE_URL, resetModuleState, setLocationUrl } from "../setup.js";
@@ -28,6 +29,7 @@ const OTHER_VIDEO_READER_URL = "https://www.bilibili.com/video/BV1test999999/?bo
 let state;
 let clipState;
 let runtime;
+let messageHandler;
 let videoIdShared;
 let uiRenderer;
 
@@ -37,6 +39,9 @@ async function loadModules() {
   state = stateModule.state;
   clipState = stateModule.clipState;
   runtime = await import("../../extension/core/runtime.js");
+  // URL 变化编排（handleUrlChange 监听）已搬到组合根 message-handler；
+  // runtime.startUrlWatcher 只负责 history 补丁与 boc:urlchange 广播。
+  messageHandler = await import("../../extension/core/message-handler.js");
   videoIdShared = await import("../../extension/bilibili/video-id-shared.js");
   uiRenderer = await import("../../extension/ui/ui-renderer.js");
 }
@@ -66,7 +71,7 @@ afterEach(() => {
 describe("replaceState 补丁与章节清空（5be8f39 嫌疑路径）", () => {
   it("F1. 修复后：replaceReaderModeUrl 切换到另一视频的阅读模式 URL，已抓取章节保留", () => {
     seedFetchedClip();
-    runtime.startUrlWatcher();
+    messageHandler.bindUrlChangeHandler();
 
     runtime.replaceReaderModeUrl(OTHER_VIDEO_READER_URL);
 
@@ -76,7 +81,7 @@ describe("replaceState 补丁与章节清空（5be8f39 嫌疑路径）", () => {
 
   it("F2. 旧调用模式（red-capable 对照）：replaceState 前不更新签名，章节被清空", () => {
     seedFetchedClip();
-    runtime.startUrlWatcher();
+    messageHandler.bindUrlChangeHandler();
 
     // 5be8f39 之前的 replaceReaderModeUrl 等价于直接 replaceState
     history.replaceState(history.state, "", OTHER_VIDEO_READER_URL);

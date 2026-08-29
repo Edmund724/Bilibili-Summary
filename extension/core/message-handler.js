@@ -2,20 +2,26 @@ import { state, uiState, playerAiState, clipState } from "./state.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
 
 import {
-  replaceReaderModeUrl
+  replaceReaderModeUrl,
+  startUrlWatcher,
+  BOC_URL_CHANGE_EVENT
 } from "./runtime.js";
 import {
-  getErrorMessage
+  getErrorMessage,
+  isStaleRunError
 } from "../shared/error-helpers.js";
 import {
   getRuntimeVideoElement
 } from "../bilibili/video-probe.js";
 
 import { getPopupPayload } from "../subtitle/ui.js";
-import { refreshClip, loadSubtitle } from "../subtitle/fetcher.js";
+import { refreshClip, loadSubtitle, resetClipState } from "../subtitle/fetcher.js";
 import { setStatus, renderSubtitleSelect, ensureUiReady } from "../ui/ui-renderer.js";
 
-import { removePlayerAiQuickActionButton } from "../ai/player-ai.js";
+import {
+  removePlayerAiQuickActionButton,
+  schedulePlayerAiQuickActionSync
+} from "../ai/player-ai.js";
 
 import {
   updateReaderFollowState,
@@ -24,11 +30,15 @@ import {
   closeReadingView,
   logWarn,
   isReaderViewOpen,
-  resetManualScrollPause
+  resetManualScrollPause,
+  renderReadingStatus,
+  waitForVideoMetadata,
+  enforceNormalPageStateIfNeeded
 } from "../reader/index.js";
 
 import {
   isReaderMode,
+  computeCurrentClipSignature,
   stripReaderModeUrl
 } from "../bilibili/video-id-shared.js";
 
@@ -201,4 +211,61 @@ export function bindRuntimeEvents() {
 
     return false;
   });
+}
+
+// URL 变化编排（自 core/runtime.js 搬入）：runtime 只负责给 history 打补丁并
+// 广播 boc:urlchange（纯机制），本组合根监听 popstate/hashchange/boc:urlchange，
+// 按原顺序编排：更新 clip 签名 → 恢复普通页状态 → 确保 UI → 重置 clip →
+// player-ai 按钮同步 → reader 同步/字幕刷新。行为与顺序与搬迁前完全一致。
+let urlChangeHandlerBound = false;
+
+export function bindUrlChangeHandler() {
+  if (urlChangeHandlerBound) {
+    return;
+  }
+  urlChangeHandlerBound = true;
+
+  const handleUrlChange = () => {
+    const nextUrl = location.href;
+    const nextSignature = computeCurrentClipSignature();
+    if (nextSignature === state.clip.currentClipSignature) {
+      return;
+    }
+
+    clipState.setCurrentUrl(nextUrl);
+    clipState.setCurrentClipSignature(nextSignature);
+    enforceNormalPageStateIfNeeded(nextUrl);
+    ensureUiReady();
+    resetClipState();
+    schedulePlayerAiQuickActionSync();
+    const shouldEnterReaderMode = isReaderMode(nextUrl);
+    if (!isReaderViewOpen() && shouldEnterReaderMode) {
+      document.documentElement.setAttribute("data-boc-reader-mode", "1");
+      document.body.setAttribute("data-boc-reader-mode", "1");
+      renderReadingStatus("检测到阅读视图跳转，正在打开阅读模式...");
+      enterReaderMode().catch((error) => {
+        renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
+      });
+      return;
+    }
+    if (isReaderViewOpen() || shouldEnterReaderMode) {
+      renderReadingStatus("检测到视频变化，正在自动刷新字幕...");
+      waitForVideoMetadata().then(() => {
+        refreshClip().catch((error) => {
+          if (!isStaleRunError(error)) {
+            renderReadingStatus(`自动刷新失败：${getErrorMessage(error)}`);
+          }
+        });
+      });
+      return;
+    }
+    setStatus("检测到页面变化，请点击“刷新抓取”加载当前视频字幕。");
+  };
+
+  // 先注册监听，再由 startUrlWatcher 安装 history 补丁——与搬迁前
+  // startUrlWatcher 内部「监听在前、补丁在后」的顺序保持一致。
+  window.addEventListener("popstate", handleUrlChange);
+  window.addEventListener("hashchange", handleUrlChange);
+  window.addEventListener(BOC_URL_CHANGE_EVENT, handleUrlChange);
+  startUrlWatcher();
 }

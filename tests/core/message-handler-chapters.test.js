@@ -9,7 +9,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../extension/core/runtime.js", () => ({
-  replaceReaderModeUrl: vi.fn()
+  replaceReaderModeUrl: vi.fn(),
+  startUrlWatcher: vi.fn(),
+  BOC_URL_CHANGE_EVENT: "boc:urlchange"
 }));
 vi.mock("../../extension/bilibili/video-probe.js", () => ({
   getRuntimeVideoElement: vi.fn(() => null)
@@ -19,7 +21,8 @@ vi.mock("../../extension/subtitle/ui.js", () => ({
 }));
 vi.mock("../../extension/subtitle/fetcher.js", () => ({
   refreshClip: vi.fn(async () => {}),
-  loadSubtitle: vi.fn(async () => {})
+  loadSubtitle: vi.fn(async () => {}),
+  resetClipState: vi.fn()
 }));
 vi.mock("../../extension/ui/ui-renderer.js", () => ({
   setStatus: vi.fn(),
@@ -27,7 +30,8 @@ vi.mock("../../extension/ui/ui-renderer.js", () => ({
   ensureUiReady: vi.fn()
 }));
 vi.mock("../../extension/ai/player-ai.js", () => ({
-  removePlayerAiQuickActionButton: vi.fn()
+  removePlayerAiQuickActionButton: vi.fn(),
+  schedulePlayerAiQuickActionSync: vi.fn()
 }));
 vi.mock("../../extension/reader/index.js", () => ({
   updateReaderFollowState: vi.fn(),
@@ -36,7 +40,10 @@ vi.mock("../../extension/reader/index.js", () => ({
   closeReadingView: vi.fn(),
   logWarn: vi.fn(),
   isReaderViewOpen: vi.fn(() => false),
-  resetManualScrollPause: vi.fn()
+  resetManualScrollPause: vi.fn(),
+  renderReadingStatus: vi.fn(),
+  waitForVideoMetadata: vi.fn(async () => {}),
+  enforceNormalPageStateIfNeeded: vi.fn()
 }));
 vi.mock("../../extension/bilibili/gateway.js", () => ({
   getCurrentAid: vi.fn(() => ""),
