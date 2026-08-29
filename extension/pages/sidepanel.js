@@ -1045,7 +1045,6 @@ function renderConversationMessages() {
     }
     const node = document.createElement("div");
     node.className = "sp-msg sp-msg-assistant";
-    node.dataset.raw = String(message.content || "");
     chatRuntime.renderAssistantMessage(node, String(message.content || ""), {
       userPrompt: findPreviousUserPrompt(index)
     });

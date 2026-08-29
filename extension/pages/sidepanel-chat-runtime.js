@@ -238,7 +238,9 @@ export function createChatRuntime(deps) {
   function appendAssistantPlaceholder() {
     const node = document.createElement("div");
     node.className = "sp-msg sp-msg-assistant";
-    node.dataset.raw = "";
+    // 流式 token 累加器（原 dataset.raw）随占位节点初始化/重置，
+    // 保证第二条消息不会串上上一条的流式文本。
+    resetTokenStreamState(node);
     const cursor = document.createElement("span");
     cursor.className = "sp-msg-cursor";
     node.appendChild(cursor);
@@ -271,6 +273,15 @@ export function createChatRuntime(deps) {
   // =========================================================================
   // appendThinkingText
   // =========================================================================
+  // 思考文本的流式累加器（原挂在 .sp-thinking-text 的 dataset.acc，每条增量
+  // 全量复制旧串，O(n²) 且无上限——纯自用累加器，无任何外部读取方）。
+  // 现改为 WeakMap 按节点存放"前 MAX_DISPLAY_CHARS 字符头缓冲 + 溢出计数"：
+  // 每条增量只复制能进头缓冲的部分，其余仅累加计数，总复制量 O(n)。
+  // 显示输出与旧逻辑逐字节一致：头缓冲 +（溢出时的截断提示）。
+  // 头缓冲/计数随 thinking 节点（每条消息新建）走，跨消息天然隔离重置。
+  const thinkingDisplayStates = new WeakMap();
+  const THINKING_TRUNCATION_SUFFIX = "\n…（思考内容过长，已截断显示）";
+
   function appendThinkingText(node, text) {
     if (!node) {
       return;
@@ -280,12 +291,23 @@ export function createChatRuntime(deps) {
       return;
     }
     const MAX_DISPLAY_CHARS = 4000;
-    const acc = (textNode.dataset.acc || "") + String(text || "");
-    textNode.dataset.acc = acc;
-    if (acc.length > MAX_DISPLAY_CHARS) {
-      textNode.textContent = acc.slice(0, MAX_DISPLAY_CHARS) + "\n…（思考内容过长，已截断显示）";
+    let state = thinkingDisplayStates.get(textNode);
+    if (!state) {
+      state = { head: "", overflow: 0 };
+      thinkingDisplayStates.set(textNode, state);
+    }
+    const chunk = String(text || "");
+    const space = Math.max(MAX_DISPLAY_CHARS - state.head.length, 0);
+    if (chunk.length <= space) {
+      state.head += chunk;
     } else {
-      textNode.textContent = acc;
+      state.head += chunk.slice(0, space);
+      state.overflow += chunk.length - space;
+    }
+    if (state.overflow > 0) {
+      textNode.textContent = state.head + THINKING_TRUNCATION_SUFFIX;
+    } else {
+      textNode.textContent = state.head;
     }
     textNode.scrollTop = textNode.scrollHeight;
   }
@@ -299,6 +321,38 @@ export function createChatRuntime(deps) {
   // 才由 finalizeAssistant / handleAssistantStopped 出口渲染。光标 span 保留
   // 在渲染内容之后——innerHTML 整体赋值会清掉光标，所以每帧重建时重新接回。
   let tokenFlushFrame = 0;
+
+  // 流式 token 累加器（原挂在 assistant 节点的 dataset.raw，每 token 全量
+  // 拼接旧串，O(n²) 复制——全仓读取方仅同流的 flush / finalize / stopped）。
+  // 现改为 WeakMap 按节点存放 { base, pending: string[] }：append 推入
+  // pending；flush 时 text = base + pending.join("")，渲染照旧（仍全量
+  // renderMarkdown + innerHTML），渲染后 text 收进 base、清空 pending，
+  // 每帧拼接量与帧间隔成正比，总复制量 O(n)。finalize / stopped 从这里
+  // 取全量文本。随占位节点初始化（appendAssistantPlaceholder），跨消息
+  // 天然隔离。
+  const tokenStreamStates = new WeakMap();
+
+  function resetTokenStreamState(node) {
+    tokenStreamStates.set(node, { base: "", pending: [] });
+  }
+
+  function getTokenStreamState(node) {
+    let state = tokenStreamStates.get(node);
+    if (!state) {
+      state = { base: "", pending: [] };
+      tokenStreamStates.set(node, state);
+    }
+    return state;
+  }
+
+  // 全量流式文本 = base + 未 flush 的 pending（不做清空，供 finalize/stopped 只读）
+  function getStreamRaw(node) {
+    const state = tokenStreamStates.get(node);
+    if (!state) {
+      return "";
+    }
+    return state.base + state.pending.join("");
+  }
 
   function cancelTokenFlush() {
     if (!tokenFlushFrame) {
@@ -316,18 +370,22 @@ export function createChatRuntime(deps) {
     if (!node) {
       return;
     }
-    node.dataset.raw = (node.dataset.raw || "") + String(token || "");
+    getTokenStreamState(node).pending.push(String(token || ""));
     if (tokenFlushFrame) {
       return;
     }
     const flush = () => {
       tokenFlushFrame = 0;
+      const state = getTokenStreamState(node);
+      const text = state.base + state.pending.join("");
       const cursor = node.querySelector(".sp-msg-cursor");
-      node.innerHTML = renderMarkdown(node.dataset.raw || "");
+      node.innerHTML = renderMarkdown(text || "");
       if (cursor) {
         node.appendChild(cursor);
       }
       scrollToBottom();
+      state.base = text;
+      state.pending.length = 0;
     };
     if (typeof window.requestAnimationFrame === "function") {
       tokenFlushFrame = window.requestAnimationFrame(flush);
@@ -345,7 +403,7 @@ export function createChatRuntime(deps) {
     }
     cancelTokenFlush();
     clearStreamRuntimeState();
-    const raw = node.dataset.raw || "";
+    const raw = getStreamRaw(node);
     renderAssistantMessage(node, raw, { userPrompt: activeUserPrompt });
     if (activeUserPrompt && raw) {
       chatHistory().push({ role: "user", content: activeUserPrompt });
@@ -395,7 +453,7 @@ export function createChatRuntime(deps) {
     }
     cancelTokenFlush();
     clearStreamRuntimeState();
-    const raw = String(node.dataset.raw || "");
+    const raw = getStreamRaw(node);
     if (raw.trim()) {
       renderAssistantMessage(node, raw, { userPrompt: activeUserPrompt });
       const stopped = document.createElement("div");
