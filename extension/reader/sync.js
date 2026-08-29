@@ -2,19 +2,21 @@
 // formerly the transcript-sync.js segment, issue 06+).
 //
 // Deep module owning the sync timer and the manual/programmatic scroll-pause
-// deadlines. Layout is the base layer (extension/reader/reader-impl.js); this
-// module depends on it and must never be imported by it (the dependency graph
-// is acyclic: SYNC → LAYOUT).
+// deadlines. Layout is the base layer (extension/reader/page-frame.js +
+// player-host.js); this module depends on it and must never be imported by it
+// (the dependency graph is acyclic: SYNC → LAYOUT).
 //
-//   LAYOUT   reader-impl.js     module-level closure: playerHost, videoEventsBound,
+//   LAYOUT   page-frame.js + player-host.js
+//                               module-level closure: playerHost, videoEventsBound,
 //                               scroll-pause variables, timer variables
 //   SYNC     sync.js            syncTimer lives here; scroll deadlines live here;
 //                               reads/writes the layout closure only through the
 //                               exported layout functions (imported below)
 //
-// reader-impl.js must not import this module — its layout/shell functions that
-// need sync-domain behavior call it through the adapter registered below
-// (registerSyncAdapter), keeping the dependency graph acyclic: SYNC → LAYOUT.
+// LAYOUT must not import this module — its layout/shell functions that need
+// sync-domain behavior call it through the adapter registered below
+// (registerSyncAdapter, in ./sync-adapter.js), keeping the dependency graph
+// acyclic: SYNC → LAYOUT.
 import { state } from "../core/state.js";
 import { formatCompactTimestamp } from "../shared/string-utils.js";
 import { getReaderElement } from "../shared/dom-utils.js";
@@ -27,8 +29,8 @@ import {
   setProgrammaticScrollUntil
 } from "./scroll-state.js";
 
+import { ids } from "./page-frame.js";
 import {
-  ids,
   getPlayerHost,
   bindReadingViewVideo,
   queueEnsureReaderPlayerMounted,
@@ -38,12 +40,13 @@ import {
   closeReaderCleanup,
   renderReadingStatus,
   setVideoEventsBound,
-  clearLayoutTimersForSyncStop,
-  registerSyncAdapter
-} from "./reader-impl.js";
+  clearLayoutTimersForSyncStop
+} from "./player-host.js";
+import { registerSyncAdapter } from "./sync-adapter.js";
 
-// Register this module's function table with the layout module so shell/layout
-// functions can call into the sync domain synchronously. Function declarations
+// Register this module's function table with the sync-adapter leaf
+// (./sync-adapter.js) so the LAYOUT functions (page-frame/player-host) can call
+// into the sync domain synchronously. Function declarations
 // are hoisted, so the table is complete at module-evaluation time. Removed in
 // the lifecycle extraction commit, when the shell segment moves to
 // lifecycle.js and imports ./sync.js directly.

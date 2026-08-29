@@ -3,16 +3,16 @@
 //
 // Deep module owning the reader view lifecycle (enter/close), the settings
 // rendering/steppers, the page-state guards and the debug snapshot. It depends
-// on the base LAYOUT module (reader-impl.js) and on ./sync.js; neither may
-// import it, so the dependency graph stays acyclic:
+// on the base LAYOUT layer (page-frame.js + player-host.js) and on ./sync.js;
+// neither may import it, so the dependency graph stays acyclic:
 //
-//   LAYOUT       reader-impl.js
+//   LAYOUT       page-frame.js + player-host.js
 //   SYNC         sync.js            depends on LAYOUT
 //   LIFECYCLE    lifecycle.js       depends on LAYOUT + SYNC
 //
-// reader-impl.js's layout closure is read/written here only through the
-// exported accessors (getPlayerHost/getPlayerRetryTimer/...), keeping the
-// closure in the base layer as the single source of truth.
+// The player-host layout closure is read here through the exported accessors
+// (getPlayerHost/...); playerRetryTimer's variable itself moved into this
+// module (its owner starts/clears it here), so it is read/written directly.
 import { state, uiState } from "../core/state.js";
 import { logWarn } from "../shared/logging.js";
 import { getReaderElement } from "../shared/dom-utils.js";
@@ -49,12 +49,20 @@ import {
   requestPlayerAiSync
 } from "./presenter.js";
 
-// LAYOUT functions this module drives (from reader-impl.js):
+// LAYOUT (page-frame) functions this module drives:
 import {
   ids,
+  alignReaderViewportToPlayer,
+  applyReaderPageFocus,
+  clearReaderPageFocus,
+  moveReadingMainInline,
+  restoreReadingMainInline,
+  applyInlineHostPresentation,
+  cleanupReaderFloatingArtifacts
+} from "./page-frame.js";
+// LAYOUT (player-host) functions this module drives:
+import {
   getPlayerHost,
-  getPlayerRetryTimer,
-  setPlayerRetryTimer,
   getReaderPlayerWrapNode,
   hasNativeReaderPlayerLayoutIssue,
   isReaderPresentationStable,
@@ -64,19 +72,17 @@ import {
   ensureReaderPlayerMounted,
   scheduleReaderMiniPlayerDismiss,
   bindReaderHeaderActionsHover,
-  alignReaderViewportToPlayer,
-  applyReaderPageFocus,
-  clearReaderPageFocus,
-  moveReadingMainInline,
-  restoreReadingMainInline,
-  applyInlineHostPresentation,
-  cleanupReaderFloatingArtifacts,
   cleanupReaderPlayerHost,
   unbindReaderLayout,
   updateReadingTranscriptTailSpacer,
   renderReadingStatus
-} from "./reader-impl.js";
+} from "./player-host.js";
 import { resetManualScrollPause, setProgrammaticScrollUntil } from "./scroll-state.js";
+
+// playerRetryTimer（readingPlayerRetryTimer）自 reader-impl.js 闭包迁入：属主启动
+//（scheduleReaderPlayerRetry）与清除（closeReadingView、presenter reset）都在本
+// 模块，直读局部变量，不再经 get/setPlayerRetryTimer 访问器。
+let playerRetryTimer = 0;
 
 // SYNC functions this module drives (from sync.js):
 import {
@@ -106,6 +112,12 @@ export function bindReaderPresenter() {
     switch (kind) {
       case "reset":
         stopReadingViewSync();
+        // 原 clearLayoutTimersForSyncStop 内的 playerRetryTimer 清除分支随变量
+        // 迁入本模块：stopReadingViewSync 不再清它，在此补齐同等清除。
+        if (playerRetryTimer) {
+          window.clearTimeout(playerRetryTimer);
+          playerRetryTimer = 0;
+        }
         stopReaderPlayerObserver();
         break;
       case "subtitle-ready":
@@ -246,13 +258,13 @@ export async function enterReaderMode() {
 }
 
 function scheduleReaderPlayerRetry() {
-  if (getPlayerRetryTimer()) {
-    window.clearTimeout(getPlayerRetryTimer());
-    setPlayerRetryTimer(0);
+  if (playerRetryTimer) {
+    window.clearTimeout(playerRetryTimer);
+    playerRetryTimer = 0;
   }
   // Keep trying to mount player in background
   const tryMount = async () => {
-    setPlayerRetryTimer(0);
+    playerRetryTimer = 0;
     if (!state.reader.readingViewOpen || !isReaderMode()) return;
     const mounted = await ensureReaderPlayerMounted({ retries: 10, delayMs: 200, forceLayout: true });
     const retryHost = getPlayerHost();
@@ -262,10 +274,10 @@ function scheduleReaderPlayerRetry() {
     if (mounted) {
       finishEnterReaderMode();
     } else if (state.reader.readingViewOpen) {
-      setPlayerRetryTimer(window.setTimeout(tryMount, 500));
+      playerRetryTimer = window.setTimeout(tryMount, 500);
     }
   };
-  setPlayerRetryTimer(window.setTimeout(tryMount, 500));
+  playerRetryTimer = window.setTimeout(tryMount, 500);
 }
 
 function finishEnterReaderMode() {
@@ -338,9 +350,9 @@ export function closeReadingView() {
   // so a later manual interaction is never swallowed by stale deadlines.
   resetManualScrollPause();
   setProgrammaticScrollUntil(0);
-  if (getPlayerRetryTimer()) {
-    window.clearTimeout(getPlayerRetryTimer());
-    setPlayerRetryTimer(0);
+  if (playerRetryTimer) {
+    window.clearTimeout(playerRetryTimer);
+    playerRetryTimer = 0;
   }
   const readingView = getReaderElement(ids.readingView);
   readingView.classList.remove("open", "reader-page");

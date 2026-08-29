@@ -1,25 +1,27 @@
-// Reader LAYOUT module (issue 06+).
+// Reader LAYOUT 层 · player-host 域（自 reader-impl.js 机械拆分）。
 //
-// The base layer of the reader domain: page-frame (DOM focus/pruning/inline
-// host) + player-host (player mount/controls/observer) + the shared module
-// closure, ids table and accessor seam. The two modules that depend on it live
-// in ./sync.js (SYNC) and ./lifecycle.js (LIFECYCLE); the dependency graph is
-// acyclic (SYNC → LAYOUT, LIFECYCLE → SYNC + LAYOUT), so this module must not
-// import either of them. All reader-domain bookkeeping that is private to the
-// reader domain lives here as module-level closure variables instead of
-// state.reader; the facade ./index.js re-exports the public functions.
+// 本文件拥有播放器宿主生命周期：挂载（ensureReaderPlayerMounted）/布局
+// （layoutReaderPlayerHost）/控制条恢复与悬停/小窗关闭调度/观察器，以及原
+// reader-impl.js 头部的共享函数（closeReaderCleanup、
+// updateReadingTranscriptTailSpacer、renderReadingStatus）与闭包访问器
+// （getPlayerHost/setVideoEventsBound/clearLayoutTimersForSyncStop）。
+// 分节函数体逐字节搬自原 reader-impl.js 的 player-host 分节（原 :680-1486），
+// 行为零变化。页面框架（DOM 焦点/剪枝/内联宿主）在 ./page-frame.js。
 //
-// Settings/shared flags (readingViewOpen, readingTheme, ...) and fields that
-// external modules read or write (readingVideoEl, readingDocumentClickBound)
-// stay in state.reader.
-import { state, uiState } from "../core/state.js";
+// SYNC 域调用经 ./sync-adapter.js 反环叶子（callSync）；./sync.js 与
+// ./lifecycle.js 依赖本层，本文件不得反向 import 它们。
+// playerRetryTimer 闭包变量整体迁入 ./lifecycle.js（属主启动/清除都在那），
+// clearLayoutTimersForSyncStop 因此不再清它（closeReadingView 原本就在
+// stopReadingViewSync 之前自清；presenter reset 路径由 lifecycle 补齐清除）。
+import { state } from "../core/state.js";
 import { logInfo, logWarn } from "../shared/logging.js";
 import { getReaderElement, isVisibleReaderControl } from "../shared/dom-utils.js";
 import { sleep } from "../shared/utils.js";
 import { isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
-import * as pageContext from "./page-context.js";
-import { isProgrammaticScrolling } from "./scroll-state.js";
+// 跨域模块接口：reader 私有 DOM id 表、页面宽度上限与小窗关闭（page-frame.js 导出）。
+import { ids, getReaderMainWidthLimit, dismissReaderMiniPlayer } from "./page-frame.js";
+import { callSync } from "./sync-adapter.js";
 
 // ===== reader-domain private bookkeeping (module-level closure state) =====
 //
@@ -34,13 +36,13 @@ import { isProgrammaticScrolling } from "./scroll-state.js";
 // programmaticScrollUntil moved to ./scroll-state.js, the shared leaf owned by
 // SYNC and LAYOUT alike; this module reads them only through that module's
 // exported is* functions.
+//
+// playerRetryTimer（readingPlayerRetryTimer）迁入 ./lifecycle.js：属主启动
+//（scheduleReaderPlayerRetry）与清除（closeReadingView）都在那个模块。
 let playerHost = null;             // readingPlayerHost
-let mainOriginalParent = null;     // readingMainOriginalParent
-let mainOriginalNextSibling = null;// readingMainOriginalNextSibling
 let playerAdjustedNodes = [];      // readingPlayerAdjustedNodes
 let playerObserver = null;         // readingPlayerObserver
 let playerMountTimer = 0;          // readingPlayerMountTimer
-let playerRetryTimer = 0;          // readingPlayerRetryTimer
 let miniDismissTimer = 0;          // readingMiniDismissTimer
 let controlsHideTimer = 0;         // readingControlsHideTimer
 let controlsRecoveryTimer = 0;     // readingControlsRecoveryTimer
@@ -52,63 +54,12 @@ let headerHideTimer = 0;           // readingHeaderHideTimer
 let videoEventsBound = false;      // readingVideoEventsBound
 let layoutBound = false;           // readingLayoutBound
 
-// Reader-domain DOM id table (shared by the LAYOUT and LIFECYCLE modules; the
-// facade re-exports it for UI templates and a few external DOM operations).
-export const ids = {
-  root: "boc-root",
-  panel: "boc-panel",
-  status: "boc-status",
-  meta: "boc-meta",
-  subtitleSelect: "boc-subtitle-select",
-  preview: "boc-preview",
-  message: "boc-message",
-  copyBtn: "boc-copy-btn",
-  downloadBtn: "boc-download-btn",
-  refreshBtn: "boc-refresh-btn",
-  closeBtn: "boc-close-btn",
-  settingsBtn: "boc-settings-btn",
-  readingView: "boc-reading-view",
-  readingPlayerSlot: "boc-reading-player-slot",
-  readingStatus: "boc-reading-status",
-  readingCloseBtn: "boc-reading-close-btn",
-  readingRefreshBtn: "boc-reading-refresh-btn",
-  readingAutoScroll: "boc-reading-autoscroll",
-  readingTranscriptVisible: "boc-reading-transcript-visible",
-  readingThemeSelect: "boc-reading-theme-select",
-  readingSettingsBtn: "boc-reading-settings-btn",
-  readingSettingsPanel: "boc-reading-settings-panel",
-  readingFontScaleSelect: "boc-reading-font-scale-select",
-  readingLetterSpacingSelect: "boc-reading-letter-spacing-select",
-  readingLineHeightSelect: "boc-reading-line-height-select",
-  readingContentWidthSelect: "boc-reading-content-width-select",
-  readingChapterVisibilitySelect: "boc-reading-chapter-visibility-select",
-  readingChapterVisible: "boc-reading-chapter-visible",
-  readingSubtitleSelect: "boc-reading-subtitle-select",
-  readingInfoSummary: "boc-reading-info-summary",
-  readingInfoDescription: "boc-reading-info-description",
-  readingDescriptionBtn: "boc-reading-description-btn",
-  readingMeta: "boc-reading-meta",
-  readingChapterList: "boc-reading-chapters",
-  readingTranscriptList: "boc-reading-transcript",
-  readingTranscriptTailSpacer: "boc-reading-tail-spacer"
-};
-
-// getReaderElement / isVisibleReaderControl live in ../shared/dom-utils.js:
-// reading reader DOM ids is a reader-internal concern, and keeping that helper
-// out of core/runtime.js keeps the reader modules free of a static import back
-// through subtitle/fetcher.js (same rationale as the former local copy here).
-
 // ===== reader facade accessors for closure state =====
 //
-// These accessors are the seam between the reader-impl (layout) closure and
+// These accessors are the seam between the layout (player-host.js) closure and
 // the sync/lifecycle modules that depend on it. The scroll-pause variables
 // moved to ./scroll-state.js, the shared leaf both domains read and write
 // directly; sync.js resets the videoEventsBound flag through setVideoEventsBound.
-
-export function isReaderViewOpen() {
-  return state.reader.readingViewOpen;
-}
-
 export function getPlayerHost() {
   return playerHost;
 }
@@ -118,7 +69,8 @@ export function setVideoEventsBound(bound) {
 }
 
 // Timer/flag accessors used by sync.js's stopReadingViewSync to clear the
-// remaining layout timers it owns the lifecycle of.
+// remaining layout timers it owns the lifecycle of. playerRetryTimer 分支已随
+// 变量迁入 ./lifecycle.js（属主清除），不再在此清理。
 export function clearLayoutTimersForSyncStop() {
   if (miniDismissTimer) {
     window.clearTimeout(miniDismissTimer);
@@ -132,37 +84,8 @@ export function clearLayoutTimersForSyncStop() {
     window.clearTimeout(playerMountTimer);
     playerMountTimer = 0;
   }
-  if (playerRetryTimer) {
-    window.clearTimeout(playerRetryTimer);
-    playerRetryTimer = 0;
-  }
 }
 
-// Accessors for lifecycle.js (the shell segment moved there): it reads/writes
-// the layout closure it shares via these, keeping the closure in the base
-// layer (reader-impl.js) as the single source of truth.
-export function getPlayerRetryTimer() {
-  return playerRetryTimer;
-}
-
-export function setPlayerRetryTimer(timer) {
-  playerRetryTimer = timer;
-}
-
-// Seam to the sync domain: sync.js registers its function table here at module
-// load (registerSyncAdapter), so the LAYOUT functions below (moveReadingMainInline's
-// scroll handler, bindReadingViewVideo's sync handler) can call into the sync
-// domain synchronously while reader-impl.js keeps a one-way dependency
-// (reader-impl never imports sync.js, so no cycle can form).
-let syncAdapter = null;
-
-export function registerSyncAdapter(adapter) {
-  syncAdapter = adapter || null;
-}
-
-function callSync(name, ...args) {
-  return syncAdapter?.[name]?.(...args);
-}
 
 // Shared by the LAYOUT and LIFECYCLE domains: layoutReaderPlayerHost /
 // moveReadingMainInline call updateReadingTranscriptTailSpacer, and
@@ -254,428 +177,6 @@ async function ensureReaderPlayerControlsRecovered(
   return !hasReaderPlayerControlsIssue(playerHostArg);
 }
 
-// ===== page-frame.js (page frame helpers) =====
-//
-// Multi-page (分P) resolution lives in the pure page-context seam (issue 02);
-// consumers import ./page-context.js directly (established seam, see facade).
-
-function getReaderContentMaxPx() {
-  if (state.reader.readingContentWidth === "compact") {
-    return 680;
-  }
-  if (state.reader.readingContentWidth === "narrow") {
-    return 760;
-  }
-  if (state.reader.readingContentWidth === "wide") {
-    return 980;
-  }
-  if (state.reader.readingContentWidth === "full") {
-    return 1100;
-  }
-  return 860;
-}
-
-function getReaderPagePaddingPx() {
-  return Math.min(32, Math.max(16, window.innerWidth * 0.028));
-}
-
-function getReaderMainWidthLimit() {
-  return Math.max(320, Math.min(getReaderContentMaxPx(), window.innerWidth - getReaderPagePaddingPx() * 2));
-}
-
-export function clearReaderModePageState() {
-  document.documentElement.removeAttribute("data-boc-reader-mode");
-  document.documentElement.removeAttribute("data-boc-reader-line-height");
-  document.documentElement.removeAttribute("data-boc-reader-theme");
-  document.documentElement.removeAttribute("data-boc-reader-font-scale");
-  document.documentElement.removeAttribute("data-boc-reader-letter-spacing");
-  document.documentElement.removeAttribute("data-boc-reader-content-width");
-  document.documentElement.removeAttribute("data-boc-reader-chapter-visibility");
-  document.documentElement.removeAttribute("data-boc-reader-has-chapters");
-  document.documentElement.removeAttribute("data-boc-reader-transcript-visible");
-  document.body.removeAttribute("data-boc-reader-mode");
-  document.body.removeAttribute("data-boc-reader-line-height");
-  document.body.removeAttribute("data-boc-reading-active");
-}
-
-function shouldForceNormalPageState(url = location.href) {
-  return !isReaderMode(url) && !state.reader.readingViewOpen;
-}
-
-export function enforceNormalPageStateIfNeeded(url = location.href) {
-  if (!shouldForceNormalPageState(url)) {
-    return;
-  }
-  clearReaderModePageState();
-}
-
-export function bindNormalPageStateGuard() {
-  if (state.ui.normalPageStateGuardBound) {
-    return;
-  }
-  uiState.setNormalPageStateGuardBound(true);
-
-  const observer = new MutationObserver(() => {
-    enforceNormalPageStateIfNeeded();
-  });
-  observer.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: [
-      "data-boc-reader-mode",
-      "data-boc-reader-line-height",
-      "data-boc-reader-theme",
-      "data-boc-reader-font-scale",
-      "data-boc-reader-letter-spacing",
-      "data-boc-reader-content-width",
-      "data-boc-reader-chapter-visibility",
-      "data-boc-reader-has-chapters",
-      "data-boc-reader-transcript-visible"
-    ]
-  });
-  observer.observe(document.body, {
-    attributes: true,
-    attributeFilter: ["data-boc-reader-mode", "data-boc-reader-line-height", "data-boc-reading-active"]
-  });
-  pageContext.setNormalPageStateObserver(observer);
-  enforceNormalPageStateIfNeeded();
-}
-
-export function cleanupReaderFloatingArtifacts(playerHostArg = playerHost) {
-  if (document.pictureInPictureElement) {
-    document.exitPictureInPicture().catch(() => {});
-  }
-  dismissReaderMiniPlayer(playerHostArg);
-  const runtimeHost = findReaderPlayerHost(getRuntimeVideoElement());
-  if (runtimeHost && runtimeHost !== playerHostArg) {
-    dismissReaderMiniPlayer(runtimeHost);
-  }
-}
-
-export function applyReaderPageFocus() {
-  clearReaderPageFocus();
-
-  const root = getReaderElement(ids.root);
-  const video = getRuntimeVideoElement();
-  const playerHostNode = findReaderPlayerHost(video);
-  const titleNode = findReaderTitleContainer();
-  const keepRoots = [root, playerHostNode, titleNode].filter(Boolean);
-
-  keepRoots.forEach((node) => {
-    markReaderKeepSubtree(node);
-    markReaderKeepPath(node);
-  });
-
-  const keepNodes = Array.from(document.querySelectorAll("[data-boc-reader-keep='1']"));
-  keepNodes.forEach((parent) => {
-    Array.from(parent.children || []).forEach((child) => {
-      if (child.id === ids.root) {
-        return;
-      }
-      if (!child.hasAttribute("data-boc-reader-keep")) {
-        child.setAttribute("data-boc-reader-hidden", "1");
-      }
-    });
-  });
-
-  pruneReaderNonKeepBranches(document.body);
-  hideReaderNoiseNodes(keepRoots);
-}
-
-export function clearReaderPageFocus() {
-  document.querySelectorAll("[data-boc-reader-keep]").forEach((node) => {
-    node.removeAttribute("data-boc-reader-keep");
-  });
-  document.querySelectorAll("[data-boc-reader-hidden]").forEach((node) => {
-    node.removeAttribute("data-boc-reader-hidden");
-  });
-}
-
-export function applyInlineHostPresentation() {
-  const inlineHost = document.getElementById("boc-reading-inline-host");
-  if (!inlineHost) {
-    return;
-  }
-  const leftContainer = document.querySelector(".left-container");
-  const bgColor = leftContainer ? getComputedStyle(leftContainer).backgroundColor : "";
-  if (state.reader.readingTranscriptVisible) {
-    inlineHost.style.border = "";
-    inlineHost.style.background = "";
-    inlineHost.style.marginTop = "";
-    inlineHost.style.boxShadow = "";
-    inlineHost.style.borderRadius = "";
-  } else {
-    inlineHost.style.border = "none";
-    inlineHost.style.background = bgColor;
-    inlineHost.style.marginTop = "0";
-    inlineHost.style.boxShadow = "none";
-    inlineHost.style.borderRadius = "0";
-  }
-}
-
-export function moveReadingMainInline() {
-  if (!isReaderMode()) {
-    return;
-  }
-
-  const readingMain = document.querySelector(".boc-reading-main");
-  if (!readingMain) {
-    return;
-  }
-
-  if (!mainOriginalParent) {
-    mainOriginalParent = readingMain.parentElement;
-    mainOriginalNextSibling = readingMain.nextSibling;
-  }
-  const playerWrap =
-    document.getElementById("playerWrap") ||
-    playerHost?.closest?.("#playerWrap") ||
-    playerHost;
-  const hostParent = playerWrap?.parentElement;
-  if (!playerWrap || !hostParent) {
-    return;
-  }
-
-  let inlineHost = document.getElementById("boc-reading-inline-host");
-  if (!inlineHost) {
-    inlineHost = document.createElement("div");
-    inlineHost.id = "boc-reading-inline-host";
-  }
-
-  if (inlineHost.parentElement !== hostParent || inlineHost.previousElementSibling !== playerWrap) {
-    playerWrap.insertAdjacentElement("afterend", inlineHost);
-  }
-
-  if (!inlineHost.dataset.bocScrollBound) {
-    const handleInlineHostManualScroll = () => {
-      if (isProgrammaticScrolling()) {
-        return;
-      }
-      callSync("noteManualReaderInteraction");
-    };
-    inlineHost.addEventListener("scroll", handleInlineHostManualScroll);
-    inlineHost.addEventListener("wheel", handleInlineHostManualScroll, { passive: true });
-    inlineHost.dataset.bocScrollBound = "1";
-  }
-
-  if (readingMain.parentElement !== inlineHost) {
-    inlineHost.appendChild(readingMain);
-  }
-  applyInlineHostPresentation();
-  updateReadingTranscriptTailSpacer();
-}
-
-export function restoreReadingMainInline() {
-  const readingMain = document.querySelector(".boc-reading-main");
-  const inlineHost = document.getElementById("boc-reading-inline-host");
-  if (readingMain && mainOriginalParent) {
-    if (mainOriginalNextSibling?.parentNode === mainOriginalParent) {
-      mainOriginalParent.insertBefore(readingMain, mainOriginalNextSibling);
-    } else {
-      mainOriginalParent.appendChild(readingMain);
-    }
-  }
-  inlineHost?.remove();
-  mainOriginalParent = null;
-  mainOriginalNextSibling = null;
-}
-
-function pruneReaderNonKeepBranches(node) {
-  if (!node?.children?.length) {
-    return;
-  }
-
-  Array.from(node.children).forEach((child) => {
-    if (child.id === ids.root) {
-      return;
-    }
-    const childHasKeep = child.hasAttribute("data-boc-reader-keep");
-    const childContainsKeep = Boolean(child.querySelector?.("[data-boc-reader-keep='1']"));
-    if (!childHasKeep && !childContainsKeep) {
-      child.setAttribute("data-boc-reader-hidden", "1");
-      return;
-    }
-    pruneReaderNonKeepBranches(child);
-  });
-}
-
-function hideReaderNoiseNodes(keepRoots = []) {
-  const keepSet = new Set(keepRoots.filter(Boolean));
-  const selectors = [
-    ".strip-ad-inner",
-    ".inside-wrp",
-    ".inside-bg",
-    ".hinter-msg",
-    ".slide",
-    ".cover.b-img",
-    ".cover.b-img.sleepy",
-    ".b-img.clickable",
-    "[class*='activity']",
-    "[class*='adcard']"
-  ];
-
-  document.querySelectorAll(selectors.join(",")).forEach((node) => {
-    if (Array.from(keepSet).some((keepNode) => keepNode === node || node.contains(keepNode))) {
-      return;
-    }
-    if (
-      node.closest(
-        "#bilibili-player, .bpx-player-container, .bpx-player-video-area, .bpx-player-primary-area, #boc-root, h1.video-title, .video-info-detail, .video-info-meta, .video-data"
-      )
-    ) {
-      return;
-    }
-    node.setAttribute("data-boc-reader-hidden", "1");
-    const card = node.closest("article, li, .card-box, .video-page-card-small, .video-page-special-card-small, .feed-card, .bili-video-card");
-    if (card && !card.closest("#bilibili-player, .bpx-player-container, .bpx-player-video-area, .bpx-player-primary-area, #boc-root")) {
-      card.setAttribute("data-boc-reader-hidden", "1");
-    }
-  });
-}
-
-function markReaderKeepSubtree(node) {
-  if (!node) {
-    return;
-  }
-  node.setAttribute("data-boc-reader-keep", "1");
-  node.querySelectorAll("*").forEach((child) => {
-    child.setAttribute("data-boc-reader-keep", "1");
-  });
-}
-
-function markReaderKeepPath(node) {
-  let current = node;
-  while (current && current !== document.body) {
-    current.setAttribute("data-boc-reader-keep", "1");
-    current = current.parentElement;
-  }
-  document.body.setAttribute("data-boc-reader-keep", "1");
-}
-
-function findReaderTitleContainer() {
-  const title =
-    document.querySelector("h1.video-title") ||
-    document.querySelector("h1") ||
-    document.querySelector("[data-title]");
-  if (!title) {
-    return null;
-  }
-  return title;
-}
-
-function dismissReaderMiniPlayer(playerHostArg = playerHost) {
-  const explicitClose = Array.from(document.querySelectorAll(".bpx-player-mini-close")).find(isVisibleReaderControl);
-  if (explicitClose) {
-    explicitClose.click();
-    return true;
-  }
-
-  if (!playerHostArg) {
-    return false;
-  }
-
-  const computed = window.getComputedStyle(playerHostArg);
-  const fixedLike = computed.position === "fixed" || /mini|picture|float|fixed-player/i.test(playerHostArg.className || "");
-  if (!fixedLike) {
-    return false;
-  }
-
-  const roots = Array.from(
-    new Set([
-      playerHostArg,
-      playerHostArg.parentElement,
-      playerHostArg.closest("#playerWrap"),
-      playerHostArg.closest("#bilibili-player")
-    ].filter(Boolean))
-  );
-
-  const selectors = [
-    ".bpx-player-mini-close",
-    "[class*='mini'][class*='close']",
-    "[class*='close']",
-    "button[aria-label*='关闭']",
-    "button[title*='关闭']",
-    "[role='button'][aria-label*='关闭']",
-    "[role='button'][title*='关闭']"
-  ];
-
-  for (const root of roots) {
-    for (const selector of selectors) {
-      const candidates = Array.from(root.querySelectorAll(selector)).filter(isVisibleReaderControl);
-      const button = candidates.sort((a, b) => {
-        const rectA = a.getBoundingClientRect();
-        const rectB = b.getBoundingClientRect();
-        return rectA.width * rectA.height - rectB.width * rectB.height;
-      })[0];
-      if (button) {
-        button.click();
-        return true;
-      }
-    }
-  }
-
-  const playerRect = playerHostArg.getBoundingClientRect();
-  for (const root of roots) {
-    const fallback = Array.from(root.querySelectorAll("button, [role='button'], [tabindex], div, span"))
-      .filter((node) => {
-        if (!isVisibleReaderControl(node)) {
-          return false;
-        }
-        const rect = node.getBoundingClientRect();
-        const style = window.getComputedStyle(node);
-        const nearTopRight =
-          rect.width <= 48 &&
-          rect.height <= 48 &&
-          rect.left >= playerRect.right - 96 &&
-          rect.top <= playerRect.top + 96;
-        return nearTopRight && (style.cursor === "pointer" || node.hasAttribute("role") || node.hasAttribute("tabindex"));
-      })
-      .sort((a, b) => {
-        const rectA = a.getBoundingClientRect();
-        const rectB = b.getBoundingClientRect();
-        return rectA.top + (playerRect.right - rectA.right) - (rectB.top + (playerRect.right - rectB.right));
-      })[0];
-
-    if (fallback) {
-      fallback.click();
-      return true;
-    }
-  }
-
-  return false;
-}
-
-export function alignReaderViewportToPlayer() {
-  if (!isReaderMode()) {
-    return;
-  }
-
-  const titleNode = findReaderTitleContainer();
-  const playerHostNode = playerHost || findReaderPlayerHost(getRuntimeVideoElement());
-  const anchor = titleNode || playerHostNode;
-  if (!anchor) {
-    return;
-  }
-
-  const titleRect = titleNode?.getBoundingClientRect?.();
-  const playerRect = playerHostNode?.getBoundingClientRect?.();
-  const top = Math.min(
-    titleRect?.top ?? Number.POSITIVE_INFINITY,
-    playerRect?.top ?? Number.POSITIVE_INFINITY
-  );
-  if (!Number.isFinite(top)) {
-    return;
-  }
-
-  const nextTop = Math.max(0, window.scrollY + top - 16);
-  window.scrollTo({ top: nextTop, behavior: "auto" });
-  window.setTimeout(() => {
-    if (!state.reader.readingViewOpen || !isReaderMode()) {
-      return;
-    }
-    window.scrollTo({ top: nextTop, behavior: "auto" });
-    layoutReaderPlayerHost();
-  }, 120);
-}
 
 // ===== player-host.js (player host lifecycle) =====
 
@@ -1483,15 +984,3 @@ function restoreReaderPlayerContainer() {
   });
   playerAdjustedNodes = [];
 }
-
-// ===== sync.js (playback sync) =====
-//
-// The sync domain (formerly the transcript-sync.js segment) lives in
-// ./sync.js: startReadingViewSync, stopReadingViewSync, syncReadingViewPlayback,
-// setActiveReadingItems, the scroll helpers, jumpReadingTarget, the click
-// handlers, noteManualReaderInteraction and updateReaderFollowState. It
-// depends on this module (LAYOUT) and must not be imported by it.
-//
-// reader-impl.js's sync reading of the scroll-pause deadlines goes through
-// the shared leaf ./scroll-state.js (isProgrammaticScrolling above; see the
-// "reader facade accessors" section).

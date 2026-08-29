@@ -7,7 +7,8 @@
 // the shared scroll-pause leaf).
 //
 // Implementation modules behind the facade (issue 06+):
-//   ./reader-impl.js   LAYOUT    page-frame + player-host + shared closure/ids
+//   ./page-frame.js    LAYOUT    page frame: DOM focus/pruning/inline host + ids
+//   ./player-host.js   LAYOUT    player mount/controls/observer + shared fns
 //   ./sync.js          SYNC      playback↔transcript sync (depends on LAYOUT)
 //   ./lifecycle.js     LIFECYCLE reader shell: lifecycle + settings
 //                               (depends on LAYOUT + SYNC)
@@ -31,8 +32,8 @@ export { enterReaderMode } from "./lifecycle.js";
 export { closeReadingView } from "./lifecycle.js";
 // 渲染阅读视图主体（章节/字幕/信息面板）
 export { renderReadingView } from "./lifecycle.js";
-// 渲染阅读视图状态栏文案（跨域共享，位于 LAYOUT 基座）
-export { renderReadingStatus } from "./reader-impl.js";
+// 渲染阅读视图状态栏文案（跨域共享，位于 LAYOUT 基座 player-host.js）
+export { renderReadingStatus } from "./player-host.js";
 // 应用阅读排版与可见性设置到 DOM
 export { applyReadingViewPresentation } from "./lifecycle.js";
 // 从设置初始化阅读状态
@@ -56,20 +57,20 @@ export { installReaderDebugHelpers } from "./lifecycle.js";
 // 阅读模式下的设置变更监听（chrome.storage.onChanged）
 export { bindSettingsWatcher } from "./lifecycle.js";
 
-// ===== reader-impl.js (LAYOUT): page-frame + player-host + shared closure =====
+// ===== LAYOUT 层：page-frame.js + player-host.js（自 reader-impl.js 拆分） =====
 
-// 阅读视图的播放器绑定（LAYOUT）
-export { bindReadingViewVideo } from "./reader-impl.js";
+// 阅读视图的播放器绑定（LAYOUT · player-host 域）
+export { bindReadingViewVideo } from "./player-host.js";
 // 停止播放器宿主挂载观察（启动由 LIFECYCLE/SYNC 在域内驱动，不经 facade）
-export { stopReaderPlayerObserver } from "./reader-impl.js";
-// 页面级状态守卫（非阅读页清理阅读模式标记）
-export { enforceNormalPageStateIfNeeded } from "./reader-impl.js";
-export { bindNormalPageStateGuard } from "./reader-impl.js";
-export { clearReaderModePageState } from "./reader-impl.js";
-// reader 私有 DOM id 表（供 UI 模板与少量外部 DOM 操作使用）
-export { ids } from "./reader-impl.js";
-// 阅读视图开关状态查询
-export { isReaderViewOpen } from "./reader-impl.js";
+export { stopReaderPlayerObserver } from "./player-host.js";
+// 页面级状态守卫（非阅读页清理阅读模式标记；LAYOUT · page-frame 域）
+export { enforceNormalPageStateIfNeeded } from "./page-frame.js";
+export { bindNormalPageStateGuard } from "./page-frame.js";
+export { clearReaderModePageState } from "./page-frame.js";
+// reader 私有 DOM id 表（供 UI 模板与少量外部 DOM 操作使用；page-frame.js 持有）
+export { ids } from "./page-frame.js";
+// 阅读视图开关状态查询（page-frame.js 持有）
+export { isReaderViewOpen } from "./page-frame.js";
 // 阅读视图手动滚动 / 程序化滚动的暂停状态函数移至 ./scroll-state.js 共享叶子，
 // 不再经本 facade 转发；消费方（core/message-handler.js、ui/ui-renderer.js）
 // 直接 import scroll-state.js。日志同理：直接 import ../shared/logging.js。
@@ -78,7 +79,8 @@ export { isReaderViewOpen } from "./reader-impl.js";
 // ===== sync.js (SYNC): playback↔transcript sync =====
 
 // 播放↔字幕同步域（原 transcript-sync.js 段，issue 06+）：定时器、滚动暂停、
-// 章节/字幕点击跳转与跟随状态均来自 ./sync.js（依赖 reader-impl.js 的 LAYOUT）。
+// 章节/字幕点击跳转与跟随状态均来自 ./sync.js（依赖 LAYOUT 层 page-frame.js +
+// player-host.js）。
 // 高亮/滚动等仅域内使用的函数不再经 facade 转发。
 export { startReadingViewSync } from "./sync.js";
 export { stopReadingViewSync } from "./sync.js";
