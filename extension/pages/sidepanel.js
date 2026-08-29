@@ -11,13 +11,15 @@
 //   3. 滚动与布局更新、popover toggle、autosizeInput、modelSelect 宽度、通知显示
 //   4. 对 02-07 模块的编排调用（loadContextState、player AI 快捷动作、上下文
 //      同步调度、新对话/刷新等页面级流程）
+// 跨子模块共享的可变状态（上下文/会话/AI 偏好等 13 个字段）收拢在
+// ./sidepanel-state.js 的 sidepanelState，本文件与 conversation-store /
+// chat-runtime 直接 import 读写，deps 只剩回调与 DOM/storage。
 // 页面级 transport 辅助（delay / waitForTabComplete / sendMessageToActiveTab）
 // 由 ../shared/tab-utils.js 提供（08 新增共享模块，同时供
 // ui/timestamp-nav.js 的 seek 流程复用）；truncate 由 ../shared/string-utils.js
 // 提供；sendRuntimeMessage 由 ../core/runtime.js 提供（core 域）。
 
 import {
-  DEFAULT_INITIAL_QUICK_PROMPTS,
   DEFAULT_PRESET_PROMPTS,
   PLAYER_AI_QUICK_ACTION_STORAGE_KEY
 } from "../core/defaults.js";
@@ -50,6 +52,7 @@ import {
 } from "./sidepanel-no-subtitle.js";
 import { createConversationStore } from "./sidepanel-conversation-store.js";
 import { ensureChatOffscreenDocument } from "./sidepanel-offscreen-ensure.js";
+import { sidepanelState } from "./sidepanel-state.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const THINKING_LEVEL_KEY = "boc_ai_thinking_level";
@@ -80,12 +83,6 @@ const els = {
   stopBtn: document.getElementById("spStopBtn"),
 };
 
-const DEFAULT_AI_PREFS = {
-  aiSystemPrompt: "",
-  aiInitialQuickPrompts: DEFAULT_INITIAL_QUICK_PROMPTS.slice(),
-  aiPresetPrompts: DEFAULT_PRESET_PROMPTS.slice()
-};
-
 // 抓取/音频转写进行中（content 的 subtitleFetchState 为 loading 且字幕体为空）
 // 时等待其完成再放行发送流程，状态机本体在 ./sidepanel-subtitle-wait.js（可测）。
 // 这里只组装 deps：轮询读当前上下文、提示走消息区 notice、定时器用 window。
@@ -93,8 +90,8 @@ const DEFAULT_AI_PREFS = {
 // contextData，放在广播监听之前只为保证监听触发时组装已完成。
 // asr-transcribing 广播活跃标志：content 侧转写进行中的兜底信号。快照的
 // subtitleFetchState 可能在转写中因辅助抓取失败被 content 清掉（resetClipState），
-// 此时靠这个标志继续等待，不放行空字幕。
-let asrTranscribingActive = false;
+// 此时靠这个标志继续等待，不放行空字幕。标志本体在 sidepanelState.
+// asrTranscribingActive（./sidepanel-state.js，广播监听与轮询双侧读写）。
 const SUBTITLE_WAIT_POLL_MS = 4000;
 const subtitleWaiter = createSubtitleWaiter({
   pollIntervalMs: SUBTITLE_WAIT_POLL_MS,
@@ -102,10 +99,10 @@ const subtitleWaiter = createSubtitleWaiter({
     const ok = await loadContextState({ forceRefresh: false, silent: true }).catch(() => false);
     // loadContextState 无论走哪个分支都会先更新 liveContextData；等待期间
     // 可能有流式守卫冻结 contextData，读 liveContextData 保证数据不断供。
-    const snapshot = ok ? (liveContextData || contextData) : null;
+    const snapshot = ok ? (sidepanelState.liveContextData || sidepanelState.contextData) : null;
     return {
       ok: Boolean(snapshot),
-      pending: isContextPending(snapshot, { asrTranscribingActive })
+      pending: isContextPending(snapshot, { asrTranscribingActive: sidepanelState.asrTranscribingActive })
     };
   },
   showWaitingNotice: () => showConversationContextNotice("正在等待音频转写完成，完成后自动开始总结…", 0),
@@ -128,48 +125,28 @@ chrome.runtime.onMessage.addListener((message) => {
     notice.hidden = message.phase !== "asr-transcribing";
   }
   if (message.phase === "asr-transcribing") {
-    asrTranscribingActive = true;
+    sidepanelState.asrTranscribingActive = true;
   } else if (message.phase === "asr-done" || message.phase === "asr-failed") {
-    asrTranscribingActive = false;
+    sidepanelState.asrTranscribingActive = false;
     subtitleWaiter.kick();
   }
 });
 
-let contextData = null;
-let currentContextKey = "";
-let providers = [];
-let chatHistory = [];
+// 跨模块共享状态（contextData / currentContextKey / providers / chatHistory /
+// savedConversations / currentConversationId / currentConversationMeta /
+// liveContextData / liveContextKey / liveTabUrl / aiPrefs / asrTranscribingActive /
+// aiThinkingLevel）收拢在 ./sidepanel-state.js 的 sidepanelState，本文件与
+// conversation-store / chat-runtime 直接 import 读写。以下为纯局部单例。
 let suggestionsNode = null;
-let aiPrefs = { ...DEFAULT_AI_PREFS };
-let savedConversations = [];
-let currentConversationId = "";
-let currentConversationMeta = null;
-let liveContextData = null;
-let liveContextKey = "";
-let liveTabUrl = "";
 let contextNoticeTimer = 0;
-let shouldAutoScrollMessages = true;
-let aiThinkingLevel = "off";
 let liveContextSyncTimer = 0;
 let liveContextSyncForceRefresh = false;
 let modelSelectMeasureCanvas = null;
 let initCompleted = false;
 
+// 会话状态（会话列表/当前会话/上下文）已收拢至 sidepanelState，store 直接
+// import 读写；deps 只剩 UI/transport 回调、storage 抽象与常量。
 const conversationStore = createConversationStore({
-  getSavedConversations: () => savedConversations,
-  setSavedConversations: (v) => { savedConversations = v; },
-  getCurrentConversationId: () => currentConversationId,
-  setCurrentConversationId: (v) => { currentConversationId = v; },
-  getCurrentConversationMeta: () => currentConversationMeta,
-  setCurrentConversationMeta: (v) => { currentConversationMeta = v; },
-  getChatHistory: () => chatHistory,
-  setChatHistory: (v) => { chatHistory = v; },
-  getContextData: () => contextData,
-  setContextData: (v) => { contextData = v; },
-  getCurrentContextKey: () => currentContextKey,
-  setCurrentContextKey: (v) => { currentContextKey = v; },
-  getLiveContextData: () => liveContextData,
-  getLiveContextKey: () => liveContextKey,
   renderHistoryList,
   renderInitialState,
   updateContextChip,
@@ -185,6 +162,9 @@ const conversationStore = createConversationStore({
   maxSavedConversations: MAX_SAVED_CONVERSATIONS
 });
 
+// chat 流状态机：自身流状态（activePort 等）与自动滚动标志（shouldAutoScroll-
+// Messages）都在 runtime 闭包内；会话状态读 sidepanelState；deps 只剩 DOM
+// 容器/元素引用、store 实例与 UI/transport 回调。
 const chatRuntime = createChatRuntime({
   // ---- DOM 容器 / 元素引用（sidepanel 模块级 `els`）----
   messages: els.messages,
@@ -192,16 +172,6 @@ const chatRuntime = createChatRuntime({
   stopBtn: els.stopBtn,
   // ---- conversation-store 窄接口（05 产出实例）----
   store: conversationStore,
-  // ---- 会话状态访问器（sidepanel 模块级变量）----
-  getChatHistory: () => chatHistory,
-  getCurrentConversationMeta: () => currentConversationMeta,
-  setCurrentConversationMeta: (v) => { currentConversationMeta = v; },
-  getCurrentContextKey: () => currentContextKey,
-  setCurrentConversationId: (v) => { currentConversationId = v; },
-  getContextData: () => contextData,
-  getAiPrefs: () => aiPrefs,
-  getThinkingLevel: () => aiThinkingLevel,
-  setThinkingLevel: (v) => { aiThinkingLevel = normalizeAiThinkingLevel(v); },
   // ---- 布局 / UI 回调（DOM 布局留在 sidepanel）----
   setStreamingUiState,
   showConversationContextNotice,
@@ -212,8 +182,6 @@ const chatRuntime = createChatRuntime({
   removeSuggestions,
   resetConversationView,
   autosizeInput,
-  shouldAutoScrollMessagesEnabled: () => shouldAutoScrollMessages,
-  setShouldAutoScrollMessages: (v) => { shouldAutoScrollMessages = v; },
   // ---- AI 域 / 上下文 / 传输辅助（sidepanel 本地）----
   ensureCurrentContextForSend,
   getProviderId: () => els.modelSelect.value,
@@ -263,7 +231,7 @@ function bindEvents() {
   });
   els.input.addEventListener("input", autosizeInput);
   els.messages.addEventListener("scroll", () => {
-    shouldAutoScrollMessages = isMessagesNearBottom();
+    chatRuntime.setAutoScroll(isMessagesNearBottom());
   });
   els.settingsBtn.addEventListener("click", () => chrome.runtime.openOptionsPage());
   els.contextChip.addEventListener("click", () => {
@@ -292,10 +260,10 @@ function bindEvents() {
     const providerId = els.modelSelect.value;
     if (providerId) {
       localStorage.setItem(SELECTED_PROVIDER_KEY, providerId);
-      aiPrefs.defaultModel = providerId;
+      sidepanelState.aiPrefs.defaultModel = providerId;
       chrome.storage.sync.set({ defaultModel: providerId }).catch(() => {});
     } else {
-      aiPrefs.defaultModel = "";
+      sidepanelState.aiPrefs.defaultModel = "";
       chrome.storage.sync.set({ defaultModel: "" }).catch(() => {});
     }
     updateModelSelectWidth();
@@ -365,20 +333,20 @@ async function loadProvidersAndPrefs({ preferredProviderId = "" } = {}) {
     sendRuntimeMessage({ type: "ai-providers-list" }),
     sendRuntimeMessage({ type: "get-settings" }).catch(() => ({ ok: false }))
   ]);
-  providers = Array.isArray(providersResp?.providers)
+  sidepanelState.providers = Array.isArray(providersResp?.providers)
     ? providersResp.providers.filter((p) => p.enabled)
     : [];
-  aiPrefs = {
+  sidepanelState.aiPrefs = {
     aiSystemPrompt: String(settingsResp?.settings?.aiSystemPrompt || "").trim(),
     aiInitialQuickPrompts: normalizeAiInitialQuickPrompts(settingsResp?.settings?.aiInitialQuickPrompts),
     aiPresetPrompts: normalizeAiPresetPrompts(settingsResp?.settings?.aiPresetPrompts),
     defaultModel: String(settingsResp?.settings?.defaultModel || "").trim()
   };
-  aiThinkingLevel = normalizeAiThinkingLevel(
+  sidepanelState.aiThinkingLevel = normalizeAiThinkingLevel(
     settingsResp?.settings?.aiThinkingLevel ?? localStorage.getItem(THINKING_LEVEL_KEY)
   );
-  if (!aiPrefs.aiPresetPrompts.length) {
-    aiPrefs.aiPresetPrompts = DEFAULT_PRESET_PROMPTS.slice();
+  if (!sidepanelState.aiPrefs.aiPresetPrompts.length) {
+    sidepanelState.aiPrefs.aiPresetPrompts = DEFAULT_PRESET_PROMPTS.slice();
     void persistAiPresetPrompts();
   }
   renderModelSelect(preferredProviderId);
@@ -387,22 +355,22 @@ async function loadProvidersAndPrefs({ preferredProviderId = "" } = {}) {
 }
 
 function renderModelSelect(preferredProviderId = "") {
-  if (!providers.length) {
+  if (!sidepanelState.providers.length) {
     els.modelSelect.innerHTML = '<option value="">未配置平台</option>';
     els.modelSelect.disabled = true;
     els.modelSelect.style.width = "96px";
     return;
   }
 
-  els.modelSelect.innerHTML = providers
+  els.modelSelect.innerHTML = sidepanelState.providers
     .map((p) => {
       const label = String(p.model || p.name || "").trim();
       return `<option value="${escapeHtml(p.id)}">${escapeHtml(label)}</option>`;
     })
     .join("");
 
-  const savedProviderId = String(preferredProviderId || aiPrefs.defaultModel || localStorage.getItem(SELECTED_PROVIDER_KEY) || "").trim();
-  const matchedProvider = providers.find((item) => item.id === savedProviderId) || providers[0];
+  const savedProviderId = String(preferredProviderId || sidepanelState.aiPrefs.defaultModel || localStorage.getItem(SELECTED_PROVIDER_KEY) || "").trim();
+  const matchedProvider = sidepanelState.providers.find((item) => item.id === savedProviderId) || sidepanelState.providers[0];
   els.modelSelect.value = matchedProvider?.id || "";
   els.modelSelect.disabled = false;
   updateModelSelectWidth();
@@ -413,16 +381,16 @@ function renderModelSelect(preferredProviderId = "") {
 // ============================================================
 function renderThinkingLevel() {
   els.thinkingBtns.forEach((btn) => {
-    btn.classList.toggle("is-active", btn.dataset.level === aiThinkingLevel);
-    btn.setAttribute("aria-pressed", btn.dataset.level === aiThinkingLevel ? "true" : "false");
+    btn.classList.toggle("is-active", btn.dataset.level === sidepanelState.aiThinkingLevel);
+    btn.setAttribute("aria-pressed", btn.dataset.level === sidepanelState.aiThinkingLevel ? "true" : "false");
   });
 }
 
 async function setThinkingLevel(level) {
-  aiThinkingLevel = normalizeAiThinkingLevel(level);
+  sidepanelState.aiThinkingLevel = normalizeAiThinkingLevel(level);
   renderThinkingLevel();
-  localStorage.setItem(THINKING_LEVEL_KEY, aiThinkingLevel);
-  await sendRuntimeMessage({ type: "save-settings", settings: { aiThinkingLevel } }).catch(() => null);
+  localStorage.setItem(THINKING_LEVEL_KEY, sidepanelState.aiThinkingLevel);
+  await sendRuntimeMessage({ type: "save-settings", settings: { aiThinkingLevel: sidepanelState.aiThinkingLevel } }).catch(() => null);
 }
 
 async function refreshProvidersAndPrefsAfterExternalChange() {
@@ -556,15 +524,15 @@ function getModelSelectMaxWidth() {
 // 上下文状态加载（侧面板编排核心：读标签页状态 → 应用上下文 → 恢复对话）
 // ============================================================
 async function loadContextState({ forceRefresh = false, silent = false } = {}) {
-  const hasPinnedConversation = currentConversationMeta?.pinnedContext === true;
+  const hasPinnedConversation = sidepanelState.currentConversationMeta?.pinnedContext === true;
   const tab = await getActiveTab();
   if (!tab?.id) {
-    liveContextData = null;
-    liveContextKey = "";
-    liveTabUrl = "";
+    sidepanelState.liveContextData = null;
+    sidepanelState.liveContextKey = "";
+    sidepanelState.liveTabUrl = "";
     if (!hasPinnedConversation) {
-      contextData = null;
-      currentContextKey = "";
+      sidepanelState.contextData = null;
+      sidepanelState.currentContextKey = "";
     }
     updateContextChip();
     if (!silent && !hasPinnedConversation) {
@@ -578,14 +546,14 @@ async function loadContextState({ forceRefresh = false, silent = false } = {}) {
     tabId: tab.id,
     forceRefresh
   }).catch((error) => ({ ok: false, error: error.message }));
-  liveTabUrl = String(tab.url || "").trim();
+  sidepanelState.liveTabUrl = String(tab.url || "").trim();
 
   if (!resp?.ok || !resp.payload) {
-    liveContextData = null;
-    liveContextKey = "";
+    sidepanelState.liveContextData = null;
+    sidepanelState.liveContextKey = "";
     if (!hasPinnedConversation) {
-      contextData = null;
-      currentContextKey = "";
+      sidepanelState.contextData = null;
+      sidepanelState.currentContextKey = "";
     }
     updateContextChip();
     if (!silent && !hasPinnedConversation) {
@@ -594,8 +562,8 @@ async function loadContextState({ forceRefresh = false, silent = false } = {}) {
     return false;
   }
 
-  liveContextData = resp.payload;
-  liveContextKey = buildContextKey(resp.payload);
+  sidepanelState.liveContextData = resp.payload;
+  sidepanelState.liveContextKey = buildContextKey(resp.payload);
   if (hasPinnedConversation) {
     renderHistoryList();
     updateContextChip();
@@ -620,10 +588,10 @@ async function loadContextState({ forceRefresh = false, silent = false } = {}) {
 function applyContextPayload(payload) {
   const nextContext = payload && typeof payload === "object" ? payload : null;
   const nextKey = buildContextKey(nextContext);
-  const contextChanged = Boolean(currentContextKey && nextKey && nextKey !== currentContextKey);
+  const contextChanged = Boolean(sidepanelState.currentContextKey && nextKey && nextKey !== sidepanelState.currentContextKey);
 
-  contextData = nextContext;
-  currentContextKey = nextKey;
+  sidepanelState.contextData = nextContext;
+  sidepanelState.currentContextKey = nextKey;
   updateContextChip();
 
   if (contextChanged && !chatRuntime.isStreaming() && !chatRuntime.hasPendingUserPrompt()) {
@@ -635,7 +603,7 @@ function applyContextPayload(payload) {
 }
 
 function updateContextChip() {
-  if (!contextData) {
+  if (!sidepanelState.contextData) {
     els.contextChip.textContent = "无上下文";
     els.contextChip.title = "";
     els.contextChip.disabled = true;
@@ -643,32 +611,32 @@ function updateContextChip() {
     return;
   }
 
-  const shortTitle = contextData.title ? truncate(contextData.title, 19) : "未知视频";
+  const shortTitle = sidepanelState.contextData.title ? truncate(sidepanelState.contextData.title, 19) : "未知视频";
   els.contextChip.textContent = shortTitle;
   const mismatch = isBoundConversationMismatched();
   els.contextChip.classList.toggle("is-mismatch", mismatch);
-  els.contextChip.title = contextData.url
-    ? `${contextData.title || ""}${mismatch ? "\n当前页不是这个对话绑定的视频" : ""}\n点击跳转目标视频，或开启新对话`
-    : contextData.title || "";
-  els.contextChip.disabled = !String(contextData.url || "").trim();
+  els.contextChip.title = sidepanelState.contextData.url
+    ? `${sidepanelState.contextData.title || ""}${mismatch ? "\n当前页不是这个对话绑定的视频" : ""}\n点击跳转目标视频，或开启新对话`
+    : sidepanelState.contextData.title || "";
+  els.contextChip.disabled = !String(sidepanelState.contextData.url || "").trim();
 }
 
 function isBoundConversationMismatched() {
-  if (currentConversationMeta?.pinnedContext !== true) {
+  if (sidepanelState.currentConversationMeta?.pinnedContext !== true) {
     return false;
   }
-  const targetUrl = String(currentConversationMeta?.contextUrl || contextData?.url || "").trim();
+  const targetUrl = String(sidepanelState.currentConversationMeta?.contextUrl || sidepanelState.contextData?.url || "").trim();
   if (!targetUrl) {
     return false;
   }
-  if (!liveTabUrl) {
+  if (!sidepanelState.liveTabUrl) {
     return true;
   }
-  return !doesTabMatchContextUrl(liveTabUrl, targetUrl);
+  return !doesTabMatchContextUrl(sidepanelState.liveTabUrl, targetUrl);
 }
 
 async function openCurrentContextUrl() {
-  const targetUrl = String(contextData?.url || currentConversationMeta?.contextUrl || "").trim();
+  const targetUrl = String(sidepanelState.contextData?.url || sidepanelState.currentConversationMeta?.contextUrl || "").trim();
   if (!targetUrl) {
     return;
   }
@@ -688,11 +656,11 @@ async function openCurrentContextUrl() {
 
 function renderInitialState() {
   updateSidepanelLayoutState();
-  if (!contextData) {
+  if (!sidepanelState.contextData) {
     resetConversationView("当前页面不是 B 站视频页，无法读取视频信息。");
     return;
   }
-  if (!providers.length) {
+  if (!sidepanelState.providers.length) {
     resetConversationView('还没有配置 AI 平台，<a href="#" id="spOpenSettings">前往设置</a>');
     document.getElementById("spOpenSettings")?.addEventListener("click", (e) => {
       e.preventDefault();
@@ -700,11 +668,11 @@ function renderInitialState() {
     });
     return;
   }
-  if (chatHistory.length) {
+  if (sidepanelState.chatHistory.length) {
     renderConversationMessages();
     return;
   }
-  if (contextData.isVideoContext === false) {
+  if (sidepanelState.contextData.isVideoContext === false) {
     resetConversationView(NON_VIDEO_CONTEXT_MESSAGE);
     return;
   }
@@ -726,19 +694,19 @@ function resetConversationView(stateHtml = "") {
   els.messages.appendChild(suggestionsNode);
   renderSuggestions();
   renderPresetPrompts();
-  shouldAutoScrollMessages = true;
-  scrollToBottom(true);
+  chatRuntime.setAutoScroll(true);
+  chatRuntime.scrollToBottom(true);
 }
 
 function renderSuggestions() {
   if (!suggestionsNode) {
     return;
   }
-  if (!contextData || !providers.length || chatHistory.length || contextData.isVideoContext === false) {
+  if (!sidepanelState.contextData || !sidepanelState.providers.length || sidepanelState.chatHistory.length || sidepanelState.contextData.isVideoContext === false) {
     suggestionsNode.innerHTML = "";
     return;
   }
-  const prompts = normalizeAiInitialQuickPrompts(aiPrefs.aiInitialQuickPrompts).filter(Boolean);
+  const prompts = normalizeAiInitialQuickPrompts(sidepanelState.aiPrefs.aiInitialQuickPrompts).filter(Boolean);
   suggestionsNode.innerHTML = prompts
     .map((prompt) => `<button type="button" class="sp-chip">${escapeHtml(prompt)}</button>`)
     .join("");
@@ -755,7 +723,7 @@ function renderPresetPrompts() {
   if (!els.presetList) {
     return;
   }
-  const prompts = Array.isArray(aiPrefs.aiPresetPrompts) ? aiPrefs.aiPresetPrompts : [];
+  const prompts = Array.isArray(sidepanelState.aiPrefs.aiPresetPrompts) ? sidepanelState.aiPrefs.aiPresetPrompts : [];
   if (!prompts.length) {
     els.presetList.innerHTML = '<span class="sp-preset-empty">还没有预设提示词</span>';
     return;
@@ -788,28 +756,28 @@ function renderHistoryList() {
     return;
   }
   if (els.historyClearBtn) {
-    els.historyClearBtn.hidden = savedConversations.length === 0;
+    els.historyClearBtn.hidden = sidepanelState.savedConversations.length === 0;
   }
-  if (!savedConversations.length) {
+  if (!sidepanelState.savedConversations.length) {
     els.historyList.innerHTML = '<span class="sp-history-empty">还没有历史对话</span>';
     return;
   }
 
-  const liveVideoRef = liveContextData?.isVideoContext ? liveContextData : null;
+  const liveVideoRef = sidepanelState.liveContextData?.isVideoContext ? sidepanelState.liveContextData : null;
   const canHighlightLiveMatches = Boolean(
     liveVideoRef &&
-    currentConversationMeta?.pinnedContext &&
-    currentConversationMeta?.contextUrl &&
-    !doesTabMatchContextUrl(liveVideoRef.url || liveTabUrl, currentConversationMeta.contextUrl || "")
+    sidepanelState.currentConversationMeta?.pinnedContext &&
+    sidepanelState.currentConversationMeta?.contextUrl &&
+    !doesTabMatchContextUrl(liveVideoRef.url || sidepanelState.liveTabUrl, sidepanelState.currentConversationMeta.contextUrl || "")
   );
 
-  els.historyList.innerHTML = savedConversations
+  els.historyList.innerHTML = sidepanelState.savedConversations
     .map((conversation) => {
-      const isActive = conversation.id === currentConversationId;
+      const isActive = conversation.id === sidepanelState.currentConversationId;
       const isLiveMatch = Boolean(
         !isActive &&
         canHighlightLiveMatches &&
-        doesConversationMatchCurrentContext(conversation, liveVideoRef, liveContextKey)
+        doesConversationMatchCurrentContext(conversation, liveVideoRef, sidepanelState.liveContextKey)
       );
       const metaText = formatConversationTimestamp(conversation.updatedAt || conversation.createdAt);
       const titleDisplay = buildConversationTitleDisplay(conversation.title, 30);
@@ -920,11 +888,11 @@ function scheduleLiveContextSync(forceRefresh = false) {
 
 async function syncLiveContextState(forceRefresh = false) {
   const ok = await loadContextState({ forceRefresh, silent: true }).catch(() => false);
-  if (currentConversationMeta?.pinnedContext || chatRuntime.isStreaming() || chatRuntime.hasPendingUserPrompt()) {
+  if (sidepanelState.currentConversationMeta?.pinnedContext || chatRuntime.isStreaming() || chatRuntime.hasPendingUserPrompt()) {
     updateContextChip();
     return;
   }
-  if (!ok || !contextData || !providers.length || !chatHistory.length) {
+  if (!ok || !sidepanelState.contextData || !sidepanelState.providers.length || !sidepanelState.chatHistory.length) {
     renderInitialState();
     return;
   }
@@ -936,11 +904,11 @@ async function addPresetPrompt() {
   if (!text) {
     return;
   }
-  const nextPrompts = [...(aiPrefs.aiPresetPrompts || [])];
+  const nextPrompts = [...(sidepanelState.aiPrefs.aiPresetPrompts || [])];
   if (!nextPrompts.includes(text)) {
     nextPrompts.push(text);
   }
-  aiPrefs.aiPresetPrompts = nextPrompts.slice(0, 12);
+  sidepanelState.aiPrefs.aiPresetPrompts = nextPrompts.slice(0, 12);
   await persistAiPresetPrompts();
   els.presetInput.value = "";
   renderPresetPrompts();
@@ -950,7 +918,7 @@ async function removePresetPrompt(index) {
   if (index < 0) {
     return;
   }
-  aiPrefs.aiPresetPrompts = (aiPrefs.aiPresetPrompts || []).filter((_, itemIndex) => itemIndex !== index);
+  sidepanelState.aiPrefs.aiPresetPrompts = (sidepanelState.aiPrefs.aiPresetPrompts || []).filter((_, itemIndex) => itemIndex !== index);
   await persistAiPresetPrompts();
   renderPresetPrompts();
 }
@@ -962,17 +930,17 @@ async function persistAiPresetPrompts() {
   }
   const nextSettings = {
     ...settingsResp.settings,
-    aiPresetPrompts: (aiPrefs.aiPresetPrompts || []).slice(0, 12)
+    aiPresetPrompts: (sidepanelState.aiPrefs.aiPresetPrompts || []).slice(0, 12)
   };
   await sendRuntimeMessage({ type: "save-settings", settings: nextSettings }).catch(() => null);
 }
 
 function updateSidepanelLayoutState() {
   const useCompactInput = Boolean(
-    contextData &&
-    contextData.isVideoContext === false &&
-    !chatHistory.length &&
-    !currentConversationMeta?.pinnedContext
+    sidepanelState.contextData &&
+    sidepanelState.contextData.isVideoContext === false &&
+    !sidepanelState.chatHistory.length &&
+    !sidepanelState.currentConversationMeta?.pinnedContext
   );
   document.body.classList.toggle("sp-non-video-context", useCompactInput);
   if (els.input) {
@@ -988,7 +956,7 @@ async function refreshContextManually() {
   try {
     const ok = await loadContextState({ forceRefresh: true });
     if (ok) {
-      if (!contextData || !providers.length || !chatHistory.length) {
+      if (!sidepanelState.contextData || !sidepanelState.providers.length || !sidepanelState.chatHistory.length) {
         renderInitialState();
       } else {
         renderSuggestions();
@@ -1023,9 +991,9 @@ async function startNewConversation() {
   } finally {
     setRefreshing(false);
   }
-  if (liveContextData) {
-    contextData = { ...liveContextData };
-    currentContextKey = liveContextKey || buildContextKey(liveContextData);
+  if (sidepanelState.liveContextData) {
+    sidepanelState.contextData = { ...sidepanelState.liveContextData };
+    sidepanelState.currentContextKey = sidepanelState.liveContextKey || buildContextKey(sidepanelState.liveContextData);
     updateContextChip();
   }
   restartChat({ keepContext: true });
@@ -1039,11 +1007,11 @@ function renderConversationMessages() {
   updateSidepanelLayoutState();
   els.messages.innerHTML = "";
   suggestionsNode = null;
-  if (!chatHistory.length) {
+  if (!sidepanelState.chatHistory.length) {
     resetConversationView("");
     return;
   }
-  chatHistory.forEach((message, index) => {
+  sidepanelState.chatHistory.forEach((message, index) => {
     if (message.role === "user") {
       chatRuntime.appendUserMessage(message.content, false);
       return;
@@ -1055,14 +1023,14 @@ function renderConversationMessages() {
     });
     els.messages.appendChild(node);
   });
-  shouldAutoScrollMessages = true;
-  scrollToBottom(true);
+  chatRuntime.setAutoScroll(true);
+  chatRuntime.scrollToBottom(true);
 }
 
 // 历史回放时找该助手消息的前一条用户消息（注入 renderAssistantMessage 的 userPrompt）
 function findPreviousUserPrompt(index) {
   for (let i = Number(index) - 1; i >= 0; i -= 1) {
-    const item = chatHistory[i];
+    const item = sidepanelState.chatHistory[i];
     if (item?.role === "user" && typeof item.content === "string") {
       return item.content;
     }
@@ -1076,12 +1044,12 @@ function findPreviousUserPrompt(index) {
 // BLOCKED 类型化信号让 sendMessage 提前返回（不追加用户消息、不落
 // chatHistory、不发起 port），并按 noSubtitleReason 显示对应 notice。
 async function ensureCurrentContextForSend() {
-  if (currentConversationMeta?.pinnedContext) {
+  if (sidepanelState.currentConversationMeta?.pinnedContext) {
     await loadContextState({ forceRefresh: false, silent: true }).catch(() => null);
     return conversationStore.hydratePinned();
   }
   const ok = await loadContextState({ forceRefresh: false, silent: true });
-  if (!ok || !contextData) {
+  if (!ok || !sidepanelState.contextData) {
     resetConversationView("当前页面上下文读取失败。");
     return false;
   }
@@ -1093,12 +1061,12 @@ async function ensureCurrentContextForSend() {
   // 等待期间 contextData 可能停在旧快照（守卫分支或就绪瞬间），放行前重取
   // 一次，确保发送出去的是转写完成后的完整字幕。
   await loadContextState({ forceRefresh: false, silent: true }).catch(() => null);
-  if (!contextData) {
+  if (!sidepanelState.contextData) {
     resetConversationView("当前页面上下文读取失败。");
     return false;
   }
-  if (isNoSubtitleEmptyContext(contextData)) {
-    const notice = buildNoSubtitleNotice(contextData.noSubtitleReason);
+  if (isNoSubtitleEmptyContext(sidepanelState.contextData)) {
+    const notice = buildNoSubtitleNotice(sidepanelState.contextData.noSubtitleReason);
     showConversationContextNotice(notice.message, 0, { openSettingsAction: notice.openSettings });
     return NO_SUBTITLE_SEND_BLOCKED;
   }
@@ -1108,7 +1076,7 @@ async function ensureCurrentContextForSend() {
 // 时间戳跳转依赖包（注入 timestamp-nav，seek 复用 shared 的 sendMessageToActiveTab）
 function getTimestampNavDeps() {
   return {
-    contextUrl: String(contextData?.url || currentConversationMeta?.contextUrl || "").trim(),
+    contextUrl: String(sidepanelState.contextData?.url || sidepanelState.currentConversationMeta?.contextUrl || "").trim(),
     notice: showConversationContextNotice,
     getActiveTab,
     matchContextUrl: doesTabMatchContextUrl,
@@ -1119,11 +1087,11 @@ function getTimestampNavDeps() {
 // 重启对话：清流状态 + 清会话状态 + 重置消息区（编排入口，被新对话/上下文切换复用）
 function restartChat({ keepContext = false } = {}) {
   chatRuntime.resetStreamState();
-  chatHistory = [];
-  currentConversationId = "";
-  currentConversationMeta = null;
+  sidepanelState.chatHistory = [];
+  sidepanelState.currentConversationId = "";
+  sidepanelState.currentConversationMeta = null;
   if (!keepContext) {
-    currentContextKey = buildContextKey(contextData);
+    sidepanelState.currentContextKey = buildContextKey(sidepanelState.contextData);
   }
   updateContextChip();
   resetConversationView("");
@@ -1154,7 +1122,7 @@ function showConversationContextError(message) {
   stateNode.className = "sp-center-error";
   stateNode.textContent = String(message);
   els.messages.appendChild(stateNode);
-  scrollToBottom();
+  chatRuntime.scrollToBottom();
 }
 
 // 消息区通知条。第三参 options.openSettingsAction 为 true 时在文案末尾附
@@ -1196,13 +1164,6 @@ function removeConversationContextNotice() {
 function isMessagesNearBottom(threshold = 56) {
   const { scrollTop, scrollHeight, clientHeight } = els.messages;
   return scrollHeight - (scrollTop + clientHeight) <= threshold;
-}
-
-function scrollToBottom(force = false) {
-  if (!force && !shouldAutoScrollMessages) {
-    return;
-  }
-  els.messages.scrollTop = els.messages.scrollHeight;
 }
 
 // 获取当前活动标签页（transport 辅助，注入 store/timestamp-nav）

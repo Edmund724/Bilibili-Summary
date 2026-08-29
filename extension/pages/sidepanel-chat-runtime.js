@@ -10,32 +10,36 @@
 // rendering (../ui/markdown.js, pulled in directly).
 //
 // Boundary: this module does NOT touch sidepanel module-level layout variables
-// or the surrounding chrome (header/popovers/context chip). Everything it needs
-// — layout callback, context notices, AI-domain helpers, DOM container
-// references, input/stop-button element refs — arrives via the `deps` object of
-// the `createChatRuntime(deps)` factory, or is read out of module-level state
-// owned by this module itself.
+// or the surrounding chrome (header/popovers/context chip). Conversation state
+// (chatHistory / conversation meta / context / aiPrefs / thinking level) lives
+// in ./sidepanel-state.js and is imported directly; everything else it needs —
+// layout callback, context notices, DOM container references, input/stop-button
+// element refs — arrives via the `deps` object of the `createChatRuntime(deps)`
+// factory. The auto-scroll flag (shouldAutoScrollMessages) is owned by this
+// module's closure: sidepanel writes it through the narrow setAutoScroll() /
+// scrollToBottom() entries, the token flush / finalize paths read it here.
 //
 // Top-level side effects: NONE (no document/chrome/window access at module
 // scope) — unlike sidepanel.js, this module evaluates cleanly under a Node test
 // harness without a DOM shim.
 import { renderMarkdown, splitMarkdownTail, stripThinkBlocks } from "../ui/markdown.js";
 import { linkifyAssistantTimestamps } from "../ui/timestamp-nav.js";
+import { sidepanelState } from "./sidepanel-state.js";
 
 const STREAM_SLOW_NOTICE_MS = 15000;
 
 /**
  * createChatRuntime(deps) — factory returning the chat runtime method set.
  *
- * The runtime owns the stream state machine; sidepanel keeps its own
- * module-level state (chatHistory / conversation meta / context / providers /
- * aiPrefs / suggestionsNode / shouldAutoScrollMessages) and injects accessors
- * plus UI callbacks via deps. The returned methods are bound closures over the
- * runtime's own closure state, so multiple factories would be isolated —
+ * The runtime owns the stream state machine and the auto-scroll flag
+ * (shouldAutoScrollMessages, closure-local); conversation state (chatHistory /
+ * conversation meta / context / aiPrefs / thinking level) is read/written via
+ * the shared sidepanelState module. deps only carries DOM refs, the store
+ * instance and UI/transport callbacks. The returned methods are bound closures
+ * over the runtime's own closure state, so multiple factories would be isolated —
  * sidepanel constructs exactly one.
  *
- * @param {object} deps  every dependency, each sourced out of sidepanel's own
- *   module-level scope at factory-construction time:
+ * @param {object} deps
  *   {
  *     // ---- DOM container / element refs (sidepanel module-level `els`) ----
  *     messages,        // els.messages  (messages scroll container)
@@ -43,15 +47,6 @@ const STREAM_SLOW_NOTICE_MS = 15000;
  *     stopBtn,         // els.stopBtn (optional)
  *     // ---- conversation-store narrow interface (ticket 05) ----
  *     store,           // conversationStore instance: { persistCurrent() }
- *     // ---- conversation state accessors (sidepanel module-level vars) ----
- *     getChatHistory,              // () => chatHistory
- *     getCurrentConversationMeta,  // () => currentConversationMeta
- *     setCurrentConversationMeta,  // (v) => { currentConversationMeta = v; }
- *     getCurrentContextKey,        // () => currentContextKey
- *     setCurrentConversationId,    // (v) => { currentConversationId = v; }
- *     getContextData,              // () => contextData
- *     getAiPrefs,                  // () => aiPrefs  (for aiSystemPrompt)
- *     getThinkingLevel,            // () => aiThinkingLevel  (off/low/high)
  *     // ---- layout / UI sidepanel callbacks (DOM layout stays in sidepanel) ----
  *     setStreamingUiState,               // (isStreaming, { stopping }) => void
  *     showConversationContextNotice,     // (message, autoHideMs) => void
@@ -62,8 +57,6 @@ const STREAM_SLOW_NOTICE_MS = 15000;
  *     removeSuggestions,                 // () => void  (removes + nulls suggestionsNode)
  *     resetConversationView,             // (stateHtml) => void
  *     autosizeInput,                     // () => void
- *     shouldAutoScrollMessagesEnabled,   // () => boolean (shouldAutoScrollMessages)
- *     setShouldAutoScrollMessages,       // (v) => void
  *     // ---- context/transport helpers (AI domain, sidepanel local) ----
  *     ensureCurrentContextForSend,       // () => Promise<boolean | NO_SUBTITLE_SEND_BLOCKED>
  *                                        //    true=放行；false=读取失败；
@@ -74,8 +67,8 @@ const STREAM_SLOW_NOTICE_MS = 15000;
  *     connectPort,                       // () => Promise<chrome.runtime.Port> (name "offscreen-chat"; 先 ensure offscreen 文档)
  *   }
  *
- * @returns {object} method set (all closures; state only via the runtime's own
- *   closure variables — sidepanel queries it with isStreaming() /
+ * @returns {object} method set (all closures; stream state only via the
+ *   runtime's own closure variables — sidepanel queries it with isStreaming() /
  *   hasPendingUserPrompt(), never by reading runtime internals):
  *   {
  *     sendMessage,                 // () => Promise<void>
@@ -92,6 +85,10 @@ const STREAM_SLOW_NOTICE_MS = 15000;
  *     appendUserMessage,           // (text, shouldScroll) => void
  *     createThinkingNode,          // (assistantNode) => HTMLElement|null
  *     appendThinkingText,          // (node, text) => void
+ *     // ---- auto-scroll (flag owned by this closure; sidepanel writes via
+ *     // these narrow entries, flush/finalize read it internally) ----
+ *     setAutoScroll,               // (value) => void  (scroll listener / reset points)
+ *     scrollToBottom,              // (force?) => void
  *     // ---- stream state queries / reset (sidepanel reads runtime state) ----
  *     isStreaming,                 // () => boolean   (activePort !== null)
  *     hasPendingUserPrompt,        // () => boolean   (activeUserPrompt !== "")
@@ -106,26 +103,18 @@ export function createChatRuntime(deps) {
   let thinkingNode = null;
   let streamSlowNoticeTimer = 0;
   let streamFirstTokenReceived = false;
+  // 自动滚动标志（原 sidepanel 模块级 shouldAutoScrollMessages，归位到本闭包）：
+  // scroll 监听与恢复点经 setAutoScroll 写入，token flush / finalize /
+  // error / stopped 的非强制滚动在此读取。
+  let shouldAutoScrollMessages = true;
 
-  // ---- internal helpers (sidepanel-local utilities the chat flow needs) ----
-  function chatHistory() {
-    return deps.getChatHistory();
-  }
-
+  // ---- internal helpers ----
   function setStreamingUiState(isStreaming, { stopping = false } = {}) {
     deps.setStreamingUiState(isStreaming, { stopping });
   }
 
-  function shouldAutoScrollMessages() {
-    return deps.shouldAutoScrollMessagesEnabled();
-  }
-
-  function setShouldAutoScrollMessages(value) {
-    deps.setShouldAutoScrollMessages(value);
-  }
-
   function scrollToBottom(force = false) {
-    if (!force && !shouldAutoScrollMessages()) {
+    if (!force && !shouldAutoScrollMessages) {
       return;
     }
     deps.messages.scrollTop = deps.messages.scrollHeight;
@@ -155,10 +144,10 @@ export function createChatRuntime(deps) {
     if (hasContext !== true) {
       return;
     }
-    const currentMeta = deps.getCurrentConversationMeta();
-    if (!currentMeta?.pinnedContext && currentMeta?.contextKey && currentMeta.contextKey !== deps.getCurrentContextKey()) {
-      deps.setCurrentConversationId("");
-      deps.setCurrentConversationMeta(null);
+    const currentMeta = sidepanelState.currentConversationMeta;
+    if (!currentMeta?.pinnedContext && currentMeta?.contextKey && currentMeta.contextKey !== sidepanelState.currentContextKey) {
+      sidepanelState.currentConversationId = "";
+      sidepanelState.currentConversationMeta = null;
     }
 
     deps.removeCenteredState();
@@ -212,15 +201,15 @@ export function createChatRuntime(deps) {
     port.postMessage({
       action: "chat",
       providerId,
-      thinkingLevel: deps.getThinkingLevel(),
+      thinkingLevel: sidepanelState.aiThinkingLevel,
       context: {
-        ...deps.getContextData(),
-        aiSystemPrompt: deps.getAiPrefs().aiSystemPrompt
+        ...sidepanelState.contextData,
+        aiSystemPrompt: sidepanelState.aiPrefs.aiSystemPrompt
       },
       prompt: text,
       // 历史只走顶层 history（offscreen/ai 侧统一读 msg.history）；
       // 不再向 context 里塞 chatHistory 副本（无任何读取方的死负载）。
-      history: chatHistory()
+      history: sidepanelState.chatHistory
     });
   }
 
@@ -233,7 +222,7 @@ export function createChatRuntime(deps) {
     node.textContent = text;
     deps.messages.appendChild(node);
     if (shouldScroll) {
-      setShouldAutoScrollMessages(true);
+      shouldAutoScrollMessages = true;
       scrollToBottom(true);
     }
   }
@@ -251,7 +240,7 @@ export function createChatRuntime(deps) {
     cursor.className = "sp-msg-cursor";
     node.appendChild(cursor);
     deps.messages.appendChild(node);
-    setShouldAutoScrollMessages(true);
+    shouldAutoScrollMessages = true;
     scrollToBottom(true);
     return node;
   }
@@ -449,8 +438,8 @@ export function createChatRuntime(deps) {
     const raw = getStreamRaw(node);
     renderAssistantMessage(node, raw, { userPrompt: activeUserPrompt });
     if (activeUserPrompt && raw) {
-      chatHistory().push({ role: "user", content: activeUserPrompt });
-      chatHistory().push({ role: "assistant", content: raw });
+      sidepanelState.chatHistory.push({ role: "user", content: activeUserPrompt });
+      sidepanelState.chatHistory.push({ role: "assistant", content: raw });
       activeUserPrompt = "";
       void deps.store.persistCurrent();
     }
@@ -504,8 +493,8 @@ export function createChatRuntime(deps) {
       stopped.textContent = reason || "已停止生成";
       node.appendChild(stopped);
       if (activeUserPrompt) {
-        chatHistory().push({ role: "user", content: activeUserPrompt });
-        chatHistory().push({ role: "assistant", content: raw });
+        sidepanelState.chatHistory.push({ role: "user", content: activeUserPrompt });
+        sidepanelState.chatHistory.push({ role: "assistant", content: raw });
         activeUserPrompt = "";
         void deps.store.persistCurrent();
       }
@@ -632,6 +621,14 @@ export function createChatRuntime(deps) {
   }
 
   // =========================================================================
+  // setAutoScroll — 自动滚动标志的窄写入口（sidepanel scroll 监听与消息区
+  // 重建点调用；appendUserMessage / appendAssistantPlaceholder 直接写闭包）
+  // =========================================================================
+  function setAutoScroll(value) {
+    shouldAutoScrollMessages = Boolean(value);
+  }
+
+  // =========================================================================
   // isStreaming / hasPendingUserPrompt / resetStreamState — state queries and
   // the reset entry point for sidepanel (replaces direct reads of the old
   // module-level variables)
@@ -670,6 +667,8 @@ export function createChatRuntime(deps) {
     appendUserMessage,
     createThinkingNode,
     appendThinkingText,
+    setAutoScroll,
+    scrollToBottom,
     isStreaming,
     hasPendingUserPrompt,
     resetStreamState

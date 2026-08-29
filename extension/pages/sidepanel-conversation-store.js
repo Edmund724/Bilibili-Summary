@@ -2,17 +2,19 @@
 // 会话持久化 + 上下文绑定关注点（sidepanel-split ticket #05）。
 //
 // 本模块从 extension/pages/sidepanel.js 抽出「会话列表的存取、按视频上下文
-// 绑定/恢复、增删改」这条关注点。它通过 `createConversationStore(deps)` 工厂
-// 接收全部所需状态访问与副作用回调，从而**绝不直接读取** sidepanel 的模块级
-// 全局（`currentConversationMeta`/`contextData`/`chatHistory`/`savedConversations`
-// /`currentConversationId`/`currentContextKey`/`liveContextData`/`liveContextKey`）。
-// 所有状态都经由 deps 的 getter/setter 注入；UI/transport 副作用也经由回调注入。
+// 绑定/恢复、增删改」这条关注点。会话状态本体（savedConversations /
+// currentConversationId / currentConversationMeta / chatHistory / contextData /
+// currentContextKey / liveContextData / liveContextKey）收拢在
+// ./sidepanel-state.js 的 sidepanelState，本模块直接 import 读写（后续收拢：
+// 原 deps 里的 14 个状态 getter/setter 访问器已删）；deps 只剩 UI/transport
+// 回调、storage 抽象与常量。
 //
 // 纯函数（`needsConversationPageHydration`）直接 export，可在无 store 实例时测试。
 // 工厂返回的窄接口仅暴露 sidepanel 真正调用的方法。
 //
 // 依赖方向（无环）：
 //   sidepanel-conversation-store.js → ../ai/conversation.js（纯函数）
+//   sidepanel-conversation-store.js → ./sidepanel-state.js（共享可变状态叶子）
 // sidepanel.js 不在本模块的 import 图中。
 
 import {
@@ -28,6 +30,7 @@ import {
   MAX_SAVED_CONVERSATIONS
 } from "../ai/conversation.js";
 import { extractPageIndexFromUrl } from "../bilibili/video-id-shared.js";
+import { sidepanelState } from "./sidepanel-state.js";
 
 // ---------------------------------------------------------------------------
 // 纯函数（直接 export，无需 store 实例即可测试）
@@ -69,27 +72,18 @@ export function needsConversationPageHydration(conversation) {
 // ---------------------------------------------------------------------------
 
 /**
- * 创建一个对话存储编排器。所有状态访问/副作用通过 deps 注入，store 自身
- * 不持有任何可变状态，也不读取任何 sidepanel 模块级全局。
+ * 创建一个对话存储编排器。会话状态直接读写 sidepanelState（./sidepanel-state.js），
+ * deps 只注入 UI/transport 回调、storage 抽象与常量；store 自身不持有可变状态。
  *
- * deps 形状（全部必填，由 sidepanel 在构造时绑定）：
- *   状态 getter/setter（映射 sidepanel 的 8 个模块级变量）：
- *     getSavedConversations, setSavedConversations
- *     getCurrentConversationId, setCurrentConversationId
- *     getCurrentConversationMeta, setCurrentConversationMeta
- *     getChatHistory, setChatHistory
- *     getContextData, setContextData
- *     getCurrentContextKey, setCurrentContextKey
- *     getLiveContextData, getLiveContextKey
- *   UI/transport 回调（留在 sidepanel，DOM 渲染不进 store）：
- *     renderHistoryList, renderInitialState, updateContextChip
- *     showConversationContextNotice(message, autoHideMs?)
- *     showConversationContextError(message)
- *     removeConversationContextNotice()
- *     hideHistoryPopover()
- *     loadContextState({ forceRefresh?, silent? }) → Promise<boolean|object>
- *     getActiveTab() → Promise<object|null>
- *     sendRuntimeMessage(message, opts?) → Promise<object>
+ * deps 形状（UI/transport 回调，由 sidepanel 在构造时绑定）：
+ *   renderHistoryList, renderInitialState, updateContextChip
+ *   showConversationContextNotice(message, autoHideMs?)
+ *   showConversationContextError(message)
+ *   removeConversationContextNotice()
+ *   hideHistoryPopover()
+ *   loadContextState({ forceRefresh?, silent? }) → Promise<boolean|object>
+ *   getActiveTab() → Promise<object|null>
+ *   sendRuntimeMessage(message, opts?) → Promise<object>
  *   存储抽象（默认 chrome.storage.local）：
  *     storage = { get(keys) → Promise<object>, set(obj) → Promise<void> }
  *   常量（与 sidepanel 原局部常量保持一致）：
@@ -115,24 +109,9 @@ export function needsConversationPageHydration(conversation) {
  */
 export function createConversationStore(deps) {
   // 解构全部依赖，缺省取合理默认（storage 默认 chrome.storage.local，常量默认与
-  // sidepanel 原局部常量一致）。任何未提供的 getter/setter/回调在使用时会抛出
-  // 明确错误，避免静默读取 sidepanel 全局。
+  // sidepanel 原局部常量一致）。任何未提供的回调在使用时会抛出明确错误，
+  // 避免静默调用 undefined。
   const {
-    // 状态 getter/setter
-    getSavedConversations,
-    setSavedConversations,
-    getCurrentConversationId,
-    setCurrentConversationId,
-    getCurrentConversationMeta,
-    setCurrentConversationMeta,
-    getChatHistory,
-    setChatHistory,
-    getContextData,
-    setContextData,
-    getCurrentContextKey,
-    setCurrentContextKey,
-    getLiveContextData,
-    getLiveContextKey,
     // UI/transport 回调
     renderHistoryList,
     renderInitialState,
@@ -158,12 +137,12 @@ export function createConversationStore(deps) {
     return value;
   }
 
-  // ---- 读取/写入状态的薄封装（语义与 sidepanel 原直读全局一致） ----
+  // ---- 读取/写入会话状态的薄封装（状态本体在 sidepanelState） ----
   function saved() {
-    return getSavedConversations();
+    return sidepanelState.savedConversations;
   }
   function commitSaved(next) {
-    setSavedConversations(next);
+    sidepanelState.savedConversations = next;
   }
 
   // ===========================================================================
@@ -236,17 +215,17 @@ export function createConversationStore(deps) {
       return;
     }
 
-    const currentId = getCurrentConversationId();
+    const currentId = sidepanelState.currentConversationId;
     if (currentId) {
       const activeConversation = conversations.find((item) => item.id === currentId);
       if (activeConversation) {
-        setCurrentConversationMeta({
-          ...getCurrentConversationMeta(),
+        sidepanelState.currentConversationMeta = {
+          ...sidepanelState.currentConversationMeta,
           title: activeConversation.title,
           contextKey: activeConversation.contextKey,
           contextUrl: activeConversation.contextUrl,
           contextRef: activeConversation.contextRef
-        });
+        };
       }
     }
     requireDep("renderHistoryList", renderHistoryList)();
@@ -270,14 +249,14 @@ export function createConversationStore(deps) {
   // restoreLatestConversationForCurrentContext
   // ===========================================================================
   async function restoreLatest() {
-    const targetContextKey = getLiveContextKey() || getCurrentContextKey();
-    const currentRef = getLiveContextData() || getContextData();
+    const targetContextKey = sidepanelState.liveContextKey || sidepanelState.currentContextKey;
+    const currentRef = sidepanelState.liveContextData || sidepanelState.contextData;
     const conversations = saved();
     const latest = conversations.find((item) => doesConversationMatchCurrentContext(item, currentRef, targetContextKey));
     if (!latest) {
-      setCurrentConversationId("");
-      setCurrentConversationMeta(null);
-      setChatHistory([]);
+      sidepanelState.currentConversationId = "";
+      sidepanelState.currentConversationMeta = null;
+      sidepanelState.chatHistory = [];
       return false;
     }
     apply(latest);
@@ -291,8 +270,8 @@ export function createConversationStore(deps) {
     if (!conversation) {
       return;
     }
-    setCurrentConversationId(conversation.id);
-    setCurrentConversationMeta({
+    sidepanelState.currentConversationId = conversation.id;
+    sidepanelState.currentConversationMeta = {
       id: conversation.id,
       title: conversation.title,
       createdAt: conversation.createdAt,
@@ -304,24 +283,23 @@ export function createConversationStore(deps) {
       pinnedContext: true,
       contextRef: conversation.contextRef || null,
       resolvedContext: null
-    });
-    setChatHistory(
+    };
+    sidepanelState.chatHistory =
       Array.isArray(conversation.messages)
         ? conversation.messages.map((item) => ({ role: item.role, content: String(item.content || "") }))
-        : []
-    );
-    const liveData = getLiveContextData();
-    const liveKey = getLiveContextKey();
+        : [];
+    const liveData = sidepanelState.liveContextData;
+    const liveKey = sidepanelState.liveContextKey;
     if (liveData && conversation.contextKey && conversation.contextKey === liveKey) {
-      setContextData({ ...liveData });
-      setCurrentContextKey(liveKey);
-      setCurrentConversationMeta({
-        ...getCurrentConversationMeta(),
+      sidepanelState.contextData = { ...liveData };
+      sidepanelState.currentContextKey = liveKey;
+      sidepanelState.currentConversationMeta = {
+        ...sidepanelState.currentConversationMeta,
         resolvedContext: { ...liveData }
-      });
+      };
     } else if (conversation.contextRef) {
-      setContextData(buildContextPlaceholder(conversation.contextRef));
-      setCurrentContextKey(conversation.contextKey || buildContextKey(getContextData()));
+      sidepanelState.contextData = buildContextPlaceholder(conversation.contextRef);
+      sidepanelState.currentContextKey = conversation.contextKey || buildContextKey(sidepanelState.contextData);
     }
     requireDep("updateContextChip", updateContextChip)();
     requireDep("renderHistoryList", renderHistoryList)();
@@ -337,7 +315,7 @@ export function createConversationStore(deps) {
     }
     apply(conversation);
     requireDep("renderInitialState", renderInitialState)();
-    if (conversation.contextKey && conversation.contextKey !== getLiveContextKey()) {
+    if (conversation.contextKey && conversation.contextKey !== sidepanelState.liveContextKey) {
       requireDep("showConversationContextNotice", showConversationContextNotice)("正在加载原视频上下文...");
       void hydratePinned({ silent: true });
     }
@@ -347,20 +325,20 @@ export function createConversationStore(deps) {
   // deleteConversation
   // ===========================================================================
   async function deleteById(id) {
-    const wasCurrent = id && id === getCurrentConversationId();
+    const wasCurrent = id && id === sidepanelState.currentConversationId;
     const next = saved().filter((item) => item.id !== id);
     commitSaved(next);
     await saveConversations();
     if (!wasCurrent) {
       return;
     }
-    setCurrentConversationId("");
-    setCurrentConversationMeta(null);
-    setChatHistory([]);
-    const liveData = getLiveContextData();
+    sidepanelState.currentConversationId = "";
+    sidepanelState.currentConversationMeta = null;
+    sidepanelState.chatHistory = [];
+    const liveData = sidepanelState.liveContextData;
     if (liveData) {
-      setContextData({ ...liveData });
-      setCurrentContextKey(getLiveContextKey() || buildContextKey(liveData));
+      sidepanelState.contextData = { ...liveData };
+      sidepanelState.currentContextKey = sidepanelState.liveContextKey || buildContextKey(liveData);
       requireDep("updateContextChip", updateContextChip)();
     }
     requireDep("renderInitialState", renderInitialState)();
@@ -377,15 +355,15 @@ export function createConversationStore(deps) {
       return;
     }
     commitSaved([]);
-    setCurrentConversationId("");
-    setCurrentConversationMeta(null);
-    setChatHistory([]);
+    sidepanelState.currentConversationId = "";
+    sidepanelState.currentConversationMeta = null;
+    sidepanelState.chatHistory = [];
     await saveConversations();
     requireDep("hideHistoryPopover", hideHistoryPopover)();
-    const liveData = getLiveContextData();
+    const liveData = sidepanelState.liveContextData;
     if (liveData) {
-      setContextData({ ...liveData });
-      setCurrentContextKey(getLiveContextKey() || buildContextKey(liveData));
+      sidepanelState.contextData = { ...liveData };
+      sidepanelState.currentContextKey = sidepanelState.liveContextKey || buildContextKey(liveData);
       requireDep("updateContextChip", updateContextChip)();
     }
     requireDep("renderInitialState", renderInitialState)();
@@ -395,22 +373,22 @@ export function createConversationStore(deps) {
   // persistCurrentConversation
   // ===========================================================================
   async function persistCurrent() {
-    const chat = getChatHistory();
-    const context = getContextData();
+    const chat = sidepanelState.chatHistory;
+    const context = sidepanelState.contextData;
     if (!chat.length || !context) {
       return;
     }
     const now = Date.now();
-    let currentId = getCurrentConversationId();
-    let meta = getCurrentConversationMeta();
+    let currentId = sidepanelState.currentConversationId;
+    let meta = sidepanelState.currentConversationMeta;
     if (!currentId) {
       currentId = generateConversationId();
-      setCurrentConversationId(currentId);
+      sidepanelState.currentConversationId = currentId;
       meta = {
         id: currentId,
         title: buildConversationTitle(context),
         createdAt: now,
-        contextKey: getCurrentContextKey(),
+        contextKey: sidepanelState.currentContextKey,
         contextTitle: String(context.title || "").trim(),
         contextUrl: String(context.url || "").trim(),
         isVideoContext: context.isVideoContext !== false,
@@ -418,12 +396,12 @@ export function createConversationStore(deps) {
         contextRef: buildAiContextRef(context),
         resolvedContext: { ...context }
       };
-      setCurrentConversationMeta(meta);
+      sidepanelState.currentConversationMeta = meta;
     }
     const nextConversation = {
       id: currentId,
       title: meta?.title || buildConversationTitle(context),
-      contextKey: String(meta?.contextKey || getCurrentContextKey() || "").trim(),
+      contextKey: String(meta?.contextKey || sidepanelState.currentContextKey || "").trim(),
       contextTitle: String(meta?.contextTitle || context.title || "").trim(),
       contextUrl: String(meta?.contextUrl || context.url || "").trim(),
       isVideoContext: meta?.isVideoContext !== false,
@@ -434,7 +412,7 @@ export function createConversationStore(deps) {
     };
     const filtered = saved().filter((item) => item.id !== currentId);
     commitSaved([nextConversation, ...filtered]);
-    setCurrentConversationMeta({
+    sidepanelState.currentConversationMeta = {
       id: nextConversation.id,
       title: nextConversation.title,
       createdAt: nextConversation.createdAt,
@@ -446,7 +424,7 @@ export function createConversationStore(deps) {
       pinnedContext: true,
       contextRef: nextConversation.contextRef,
       resolvedContext: meta?.resolvedContext ? { ...meta.resolvedContext } : { ...context }
-    });
+    };
     await saveConversations();
   }
 
@@ -454,34 +432,34 @@ export function createConversationStore(deps) {
   // hydratePinnedConversationContext
   // ===========================================================================
   async function hydratePinned({ silent = false } = {}) {
-    let meta = getCurrentConversationMeta();
+    let meta = sidepanelState.currentConversationMeta;
     const targetKey = String(meta?.contextKey || "").trim();
     const cachedResolvedContext = meta?.resolvedContext;
     if (cachedResolvedContext && typeof cachedResolvedContext === "object") {
-      setContextData({ ...cachedResolvedContext });
-      setCurrentContextKey(targetKey || buildContextKey(getContextData()));
+      sidepanelState.contextData = { ...cachedResolvedContext };
+      sidepanelState.currentContextKey = targetKey || buildContextKey(sidepanelState.contextData);
       requireDep("updateContextChip", updateContextChip)();
       requireDep("removeConversationContextNotice", removeConversationContextNotice)();
       return true;
     }
 
-    if (targetKey && getLiveContextKey() && targetKey === getLiveContextKey()) {
+    if (targetKey && sidepanelState.liveContextKey && targetKey === sidepanelState.liveContextKey) {
       const ok = await requireDep("loadContextState", loadContextState)({ forceRefresh: false, silent: true });
-      const context = getContextData();
+      const context = sidepanelState.contextData;
       if (ok && context) {
-        setCurrentContextKey(targetKey);
-        meta = getCurrentConversationMeta();
-        setCurrentConversationMeta({
+        sidepanelState.currentContextKey = targetKey;
+        meta = sidepanelState.currentConversationMeta;
+        sidepanelState.currentConversationMeta = {
           ...meta,
           resolvedContext: { ...context }
-        });
+        };
         requireDep("updateContextChip", updateContextChip)();
         requireDep("removeConversationContextNotice", removeConversationContextNotice)();
         return true;
       }
     }
 
-    const contextRef = getCurrentConversationMeta()?.contextRef || null;
+    const contextRef = sidepanelState.currentConversationMeta?.contextRef || null;
     if (!contextRef) {
       requireDep("removeConversationContextNotice", removeConversationContextNotice)();
       if (!silent) {
@@ -503,17 +481,17 @@ export function createConversationStore(deps) {
     }
 
     const resolved = response.payload;
-    setContextData(resolved);
-    setCurrentContextKey(targetKey || buildContextKey(resolved));
-    meta = getCurrentConversationMeta();
-    setCurrentConversationMeta({
+    sidepanelState.contextData = resolved;
+    sidepanelState.currentContextKey = targetKey || buildContextKey(resolved);
+    meta = sidepanelState.currentConversationMeta;
+    sidepanelState.currentConversationMeta = {
       ...meta,
-      contextKey: getCurrentContextKey(),
+      contextKey: sidepanelState.currentContextKey,
       contextTitle: String(resolved.title || meta?.contextTitle || "").trim(),
       contextUrl: String(resolved.url || meta?.contextUrl || "").trim(),
       contextRef: buildAiContextRef(resolved),
       resolvedContext: { ...resolved }
-    });
+    };
     requireDep("updateContextChip", updateContextChip)();
     requireDep("removeConversationContextNotice", removeConversationContextNotice)();
     return true;

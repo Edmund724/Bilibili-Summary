@@ -2,6 +2,10 @@
 // 验证 appendToken 在流式期间就渲染 markdown 结构（换行/缩进/列表），
 // 且渲染出的节点始终保留光标 span（sp-msg-cursor）在内容之后；
 // 以及流式累加器（thinking 头缓冲 / token { base, pending }）的显示语义。
+//
+// 注意：chat-runtime 直接读写 sidepanelState（./sidepanel-state.js）。测试在
+// beforeEach 里 resetModules 后把两个模块放进同一模块纪元导入（跨纪元会拿到
+// 两个不同的 state 单例），并在每个用例前手动重置会用到的字段。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
@@ -9,6 +13,7 @@ import { normalizeMarkdownForSectionPaste } from "../../extension/notes/paste.js
 import { renderMarkdown } from "../../extension/ui/markdown.js";
 
 let createChatRuntime;
+let sidepanelState;
 
 function makeDeps() {
   const messages = document.createElement("div");
@@ -18,14 +23,6 @@ function makeDeps() {
     input,
     stopBtn: null,
     store: { persistCurrent: vi.fn(async () => {}) },
-    getChatHistory: () => [],
-    getCurrentConversationMeta: () => null,
-    setCurrentConversationMeta: vi.fn(),
-    getCurrentContextKey: () => "",
-    setCurrentConversationId: vi.fn(),
-    getContextData: () => ({}),
-    getAiPrefs: () => ({ aiSystemPrompt: "" }),
-    getThinkingLevel: () => "off",
     setStreamingUiState: vi.fn(),
     showConversationContextNotice: vi.fn(),
     removeConversationContextNotice: vi.fn(),
@@ -35,8 +32,6 @@ function makeDeps() {
     removeSuggestions: vi.fn(),
     resetConversationView: vi.fn(),
     autosizeInput: vi.fn(),
-    shouldAutoScrollMessagesEnabled: () => true,
-    setShouldAutoScrollMessages: vi.fn(),
     ensureCurrentContextForSend: vi.fn(async () => true),
     getProviderId: () => "test-provider",
     getTimestampNavDeps: () => ({}),
@@ -48,7 +43,15 @@ function makeDeps() {
 beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
-  createChatRuntime = (await import("../../extension/pages/sidepanel-chat-runtime.js")).createChatRuntime;
+  // 同一模块纪元内新鲜导入（先 resetModules 再 import，两个模块同图解析）：
+  ({ createChatRuntime } = await import("../../extension/pages/sidepanel-chat-runtime.js"));
+  ({ sidepanelState } = await import("../../extension/pages/sidepanel-state.js"));
+  // sidepanelState 是模块级单例，手动重置本文件用到的字段
+  sidepanelState.contextData = null;
+  sidepanelState.currentContextKey = "";
+  sidepanelState.chatHistory = [];
+  sidepanelState.currentConversationId = "";
+  sidepanelState.currentConversationMeta = null;
 });
 
 afterEach(() => {
@@ -173,9 +176,7 @@ describe("appendThinkingText 流式思考文本", () => {
 
 describe("appendToken 累加器与 finalize 全量文本", () => {
   it("多次 flush 后 finalize 拿到的全量文本与逐 token 拼接一致（含未 flush 的 pending）", async () => {
-    const history = [];
     const deps = makeDeps();
-    deps.getChatHistory = () => history;
     deps.input.value = "帮我写个标题";
     const messageListeners = [];
     const port = {
@@ -221,8 +222,8 @@ describe("appendToken 累加器与 finalize 全量文本", () => {
 
     // 累加器已不在 DOM 上（dataset.raw 撤下）
     expect(node.dataset.raw).toBeUndefined();
-    expect(history[0]).toEqual({ role: "user", content: "帮我写个标题" });
-    expect(history[1]).toEqual({ role: "assistant", content: fullText });
+    expect(sidepanelState.chatHistory[0]).toEqual({ role: "user", content: "帮我写个标题" });
+    expect(sidepanelState.chatHistory[1]).toEqual({ role: "assistant", content: fullText });
     expect(node.querySelector(".sp-msg-assistant-body").innerHTML).toBe(renderMarkdown(fullText));
   });
 });
@@ -233,19 +234,17 @@ describe("sendMessage 无字幕拦截的提前返回", () => {
   // 不落 chatHistory、不发起 offscreen port、不进入流式 UI 状态。
   // notice 文案本身由 sidepanel（ensureCurrentContextForSend 调用方）负责。
   function makeSendDeps(ensureResult) {
-    const history = [];
     const deps = makeDeps();
-    deps.getChatHistory = () => history;
     deps.input.value = "总结一下这个视频";
     deps.connectPort = vi.fn(async () => {
       throw new Error("不应发起 port");
     });
     deps.ensureCurrentContextForSend = vi.fn(async () => ensureResult);
-    return { deps, history };
+    return { deps };
   }
 
   it("NO_SUBTITLE_SEND_BLOCKED（无字幕拦截）：不追加消息、不清输入、不发起 port", async () => {
-    const { deps, history } = makeSendDeps("no-subtitle-send-blocked");
+    const { deps } = makeSendDeps("no-subtitle-send-blocked");
     const runtime = createChatRuntime(deps);
 
     await runtime.sendMessage();
@@ -256,24 +255,22 @@ describe("sendMessage 无字幕拦截的提前返回", () => {
     expect(deps.messages.querySelector(".sp-msg-assistant")).toBeNull();
     expect(deps.input.value).toBe("总结一下这个视频");
     expect(deps.setStreamingUiState).not.toHaveBeenCalledWith(true, expect.anything());
-    expect(history).toEqual([]);
+    expect(sidepanelState.chatHistory).toEqual([]);
   });
 
   it("false（上下文读取失败）：同样提前返回，行为与拦截一致", async () => {
-    const { deps, history } = makeSendDeps(false);
+    const { deps } = makeSendDeps(false);
     const runtime = createChatRuntime(deps);
 
     await runtime.sendMessage();
 
     expect(deps.connectPort).not.toHaveBeenCalled();
     expect(deps.messages.querySelector(".sp-msg-user")).toBeNull();
-    expect(history).toEqual([]);
+    expect(sidepanelState.chatHistory).toEqual([]);
   });
 
   it("true（放行）：照常追加用户消息并发起 port（非 empty 不受影响）", async () => {
-    const history = [];
     const deps = makeDeps();
-    deps.getChatHistory = () => history;
     deps.input.value = "总结一下这个视频";
     const messageListeners = [];
     const port = {
