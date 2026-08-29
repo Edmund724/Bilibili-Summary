@@ -4,6 +4,8 @@
 // extension/asr/asr-provider-store.js（语音转写平台）原本互为镜像：
 // 本工厂提取两者共享的列表 CRUD 结构，两个模块退化为只传 storage key
 // 与 normalizeProvider 的薄适配层。只与 chrome.storage 交互，不涉及消息路由。
+// 另承载两平台探针（ai-provider-store / asr-provider-store）共用的错误文案
+// 拼装 helper，保证 AI/ASR 连通性测试的文案逐字一致。
 //
 // 存储布局（不变式，两个平台一致）：provider 列表持久化在 chrome.storage.sync，
 // API Key 单独存放在 chrome.storage.local —— apiKey 永不进同步列表：写回 sync
@@ -93,4 +95,21 @@ export function createProviderStore({ listStorageKey, keysStorageKey, normalizeP
   }
 
   return { loadKeys, getKey, saveKey, loadProviders, saveProviders, deleteProvider };
+}
+
+// ===== 探针错误文案拼装（AI / ASR 探针共享） =====
+
+// 探针网络层失败的文案。error?.message || error 兜底照顾非 Error 抛出物
+//（字符串、对象）。文案逐字节冻结：tests 断言「无法连接」。
+export function formatProbeConnectionError(error) {
+  return `无法连接：${error?.message || error}`;
+}
+
+// 探针非 2xx 的文案：附响应体前 200 字符；响应体读取失败时无 detail。
+export async function formatProbeHttpError(response) {
+  let detail = "";
+  try {
+    detail = (await response.text()).slice(0, 200);
+  } catch {}
+  return `HTTP ${response.status}${detail ? `: ${detail}` : ""}`;
 }

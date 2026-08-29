@@ -91,17 +91,18 @@ beforeEach(() => {
   clipState.setSubtitles([]);
   clipState.setSubtitleBody([]);
   clipState.setSubtitleFetchState("idle");
-  // provider 元数据（无 Key）经设置快照供页面侧取用；Key 组装在 offscreen
+  // ASR 标量设置经设置快照供页面侧取用；provider 元数据（无 Key）走注入的
+  // loadProviders（provider 列表，asrProviders 已摘出 settings），Key 组装在 offscreen
   state.settings = {
     ...state.settings,
     asrAutoFallback: true,
     activeAsrProviderId: "p1",
-    asrProviders: [PROVIDER],
     asrLanguage: "auto"
   };
 
   deps = {
     getSettings: vi.fn(async () => state.settings),
+    loadProviders: vi.fn(async () => [PROVIDER]),
     setStatus: vi.fn(),
     setMessage: vi.fn(),
     applyNoSubtitleState: vi.fn(),

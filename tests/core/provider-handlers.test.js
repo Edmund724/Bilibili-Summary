@@ -241,11 +241,14 @@ describe("test（嵌套 provider 装配，ASR 家族覆写）", () => {
 function makeRuntimeDeps(overrides = {}) {
   return {
     getMergedSettings: vi.fn(async () => ({
-      asrProviders: [{ id: "p1", type: "openai-transcriptions", name: "本地 Whisper", model: "whisper-large-v3" }],
       activeAsrProviderId: " p1 ",
       asrLanguage: "auto",
       asrAutoFallback: true
     })),
+    // provider 列表直读 provider-store（asrProviders 已摘出 settings）
+    loadProviders: vi.fn(async () => [
+      { id: "p1", type: "openai-transcriptions", name: "本地 Whisper", model: "whisper-large-v3" }
+    ]),
     getAsrProviderKey: vi.fn(async () => "sk-local"),
     ...overrides
   };
@@ -266,7 +269,8 @@ describe("get-asr-runtime-config（createAsrRuntimeConfigHandler）", () => {
       asrLanguage: "auto",
       asrAutoFallback: true
     });
-    // Key 单查只针对激活平台 id（trim 后），列表不附带任何 Key 材料
+    // 列表直读 provider-store；Key 单查只针对激活平台 id（trim 后）
+    expect(deps.loadProviders).toHaveBeenCalledTimes(1);
     expect(deps.getAsrProviderKey).toHaveBeenCalledTimes(1);
     expect(deps.getAsrProviderKey).toHaveBeenCalledWith("p1");
   });
@@ -274,11 +278,11 @@ describe("get-asr-runtime-config（createAsrRuntimeConfigHandler）", () => {
   it("无激活平台时不读 Key 存储，activeKey 为空串", async () => {
     const deps = makeRuntimeDeps({
       getMergedSettings: vi.fn(async () => ({
-        asrProviders: [],
         activeAsrProviderId: "",
         asrLanguage: "zh",
         asrAutoFallback: false
-      }))
+      })),
+      loadProviders: vi.fn(async () => [])
     });
     const handler = createAsrRuntimeConfigHandler(deps);
     const { sendResponse, response } = makeChannel();

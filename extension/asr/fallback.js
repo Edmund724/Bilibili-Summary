@@ -7,8 +7,10 @@
 //   - 直 import（传递 import 闭包不触及 subtitle/fetcher.js）：shared/
 //     error-helpers、shared/logging、core/state、subtitle/cache、subtitle/selection；
 //   - 注入 deps（传递闭包含 runtime.js→fetcher 或随 UI/上下文成环）：
-//     getSettings、setStatus、setMessage、applyNoSubtitleState、
-//     refreshDerivedContent、isReaderViewOpen、notifyReaderPresenter、
+//     getSettings、loadProviders（provider 列表，asrProviders 已摘出 settings，
+//     fetcher 经 asr-providers-list 消息直读 provider-store）、setStatus、
+//     setMessage、applyNoSubtitleState、refreshDerivedContent、
+//     isReaderViewOpen、notifyReaderPresenter、
 //     runAsrPipeline（pipeline 闭包经 offscreen-bridge.page →core/runtime→fetcher）、
 //     broadcastSubtitleStatus（fetcher 内部函数）。
 // 模块不 import extension/entry/ 与 extension/pages/ 的任何内容。
@@ -45,6 +47,7 @@ function noSubtitleReasonFromAsrSkipError(error) {
 export function createAsrFallback(deps) {
   const {
     getSettings,
+    loadProviders,
     setStatus,
     setMessage,
     applyNoSubtitleState,
@@ -102,11 +105,13 @@ export function createAsrFallback(deps) {
       }
 
       // provider 元数据（name/model，无 Key——Key 单独存储、组装在 offscreen）
-      // 从设置快照取，仅用于平台名展示与缓存键；激活平台不在列表中 → skip。
-      // 转写所需的完整 provider+Key+语言由 offscreen 直调 background 的
-      // get-asr-runtime-config 获取（配置级缺失/关闭时 offscreen 回 asr-skip，
-      // 由下方 catch 静默跳过），apiKey 不再进页面 context。
-      const activeProvider = (settings.asrProviders || []).find((p) => p.id === activeId);
+      // 从 provider-store 列表取（注入的 loadProviders），仅用于平台名展示与
+      // 缓存键；激活平台不在列表中 → skip。转写所需的完整 provider+Key+语言由
+      // offscreen 直调 background 的 get-asr-runtime-config 获取（配置级缺失/
+      // 关闭时 offscreen 回 asr-skip，由下方 catch 静默跳过），apiKey 不再进
+      // 页面 context。
+      const providers = await loadProviders();
+      const activeProvider = (Array.isArray(providers) ? providers : []).find((p) => p.id === activeId);
       if (!activeProvider) {
         clipState.setNoSubtitleReason("no-asr-config");
         return "skip";

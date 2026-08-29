@@ -74,7 +74,7 @@ describe("normalizeSettings 是唯一归一化路径", () => {
       aiSystemPrompt: LEGACY_DEFAULT_AI_SYSTEM_PROMPT,
       aiThinkingLevel: "bogus",
       readerFontScale: "not-a-scale",
-      asrProviders: "not-an-array"
+      unknownKey: "passthrough"
     };
     syncGetMock.mockImplementation(async (defaults) => ({ ...defaults, ...stored }));
 

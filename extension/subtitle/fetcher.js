@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import { normalizeDownloadFormat } from "../core/validators.js";
 import { state, clipState } from "../core/state.js";
 import { extractBvid, computeCurrentClipSignature } from "../bilibili/video-id-shared.js";
-import { getSettings } from "../core/runtime.js";
+import { getSettings, sendRuntimeMessage } from "../core/runtime.js";
 import { byId } from "../shared/dom-utils.js";
 import { ensureRunActive, isStaleRunError, getErrorMessage, toReadableText, isRetryableNetworkError, retryAsync } from "../shared/error-helpers.js";
 import { logInfo, logWarn } from "../shared/logging.js";
@@ -482,12 +482,26 @@ function broadcastSubtitleStatus(phase) {
   }
 }
 
+// ASR provider 列表（provider 元数据，无 Key）经 background 的 asr-providers-list
+// 读取：asrProviders 已从 settings 快照摘除（save-settings 白名单不再落盘该键，
+// 写回收口在 asr-providers-save），页面侧不碰 chrome.storage provider 存储。
+// 消息失败按空列表降级：回退入口据此走 no-asr-config skip，与旧行为一致。
+async function loadAsrProviderList() {
+  try {
+    const resp = await sendRuntimeMessage({ type: "asr-providers-list" });
+    return Array.isArray(resp?.providers) ? resp.providers : [];
+  } catch {
+    return [];
+  }
+}
+
 // ASR 回退策略簇（skip 闸门 / 缓存命中 / 并发共享去重 / 转写 / 收尾）已整体
 // 迁至 asr/fallback.js（工厂 createAsrFallback，进行中的转写共享单元闭包在
 // 工厂层）。此处注入运行时与 UI 依赖完成薄接线；broadcastSubtitleStatus 为
 // 本模块内部函数（refreshClip 也在用），作为注入依赖传入。
 const asrFallback = createAsrFallback({
   getSettings,
+  loadProviders: loadAsrProviderList,
   setStatus,
   setMessage,
   applyNoSubtitleState,

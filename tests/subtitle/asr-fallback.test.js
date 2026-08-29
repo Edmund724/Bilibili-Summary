@@ -1,15 +1,16 @@
 // asr/fallback.js 的 ASR 回退策略簇回归测试（直测 createAsrFallback 工厂）。
 // 依赖注入 seam：cache/cache-lru 直 import 真实模块，跑在测试内构造的内存版
 // chrome.storage.local（Map 承载，支持 get(null) 全量枚举）之上；runAsrPipeline、
-// getSettings 与 UI 回调（setStatus / setMessage / applyNoSubtitleState /
-// refreshDerivedContent / isReaderViewOpen / notifyReaderPresenter /
-// broadcastSubtitleStatus）全部为测试内构造的假依赖。不经 vi.mock 间接测
-// fetcher 内部。
-// provider 元数据（name/model/language）从设置快照取（Key 不再进页面——组装
-// 移到 offscreen）；重点断言：skip 闸门（开关关 / 无激活平台 / 平台不在设置
-// 列表 / offscreen asr-skip）、缓存命中（时长校验过 → done；不过 → 清缓存重生
-// 成）、空结果诊断、错误路径（asr-failed 广播 + applyNoSubtitleState）、成功路
-// 径（写缓存 + clearStaleAsrSubtitleCache 孤儿清理 + 伪轨道收尾）、stale run。
+// getSettings、loadProviders（provider 列表，provider-store 形状）与 UI 回调
+// （setStatus / setMessage / applyNoSubtitleState / refreshDerivedContent /
+// isReaderViewOpen / notifyReaderPresenter / broadcastSubtitleStatus）全部为
+// 测试内构造的假依赖。不经 vi.mock 间接测 fetcher 内部。
+// provider 元数据（name/model）经注入的 loadProviders 取（asrProviders 已摘出
+// settings——列表归 provider-store，Key 不再进页面——组装移到 offscreen）；
+// 重点断言：skip 闸门（开关关 / 无激活平台 / 平台不在 provider 列表 / offscreen
+// asr-skip）、缓存命中（时长校验过 → done；不过 → 清缓存重新生成）、空结果诊
+// 断、错误路径（asr-failed 广播 + applyNoSubtitleState）、成功路径（写缓存 +
+// clearStaleAsrSubtitleCache 孤儿清理 + 伪轨道收尾）、stale run。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
@@ -87,6 +88,7 @@ async function seedCache(key, body) {
 function buildDeps(overrides = {}) {
   return {
     getSettings: vi.fn(async () => state.settings),
+    loadProviders: vi.fn(async () => [PROVIDER]),
     setStatus: vi.fn(),
     setMessage: vi.fn(),
     applyNoSubtitleState: vi.fn(),
@@ -114,12 +116,11 @@ beforeEach(() => {
   clipState.setSubtitles([]);
   clipState.setSubtitleBody([]);
   clipState.setSubtitleFetchState("idle");
-  // provider 元数据（无 Key）经设置快照供页面侧取用：缓存键/平台名来源
+  // ASR 标量设置经设置快照供页面侧取用；provider 元数据走注入的 loadProviders
   state.settings = {
     ...state.settings,
     asrAutoFallback: true,
     activeAsrProviderId: "p1",
-    asrProviders: [PROVIDER],
     asrLanguage: "auto"
   };
 
@@ -164,8 +165,8 @@ describe("maybeRunAsrFallback skip 闸门", () => {
     expect(clipState.noSubtitleReason).toBe("no-asr-config");
   });
 
-  it("激活平台 id 不在设置快照的 asrProviders 列表中：返回 skip", async () => {
-    state.settings.asrProviders = [{ id: "other", type: "openai-transcriptions", name: "其他" }];
+  it("激活平台 id 不在 provider 列表（loadProviders）中：返回 skip", async () => {
+    deps.loadProviders.mockResolvedValue([{ id: "other", type: "openai-transcriptions", name: "其他" }]);
 
     const result = await fallback.maybeRunAsrFallback({ runId: RUN_ID });
 
@@ -238,7 +239,7 @@ describe("maybeRunAsrFallback 成功与缓存", () => {
     expect(result).toBe("done");
     expect(deps.runAsrPipeline).toHaveBeenCalledTimes(1);
     // 页面侧不再传 provider/Key/durationSec（provider+Key 组装移到 offscreen）；
-    // 语言档位/模型来自设置快照，只体现为缓存键
+    // 语言档位来自设置快照、模型来自 provider 列表，只体现为缓存键
     const pipelineArgs = deps.runAsrPipeline.mock.calls[0][0];
     expect(pipelineArgs).toEqual(
       expect.objectContaining({

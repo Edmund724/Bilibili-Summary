@@ -5,12 +5,13 @@
 // 全局设置（reader/AI/ASR/下载域）的归一化与读写已拆到 settings-store.js，
 // 本模块只负责 AI 平台列表 CRUD 与探针。
 
-import { createProviderStore } from "./provider-store.js";
+import { createProviderStore, formatProbeConnectionError, formatProbeHttpError } from "./provider-store.js";
 
 // ===== AI 模型平台存储 =====
 // 列表 CRUD（load/save/delete/Key 读写）委托给通用工厂 createProviderStore，
 // 本模块只提供 storage key 与 AI 专属的 normalizeProvider。不变式
-// “apiKey 永不进同步列表”由工厂统一保证。
+// “apiKey 永不进同步列表”由工厂统一保证。直接导出绑定好的 store 实例，
+// 消费方（background 消息路由）调用实例方法。
 
 const AI_PROVIDER_KEYS_STORAGE = "aiProviderKeys";
 
@@ -29,31 +30,11 @@ function normalizeAiProvider(item) {
   };
 }
 
-const providerStore = createProviderStore({
+export const aiProviderStore = createProviderStore({
   listStorageKey: "aiProviders",
   keysStorageKey: AI_PROVIDER_KEYS_STORAGE,
   normalizeProvider: normalizeAiProvider
 });
-
-export async function loadAiProviders() {
-  return providerStore.loadProviders();
-}
-
-export async function saveAiProviders(items) {
-  return providerStore.saveProviders(items);
-}
-
-export async function deleteAiProvider(providerId) {
-  return providerStore.deleteProvider(providerId);
-}
-
-export async function loadAiProviderKeys() {
-  return providerStore.loadKeys();
-}
-
-export async function saveAiProviderKey(providerId, apiKey) {
-  return providerStore.saveKey(providerId, apiKey);
-}
 
 // ===== 连接测试 / 模型探测 =====
 
@@ -100,18 +81,14 @@ export async function probeAiChatCompletion({ baseUrl, apiKey, model, headers })
       })
     });
   } catch (error) {
-    return { ok: false, error: `无法连接：${error?.message || error}` };
+    return { ok: false, error: formatProbeConnectionError(error) };
   }
 
   if (response.ok) {
     return { ok: true };
   }
 
-  let detail = "";
-  try {
-    detail = (await response.text()).slice(0, 200);
-  } catch {}
-  return { ok: false, error: `HTTP ${response.status}${detail ? `: ${detail}` : ""}` };
+  return { ok: false, error: await formatProbeHttpError(response) };
 }
 
 export async function handleAiProvidersModels({ baseUrl, apiKey, providerId }) {
@@ -126,7 +103,7 @@ export async function handleAiProvidersModels({ baseUrl, apiKey, providerId }) {
 
   try {
     if (!apiKey) {
-      const keys = providerId ? await loadAiProviderKeys() : {};
+      const keys = providerId ? await aiProviderStore.loadKeys() : {};
       apiKey = String(keys[providerId] || "").trim();
     }
     if (apiKey) {

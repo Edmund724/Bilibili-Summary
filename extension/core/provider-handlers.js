@@ -126,21 +126,26 @@ export function createProviderMessageHandlers({
 
 // 内容脚本（无字幕轨时的 ASR 转写回退，subtitle/fetcher.js）的运行时配置
 // 消息处理器工厂。provider-store 存储层由此收口在 background 侧，内容
-// bundle 不再打包 chrome.storage provider 存储。一次 getMergedSettings()
-// 取归一化设置，再按激活平台 id 单查已存 Key，回包一致快照：
+// bundle 不再打包 chrome.storage provider 存储。一次 getMergedSettings() 取
+// 归一化设置（标量项；asrProviders 已摘出 settings，列表经注入的
+// loadProviders 直读 provider-store），再按激活平台 id 单查已存 Key，
+// 回包一致快照：
 //   { ok, providers, activeAsrProviderId, activeKey, asrLanguage, asrAutoFallback }
-// providers 为归一化列表（Key 不明文回传）；activeKey 是激活平台的已存
-// Key——响应中唯一的 Key 材料，暴露面与旧内容侧直读存储（只持有激活平台
-// 的 Key）一致。存储读取失败 → { ok: false, error }，由调用方决定降级。
-export function createAsrRuntimeConfigHandler({ getMergedSettings, getAsrProviderKey }) {
+// providers 为 provider-store 归一化列表（Key 不明文回传）；activeKey 是激活
+// 平台的已存 Key——响应中唯一的 Key 材料，暴露面与旧内容侧直读存储（只持有
+// 激活平台的 Key）一致。存储读取失败 → { ok: false, error }，由调用方决定降级。
+export function createAsrRuntimeConfigHandler({ getMergedSettings, loadProviders, getAsrProviderKey }) {
   return function handleGetAsrRuntimeConfig(message, sender, sendResponse) {
     getMergedSettings()
       .then(async (settings) => {
         const activeId = String(settings.activeAsrProviderId || "").trim();
-        const activeKey = activeId ? await getAsrProviderKey(activeId) : "";
+        const [providers, activeKey] = await Promise.all([
+          loadProviders(),
+          activeId ? getAsrProviderKey(activeId) : Promise.resolve("")
+        ]);
         sendResponse({
           ok: true,
-          providers: Array.isArray(settings.asrProviders) ? settings.asrProviders : [],
+          providers,
           activeAsrProviderId: activeId,
           activeKey,
           asrLanguage: settings.asrLanguage,

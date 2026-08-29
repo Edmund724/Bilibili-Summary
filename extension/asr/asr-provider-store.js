@@ -3,14 +3,19 @@
 // 列表 CRUD 委托给 extension/core/provider-store.js 的 createProviderStore
 // （与 AI 平台存储共用同一工厂）：provider 列表持久化在 chrome.storage.sync，
 // API Key 单独存放在 chrome.storage.local，不随列表明文回传（列表只带
-// hasSavedKey 布尔占位）。本模块只与 chrome.storage / fetch 交互，不涉及
-// 消息路由——background.js 的处理函数调用这里。
+// hasSavedKey 布尔占位）。直接导出绑定好的 asrProviderStore 实例，消费方
+// （background.js 消息路由、运行时配置处理器）调用实例方法。本模块只与
+// chrome.storage / fetch 交互，不涉及消息路由。
 //
 // 与 AI 平台存储完全隔离：用不同的 storage key（asrProviders / asrProviderKeys），
 // 不和对话平台混用同一个列表。
 
 import { normalizeAsrProvider, normalizeBaseUrl } from "../core/presets.js";
-import { createProviderStore } from "../core/provider-store.js";
+import {
+  createProviderStore,
+  formatProbeConnectionError,
+  formatProbeHttpError
+} from "../core/provider-store.js";
 import { getMergedSettings } from "../core/settings-store.js";
 import { encodeWavBytes } from "./chunker.js";
 
@@ -19,38 +24,11 @@ import { encodeWavBytes } from "./chunker.js";
 const ASR_PROVIDER_KEYS_STORAGE = "asrProviderKeys";
 const ASR_PROVIDERS_STORAGE = "asrProviders";
 
-const providerStore = createProviderStore({
+export const asrProviderStore = createProviderStore({
   listStorageKey: ASR_PROVIDERS_STORAGE,
   keysStorageKey: ASR_PROVIDER_KEYS_STORAGE,
   normalizeProvider: normalizeAsrProvider
 });
-
-// 读取已存 API Key（providerId -> apiKey 的映射）。Key 单独存 local，
-// 不随 sync 的 provider 列表明文回传。
-export async function loadAsrProviderKeys() {
-  return providerStore.loadKeys();
-}
-
-// 读取单个 provider 的已存 Key（按 id 查）。供探针在不要求用户重输 Key 时使用。
-export async function getAsrProviderKey(providerId) {
-  return providerStore.getKey(providerId);
-}
-
-// 读取 provider 列表，Key 不明文回传，只带 hasSavedKey 占位。
-export async function loadAsrProviders() {
-  return providerStore.loadProviders();
-}
-
-// 保存 provider 列表。列表中若带 apiKey 字段则一并写入 Key 存储，
-// 但回传列表只带 hasSavedKey 占位（Key 不明文出现在 sync 列表里）。
-export async function saveAsrProviders(items) {
-  return providerStore.saveProviders(items);
-}
-
-// 删除 provider，其已存 Key 一并清理（不残留孤儿 Key）。
-export async function deleteAsrProvider(providerId) {
-  return providerStore.deleteProvider(providerId);
-}
 
 // ===== 静音 WAV 生成（探针用） =====
 
@@ -79,7 +57,7 @@ export async function testAsrConnection(provider, { transport } = {}) {
   // 解析 apiKey：优先 provider.apiKey，否则按 id 读已存 Key
   let apiKey = String(provider?.apiKey || "").trim();
   if (!apiKey && normalized.id) {
-    apiKey = await getAsrProviderKey(normalized.id);
+    apiKey = await asrProviderStore.getKey(normalized.id);
   }
 
   if (normalized.type === "openai-transcriptions") {
@@ -151,16 +129,12 @@ async function probeOpenAiTranscriptions({ baseUrl, apiKey, model, language, tra
       body: form
     });
   } catch (error) {
-    return { ok: false, error: `无法连接：${error?.message || error}` };
+    return { ok: false, error: formatProbeConnectionError(error) };
   }
 
   if (response.ok) {
     return { ok: true };
   }
 
-  let detail = "";
-  try {
-    detail = (await response.text()).slice(0, 200);
-  } catch {}
-  return { ok: false, error: `HTTP ${response.status}${detail ? `: ${detail}` : ""}` };
+  return { ok: false, error: await formatProbeHttpError(response) };
 }

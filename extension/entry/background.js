@@ -10,22 +10,11 @@ import { sleep } from "../shared/utils.js";
 import { sendMessageToTab, waitForTabComplete } from "../shared/tab-utils.js";
 import { getMergedSettings, normalizeSettings, saveSettings } from "../core/settings-store.js";
 import {
-  loadAiProviders,
-  saveAiProviders,
-  deleteAiProvider,
-  loadAiProviderKeys,
-  saveAiProviderKey,
+  aiProviderStore,
   testAiConnection,
   handleAiProvidersModels as fetchAiProviderModels
 } from "../core/ai-provider-store.js";
-import {
-  loadAsrProviders,
-  saveAsrProviders,
-  deleteAsrProvider,
-  loadAsrProviderKeys,
-  getAsrProviderKey,
-  testAsrConnection
-} from "../asr/asr-provider-store.js";
+import { asrProviderStore, testAsrConnection } from "../asr/asr-provider-store.js";
 import {
   createProviderMessageHandlers,
   createAsrRuntimeConfigHandler
@@ -164,11 +153,11 @@ function handleFetchJson(message, sender, sendResponse) {
 // 路由表只换处理器指向。AI 的 test 消息是平铺字段（Key 可由处理器按
 // providerId 代查），用工厂缺省的探针输入装配。
 const aiProviderHandlers = createProviderMessageHandlers({
-  loadProviders: loadAiProviders,
-  saveProviders: saveAiProviders,
-  deleteProvider: deleteAiProvider,
-  loadKeys: loadAiProviderKeys,
-  saveKey: saveAiProviderKey,
+  loadProviders: aiProviderStore.loadProviders,
+  saveProviders: aiProviderStore.saveProviders,
+  deleteProvider: aiProviderStore.deleteProvider,
+  loadKeys: aiProviderStore.loadKeys,
+  saveKey: aiProviderStore.saveKey,
   probe: testAiConnection
 });
 
@@ -203,19 +192,21 @@ function handleAsrPresetsList(message, sender, sendResponse) {
 // ASR 的 test 消息把整个 provider 对象放在 message.provider（Key 由探针
 // 自行解析），覆写探针输入装配；其余处理器与 AI 家族共用同一套契约。
 const asrProviderHandlers = createProviderMessageHandlers({
-  loadProviders: loadAsrProviders,
-  saveProviders: saveAsrProviders,
-  deleteProvider: deleteAsrProvider,
-  loadKeys: loadAsrProviderKeys,
+  loadProviders: asrProviderStore.loadProviders,
+  saveProviders: asrProviderStore.saveProviders,
+  deleteProvider: asrProviderStore.deleteProvider,
+  loadKeys: asrProviderStore.loadKeys,
   probe: testAsrConnection,
   pickTestProvider: (message) => ({ provider: message.provider || {} })
 });
 
-// 内容脚本 ASR 回退的运行时配置：settings 归一化结果 + 激活平台 Key 一次
-// 回包，provider-store 存储层不再进内容 bundle（契约见 provider-handlers.js）。
+// 内容脚本 ASR 回退的运行时配置：settings 标量 + provider-store 列表 + 激活
+// 平台 Key 一次回包，provider-store 存储层不再进内容 bundle（契约见
+// provider-handlers.js）。
 const handleGetAsrRuntimeConfig = createAsrRuntimeConfigHandler({
   getMergedSettings,
-  getAsrProviderKey
+  loadProviders: asrProviderStore.loadProviders,
+  getAsrProviderKey: asrProviderStore.getKey
 });
 
 // ===== 通用 offscreen 任务通道 =====

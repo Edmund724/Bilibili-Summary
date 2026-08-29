@@ -1,6 +1,7 @@
 // presets.js / defaults.js ASR 预设与规范化测试：
 // 验证 ASR_PROVIDER_PRESETS 字段齐全、normalizeAsrProvider type 合法值校验、
-// DEFAULT_SETTINGS 新增的 4 个 ASR 默认项。
+// DEFAULT_SETTINGS 的 3 个 ASR 标量默认项（asrProviders 列表已摘出 settings，
+// 归 provider-store 管）。
 
 import { describe, expect, it } from "vitest";
 import { ASR_PROVIDER_PRESETS, normalizeAsrProvider, normalizeAsrLanguage } from "../../extension/core/presets.js";
@@ -150,8 +151,8 @@ describe("normalizeAsrProvider", () => {
 });
 
 describe("DEFAULT_SETTINGS ASR 默认项", () => {
-  it("asrProviders 默认空数组", () => {
-    expect(DEFAULT_SETTINGS.asrProviders).toEqual([]);
+  it("asrProviders 不再是设置默认项（provider 列表归 provider-store）", () => {
+    expect(DEFAULT_SETTINGS).not.toHaveProperty("asrProviders");
   });
   it("activeAsrProviderId 默认空串", () => {
     expect(DEFAULT_SETTINGS.activeAsrProviderId).toBe("");
