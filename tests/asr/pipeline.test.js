@@ -28,16 +28,12 @@ vi.mock("../../extension/asr/asr-provider-store.js", () => ({
   loadAsrProviders: vi.fn(async () => []),
   getAsrProviderKey: vi.fn(async () => "")
 }));
-// fetcher.js 只被 pipeline 引 retryAsync / ensureRunActive；retryAsync 保持真实
-// 实现（单测里直接断言重试次数），fetcher 其余副作用（subscribeSubtitleRefresh）
-// 需 presenter mock 掉顶层接线。
-vi.mock("../../extension/subtitle/fetcher.js", async (importOriginal) => {
-  const actual = await importOriginal();
-  return {
-    ...actual,
-    retryAsync: vi.fn((fn) => fn())
-  };
-});
+// retryAsync 已移入 shared/error-helpers.js（pipeline 与 fetcher 共用）。这里不用
+// vi.mock 工厂：resetModuleState 的 vi.resetModules 不会重跑 mock 工厂，工厂里
+// importOriginal 捕获的真实导出会闭包到过期的 state 实例（ensureRunActive 因此
+// 看不到用例内 setFetchRunId 的变更）。改为 beforeEach 里对新导入的模块命名空间
+// vi.spyOn，每用例拿到新鲜实例，retryAsync 之外的真实导出（ensureRunActive 等）
+// 保持逐用例新鲜。
 vi.mock("../../extension/reader/presenter.js", () => ({
   subscribeSubtitleRefresh: vi.fn(),
   notifyReaderPresenter: vi.fn()
@@ -131,13 +127,13 @@ const OPENAI_PROVIDER = {
 import { encodeWav } from "../../extension/asr/chunker.js";
 
 let pipeline;
-let fetcherMock;
+let retryAsyncMock;
 
 beforeEach(async () => {
   resetModuleState();
   pipeline = await import("../../extension/asr/pipeline.js");
-  fetcherMock = (await import("../../extension/subtitle/fetcher.js")).retryAsync;
-  fetcherMock.mockImplementation((fn) => fn());
+  const errorHelpers = await import("../../extension/shared/error-helpers.js");
+  retryAsyncMock = vi.spyOn(errorHelpers, "retryAsync").mockImplementation((fn) => fn());
   // fetch mock：默认直接 200 返回空 text（transcribe 各用例自己覆盖）
   vi.stubGlobal("fetch", vi.fn(async () => {
     return { ok: true, status: 200, json: async () => ({ text: "" }) };
@@ -448,8 +444,8 @@ describe("pipeline 并发上限与 runId 作废", () => {
 
 describe("pipeline 重试与未知类型", () => {
   it("网络错误/5xx：retryAsync 指数退避重试（transcribe 抛 HTTP 5xx）", async () => {
-    // 断言 pipeline 调用 retryAsync 时传了重试次数 2（指数退避由 fetcher 的
-    // retryAsync 实现，这里 mock 掉直调，验证传参而非真实退避耗时）。
+    // 断言 pipeline 调用 retryAsync 时传了重试次数 2（指数退避由 shared/error-helpers
+    // 的 retryAsync 实现，这里 mock 掉直调，验证传参而非真实退避耗时）。
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
@@ -478,7 +474,7 @@ describe("pipeline 重试与未知类型", () => {
       }
       throw lastErr;
     });
-    fetcherMock.mockImplementation(retrySpy);
+    retryAsyncMock.mockImplementation(retrySpy);
 
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",

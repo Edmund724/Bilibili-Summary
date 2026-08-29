@@ -1,4 +1,6 @@
 import { state } from "../core/state.js";
+import { sleep } from "./utils.js";
+import { logInfo } from "./logging.js";
 
 export function toReadableText(value, fallback = "") {
   if (value === undefined || value === null) {
@@ -73,6 +75,32 @@ export function isRetryableNetworkError(error) {
     message.includes("timeout") ||
     message.includes("timed out")
   );
+}
+
+export async function retryAsync(task, retries = 1, delayMs = 180) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      lastError = error;
+      const isNetworkError = isRetryableNetworkError(error);
+      const isRetryable = error?.retryable === true;
+      if (!isNetworkError && !isRetryable) {
+        throw error;
+      }
+      if (attempt >= retries) {
+        throw error;
+      }
+      const backoffDelay = Math.min(delayMs * Math.pow(2, attempt - 1), 5000);
+      logInfo(`[BOC] retrying after ${backoffDelay}ms, attempt ${attempt + 1}/${retries}`, {
+        error: getErrorMessage(error),
+        code: error.code
+      });
+      await sleep(backoffDelay);
+    }
+  }
+  throw lastError || new Error("Unknown retry error");
 }
 
 // 中止标记错误工厂：AI 编排（map-reduce / merge / pool）统一用 e.aborted === true 收束

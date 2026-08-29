@@ -4,14 +4,13 @@
 // 合并为 B 站字幕格式 [{from,to,content}]。
 //
 // 每步都做 ensureRunActive(runId) 守卫：转写中切换视频，旧任务立即中止，
-// 不污染新视频状态。网络错误/5xx 复用 fetcher.js 的 retryAsync 指数退避
-// 重试（本管线按 2 次重试调用）。
+// 不污染新视频状态。网络错误/5xx 复用 shared/error-helpers.js 的 retryAsync
+// 指数退避重试（本管线按 2 次重试调用）。
 
 import { getSourceAudioUrl } from "./audio-source.js";
 import { buildChunkPlan } from "./chunker.js";
 import { transcribe as transcribeOpenAi } from "./adapters/openai-transcriptions.js";
-import { ensureRunActive } from "../shared/error-helpers.js";
-import { retryAsync } from "../subtitle/fetcher.js";
+import { ensureRunActive, retryAsync } from "../shared/error-helpers.js";
 import { createOffscreenChunkHost } from "./offscreen-bridge.js";
 
 // 过期检查统一入口：优先用注入的 isStale 回调（fetcher 传"视频键是否已切换"，

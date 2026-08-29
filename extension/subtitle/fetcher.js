@@ -1,12 +1,11 @@
 import { setMessage } from "../ui/ui-renderer.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import { normalizeDownloadFormat } from "../core/validators.js";
-import { sleep } from "../shared/utils.js";
 import { state, clipState } from "../core/state.js";
 import { extractBvid, computeCurrentClipSignature } from "../bilibili/video-id-shared.js";
 import { getSettings, sendRuntimeMessage } from "../core/runtime.js";
 import { byId } from "../shared/dom-utils.js";
-import { ensureRunActive, isStaleRunError, getErrorMessage, toReadableText, isRetryableNetworkError } from "../shared/error-helpers.js";
+import { ensureRunActive, isStaleRunError, getErrorMessage, toReadableText, isRetryableNetworkError, retryAsync } from "../shared/error-helpers.js";
 import { logInfo, logWarn } from "../shared/logging.js";
 import { isReaderViewOpen } from "../reader/index.js";
 import {
@@ -54,32 +53,6 @@ import { runAsrPipeline } from "../asr/pipeline.js";
 // chain, so registering here is the only wiring needed: the reader side can
 // trigger a re-fetch through the presenter seam's requestSubtitleRefresh().
 subscribeSubtitleRefresh(refreshClip);
-
-export async function retryAsync(task, retries = 1, delayMs = 180) {
-  let lastError = null;
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    try {
-      return await task();
-    } catch (error) {
-      lastError = error;
-      const isNetworkError = isRetryableNetworkError(error);
-      const isRetryable = error?.retryable === true;
-      if (!isNetworkError && !isRetryable) {
-        throw error;
-      }
-      if (attempt >= retries) {
-        throw error;
-      }
-      const backoffDelay = Math.min(delayMs * Math.pow(2, attempt - 1), 5000);
-      logInfo(`[BOC] retrying after ${backoffDelay}ms, attempt ${attempt + 1}/${retries}`, {
-        error: getErrorMessage(error),
-        code: error.code
-      });
-      await sleep(backoffDelay);
-    }
-  }
-  throw lastError || new Error("Unknown retry error");
-}
 
 export async function fetchVideoMeta(bvid) {
   logInfo("[BOC] fetch video meta", {

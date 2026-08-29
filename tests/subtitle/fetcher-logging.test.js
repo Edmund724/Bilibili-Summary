@@ -31,7 +31,6 @@ vi.mock("../../extension/subtitle/fetcher.js", async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    retryAsync: vi.fn((fn) => fn()),
     fetchVideoMeta: vi.fn(),
     fetchSubtitleBundle: vi.fn()
   };
