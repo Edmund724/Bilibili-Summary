@@ -118,6 +118,11 @@ export function createOffscreenChunkHost() {
           if (msg.code) {
             error.code = msg.code;
           }
+          // 结构化原因（asr-skip 的 "asr-disabled" / "no-asr-config"）随错误
+          // 对象透传，最终落 clipState.noSubtitleReason（asr/fallback.js）
+          if (msg.reason) {
+            error.reason = msg.reason;
+          }
           finish(reject, error);
         }
       });

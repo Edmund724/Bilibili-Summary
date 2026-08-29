@@ -52,10 +52,14 @@ export function subscribeReaderPresenter(handler) {
   };
 }
 
-export function notifyReaderPresenter(kind) {
+// 通知签名：(kind, ...payload)。payload 透传给 reader 侧 handler——fetcher 的
+// "subtitle-ready" 会带状态栏文案（如"当前视频无字幕。"），"status" 带提示文本；
+// 历史上这里只转发 kind，第二参被丢弃、阅读视图永远显示默认文案。单参调用
+// （reset/rerender/无文案的 subtitle-ready）行为不变。
+export function notifyReaderPresenter(kind, ...payload) {
   for (const handler of readers.slice()) {
     try {
-      handler(kind);
+      handler(kind, ...payload);
     } catch (error) {
       logWarn("[BOC] reader presenter handler failed", { kind, error });
     }

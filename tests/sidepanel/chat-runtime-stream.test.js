@@ -226,3 +226,70 @@ describe("appendToken 累加器与 finalize 全量文本", () => {
     expect(node.querySelector(".sp-msg-assistant-body").innerHTML).toBe(renderMarkdown(fullText));
   });
 });
+
+describe("sendMessage 无字幕拦截的提前返回", () => {
+  // ensureCurrentContextForSend 的类型化信号（NO_SUBTITLE_SEND_BLOCKED）让
+  // sendMessage 在用户消息上屏前中止：不追加用户/助手节点、不清输入框、
+  // 不落 chatHistory、不发起 offscreen port、不进入流式 UI 状态。
+  // notice 文案本身由 sidepanel（ensureCurrentContextForSend 调用方）负责。
+  function makeSendDeps(ensureResult) {
+    const history = [];
+    const deps = makeDeps();
+    deps.getChatHistory = () => history;
+    deps.input.value = "总结一下这个视频";
+    deps.connectPort = vi.fn(async () => {
+      throw new Error("不应发起 port");
+    });
+    deps.ensureCurrentContextForSend = vi.fn(async () => ensureResult);
+    return { deps, history };
+  }
+
+  it("NO_SUBTITLE_SEND_BLOCKED（无字幕拦截）：不追加消息、不清输入、不发起 port", async () => {
+    const { deps, history } = makeSendDeps("no-subtitle-send-blocked");
+    const runtime = createChatRuntime(deps);
+
+    await runtime.sendMessage();
+
+    expect(deps.ensureCurrentContextForSend).toHaveBeenCalledTimes(1);
+    expect(deps.connectPort).not.toHaveBeenCalled();
+    expect(deps.messages.querySelector(".sp-msg-user")).toBeNull();
+    expect(deps.messages.querySelector(".sp-msg-assistant")).toBeNull();
+    expect(deps.input.value).toBe("总结一下这个视频");
+    expect(deps.setStreamingUiState).not.toHaveBeenCalledWith(true, expect.anything());
+    expect(history).toEqual([]);
+  });
+
+  it("false（上下文读取失败）：同样提前返回，行为与拦截一致", async () => {
+    const { deps, history } = makeSendDeps(false);
+    const runtime = createChatRuntime(deps);
+
+    await runtime.sendMessage();
+
+    expect(deps.connectPort).not.toHaveBeenCalled();
+    expect(deps.messages.querySelector(".sp-msg-user")).toBeNull();
+    expect(history).toEqual([]);
+  });
+
+  it("true（放行）：照常追加用户消息并发起 port（非 empty 不受影响）", async () => {
+    const history = [];
+    const deps = makeDeps();
+    deps.getChatHistory = () => history;
+    deps.input.value = "总结一下这个视频";
+    const messageListeners = [];
+    const port = {
+      onMessage: { addListener: (fn) => messageListeners.push(fn) },
+      onDisconnect: { addListener: () => {} },
+      postMessage: vi.fn(),
+      disconnect: vi.fn()
+    };
+    deps.connectPort = vi.fn(async () => port);
+    const runtime = createChatRuntime(deps);
+
+    await runtime.sendMessage();
+
+    expect(deps.connectPort).toHaveBeenCalledTimes(1);
+    expect(deps.messages.querySelector(".sp-msg-user")?.textContent).toBe("总结一下这个视频");
+    expect(deps.input.value).toBe("");
+    expect(port.postMessage).toHaveBeenCalledTimes(1);
+  });
+});

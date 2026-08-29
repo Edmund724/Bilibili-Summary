@@ -548,6 +548,15 @@ body {
   text-decoration: underline;
 }
 
+.sp-context-notice a {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.sp-context-notice a:hover {
+  text-decoration: underline;
+}
+
 .sp-context-notice {
   align-self: stretch;
   position: sticky;

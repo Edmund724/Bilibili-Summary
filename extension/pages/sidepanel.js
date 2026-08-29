@@ -43,6 +43,11 @@ import { linkifyAssistantTimestamps } from "../ui/timestamp-nav.js";
 import { normalizeMarkdownForSectionPaste } from "../notes/paste.js";
 import { createChatRuntime } from "./sidepanel-chat-runtime.js";
 import { createSubtitleWaiter, isContextPending } from "./sidepanel-subtitle-wait.js";
+import {
+  NO_SUBTITLE_SEND_BLOCKED,
+  buildNoSubtitleNotice,
+  isNoSubtitleEmptyContext
+} from "./sidepanel-no-subtitle.js";
 import { createConversationStore } from "./sidepanel-conversation-store.js";
 import { ensureChatOffscreenDocument } from "./sidepanel-offscreen-ensure.js";
 
@@ -1066,7 +1071,10 @@ function findPreviousUserPrompt(index) {
 }
 
 // 发送前确保当前上下文就绪（pinned 对话补水 / 普通对话读当前页；抓取或
-// 音频转写进行中时先等待，避免空字幕上下文直接发给模型）
+// 音频转写进行中时先等待，避免空字幕上下文直接发给模型）。最终快照若是
+// 「无字幕收尾」（empty 且字幕体为空）则拦截发送：返回 NO_SUBTITLE_SEND_
+// BLOCKED 类型化信号让 sendMessage 提前返回（不追加用户消息、不落
+// chatHistory、不发起 port），并按 noSubtitleReason 显示对应 notice。
 async function ensureCurrentContextForSend() {
   if (currentConversationMeta?.pinnedContext) {
     await loadContextState({ forceRefresh: false, silent: true }).catch(() => null);
@@ -1088,6 +1096,11 @@ async function ensureCurrentContextForSend() {
   if (!contextData) {
     resetConversationView("当前页面上下文读取失败。");
     return false;
+  }
+  if (isNoSubtitleEmptyContext(contextData)) {
+    const notice = buildNoSubtitleNotice(contextData.noSubtitleReason);
+    showConversationContextNotice(notice.message, 0, { openSettingsAction: notice.openSettings });
+    return NO_SUBTITLE_SEND_BLOCKED;
   }
   return true;
 }
@@ -1144,11 +1157,26 @@ function showConversationContextError(message) {
   scrollToBottom();
 }
 
-function showConversationContextNotice(message, autoHideMs = 0) {
+// 消息区通知条。第三参 options.openSettingsAction 为 true 时在文案末尾附
+// 「前往设置」链接（打开方式与 .sp-center-error 里的设置链接一致：
+// chrome.runtime.openOptionsPage）。文本走 textContent（不受文案内容影响），
+// 链接为静态文案、单独 createElement 挂载。
+function showConversationContextNotice(message, autoHideMs = 0, { openSettingsAction = false } = {}) {
   removeConversationContextNotice();
   const notice = document.createElement("div");
   notice.className = "sp-context-notice";
   notice.textContent = String(message || "").trim();
+  if (openSettingsAction) {
+    const link = document.createElement("a");
+    link.href = "#";
+    link.textContent = "前往设置";
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      chrome.runtime.openOptionsPage();
+    });
+    notice.appendChild(document.createTextNode(" "));
+    notice.appendChild(link);
+  }
   els.messages.prepend(notice);
   if (autoHideMs > 0) {
     contextNoticeTimer = window.setTimeout(() => {

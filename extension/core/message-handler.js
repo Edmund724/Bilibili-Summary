@@ -147,6 +147,9 @@ export function bindRuntimeEvents() {
           // （可能含小时级 ASR 转写）仍在进行，sidepanel 据此等待而非把
           // 空字幕直接发给模型。
           subtitleFetchState: state.clip.subtitleFetchState || "idle",
+          // empty 时的无字幕原因归类（null | "no-asr-config" | "asr-disabled" |
+          // "asr-failed" | "asr-empty"），sidepanel 拦截总结发送时按原因提示。
+          noSubtitleReason: state.clip.noSubtitleReason || null,
           subtitleLang: state.clip.selectedSubtitleLang || "",
           selectedSubtitleId: state.clip.selectedSubtitleId || "",
           selectedSubtitleUrl: state.clip.selectedSubtitleUrl || "",

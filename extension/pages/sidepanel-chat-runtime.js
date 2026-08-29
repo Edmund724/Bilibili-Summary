@@ -65,7 +65,9 @@ const STREAM_SLOW_NOTICE_MS = 15000;
  *     shouldAutoScrollMessagesEnabled,   // () => boolean (shouldAutoScrollMessages)
  *     setShouldAutoScrollMessages,       // (v) => void
  *     // ---- context/transport helpers (AI domain, sidepanel local) ----
- *     ensureCurrentContextForSend,       // () => Promise<boolean>
+ *     ensureCurrentContextForSend,       // () => Promise<boolean | NO_SUBTITLE_SEND_BLOCKED>
+ *                                        //    true=放行；false=读取失败；
+ *                                        //    "no-subtitle-send-blocked"=无字幕拦截（notice 已显示）
  *     getProviderId,                     // () => els.modelSelect.value
  *     getTimestampNavDeps,               // () => timestamp-nav deps object
  *     normalizeMarkdownForSectionPaste,  // (raw, baseLevel) => string
@@ -147,7 +149,10 @@ export function createChatRuntime(deps) {
     }
 
     const hasContext = await deps.ensureCurrentContextForSend();
-    if (!hasContext) {
+    // 严格判 true：false（上下文读取失败）与 NO_SUBTITLE_SEND_BLOCKED（无字幕
+    // 拦截，notice 已由 ensure 侧显示）都在此提前返回——不追加用户消息、
+    // 不落 chatHistory、不发起 port。
+    if (hasContext !== true) {
       return;
     }
     const currentMeta = deps.getCurrentConversationMeta();

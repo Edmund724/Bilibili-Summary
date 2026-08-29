@@ -75,6 +75,16 @@ const clipState = {
   selectedSubtitleLang: "",
   subtitleBody: [],
   subtitleFetchState: "idle",
+  // 无字幕原因（subtitleFetchState === "empty" 时的归类，供 sidepanel 拦截总结
+  // 时按原因提示）：
+  //   null            未知/不适用
+  //   "no-asr-config" 未配置语音识别平台（含激活平台不在列表）
+  //   "asr-disabled"  无字幕自动转写开关未开启
+  //   "asr-failed"    语音识别失败
+  //   "asr-empty"     语音识别成功但未识别到语音内容
+  // 写入点在 asr/fallback.js 各终态分支；清除点为 resetClipState 与所有
+  // subtitleFetchState → "ready" 的写入点（见 fetcher.js / fallback.js）。
+  noSubtitleReason: null,
   chapters: [],
   hotComments: [],
   markdown: "",
@@ -101,6 +111,7 @@ const clipState = {
   setSelectedSubtitleLang(value) { this.selectedSubtitleLang = value; },
   setSubtitleBody(value) { this.subtitleBody = value; },
   setSubtitleFetchState(value) { this.subtitleFetchState = value; },
+  setNoSubtitleReason(value) { this.noSubtitleReason = value; },
   setChapters(value) { this.chapters = value; },
   setHotComments(value) { this.hotComments = value; },
   setMarkdown(value) { this.markdown = value; },

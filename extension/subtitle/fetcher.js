@@ -144,6 +144,7 @@ export function resetClipState() {
   clipState.setSelectedSubtitleLang("");
   clipState.setSubtitleBody([]);
   clipState.setSubtitleFetchState("idle");
+  clipState.setNoSubtitleReason(null);
   clipState.setChapters([]);
   clipState.setHotComments([]);
   clipState.setMarkdown("");
@@ -341,6 +342,7 @@ export async function refreshClip() {
       });
     }
     clipState.setSubtitleFetchState("ready");
+    clipState.setNoSubtitleReason(null);
     renderMeta();
     renderSubtitleSelect();
     if (isReaderViewOpen()) {
@@ -412,6 +414,7 @@ export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, sub
         clipState.setSelectedSubtitleLang(lang);
         clipState.setSubtitleBody(cachedBody);
         clipState.setSubtitleFetchState("ready");
+        clipState.setNoSubtitleReason(null);
         await refreshDerivedContent();
         if (isReaderViewOpen()) {
           notifyReaderPresenter("subtitle-ready");
@@ -448,15 +451,20 @@ export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, sub
   clipState.setSelectedSubtitleLang(lang);
   clipState.setSubtitleBody(body);
   clipState.setSubtitleFetchState("ready");
+  clipState.setNoSubtitleReason(null);
   await refreshDerivedContent();
   if (isReaderViewOpen()) {
     notifyReaderPresenter("subtitle-ready");
   }
 }
 
-// 无字幕提示（skip 分支）：基础文案 + 引导句——用户可去设置页配置语音识别
-// 平台自动生成字幕。返回完整提示文案。
-export function buildNoSubtitleStatusMessage(base = "当前视频无字幕。") {
+// 无字幕提示（skip 分支）：基础文案 + 引导句。reason 取 clipState.noSubtitleReason
+// （可显式传参覆盖）：未配置语音识别平台（no-asr-config）时引导用户去硅基流动
+// 免费申请 API Key 并填入设置页；其余维持通用引导句。返回完整提示文案。
+export function buildNoSubtitleStatusMessage(base = "当前视频无字幕。", reason = clipState.noSubtitleReason) {
+  if (reason === "no-asr-config") {
+    return `${base} 可免费申请硅基流动 API Key 并填入设置页，自动生成字幕。`;
+  }
   return `${base} 可在设置页配置语音识别平台自动生成字幕。`;
 }
 

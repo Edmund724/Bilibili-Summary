@@ -319,23 +319,29 @@ async function requestAsrRuntimeConfig(timeoutMs = 5000) {
 }
 
 // 配置级缺失/关闭/无激活 provider → code "asr-skip"：页面 fallback catch 后
-// 映射为静默 skip（与设置闸门 skip 同语义，零用户可见错误）。
-function makeAsrSkipError(cause) {
+// 映射为静默 skip（与设置闸门 skip 同语义，零用户可见错误）。reason 为结构化
+// 原因（"asr-disabled" / "no-asr-config"），随 port 错误消息透传回页面、最终落
+// clipState.noSubtitleReason 供 sidepanel 按原因提示；消息失败/超时的 asr-skip
+// 不带 reason（未知，页面归 null 走通用文案）。
+function makeAsrSkipError(cause, reason = "") {
   const error = new Error(String(cause?.message || cause || "ASR 配置缺失"));
   error.code = "asr-skip";
+  if (reason) {
+    error.reason = reason;
+  }
   return error;
 }
 
 // 从运行时快照解析 provider（附 Key 与生效语言）。快照关闭 / 无激活平台 /
-// 激活平台不在列表中 → 抛 asr-skip。
-function resolveAsrProvider(config) {
+// 激活平台不在列表中 → 抛 asr-skip（带结构化 reason，见 makeAsrSkipError）。
+export function resolveAsrProvider(config) {
   if (config.asrAutoFallback === false) {
-    throw makeAsrSkipError("ASR 自动回退未开启");
+    throw makeAsrSkipError("ASR 自动回退未开启", "asr-disabled");
   }
   const activeId = String(config.activeAsrProviderId || "").trim();
   const activeProvider = (config.providers || []).find((p) => p.id === activeId);
   if (!activeProvider) {
-    throw makeAsrSkipError("没有激活的语音识别平台");
+    throw makeAsrSkipError("没有激活的语音识别平台", "no-asr-config");
   }
   // 生效转写语言：全局 asrLanguage 设置（popup 顶部切换，默认 auto）；
   // auto 不传语言参数，交服务端自动检测。
@@ -510,6 +516,9 @@ async function handleAsrDecodeTask(task, port) {
       const payload = { type: "error", error: String(e?.message || e) };
       if (e?.code) {
         payload.code = e.code;
+      }
+      if (e?.reason) {
+        payload.reason = e.reason;
       }
       port.postMessage(payload);
     } catch {

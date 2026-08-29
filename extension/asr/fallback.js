@@ -33,6 +33,15 @@ function throwStaleRun() {
   throw error;
 }
 
+// offscreen asr-skip 错误的结构化原因 → clipState.noSubtitleReason 取值。
+// 仅认识 offscreen 显式标注的两类配置级原因；消息失败/超时的 asr-skip 不带
+// reason（未知）→ 归 null，sidepanel 展示通用无字幕文案。
+const KNOWN_ASR_SKIP_REASONS = new Set(["asr-disabled", "no-asr-config"]);
+
+function noSubtitleReasonFromAsrSkipError(error) {
+  return KNOWN_ASR_SKIP_REASONS.has(error?.reason) ? error.reason : null;
+}
+
 export function createAsrFallback(deps) {
   const {
     getSettings,
@@ -79,10 +88,16 @@ export function createAsrFallback(deps) {
 
       // 设置判定：开关未启用或没有激活平台 → skip（与现状行为一致，仅文案变化）。
       // 快速出口先于消息请求：回退关闭时不产生 background 往返。
+      // noSubtitleReason 随 skip 原因落 state，供 sidepanel 拦截总结时按原因提示。
       const settings = state.settings || (await getSettings());
       const enabled = settings.asrAutoFallback === true;
       const activeId = String(settings.activeAsrProviderId || "").trim();
-      if (!enabled || !activeId) {
+      if (!enabled) {
+        clipState.setNoSubtitleReason("asr-disabled");
+        return "skip";
+      }
+      if (!activeId) {
+        clipState.setNoSubtitleReason("no-asr-config");
         return "skip";
       }
 
@@ -93,6 +108,7 @@ export function createAsrFallback(deps) {
       // 由下方 catch 静默跳过），apiKey 不再进页面 context。
       const activeProvider = (settings.asrProviders || []).find((p) => p.id === activeId);
       if (!activeProvider) {
+        clipState.setNoSubtitleReason("no-asr-config");
         return "skip";
       }
       const language = String(settings.asrLanguage || "").trim() || "auto";
@@ -124,6 +140,7 @@ export function createAsrFallback(deps) {
           clipState.setSelectedSubtitleLang(`语音识别（${platformName}）`);
           clipState.setSubtitleBody(cachedBody);
           clipState.setSubtitleFetchState("ready");
+          clipState.setNoSubtitleReason(null);
           await refreshDerivedContent();
           if (isReaderViewOpen()) {
             notifyReaderPresenter("subtitle-ready");
@@ -153,6 +170,7 @@ export function createAsrFallback(deps) {
             // 切走后共享转写以空结果到站：终态广播由发起者负责，这里静默让位
             throwStaleRun();
           }
+          clipState.setNoSubtitleReason("asr-empty");
           setStatus("未识别到语音内容，该视频可能没有人声。");
           return "empty";
         }
@@ -213,6 +231,7 @@ export function createAsrFallback(deps) {
           broadcastSubtitleStatus("asr-done");
           throwStaleRun();
         }
+        clipState.setNoSubtitleReason("asr-empty");
         setStatus(
           `未识别到语音内容，该视频可能没有人声。${emptyDiag ? `（诊断：${emptyDiag}）` : ""}`
         );
@@ -260,10 +279,14 @@ export function createAsrFallback(deps) {
       // 返回 "skip" 走原有无字幕提示（与设置闸门 skip 同语义，零用户可见
       // 错误）。此时"正在使用语音识别"提示与 asr-transcribing 广播已发出，
       // 补一个 asr-done 终态广播解除 sidepanel 一键总结的等待标志。
+      // 结构化原因（error.reason）随 skip 落 state：开关关 → asr-disabled，
+      // 无激活平台 → no-asr-config，未知（config 消息失败/超时）→ null。
       if (error?.code === "asr-skip") {
         broadcastSubtitleStatus("asr-done");
+        clipState.setNoSubtitleReason(noSubtitleReasonFromAsrSkipError(error));
         return "skip";
       }
+      clipState.setNoSubtitleReason("asr-failed");
       setStatus(`语音识别失败：${getErrorMessage(error)}`);
       broadcastSubtitleStatus("asr-failed");
       applyNoSubtitleState();
@@ -315,6 +338,7 @@ export function createAsrFallback(deps) {
     clipState.setSelectedSubtitleLang(`语音识别（${platformName}）`);
     clipState.setSubtitleBody(body);
     clipState.setSubtitleFetchState("ready");
+    clipState.setNoSubtitleReason(null);
     return refreshDerivedContent().then(() => {
       if (isReaderViewOpen()) {
         notifyReaderPresenter("subtitle-ready");
