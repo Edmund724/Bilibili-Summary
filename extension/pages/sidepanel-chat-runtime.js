@@ -69,7 +69,7 @@ const STREAM_SLOW_NOTICE_MS = 15000;
  *     getProviderId,                     // () => els.modelSelect.value
  *     getTimestampNavDeps,               // () => timestamp-nav deps object
  *     normalizeMarkdownForSectionPaste,  // (raw, baseLevel) => string
- *     connectPort,                       // () => chrome.runtime.Port (name "offscreen-chat")
+ *     connectPort,                       // () => Promise<chrome.runtime.Port> (name "offscreen-chat"; 先 ensure offscreen 文档)
  *   }
  *
  * @returns {object} method set (all closures; state only via the runtime's own
@@ -168,7 +168,9 @@ export function createChatRuntime(deps) {
     startStreamSlowNoticeTimer();
     streamFirstTokenReceived = false;
 
-    const port = deps.connectPort();
+    // connectPort 现为 async（发送前先 ensure offscreen 文档，文档死亡后
+    // 自愈重建）；await 兼容旧的同步返回 Port 的 deps 实现。
+    const port = await deps.connectPort();
     activePort = port;
 
     port.onMessage.addListener((msg) => {

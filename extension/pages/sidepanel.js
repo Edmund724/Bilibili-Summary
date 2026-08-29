@@ -44,6 +44,7 @@ import { normalizeMarkdownForSectionPaste } from "../notes/paste.js";
 import { createChatRuntime } from "./sidepanel-chat-runtime.js";
 import { createSubtitleWaiter, isContextPending } from "./sidepanel-subtitle-wait.js";
 import { createConversationStore } from "./sidepanel-conversation-store.js";
+import { ensureChatOffscreenDocument } from "./sidepanel-offscreen-ensure.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const THINKING_LEVEL_KEY = "boc_ai_thinking_level";
@@ -213,7 +214,12 @@ const chatRuntime = createChatRuntime({
   getProviderId: () => els.modelSelect.value,
   getTimestampNavDeps,
   normalizeMarkdownForSectionPaste,
-  connectPort: () => chrome.runtime.connect({ name: "offscreen-chat" })
+  // 发送前 ensure offscreen 文档再连端口：文档死亡后自愈重建（ensure 失败
+  // 不阻断 connect，维持历史行为，由连接结果兜底）
+  connectPort: async () => {
+    await ensureChatOffscreenDocument();
+    return chrome.runtime.connect({ name: "offscreen-chat" });
+  }
 });
 
 init().catch((err) => {
@@ -226,16 +232,11 @@ async function init() {
     await chrome.sidePanel.setPanelBehavior({ panelBehavior: "separate" });
   } catch {}
 
-  // 创建 Offscreen Document，把 SSE 流式请求移到隐藏页面，避免 Side Panel 被冻结
-  try {
-    await chrome.offscreen.createDocument({
-      url: chrome.runtime.getURL("entry/offscreen.html"),
-      reasons: ["DOM_SCRAPING"],
-      justification: "Run AI stream fetch in background to avoid Side Panel freeze when tab is hidden."
-    });
-  } catch (e) {
-    // 已经创建过或浏览器不支持时静默降级
-  }
+  // 创建 Offscreen Document，把 SSE 流式请求移到隐藏页面，避免 Side Panel 被
+  // 冻结。创建参数抽在 ensureChatOffscreenDocument（./sidepanel-offscreen-ensure.js），
+  // 与每次聊天发送前（connectPort）复用：文档意外死亡后下一封消息自动重建，
+  // 聊天不再静默坏到面板重开。ensure 失败不阻断 init（helper 内部吞掉）。
+  await ensureChatOffscreenDocument();
 
   bindEvents();
   await loadProvidersAndPrefs();

@@ -17,11 +17,20 @@ import { transcribe as transcribeOpenAi } from "../asr/adapters/openai-transcrip
 import { isFragmentedMp4, adtsFromFmp4, parseAudioSpecificConfig } from "../asr/adts.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { logWarn } from "../shared/logging.js";
+import { shouldCloseAfterAsrTask } from "./offscreen-lifecycle.js";
 
 let activeAbortController = null;
 let pendingCostGuard = null;
 let idleTimeoutId = null;
 var STREAM_IDLE_TIMEOUT_MS = 90000;
+
+// 同一文档双通道存活计数：聊天（"offscreen-chat" 端口）用计数维护，
+// 解码任务（"asr-decode" 端口）用存活端口集合维护——终态判定要排除
+// 本次任务的端口自身（done/error 时它还连着），集合比计数少一分监听
+// 注册时序依赖。asr-decode 任务终态后由 maybeCloseSelfAfterAsr 据此决定
+// 是否自关文档（判定纯函数在 ./offscreen-lifecycle.js）。
+let currentChatCount = 0;
+const activeAsrPorts = new Set();
 
 // ASR 解码任务中止哨兵：decodeSegment/onChunk 检查 aborted 后抛出，
 // 外层 catch 识别后静默退出（不 post error），与「断连视为取消」语义一致。
@@ -49,6 +58,10 @@ function clearIdleTimeout() {
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === "asr-decode") {
+    activeAsrPorts.add(port);
+    port.onDisconnect.addListener(() => {
+      activeAsrPorts.delete(port);
+    });
     port.onMessage.addListener((msg) => {
       if (!msg || msg.action !== "asr-decode") return;
       handleAsrDecodeTask(msg.task || {}, port);
@@ -58,6 +71,8 @@ chrome.runtime.onConnect.addListener((port) => {
   if (!port || port.name !== "offscreen-chat") {
     return;
   }
+  // 聊天通道计数：asr-decode 终态自关判定的输入（见 maybeCloseSelfAfterAsr）
+  currentChatCount += 1;
 
   port.onMessage.addListener(async (msg) => {
     if (!msg) return;
@@ -191,6 +206,7 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 
   port.onDisconnect.addListener(() => {
+    currentChatCount -= 1;
     if (pendingCostGuard) {
       const resolve = pendingCostGuard.resolve;
       pendingCostGuard = null;
@@ -207,6 +223,36 @@ function abortActiveRequest() {
     activeAbortController.abort();
   }
   activeAbortController = null;
+}
+
+// asr-decode 任务终态（done / error / 断连取消）后的自关判定，三处终态
+// 共用本函数，不得各写一份。本文档同时承载聊天与解码：聊天端口还在
+// （currentChatCount > 0）或有其他解码任务在跑（刷新竞态下新任务可能已
+// 连上本文档）时保留；否则文档已无承载，自关以释放渲染进程。调用方必须
+// 已把终态消息 postMessage 发完——文档关闭后无法再 postMessage。
+function maybeCloseSelfAfterAsr(port) {
+  // 排除本次终态任务的端口：done/error 时它还连着（页面收到终态后才
+  // 断连收尾），断连取消时可能已被断连监听移出——Set.delete 幂等，
+  // 两种时序都正确。
+  activeAsrPorts.delete(port);
+  if (activeAsrPorts.size > 0 || !shouldCloseAfterAsrTask(currentChatCount)) {
+    return;
+  }
+  try {
+    const closing = chrome.offscreen.closeDocument();
+    // closeDocument 返回 Promise：异步失败（如文档已被并发关闭）同样仅记录
+    if (closing && typeof closing.catch === "function") {
+      closing.catch((error) => {
+        logWarn("[BOC] offscreen closeDocument after asr task failed", {
+          error: getErrorMessage(error)
+        });
+      });
+    }
+  } catch (error) {
+    logWarn("[BOC] offscreen closeDocument after asr task failed", {
+      error: getErrorMessage(error)
+    });
+  }
 }
 
 function clearActiveRequestState() {
@@ -309,6 +355,9 @@ async function handleAsrDecodeTask(task, port) {
   port.onDisconnect.addListener(() => {
     // 断连视为取消：下载/解码/调度各处检查标志并静默退出（原 asr-audio 通道风格）
     aborted = true;
+    // 断连即终态：页面已不再等结果，按需自关文档。下方各早退点（下载/
+    // 解码/引擎关闭后的 aborted 分支）都经由本监听覆盖，不再各自挂判定。
+    maybeCloseSelfAfterAsr(port);
   });
   try {
     const audioUrl = String(task?.audioUrl || "").trim();
@@ -451,6 +500,8 @@ async function handleAsrDecodeTask(task, port) {
       skippedSegments,
       failedChunks: summary.failedChunks
     });
+    // 终态消息发完才判定自关（文档关闭后无法再 postMessage）
+    maybeCloseSelfAfterAsr(port);
   } catch (e) {
     if (aborted) {
       return;
@@ -464,6 +515,9 @@ async function handleAsrDecodeTask(task, port) {
     } catch {
       // port 已断开，忽略
     }
+    // error 终态消息发完再判定自关（断连取消已在上方 aborted 早退 +
+    // 断连监听处覆盖，走不到这里）
+    maybeCloseSelfAfterAsr(port);
   }
 }
 
