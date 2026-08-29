@@ -23,7 +23,7 @@ import { buildChunkPlan, buildWavChunks, makeDecodedBuffer } from "../asr/chunke
 import { streamWavChunks } from "../asr/stream-chunker.js";
 import { createTranscriptionEngine } from "../asr/engine.js";
 import { transcribe as transcribeOpenAi } from "../asr/adapters/openai-transcriptions.js";
-import { isFragmentedMp4, adtsFromFmp4, parseAudioSpecificConfig } from "../asr/adts.js";
+import { isFragmentedMp4, createAdtsExtractor, parseAudioSpecificConfig } from "../asr/adts.js";
 import { ASR_CONCURRENCY } from "../shared/offscreen-constants.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { logWarn } from "../shared/logging.js";
@@ -170,24 +170,38 @@ export function createAsrDecodeHandler({ onTaskTerminal }) {
         }
       });
 
-      const audioBytes = await fetchAudioBytes([audioUrl, ...(task?.backupUrls || [])], aborted);
-      if (aborted) return;
-
-      // 主路径：fMP4 音轨拆 ADTS 分段，逐段解码 + 流式切片喂入转写引擎（有界
-      // 内存）。历史背景：旧实现把整条音轨一次性 decodeAudioData——4 小时视频在
-      // 48kHz 双声道下产出 ~6.4GB Float32 AudioBuffer，offscreen 渲染进程被 OOM
-      // 击杀，扩展整包崩溃。分段后峰值降到 O(单段 + 单片)，音轨长度不再受内存
-      // 限制。段级解码降级（Q8a）：单段失败重试 1 次，仍失败跳过计数继续。
-      const fragment = isFragmentedMp4(audioBytes);
-      const segments = fragment ? adtsFromFmp4(audioBytes, parseAudioSpecificConfig(audioBytes) || {}) : [];
-      if (fragment && segments.length === 0) {
-        // 判为 fMP4 却无音帧可提取：显式失败，绝不落入下方全量解码（会再次 OOM）
-        throw new Error("音频解码失败：无法从 fMP4 提取音帧");
+      // 下载侧流式化：fetch + getReader 增量读，fMP4 判定收满 4MB（或流结束）
+      // 判一次，ADTS 段完成即产出——峰值内存 O(下载缓冲窗口 + 单段 + 单片)，
+      // 音轨长度与内存解耦。主备 URL 轮换、HEAD 探大小、abort 检查与错误文案
+      // 语义与原 fetchAudioBytes（整段 arrayBuffer 常驻 ≤200MB）逐行对应。
+      const source = streamAudioSegments([audioUrl, ...(task?.backupUrls || [])], () => aborted);
+      const first = await source.next();
+      if (first.done) {
+        // 生成器耗尽只发生在 abort 早退（全部 URL 失败/空体时直接抛「音频下载失败」）
+        return;
       }
 
       let totalChunks;
       let skippedSegments = 0;
-      if (segments.length > 0) {
+      if (first.value.raw) {
+        // 非 fMP4（B 站 fnval=16 音轨均为 fMP4，理论不会走到）：历史行为全量解码。
+        // 静音/零时长校验 + 切片（chunkSeconds<=0 不切，整段一片，与 chunker
+        // 既有语义一致）。data 是裸 Float32Array，须经 makeDecodedBuffer 适配为
+        // chunker 契约的 AudioBuffer 鸭子类型（sampleRate 16k + diagnostic），
+        // 否则会被误报「时长为零」。
+        const { data, diagnostic } = await decodeTo16kMono(first.value.raw, 0);
+        const chunks = buildWavChunks(makeDecodedBuffer(data, { diagnostic }), { chunkSeconds });
+        for (const chunk of chunks) {
+          if (aborted) return;
+          engine.push(chunk);
+        }
+        totalChunks = chunks.length;
+      } else {
+        // 主路径：fMP4 音轨拆 ADTS 分段，逐段解码 + 流式切片喂入转写引擎（有界
+        // 内存）。历史背景：旧实现把整条音轨一次性 decodeAudioData——4 小时视频在
+        // 48kHz 双声道下产出 ~6.4GB Float32 AudioBuffer，offscreen 渲染进程被 OOM
+        // 击杀，扩展整包崩溃。分段后峰值降到 O(单段 + 单片)，音轨长度不再受内存
+        // 限制。段级解码降级（Q8a）：单段失败重试 1 次，仍失败跳过计数继续。
         const AudioCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
         if (!AudioCtor) {
           throw new Error("当前环境没有 AudioContext，无法解码");
@@ -197,7 +211,17 @@ export function createAsrDecodeHandler({ onTaskTerminal }) {
           const stop = () => {
             if (aborted) throw ASR_ABORT_SENTINEL;
           };
-          const stream = await streamWavChunks(segments, {
+          // 段来源：首个已就绪的段 + 下载流后续段（下载/提帧/解码/切片全流水，
+          // 任何时刻至多持有一个待解码段）。判为 fMP4 但整流后无音帧时生成器
+          // 抛「无法从 fMP4 提取音帧」——显式失败，绝不落入上方全量解码（会再次 OOM）。
+          async function* segmentSource() {
+            yield first.value.segment;
+            for await (const item of source) {
+              if (aborted) return;
+              yield item.segment;
+            }
+          }
+          const stream = await streamWavChunks(segmentSource(), {
             chunkSeconds,
             decodeSegment: (seg) => {
               stop();
@@ -216,19 +240,6 @@ export function createAsrDecodeHandler({ onTaskTerminal }) {
         } finally {
           audioCtx.close();
         }
-      } else {
-        // 非 fMP4（B 站 fnval=16 音轨均为 fMP4，理论不会走到）：历史行为全量解码。
-        // 静音/零时长校验 + 切片（chunkSeconds<=0 不切，整段一片，与 chunker
-        // 既有语义一致）。data 是裸 Float32Array，须经 makeDecodedBuffer 适配为
-        // chunker 契约的 AudioBuffer 鸭子类型（sampleRate 16k + diagnostic），
-        // 否则会被误报「时长为零」。
-        const { data, diagnostic } = await decodeTo16kMono(audioBytes, 0);
-        const chunks = buildWavChunks(makeDecodedBuffer(data, { diagnostic }), { chunkSeconds });
-        for (const chunk of chunks) {
-          if (aborted) return;
-          engine.push(chunk);
-        }
-        totalChunks = chunks.length;
       }
       if (aborted) return;
 
@@ -271,29 +282,144 @@ export function createAsrDecodeHandler({ onTaskTerminal }) {
   };
 }
 
-// 依次尝试主地址与备用地址下载，返回字节数组。HEAD 先探大小：超上限直接
-// 拒绝（不发起 GET），报「视频过长」；HEAD 非 ok 也照常走 GET（部分 CDN
-// 不支持 HEAD）。任一次 GET 非 ok 或返回体为空视为失败，继续试下一个地址。
-async function fetchAudioBytes(urls, aborted) {
+// 流式下载音频并产出 ADTS 段（导出仅供测试；fetch/probeSize 为全局注入面）。
+// 替代原 fetchAudioBytes 的「整段 response.arrayBuffer() 常驻」：GET 后用
+// response.body.getReader() 增量读，每个 chunk 先喂 fMP4 头部判定所需的缓冲
+// （收满 HEAD_PROBE_LIMIT 或流结束时判一次，结果缓存），判为 fMP4 则把攒下的
+// 头部与后续 chunk 逐个喂 createAdtsExtractor，段完成即 yield（不攒全量）。
+// 产出形状：
+//   { segment } — 一个已完成分组的 ADTS 段（Uint8Array，fMP4 主路径）
+//   { raw }     — 非 fMP4 兜底：整段原始字节一次交出（全量缓冲，理论不走）
+// 下载侧语义与原 fetchAudioBytes 一致：HEAD 仅在首个 URL 前探一次大小；任一
+// GET 非 ok 或空体换下一个地址；全部失败抛「音频下载失败」。判为 fMP4 但整流
+// 后无音帧：抛「无法从 fMP4 提取音帧」（显式失败，绝不落入全量解码）。
+export async function* streamAudioSegments(urls, isAborted) {
+  // 头部判定缓冲上限：4MB，与 isFragmentedMp4 自身的扫描上限（1 << 22）一致
+  const HEAD_PROBE_LIMIT = 1 << 22;
   let headDone = false;
   for (const url of urls) {
-    if (aborted) return null;
+    if (isAborted()) return;
     if (!headDone) {
       await probeSize(url);
       headDone = true;
     }
-    if (aborted) return null;
+    if (isAborted()) return;
     const response = await fetch(url, { method: "GET" });
     if (!response.ok) {
       continue;
     }
-    const buffer = new Uint8Array(await response.arrayBuffer());
-    if (buffer.length === 0) {
-      continue;
+    const body = response.body;
+    if (!(body && typeof body.getReader === "function")) {
+      // 异常环境没有流式 body：退回一次性读取（行为等价旧的全量缓冲实现）
+      const raw = new Uint8Array(await response.arrayBuffer());
+      if (raw.length === 0) {
+        continue;
+      }
+      if (isFragmentedMp4(raw)) {
+        const extractor = createAdtsExtractor(parseAudioSpecificConfig(raw) || {});
+        for (const seg of extractor.push(raw)) yield { segment: seg };
+        for (const seg of extractor.flush()) yield { segment: seg };
+        if (extractor.frameCount === 0) {
+          throw new Error("音频解码失败：无法从 fMP4 提取音帧");
+        }
+      } else {
+        yield { raw };
+      }
+      return;
     }
-    return buffer;
+    const reader = body.getReader();
+    try {
+      // 增量读状态：判定前字节攒进 head（≤4MB）；判为 fMP4 后一次性喂解析器、
+      // 后续 chunk 直通；判为非 fMP4 则转入 rawParts 全量收集（兜底路径）。
+      let extractor = null;
+      let head = null;
+      let decided = false;
+      let isFmp4 = false;
+      let rawParts = null;
+      const decide = () => {
+        isFmp4 = isFragmentedMp4(head || new Uint8Array(0));
+        decided = true;
+        if (isFmp4) {
+          // moov 在头部缓冲里（B 站 moov 极小，必在首个 moof 前），ASC 判定
+          // 失败由 extractor 默认配置兜底（与原 parseAudioSpecificConfig || {} 一致）
+          extractor = createAdtsExtractor(parseAudioSpecificConfig(head) || {});
+        } else {
+          rawParts = [];
+        }
+        // head 留给调用方在判定后统一转交下游（解析器或全量收集）
+      };
+      while (true) {
+        if (isAborted()) {
+          return; // finally 里 cancel 连接，静默退出
+        }
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!(value && value.length > 0)) continue;
+        if (!decided) {
+          head = head ? concatBytes(head, value) : value;
+          if (head.length >= HEAD_PROBE_LIMIT) decide();
+        }
+        if (decided && isFmp4 && head) {
+          // 判定后把攒下的头部一次性喂入解析器（头部包含刚到的 value）
+          const headBytes = head;
+          head = null;
+          for (const seg of extractor.push(headBytes)) yield { segment: seg };
+        } else if (decided && isFmp4) {
+          for (const seg of extractor.push(value)) yield { segment: seg };
+        } else if (decided) {
+          // 非 fMP4 兜底全量收集：判定当轮攒下的头部里已含本 chunk
+          rawParts.push(head || value);
+          head = null;
+        }
+      }
+      if (!decided) decide(); // 流结束仍未收满 4MB：用已有头部判定
+      if (isFmp4) {
+        // 收尾：把头部缓冲喂给解析器 + 最后不足 10 moof 的段
+        if (head) {
+          const headBytes = head;
+          head = null;
+          for (const seg of extractor.push(headBytes)) yield { segment: seg };
+        }
+        for (const seg of extractor.flush()) yield { segment: seg };
+        if (extractor.frameCount === 0) {
+          throw new Error("音频解码失败：无法从 fMP4 提取音帧");
+        }
+        return;
+      }
+      // 非 fMP4 兜底：整段全量缓冲后一次交出；空体视为本次 GET 失败，换下一个 URL
+      if (head) {
+        rawParts.push(head);
+        head = null;
+      }
+      const total = rawParts.reduce((n, part) => n + part.length, 0);
+      if (total === 0) {
+        continue;
+      }
+      const raw = new Uint8Array(total);
+      let off = 0;
+      for (const part of rawParts) {
+        raw.set(part, off);
+        off += part.length;
+      }
+      yield { raw };
+      return;
+    } finally {
+      try {
+        reader.cancel();
+      } catch {
+        // 流已结束/已关闭，忽略
+      }
+    }
   }
   throw new Error("音频下载失败");
+}
+
+// 拼接两段字节（fMP4 头部判定缓冲累积用，仅小缓冲 ≤4MB）
+function concatBytes(a, b) {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
 }
 
 // HEAD 探大小：Content-Length 超上限直接拒绝（超长视频不下载不解码）

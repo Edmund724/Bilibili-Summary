@@ -35,55 +35,37 @@ export function isFragmentedMp4(bytes) {
   return hasMoof;
 }
 
-// 从 fMP4 提取 AAC 裸帧并包装为 ADTS 流。
-// Chrome 的 decodeAudioData 对超长 ADTS 流（完整音轨 ~46MB / 96min）解码失败，
-// 但每 ~10 moof（约 50s / 1MB）的片段能正常解码——因此按 moof 分组返回片段数组。
-// 返回 Uint8Array[]（每个元素为一个 moof/mdat 对对应的 ADTS 字节流）；
-// 不是 fMP4 或无可解析样本时返回 []。
-// bytes 为完整音轨字节；config 可选 { profile, freqIdx, chCfg }（默认
-// AAC-LC / 48kHz / 双声道，与 B 站常规音轨一致），供 moov 里 ASC 解析失败时兜底。
-export function adtsFromFmp4(bytes, config = {}) {
-  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+// 有状态增量解析器（流式下载侧）：push 接收任意分块的下载字节，内部维护跨
+// push 的残包缓冲与顶层 box 解析状态，返回「已完成的段」数组（按
+// SEGMENT_MOOFS=10 个 moof 分组、约 1MB 的口径，与 adtsFromFmp4 完全一致）；
+// flush 在流结束时调用，收尾清残包并返回最后不足 10 moof 的段。
+// 配合下载侧逐 chunk 喂入，峰值内存 O(残包 + 单段)，音轨长度与内存解耦。
+// frameCount 只读属性给出累计提取的音帧数（调用方据此判定 fMP4 零帧失败）。
+// 解析逻辑（顶层 box 序列、moof 的 trun sample sizes、mdat 切帧、ADTS 7 字节
+// 头）与 adtsFromFmp4 原实现逐字节一致——adtsFromFmp4 现在就是用本函数实现
+// 的薄包装，两者输出保证相同。
+export function createAdtsExtractor(config = {}) {
   const profile = Number(config.profile ?? 1); // AAC-LC = 1
   const freqIdx = Number(config.freqIdx ?? 3); // 48kHz
   const chCfg = Number(config.chCfg ?? 2); // 双声道
 
-  // 走一遍顶层 box 序列，收集 moof 的 sample 尺寸与随后的 mdat 数据区
-  const seq = [];
-  let p = 0;
-  while (p + 8 <= u8.length) {
-    const sz = readU32(u8, p);
-    if (sz < 8 || p + sz > u8.length) break;
-    const typ = readAscii(u8, p + 4, 4);
-    if (typ === "moof") {
-      const sizes = parseTrunSampleSizes(u8, p, sz);
-      seq.push({ typ: "moof", start: p, sizes });
-    } else if (typ === "mdat") {
-      seq.push({ typ: "mdat", start: p, size: sz });
-    }
-    p += sz;
-  }
-  if (seq.length === 0) return [];
-
-  // 组装 ADTS：为每个 sample 写 7 字节 ADTS 头 + raw AAC 帧。
   // 按 moof 分组切段：Chrome 的 decodeAudioData 对超长 ADTS 流（完整音轨
   // ~46MB / 96min）解码失败，实测每 ~10 个 moof/mdat 对（约 50s / 1MB）
   // 可正常解码——每段限制在约 1MB 内。
   const SEGMENT_MOOFS = 10;
-  const segments = [];
-  let cur = [];
+
+  let buf = null; // 跨 push 的残包：未收完的尾部 box 字节（≤ 单个 box 大小）
+  let pendingSizes = null; // 最近一个完整 moof 解析出的 sample sizes（等后续 mdat 配对）
+  let lastSeqTyp = ""; // 顶层序列中上一个 moof/mdat box 的类型（mdat 须紧跟 moof 才配对）
+  let cur = []; // 当前段累积字节
   let moofsInSegment = 0;
-  let frameCount = 0;
-  for (let i = 0; i < seq.length; i += 1) {
-    if (i === 0) continue;
-    const curBox = seq[i];
-    const prevBox = seq[i - 1];
-    if (curBox.typ !== "mdat" || prevBox.typ !== "moof") continue;
-    const sizes = prevBox.sizes;
-    if (!sizes || sizes.length === 0) continue;
-    const dataStart = curBox.start + 8;
+  let frames = 0;
+  let out = null; // 本次 push/flush 收集已完成段的数组（调用方取走）
+
+  // 处理一个 (moof, mdat) 配对：为每个 sample 写 7 字节 ADTS 头 + raw AAC 帧，
+  // 满 SEGMENT_MOOFS 个 moof 即封段。sizes 为空时不产帧也不计数（与原实现对齐）。
+  const emitMdatFrames = (data, dataStart, dataEnd, sizes) => {
     let off = dataStart;
-    const dataEnd = curBox.start + curBox.size;
     for (const sampleSize of sizes) {
       if (off + sampleSize > dataEnd) break;
       const frameTotal = sampleSize + 7;
@@ -97,19 +79,77 @@ export function adtsFromFmp4(bytes, config = {}) {
         ((frameTotal & 7) << 5) | 0x1f,
         0xfc
       );
-      for (let k = 0; k < sampleSize; k += 1) cur.push(u8[off + k]);
+      for (let k = 0; k < sampleSize; k += 1) cur.push(data[off + k]);
       off += sampleSize;
-      frameCount += 1;
+      frames += 1;
     }
     moofsInSegment += 1;
     if (moofsInSegment >= SEGMENT_MOOFS) {
-      segments.push(new Uint8Array(cur));
+      out.push(new Uint8Array(cur));
       cur = [];
       moofsInSegment = 0;
     }
-  }
-  if (cur.length > 0) segments.push(new Uint8Array(cur));
-  if (frameCount === 0) return [];
+  };
+
+  // 走一遍（残包 + 新字节拼成的）顶层 box 序列：moof 记 sample sizes 待配对，
+  // mdat 与紧邻的前一个 moof 配对切帧；尾部不完整的 box 留作残包。
+  const parse = (data) => {
+    let p = 0;
+    while (p + 8 <= data.length) {
+      const sz = readU32(data, p);
+      if (sz < 8 || p + sz > data.length) break;
+      const typ = readAscii(data, p + 4, 4);
+      if (typ === "moof") {
+        pendingSizes = parseTrunSampleSizes(data, p, sz);
+        lastSeqTyp = "moof";
+      } else if (typ === "mdat") {
+        if (lastSeqTyp === "moof" && pendingSizes && pendingSizes.length > 0) {
+          emitMdatFrames(data, p + 8, p + sz, pendingSizes);
+        }
+        lastSeqTyp = "mdat";
+      }
+      p += sz;
+    }
+    buf = p < data.length ? data.slice(p) : null;
+  };
+
+  return {
+    push(bytes) {
+      const segments = [];
+      out = segments;
+      const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+      parse(buf ? concatBytes(buf, u8) : u8);
+      out = null;
+      return segments;
+    },
+    flush() {
+      const segments = [];
+      out = segments;
+      if (cur.length > 0) segments.push(new Uint8Array(cur));
+      cur = [];
+      buf = null;
+      out = null;
+      return segments;
+    },
+    get frameCount() {
+      return frames;
+    }
+  };
+}
+
+// 从 fMP4 提取 AAC 裸帧并包装为 ADTS 流（薄包装：整段字节一次性喂
+// createAdtsExtractor 收集全部输出，签名与返回值不变）。
+// Chrome 的 decodeAudioData 对超长 ADTS 流（完整音轨 ~46MB / 96min）解码失败，
+// 但每 ~10 moof（约 50s / 1MB）的片段能正常解码——因此按 moof 分组返回片段数组。
+// 返回 Uint8Array[]（每个元素为一个 moof/mdat 对对应的 ADTS 字节流）；
+// 不是 fMP4 或无可解析样本时返回 []。
+// bytes 为完整音轨字节；config 可选 { profile, freqIdx, chCfg }（默认
+// AAC-LC / 48kHz / 双声道，与 B 站常规音轨一致），供 moov 里 ASC 解析失败时兜底。
+export function adtsFromFmp4(bytes, config = {}) {
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const extractor = createAdtsExtractor(config);
+  const segments = [...extractor.push(u8), ...extractor.flush()];
+  if (extractor.frameCount === 0) return [];
   return segments;
 }
 
@@ -147,6 +187,14 @@ export function parseAudioSpecificConfig(bytes) {
 
 function readU32(u8, p) {
   return (u8[p] << 24) | (u8[p + 1] << 16) | (u8[p + 2] << 8) | u8[p + 3];
+}
+
+// 拼接两段字节（增量解析器跨 push 的残包缓冲拼接用，仅小缓冲）
+function concatBytes(a, b) {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
 }
 
 function readAscii(u8, p, len) {
