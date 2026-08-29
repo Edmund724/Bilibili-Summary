@@ -84,6 +84,11 @@ export function needsConversationPageHydration(conversation) {
  *   loadContextState({ forceRefresh?, silent? }) → Promise<boolean|object>
  *   getActiveTab() → Promise<object|null>
  *   sendRuntimeMessage(message, opts?) → Promise<object>
+ *   stopActiveChat() → void
+ *     流式中删除当前会话 / 清空全部 / restoreLatest 无匹配时，由本模块同步调用：
+ *     sidepanel 组装为实现 chatRuntime.resetStreamState() + 清消息区的纯回调
+ *     （store 不直接 import chatRuntime，依赖方向由 sidepanel 组装）。回调必须
+ *     幂等——restoreLatest 无匹配发生在 init/上下文切换时，流必然未启动。
  *   存储抽象（默认 chrome.storage.local）：
  *     storage = { get(keys) → Promise<object>, set(obj) → Promise<void> }
  *   常量（与 sidepanel 原局部常量保持一致）：
@@ -123,6 +128,7 @@ export function createConversationStore(deps) {
     loadContextState,
     getActiveTab,
     sendRuntimeMessage,
+    stopActiveChat,
     // 存储抽象 + 常量
     storage = (typeof chrome !== "undefined" && chrome?.storage?.local) || undefined,
     conversationsStorageKey = "boc_ai_conversations_v1",
@@ -254,6 +260,9 @@ export function createConversationStore(deps) {
     const conversations = saved();
     const latest = conversations.find((item) => doesConversationMatchCurrentContext(item, currentRef, targetContextKey));
     if (!latest) {
+      // 无匹配 → 当前会话状态清空。先同步停流（init/上下文切换时流必然未启动，
+      // 回调幂等），避免任何在途流把问答写回即将清空的会话。
+      requireDep("stopActiveChat", stopActiveChat)();
       sidepanelState.currentConversationId = "";
       sidepanelState.currentConversationMeta = null;
       sidepanelState.chatHistory = [];
@@ -326,6 +335,13 @@ export function createConversationStore(deps) {
   // ===========================================================================
   async function deleteById(id) {
     const wasCurrent = id && id === sidepanelState.currentConversationId;
+    if (wasCurrent) {
+      // 流式中删除当前会话：在所有 await 之前同步停流（断 port、清在途一问一答、
+      // 清消息区）。若放到下方 await saveConversations() 之后，done 消息可能在
+      // 间隙里把在途问答 push 回刚清空的 chatHistory 并 persistCurrent——
+      // 凭空复活出会话。非流式时回调为无害空操作（幂等）。
+      requireDep("stopActiveChat", stopActiveChat)();
+    }
     const next = saved().filter((item) => item.id !== id);
     commitSaved(next);
     await saveConversations();
@@ -355,6 +371,9 @@ export function createConversationStore(deps) {
       return;
     }
     commitSaved([]);
+    // 清空全部同样先同步停流再清当前会话状态（理由同 deleteById；清空语义下
+    // 在途问答也不应复活）。
+    requireDep("stopActiveChat", stopActiveChat)();
     sidepanelState.currentConversationId = "";
     sidepanelState.currentConversationMeta = null;
     sidepanelState.chatHistory = [];

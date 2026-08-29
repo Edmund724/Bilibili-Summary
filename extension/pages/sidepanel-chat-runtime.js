@@ -100,6 +100,11 @@ export function createChatRuntime(deps) {
   let activePort = null;
   let activeAssistantNode = null;
   let activeUserPrompt = "";
+  // 会话身份快照：sendMessage 发起时捕获 currentConversationId，finalize /
+  // stopped 持久化前比对。发送后当前会话被删除/清空/切换（id 已变）则只更新
+  // DOM，不 push 进 chatHistory、不 persistCurrent——流式中删除当前会话导致
+  // 会话"复活"的竞态兜底（第一道防线是 store reset 路径注入的 stopActiveChat）。
+  let activeConversationId = "";
   let thinkingNode = null;
   let streamSlowNoticeTimer = 0;
   let streamFirstTokenReceived = false;
@@ -158,6 +163,7 @@ export function createChatRuntime(deps) {
     deps.autosizeInput();
     setStreamingUiState(true);
     activeUserPrompt = text;
+    activeConversationId = sidepanelState.currentConversationId;
     activeAssistantNode = appendAssistantPlaceholder();
     startStreamSlowNoticeTimer();
     streamFirstTokenReceived = false;
@@ -437,12 +443,14 @@ export function createChatRuntime(deps) {
     clearStreamRuntimeState();
     const raw = getStreamRaw(node);
     renderAssistantMessage(node, raw, { userPrompt: activeUserPrompt });
-    if (activeUserPrompt && raw) {
+    // 身份校验：发送后当前会话已变（删除/清空/切换）→ 只更新 DOM，不写回
+    // chatHistory、不持久化（防会话复活 / 串话）。
+    if (activeUserPrompt && raw && sidepanelState.currentConversationId === activeConversationId) {
       sidepanelState.chatHistory.push({ role: "user", content: activeUserPrompt });
       sidepanelState.chatHistory.push({ role: "assistant", content: raw });
-      activeUserPrompt = "";
       void deps.store.persistCurrent();
     }
+    activeUserPrompt = "";
     if (activePort) {
       try { activePort.disconnect(); } catch {}
       activePort = null;
@@ -493,10 +501,13 @@ export function createChatRuntime(deps) {
       stopped.textContent = reason || "已停止生成";
       node.appendChild(stopped);
       if (activeUserPrompt) {
-        sidepanelState.chatHistory.push({ role: "user", content: activeUserPrompt });
-        sidepanelState.chatHistory.push({ role: "assistant", content: raw });
+        // 身份校验同 finalizeAssistant：会话已变则不写回、不持久化
+        if (sidepanelState.currentConversationId === activeConversationId) {
+          sidepanelState.chatHistory.push({ role: "user", content: activeUserPrompt });
+          sidepanelState.chatHistory.push({ role: "assistant", content: raw });
+          void deps.store.persistCurrent();
+        }
         activeUserPrompt = "";
-        void deps.store.persistCurrent();
       }
     } else {
       node.innerHTML = "";

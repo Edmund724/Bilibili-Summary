@@ -157,6 +157,15 @@ const conversationStore = createConversationStore({
   loadContextState,
   getActiveTab,
   sendRuntimeMessage,
+  // 流式中删除当前会话 / 清空全部 / restoreLatest 无匹配时由 store 同步调用：
+  // 断 port、清在途一问一答、清消息区并退出流式 UI 态（对应 restartChat 的
+  // 清理动作，但不清会话状态——那由 store 自己做）。store 不直接 import
+  // chatRuntime，依赖方向由本文件组装；回调幂等（非流式时为无害空操作）。
+  stopActiveChat: () => {
+    chatRuntime.resetStreamState();
+    resetConversationView();
+    setStreamingUiState(false);
+  },
   storage: chrome.storage.local,
   conversationsStorageKey: CONVERSATIONS_STORAGE_KEY,
   maxSavedConversations: MAX_SAVED_CONVERSATIONS
