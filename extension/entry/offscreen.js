@@ -4,12 +4,7 @@
 // 在本 context 用 OfflineAudioContext 完成；转写引擎与适配器也加载在本
 // context——音频字节与 API Key 都不出 offscreen，跨 port 只回传转写文本结果）。
 // 本文件只保留端口接线与分发、聊天通道、空闲超时、以及文档自关闭簿记。
-import { streamChat } from "../ai/client.js";
-import { buildBudgetPlan } from "../ai/budgeter.js";
-import { orchestrateMapReduce } from "../ai/map-reduce.js";
-import { resolveFollowupContext } from "../ai/followup-router.js";
-import { trimRecentTurns } from "../ai/followup-context.js";
-import { buildCostGuardNotice } from "../ai/cost-guard.js";
+import { runLadderChat } from "../ai/ladder.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { logWarn } from "../shared/logging.js";
 import { shouldCloseAfterAsrTask } from "./offscreen-lifecycle.js";
@@ -102,100 +97,23 @@ chrome.runtime.onConnect.addListener((port) => {
 
       armIdleTimeout(activeAbortController, port);
 
-      // 阶梯分派：预算内（≤100k token）走单次流式；超预算走 Map-Reduce 分段编排。
-      const plan = buildBudgetPlan({
-        body: Array.isArray(msg.context?.subtitleBody) ? msg.context.subtitleBody : [],
-        chapters: Array.isArray(msg.context?.chapters) ? msg.context.chapters : []
-      });
-      if (plan.mode === "map-reduce") {
-        // 追问压缩：已有成稿笔记 + 分段小结时，改走「压缩摘要 + 检索注入 + 单次调用」，
-        // 不再重跑 Map-Reduce（token 随追问近乎常数）。
-        const followupContext = await resolveFollowupContext({
-          context: msg.context || {},
-          plan,
-          history: Array.isArray(msg.history) ? msg.history : [],
-          userPrompt: msg.prompt || ""
-        });
-        if (followupContext) {
-          // 近 N 轮 verbatim 封顶：只带最近几轮历史，token 不随追问轮数增长。
-          const trimmedHistory = trimRecentTurns(msg.history);
-          const followupResult = await streamChat({
-            provider: { ...provider, apiKey },
-            context: followupContext,
-            userPrompt: msg.prompt || "",
-            history: trimmedHistory,
-            thinkingLevel: msg.thinkingLevel,
-            port,
-            signal: activeAbortController.signal,
-            onActivity: function () { armIdleTimeout(activeAbortController, port); }
-          });
-          // 兜底：压缩摘要 + 检索注入仍意外溢出（HTTP context-length）时，绝不静默无输出。
-          if (followupResult === "overflow") {
-            port.postMessage({ type: "error", error: "追问内容仍超出上下文预算，请换个更具体的问题重试" });
-          }
-          return;
-        }
-
-        // 成本护栏：发起 Map-Reduce 前预估 ≥5 次调用 → 弹确认，可取消。
-        const guard = buildCostGuardNotice({
-          estimatedCalls: plan.estimatedCalls,
-          estimatedTokens: plan.estimatedTokens
-        });
-        if (guard.shouldPrompt) {
-          // 等待用户确认期间暂停空闲超时计时，确认后重新武装。
-          clearIdleTimeout();
-          const confirmed = await askCostGuard(port, guard.message);
-          if (!confirmed) {
-            port.postMessage({ type: "stopped", reason: "已取消" });
-            return;
-          }
-          armIdleTimeout(activeAbortController, port);
-        }
-
-        await orchestrateMapReduce({
+      // 阶梯分派策略（预算内单次流式 → 超预算 Map-Reduce → 追问压缩/成本护栏）
+      // 在 ai/ladder.js（策略模块由 ladder 自行引入默认实现）；此处只接线：
+      // 注入依赖本文件簿记的 askCostGuard 与空闲超时回调。abort controller、
+      // 空闲超时与 cost-guard 的 Promise 簿记仍留在本文件。
+      await runLadderChat(
+        {
+          msg,
           provider: { ...provider, apiKey },
-          context: msg.context || {},
-          plan,
           port,
-          signal: activeAbortController.signal,
-          thinkingLevel: msg.thinkingLevel,
-          onProgress: function (notice) {
-            // 进度回吐 + 每段完成重挂空闲超时（覆盖下一段模型调用）
-            port.postMessage({ type: "notice", data: notice });
-            armIdleTimeout(activeAbortController, port);
-          }
-        });
-        return;
-      }
-
-      const result = await streamChat({
-        provider: { ...provider, apiKey },
-        context: msg.context || {},
-        userPrompt: msg.prompt || "",
-        history: Array.isArray(msg.history) ? msg.history : [],
-        thinkingLevel: msg.thinkingLevel,
-        port,
-        signal: activeAbortController.signal,
-        onActivity: function () { armIdleTimeout(activeAbortController, port); }
-      });
-
-      // 单次路径 context-length 溢出 → 自动转 Map-Reduce 重试一次
-      //（仅一次：map-reduce 各调用自身更短，再溢出就抛出错误；activeAbortController 复用，stop 仍可中止）。
-      if (result === "overflow") {
-        await orchestrateMapReduce({
-          provider: { ...provider, apiKey },
-          context: msg.context || {},
-          plan,
-          port,
-          signal: activeAbortController.signal,
-          thinkingLevel: msg.thinkingLevel,
-          onProgress: function (notice) {
-            // 进度回吐 + 每段完成重挂空闲超时（覆盖下一段模型调用）
-            port.postMessage({ type: "notice", data: notice });
-            armIdleTimeout(activeAbortController, port);
-          }
-        });
-      }
+          signal: activeAbortController.signal
+        },
+        {
+          askCostGuard,
+          onActivity: function () { armIdleTimeout(activeAbortController, port); },
+          pauseIdleTimeout: clearIdleTimeout
+        }
+      );
     } catch (e) {
       port.postMessage({ type: "error", error: String(e?.message || e) });
     } finally {
