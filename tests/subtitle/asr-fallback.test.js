@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 import { createAsrFallback } from "../../extension/asr/fallback.js";
 import { state, clipState } from "../../extension/core/state.js";
-import { getSubtitleCacheKey } from "../../extension/subtitle/cache.js";
+import { getSubtitleCacheKey, saveSubtitleToCache } from "../../extension/subtitle/cache.js";
 
 const BVID = "BV1test000000";
 const CID = "101";
@@ -224,9 +224,11 @@ describe("maybeRunAsrFallback skip 闸门", () => {
 
 describe("maybeRunAsrFallback 成功与缓存", () => {
   it("配置齐全：管线产出字幕 → 伪轨道 + ready + 写缓存 + 清理旧 ASR 变体 + asr-done 广播", async () => {
-    // 预放同视频另一 provider/model 的过期 ASR 变体键：成功后应被孤儿清理
+    // 预放同视频另一 provider/model 的过期 ASR 变体键：成功后应被孤儿清理。
+    // 经真实写路径落盘（saveSubtitleToCache 记录 LRU 索引键面——孤儿清理按
+    // 索引定点枚举，与生产写入来源一致）
     const staleVariantKey = asrCacheKey({ providerId: "p1", model: "whisper-old" });
-    await seedCache(staleVariantKey, [{ from: 0, to: 5, content: "旧变体" }]);
+    await saveSubtitleToCache(staleVariantKey, [{ from: 0, to: 5, content: "旧变体" }]);
     // 预放陈旧的无字幕原因：字幕就绪后必须清 null
     clipState.setNoSubtitleReason("asr-empty");
     deps.runAsrPipeline.mockResolvedValue(TRANSCRIBED_BODY);

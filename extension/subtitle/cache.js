@@ -1,5 +1,5 @@
 import { logWarn, logError } from "../shared/logging.js";
-import { parseBvidFromCacheKey, writeWithEviction } from "../core/cache-lru.js";
+import { parseBvidFromCacheKey, readLruIndex, writeWithEviction } from "../core/cache-lru.js";
 
 export const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
 // ASR 变体 source key 前缀：fetcher 以 subtitleId "asr:<providerId>:<model>:<lang>"
@@ -61,12 +61,21 @@ export async function saveSubtitleToCache(cacheKey, body) {
  * ASR 孤儿清理：删除同 (bvid, cid) 下除 keepKey 外的 ASR 变体缓存键
  * （不同 provider/model/language 的旧转写，键含 "id_asr:" source key）。
  * 平台字幕轨（id_/url_/lang_ 且非 asr:）不是孤儿，一律保留。
+ * 枚举走 LRU 索引定点批量读取；索引缺失 / 该 bvid 无条目 / 条目无 keys 时
+ * 回退 get(null) 前缀扫描（镜像 pruneToRecentVideos 的兜底模式）。
  * 返回删除的键数组；失败 logWarn 并返回 []，不抛异常。
  */
 export async function clearStaleAsrSubtitleCache({ bvid, cid, keepKey = "" } = {}) {
   try {
     const keyPrefix = `${CACHE_KEY_PREFIX}${bvid}_${cid}_${ASR_SOURCE_KEY_PREFIX}`;
-    const all = await chrome.storage.local.get(null);
+    const index = await readLruIndex();
+    const familyEntry = index[CACHE_KEY_PREFIX] && typeof index[CACHE_KEY_PREFIX] === "object" ? index[CACHE_KEY_PREFIX] : {};
+    const bvidEntry = familyEntry[bvid];
+    const all = Array.isArray(bvidEntry?.keys) && bvidEntry.keys.length > 0
+      ? await chrome.storage.local.get(
+          bvidEntry.keys.filter((key) => typeof key === "string" && key.startsWith(keyPrefix))
+        )
+      : await chrome.storage.local.get(null);
     const staleKeys = Object.keys(all || {}).filter(
       (key) => typeof key === "string" && key.startsWith(keyPrefix) && key !== keepKey
     );

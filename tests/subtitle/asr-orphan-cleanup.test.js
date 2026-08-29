@@ -100,6 +100,25 @@ describe("clearStaleAsrSubtitleCache：只清同视频的过期 ASR 变体", () 
     await expect(cache.clearStaleAsrSubtitleCache({ bvid: "BV1o", cid: "7", keepKey })).resolves.toEqual([]);
     expect(storage.map.has(keepKey)).toBe(true);
   });
+
+  it("索引含该 bvid 的 keys → 定点批量枚举，不做 get(null) 全量枚举", async () => {
+    const keepKey = cache.getSubtitleCacheKey({ bvid: "BV1o", cid: "7", subtitleId: "asr:new:p:m:auto" });
+    const staleAsr = cache.getSubtitleCacheKey({ bvid: "BV1o", cid: "7", subtitleId: "asr:old:p:m:auto" });
+    await storage.local.set({
+      [keepKey]: { body: BODY, timestamp: 2 },
+      [staleAsr]: { body: BODY, timestamp: 1 }
+    });
+    const lru = await import("../../extension/core/cache-lru.js");
+    await lru.recordCacheWrite("boc_subtitle_cache_", "BV1o", 10, [keepKey, staleAsr]);
+
+    const removed = await cache.clearStaleAsrSubtitleCache({ bvid: "BV1o", cid: "7", keepKey });
+
+    expect(removed).toEqual([staleAsr]);
+    expect(storage.map.has(staleAsr)).toBe(false);
+    expect(storage.map.has(keepKey)).toBe(true);
+    // 全程无全量枚举（索引读 + 定点批量 get 都不是 null）
+    expect(storage.local.get.mock.calls.some(([keys]) => keys === null)).toBe(false);
+  });
 });
 
 describe("saveSubtitleToCache 与统一 LRU 的接线", () => {

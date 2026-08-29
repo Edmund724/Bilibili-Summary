@@ -10,10 +10,14 @@ let mod;
 let storage;
 
 // 内存 Map 实现的 chrome.storage.local：get/set/remove 均为 vi.fn，便于断言调用与注入失败。
+// get 需支持 null（loadStoredRawSegments 索引缺失时的回退兜底走全量枚举）。
 function createMemoryStorage() {
   const map = new Map();
   const local = {
     get: vi.fn(async (keys) => {
+      if (keys === null || keys === undefined) {
+        return Object.fromEntries(map.entries());
+      }
       const want = Array.isArray(keys) ? keys : [keys];
       const out = {};
       for (const k of want) {
@@ -90,6 +94,37 @@ describe("原始字幕段落盘读写（命中/未命中）", () => {
     // 存储值形状 { segments, timestamp }
     expect(storage.map.get(key)).toMatchObject({ segments });
     expect(storage.map.get(key).timestamp).toEqual(expect.any(Number));
+  });
+});
+
+describe("loadStoredRawSegments：索引驱动批量读取（代替 get(null) 全库扫描）", () => {
+  it("索引含该 bvid 的 keys → 单次批量定点读取（无逐键往返），返回形状不变", async () => {
+    const keys = [0, 1, 2].map((i) =>
+      mod.getRawSegmentKey({ bvid: "BV1a", cid: "1", subtitleId: "sub-1", segmentIndex: i })
+    );
+    for (const [i, key] of keys.entries()) {
+      await mod.saveRawSegments(key, [{ from: i * 5, to: i * 5 + 5, content: `段${i}` }]);
+    }
+    storage.local.get.mockClear();
+
+    const restored = await mod.loadStoredRawSegments({ bvid: "BV1a", cid: "1", subtitleId: "sub-1" });
+    expect(restored.map((seg) => seg.index)).toEqual([0, 1, 2]);
+    expect(restored[1]).toMatchObject({ index: 1, from: 5, to: 10, items: [{ from: 5, to: 10, content: "段1" }] });
+    // 往返数：索引定点读 1 次 + 数据键单次批量 get 1 次（原实现为 get(null) + 逐键串行）
+    const lru = await import("../../extension/core/cache-lru.js");
+    expect(storage.local.get.mock.calls.map(([k]) => k)).toEqual([
+      lru.LRU_INDEX_KEY,
+      expect.arrayContaining(keys)
+    ]);
+  });
+
+  it("索引缺失（该 bvid 无条目）→ 回退 get(null) 前缀扫描兜底，行为不变", async () => {
+    const key = mod.getRawSegmentKey({ bvid: "BV1a", cid: "1", subtitleId: "sub-1", segmentIndex: 0 });
+    await storage.local.set({ [key]: { segments: [{ from: 0, to: 5, content: "x" }], timestamp: 1 } });
+
+    const restored = await mod.loadStoredRawSegments({ bvid: "BV1a", cid: "1", subtitleId: "sub-1" });
+    expect(restored).toEqual([{ index: 0, from: 0, to: 5, items: [{ from: 0, to: 5, content: "x" }] }]);
+    expect(storage.local.get).toHaveBeenCalledWith(null);
   });
 });
 

@@ -7,7 +7,7 @@
 
 import { logError } from "../shared/logging.js";
 import { buildSubtitleSourceKey } from "../subtitle/cache.js";
-import { parseBvidFromCacheKey, writeWithEviction } from "../core/cache-lru.js";
+import { parseBvidFromCacheKey, readLruIndex, writeWithEviction } from "../core/cache-lru.js";
 
 // 分段小结缓存键前缀。
 export const SEGMENT_SUMMARY_PREFIX = "boc_lvs_summary_";
@@ -145,6 +145,8 @@ function segmentIndexFromKey(key, keyPrefix) {
 /**
  * 跨会话回退读取：按 (bvid, cid, 字幕轨 source key) 枚举已落盘的原始字幕段键，
  * 按段序返回与 plan.segments 同构的数组（{ index, from, to, items }）。
+ * 枚举走 LRU 索引定点批量读取（单次往返）；索引缺失 / 该 bvid 无条目 / 条目无
+ * keys 时回退 get(null) 前缀扫描（镜像 pruneToRecentVideos 的兜底模式）。
  * from/to 由 items 首末项推导（对齐 budgeter.splitByBudget 的段边界语义）。
  * 缺 bvid/cid / 无命中 / 读失败 → []（回退只补空，绝不抛错）。
  */
@@ -155,14 +157,23 @@ export async function loadStoredRawSegments({ bvid, cid, subtitleId = "", subtit
     }
     const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
     const keyPrefix = `${RAW_SEGMENT_PREFIX}${bvid}_${cid}_${sourceKey}_`;
-    const all = await chrome.storage.local.get(null);
+    // 索引驱动：取该族该 bvid 条目的 keys 定点批量读取（代替 get(null) 全库扫描
+    // 与逐键串行 await）；条目无 keys（旧格式/缺失）时回退前缀扫描兜底。
+    const index = await readLruIndex();
+    const familyEntry = index[RAW_SEGMENT_PREFIX] && typeof index[RAW_SEGMENT_PREFIX] === "object" ? index[RAW_SEGMENT_PREFIX] : {};
+    const bvidEntry = familyEntry[bvid];
+    const all = Array.isArray(bvidEntry?.keys) && bvidEntry.keys.length > 0
+      ? await chrome.storage.local.get(
+          bvidEntry.keys.filter((key) => typeof key === "string" && key.startsWith(keyPrefix))
+        )
+      : await chrome.storage.local.get(null);
     const keys = Object.keys(all || {})
       .filter((key) => typeof key === "string" && key.startsWith(keyPrefix))
       .sort((a, b) => segmentIndexFromKey(a, keyPrefix) - segmentIndexFromKey(b, keyPrefix));
 
     const out = [];
     for (const key of keys) {
-      const items = await loadRawSegments(key);
+      const items = all[key]?.segments;
       if (Array.isArray(items) && items.length > 0) {
         const first = items[0] || {};
         const last = items[items.length - 1] || {};

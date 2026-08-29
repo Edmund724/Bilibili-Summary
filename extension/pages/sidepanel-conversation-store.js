@@ -243,11 +243,12 @@ export function createConversationStore(deps) {
   // ===========================================================================
   // saveConversations（内部辅助，被多处复用；不单独暴露给 sidepanel）
   // ===========================================================================
+  // 写路径只落盘当前内存态：各写入口已把变化的会话整理成形（persistCurrent 自
+  // 构造规范会话，读边界 loadAll 对 storage 旧数据做过全量归一），这里不再对全部
+  // 会话重跑 normalizeConversations，只保留 60 条容量切片。
   async function saveConversations() {
-    const normalized = normalizeConversations(saved());
-    commitSaved(normalized);
     await requireDep("storage", storage).set({
-      [conversationsStorageKey]: normalized.slice(0, maxSavedConversations)
+      [conversationsStorageKey]: saved().slice(0, maxSavedConversations)
     });
     requireDep("renderHistoryList", renderHistoryList)();
   }
@@ -444,7 +445,9 @@ export function createConversationStore(deps) {
       messages: chat.map((item) => ({ role: item.role, content: String(item.content || "") }))
     };
     const filtered = saved().filter((item) => item.id !== currentId);
-    commitSaved([nextConversation, ...filtered]);
+    // 写路径自构造的会话已是规范形状，置前提交即可（saveConversations 不再全量
+    // 归一）；60 条容量切片在此维持。
+    commitSaved([nextConversation, ...filtered].slice(0, maxSavedConversations));
     sidepanelState.currentConversationMeta = {
       id: nextConversation.id,
       title: nextConversation.title,

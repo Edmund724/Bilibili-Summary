@@ -9,9 +9,10 @@
 //     ts 为该视频最近一次写入时间戳，keys 为该 bvid 在该族下的全部缓存键
 //     （每次记录写入时合并去重更新）。旧格式条目（数值 ts，无 keys）在读端归一化
 //     兼容，无需迁移；
-//   - 淘汰优先走索引键清单（避免 get(null) 全量扫描）；仅当某族在索引中无条目、
-//     或存在无 keys 的条目（旧格式/混合状态，键面不全）时，该族回退 get(null)
-//     前缀扫描兜底；
+//   - 淘汰候选键优先取索引键清单（不做 storage 存在性检查）；仅当某族在索引中
+//     无条目、或存在无 keys 的条目（旧格式/混合状态，键面不全）时，该族回退
+//     get(null) 前缀扫描兜底。索引指向已删键的幽灵条目随淘汰被垃圾回收出索引
+//     （storage.remove 对不存在键是 no-op，索引收缩步骤顺带清掉条目）；
 //   - 淘汰本身静默运行、不提示；仅当「淘汰后重试仍失败」时由调用方把 distinct
 //     失败（CacheWriteError）上浮到各自的 UI 通道（content 状态栏 / offscreen port notice）。
 // chrome.* 访问与既有测试模式一致：直接使用全局 chrome.storage.local，
@@ -104,24 +105,12 @@ function rankBvidsInFamily(family, indexEntry, familyKeys) {
 }
 
 /**
- * 淘汰到每族最近 keep 个视频：优先按索引里记录的各族键清单列出键（避免全量扫描），
- * 索引缺 keys 的族回退前缀扫描；bvid 不在最近 keep 名内的整键删除。
- * 返回 { [family]: string[] }（实际删除的键）；淘汰本身静默：任何失败吞掉并返回 {}。
+ * 淘汰到每族最近 keep 个视频：候选键优先取索引里记录的各族键清单（无存在性检查），
+ * 索引缺 keys 的族回退前缀扫描；bvid 不在最近 keep 名内的整键删除——索引有、
+ * storage 无的幽灵键也在其列（storage.remove 对其为 no-op，其索引条目随收缩清出）。
+ * 返回 { [family]: string[] }（清理出的键，可能含已不存在的键）；淘汰本身静默：
+ * 任何失败吞掉并返回 {}。
  */
-// 批量探测键现存性：返回实际存在于 storage 的键（索引指向已删键的 no-op 容错）。
-async function filterExistingKeys(storage, keys) {
-  if (keys.length === 0) {
-    return [];
-  }
-  try {
-    const found = await storage.get(keys);
-    return keys.filter((key) => Object.prototype.hasOwnProperty.call(found || {}, key));
-  } catch {
-    // 探测失败退回原清单：storage.remove 对不存在键是 no-op，语义等价。
-    return keys;
-  }
-}
-
 export async function pruneToRecentVideos(families = CACHE_FAMILIES, keep = LRU_KEEP_VIDEOS) {
   try {
     const storage = requireStorageLocal();
@@ -157,10 +146,11 @@ export async function pruneToRecentVideos(families = CACHE_FAMILIES, keep = LRU_
     const keysToRemove = [];
     const removed = {};
     for (const family of familyList) {
-      // 候选键：索引驱动族用索引 keys 并集；回退族按前缀扫描。索引有、storage 无的
-      // 键视同已删（不参与排序与删除报告）；畸形键（解析不出 bvid）按垃圾回收。
+      // 候选键：索引驱动族直接用索引 keys 并集（不做存在性检查，「索引有、storage
+      // 无」的幽灵键照常流入下方淘汰清单，由 storage.remove no-op + 索引收缩自愈）；
+      // 回退族按前缀扫描。畸形键（解析不出 bvid）按垃圾回收。
       const familyKeys = indexDrivenKeys.has(family)
-        ? (await filterExistingKeys(storage, indexDrivenKeys.get(family)))
+        ? indexDrivenKeys.get(family)
         : Object.keys(all || {}).filter((key) => key.startsWith(family));
       const ranked = rankBvidsInFamily(family, index[family], familyKeys);
       const keepSet = new Set(ranked.slice(0, safeKeep).map(([bvid]) => bvid));
@@ -198,9 +188,28 @@ export async function pruneToRecentVideos(families = CACHE_FAMILIES, keep = LRU_
   }
 }
 
+// prune 短路检查：各族索引条目的 bvid 数（旧格式条目 normalizeIndexEntry 后照计，
+// 畸形条目不计）都 ≤ keep → true。各族的淘汰只会在自己的写入路径上越界，别的族
+// 不可能因本次写入超限，此时完整 prune 必无事可做，可跳过。
+function familiesWithinKeep(index, families, keep) {
+  const safeKeep = Math.max(1, Math.floor(Number(keep)) || LRU_KEEP_VIDEOS);
+  const familyList = (Array.isArray(families) ? families : []).filter((f) => typeof f === "string" && f);
+  return familyList.every((family) => {
+    const entry = index[family] && typeof index[family] === "object" ? index[family] : {};
+    let count = 0;
+    for (const value of Object.values(entry)) {
+      if (normalizeIndexEntry(value)) {
+        count += 1;
+      }
+    }
+    return count <= safeKeep;
+  });
+}
+
 /**
  * 带 LRU 淘汰的写入：记录索引 → 写入 → 每次成功写入后维持「每族仅保留最近 keep
- * 个视频」的不变量；写入失败时先淘汰（静默）再重试一次，仍失败返回
+ * 个视频」的不变量（先读索引短路：各族条目 bvid 数都 ≤ keep 时跳过完整 prune）；
+ * 写入失败时先淘汰（静默）再重试一次，仍失败返回
  * { ok:false, error: CacheWriteError }（distinct 失败，由调用方决定是否上浮 UI）。
  * 从不抛出；返回 { ok:true } 或 { ok:false, error }。
  */
@@ -240,7 +249,11 @@ export async function writeWithEviction({
     }
   }
 
-  // 维持 LRU 不变量：每次成功写入后收缩到每族最近 keep 个视频。
-  await pruneToRecentVideos(pruneFamilies, keep);
+  // 维持 LRU 不变量：每次成功写入后收缩到每族最近 keep 个视频。先读一次索引
+  // （单个小键、便宜）短路：各族条目 bvid 数都 ≤ keep 时本次写入不可能造成越界，
+  // 跳过完整 prune。
+  if (!familiesWithinKeep(await readLruIndex(), pruneFamilies, keep)) {
+    await pruneToRecentVideos(pruneFamilies, keep);
+  }
   return { ok: true };
 }
