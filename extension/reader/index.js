@@ -69,12 +69,11 @@ export { clearReaderModePageState } from "./reader-impl.js";
 export { ids } from "./reader-impl.js";
 // 阅读视图开关状态查询
 export { isReaderViewOpen } from "./reader-impl.js";
-// 阅读视图手动滚动暂停状态查询与重置
-export { isManualScrollPaused, resetManualScrollPause } from "./reader-impl.js";
-// 阅读视图程序化滚动状态查询
-export { isProgrammaticScrolling } from "./reader-impl.js";
+// 阅读视图手动滚动 / 程序化滚动的暂停状态函数移至 ./scroll-state.js 共享叶子，
+// 不再经本 facade 转发；消费方（core/message-handler.js、ui/ui-renderer.js）
+// 直接 import scroll-state.js。
 // 阅读模式下的播放器宿主 / 布局闭包状态访问器（供 reader 域内部模块使用）
-export { setVideoEventsBound, isVideoEventsBound, setManualScrollPaused, setProgrammaticScrollUntil } from "./reader-impl.js";
+export { setVideoEventsBound, isVideoEventsBound } from "./reader-impl.js";
 // 日志（reader 域与外部共用，非 reader 专属能力）
 export { logInfo, logWarn } from "../shared/logging.js";
 

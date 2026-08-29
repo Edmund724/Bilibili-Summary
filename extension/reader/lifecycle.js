@@ -74,10 +74,9 @@ import {
   cleanupReaderPlayerHost,
   unbindReaderLayout,
   updateReadingTranscriptTailSpacer,
-  renderReadingStatus,
-  resetManualScrollPause,
-  setProgrammaticScrollUntil
+  renderReadingStatus
 } from "./reader-impl.js";
+import { resetManualScrollPause, setProgrammaticScrollUntil } from "./scroll-state.js";
 
 // SYNC functions this module drives (from sync.js):
 import {

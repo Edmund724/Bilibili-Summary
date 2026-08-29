@@ -32,10 +32,10 @@ import {
   noteManualReaderInteraction,
   onReadingChapterClick,
   onReadingTranscriptClick,
-  isReaderViewOpen,
-  resetManualScrollPause,
-  isProgrammaticScrolling
+  isReaderViewOpen
 } from "../reader/index.js";
+// 滚动暂停 / 程序化滚动状态位于 reader 域的共享叶子模块（不再经 reader/index.js 转发）
+import { resetManualScrollPause, isProgrammaticScrolling } from "../reader/scroll-state.js";
 import {
   refreshClip,
   loadSubtitle

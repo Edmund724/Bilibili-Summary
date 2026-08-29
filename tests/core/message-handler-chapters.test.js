@@ -40,10 +40,12 @@ vi.mock("../../extension/reader/index.js", () => ({
   closeReadingView: vi.fn(),
   logWarn: vi.fn(),
   isReaderViewOpen: vi.fn(() => false),
-  resetManualScrollPause: vi.fn(),
   renderReadingStatus: vi.fn(),
   waitForVideoMetadata: vi.fn(async () => {}),
   enforceNormalPageStateIfNeeded: vi.fn()
+}));
+vi.mock("../../extension/reader/scroll-state.js", () => ({
+  resetManualScrollPause: vi.fn()
 }));
 vi.mock("../../extension/bilibili/gateway.js", () => ({
   getCurrentAid: vi.fn(() => ""),

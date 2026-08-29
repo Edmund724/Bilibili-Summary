@@ -30,11 +30,12 @@ import {
   closeReadingView,
   logWarn,
   isReaderViewOpen,
-  resetManualScrollPause,
   renderReadingStatus,
   waitForVideoMetadata,
   enforceNormalPageStateIfNeeded
 } from "../reader/index.js";
+// 滚动暂停重置位于 reader 域的共享叶子模块（不再经 reader/index.js 转发）
+import { resetManualScrollPause } from "../reader/scroll-state.js";
 
 import {
   isReaderMode,

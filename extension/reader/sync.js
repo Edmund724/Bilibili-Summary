@@ -20,6 +20,12 @@ import { formatCompactTimestamp } from "../shared/string-utils.js";
 import { getReaderElement } from "../shared/dom-utils.js";
 import { findActiveSubtitleIndex, findActiveChapterIndex } from "../subtitle/core.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
+import {
+  isManualScrollPaused,
+  resetManualScrollPause,
+  setManualScrollPaused,
+  setProgrammaticScrollUntil
+} from "./scroll-state.js";
 
 import {
   ids,
@@ -31,10 +37,6 @@ import {
   unbindReaderPlayerControlsHover,
   closeReaderCleanup,
   renderReadingStatus,
-  isManualScrollPaused,
-  resetManualScrollPause,
-  setManualScrollPaused,
-  setProgrammaticScrollUntil,
   setVideoEventsBound,
   clearLayoutTimersForSyncStop,
   registerSyncAdapter
@@ -58,10 +60,8 @@ registerSyncAdapter({
 // ===== sync-domain private bookkeeping (module-level closure state) =====
 //
 // syncTimer (readingSyncTimer) moved here with the sync domain.
-// manualScrollPauseUntil / programmaticScrollUntil were hoisted to
-// reader-impl.js (issue 06); they moved here with the sync domain because all
-// their readers/writers are sync functions. The layout side only reads them
-// through the exported is* accessors and resets them via resetManualScrollPause.
+// manualScrollPauseUntil / programmaticScrollUntil live in ./scroll-state.js,
+// the shared leaf both this module and the LAYOUT layer read/write directly.
 let syncTimer = 0; // readingSyncTimer
 
 // ===== transcript-sync.js (playback sync) =====

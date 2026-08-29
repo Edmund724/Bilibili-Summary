@@ -19,6 +19,7 @@ import { sleep } from "../shared/utils.js";
 import { isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import * as pageContext from "./page-context.js";
+import { isProgrammaticScrolling } from "./scroll-state.js";
 
 // ===== reader-domain private bookkeeping (module-level closure state) =====
 //
@@ -30,10 +31,9 @@ import * as pageContext from "./page-context.js";
 // unbinding the video), so state.reader stays its single source of truth.
 //
 // syncTimer moved to sync.js with the sync domain. manualScrollPauseUntil /
-// programmaticScrollUntil stay declared here (base layer) and are written by
-// sync.js through the exported set* accessors below; this module reads them
-// exclusively through the exported is* accessors. Keeping the declarations
-// here makes both modules share one closure scope with no cross-module state.
+// programmaticScrollUntil moved to ./scroll-state.js, the shared leaf owned by
+// SYNC and LAYOUT alike; this module reads them only through that module's
+// exported is* functions.
 let playerHost = null;             // readingPlayerHost
 let mainOriginalParent = null;     // readingMainOriginalParent
 let mainOriginalNextSibling = null;// readingMainOriginalNextSibling
@@ -51,8 +51,6 @@ let headerHoverHost = null;        // readingHeaderHoverHost
 let headerHideTimer = 0;           // readingHeaderHideTimer
 let videoEventsBound = false;      // readingVideoEventsBound
 let layoutBound = false;           // readingLayoutBound
-let manualScrollPauseUntil = 0;    // readingManualScrollPauseUntil
-let programmaticScrollUntil = 0;   // readingProgrammaticScrollUntil
 
 // Reader-domain DOM id table (shared by the LAYOUT and LIFECYCLE modules; the
 // facade re-exports it for UI templates and a few external DOM operations).
@@ -104,8 +102,8 @@ export const ids = {
 //
 // These accessors are the seam between the reader-impl (layout) closure and
 // the sync/lifecycle modules that depend on it. The scroll-pause variables
-// themselves moved to sync.js with the sync domain; the closure flags they
-// read (videoEventsBound) stay here.
+// moved to ./scroll-state.js, the shared leaf both domains read and write
+// directly; the closure flags they read (videoEventsBound) stay here.
 
 export function isReaderViewOpen() {
   return state.reader.readingViewOpen;
@@ -113,27 +111,6 @@ export function isReaderViewOpen() {
 
 export function getPlayerHost() {
   return playerHost;
-}
-
-export function isManualScrollPaused() {
-  return Date.now() < manualScrollPauseUntil;
-}
-
-export function resetManualScrollPause() {
-  manualScrollPauseUntil = 0;
-}
-
-export function isProgrammaticScrolling() {
-  return Date.now() <= programmaticScrollUntil;
-}
-
-// Writable accessors used by sync.js (its own closure variables):
-export function setManualScrollPaused(until) {
-  manualScrollPauseUntil = until;
-}
-
-export function setProgrammaticScrollUntil(until) {
-  programmaticScrollUntil = until;
 }
 
 export function setVideoEventsBound(bound) {
@@ -1587,6 +1564,6 @@ export function restoreReaderPlayerContainer() {
 // handlers, noteManualReaderInteraction and updateReaderFollowState. It
 // depends on this module (LAYOUT) and must not be imported by it.
 //
-// reader-impl.js's sync reading of the scroll-pause deadlines is exposed as
-// isManualScrollPaused() / isProgrammaticScrolling() above (see the "reader
-// facade accessors" section); the variables themselves live in sync.js.
+// reader-impl.js's sync reading of the scroll-pause deadlines goes through
+// the shared leaf ./scroll-state.js (isProgrammaticScrolling above; see the
+// "reader facade accessors" section).
