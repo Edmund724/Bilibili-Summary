@@ -360,8 +360,10 @@ async function ensureContentScriptReady(tabId) {
 
   try {
     await chrome.scripting.executeScript({
+      // 候选4 分包后注入 classic bootstrap（见 background.js 同名注入点的注释）；
+      // 哨兵在 bootstrap 顶层同步置位，主包经其异步拉起。
       target: { tabId },
-      files: ["entry/content-classic.js"]
+      files: ["entry/content-bootstrap.iife.js"]
     });
   } catch (error) {
     const message = String(error?.message || "");

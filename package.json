@@ -6,8 +6,8 @@
     "doc": "docs"
   },
   "scripts": {
-    "build": "npm run build:content-classic",
-    "build:content-classic": "node scripts/build-content-classic.js",
+    "build": "npm run build:content",
+    "build:content": "node scripts/build-content.js",
     "build:release": "python3 scripts/build_release.py",
     "test": "vitest run",
     "test:watch": "vitest",

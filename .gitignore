@@ -10,8 +10,10 @@ node_modules/
 /build/
 /coverage/
 
-# Generated extension files
-/extension/entry/content-classic.js
+# Generated extension files（候选4 分包：classic bootstrap + ESM 主包 + 动态 chunk）
+/extension/entry/content-bootstrap.iife.js
+/extension/entry/content-main.mjs
+/extension/entry/chunks/
 
 # Local agent / store assets
 AGENTS.md

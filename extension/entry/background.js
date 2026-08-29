@@ -382,8 +382,11 @@ async function injectReaderContent(tabId) {
 
   try {
     await chrome.scripting.executeScript({
+      // 候选4 分包后这里注入 classic bootstrap：它置版本哨兵后异步拉起 ESM
+      // 主包（manifest.content_scripts 指向同一文件，注入语义一致）。重复注入
+      // 由 bootstrap 的 __BOC_CONTENT_BOOTSTRAP_STARTED__ 标志挡住。
       target: { tabId },
-      files: ["entry/content-classic.js"]
+      files: ["entry/content-bootstrap.iife.js"]
     });
   } catch (error) {
     const message = String(error?.message || "");

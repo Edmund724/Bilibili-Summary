@@ -15,10 +15,10 @@ import { getPopupPayload } from "../subtitle/ui.js";
 import { refreshClip, loadSubtitle, resetClipState } from "../subtitle/fetcher.js";
 import { setStatus, renderSubtitleSelect, ensureUiReady } from "../ui/ui-renderer.js";
 
-import {
-  removePlayerAiQuickActionButton,
-  schedulePlayerAiQuickActionSync
-} from "../ai/player-ai.js";
+// player-ai 经加载器按需引入（候选4 分包）：默认关闭的能力不再常驻。
+// 「未加载」时按钮不可能存在，remove/sync 均可安全跳过（幂等不变量见
+// lazy-player-ai.js 头注）。
+import { loadPlayerAi, isPlayerAiLoaded } from "./lazy-player-ai.js";
 
 import {
   updateReaderFollowState,
@@ -94,7 +94,14 @@ export function bindRuntimeEvents() {
 
     if (message.type === "popup-trigger-reading-view") {
       playerAiState.setSuppressedUntil(Date.now() + 2500);
-      removePlayerAiQuickActionButton();
+      // 原为同步 remove；懒加载后「未加载 ⇒ 无按钮」可直接跳过，已加载时经
+      // promise 移除（延后一个 tick，视觉无差异）。失败静默：移除按钮失败
+      // 不应阻断阅读模式打开，且 suppressedUntil 已保证按钮短期不再弹出。
+      if (isPlayerAiLoaded()) {
+        loadPlayerAi()
+          .then((playerAi) => playerAi.removePlayerAiQuickActionButton())
+          .catch(() => {});
+      }
       ensureUiReady();
       const readerUrl = String(message.readerUrl || "").trim();
       if (readerUrl) {
@@ -293,7 +300,14 @@ export function bindUrlChangeHandler() {
     enforceNormalPageStateIfNeeded(nextUrl);
     ensureUiReady();
     resetClipState();
-    schedulePlayerAiQuickActionSync();
+    // player-ai 按钮同步（原为同步调用）：懒加载后「已加载/加载中才请求」，
+    // 未加载（快捷开关关闭态）跳过——player-ai start 自带初始 sync，开启后
+    // 的 URL 变化自会恢复同步，行为等价。
+    if (isPlayerAiLoaded()) {
+      loadPlayerAi()
+        .then((playerAi) => playerAi.schedulePlayerAiQuickActionSync())
+        .catch(() => {});
+    }
     const shouldEnterReaderMode = isReaderMode(nextUrl);
     if (!isReaderViewOpen() && shouldEnterReaderMode) {
       document.documentElement.setAttribute("data-boc-reader-mode", "1");

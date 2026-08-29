@@ -88,7 +88,7 @@
 git clone https://github.com/Edmund724/Bilibili-Summary.git
 cd Bilibili-Summary
 npm install
-npm run build          # 生成 content-classic.js
+npm run build          # 生成 content-bootstrap.iife.js + content-main.mjs（+ chunks/）
 npm run build:release  # 生成 Chrome / Firefox 打包到 release/
 ```
 
@@ -126,7 +126,7 @@ extension/
 └── icons/                 # 扩展图标
 ```
 
-> `extension/entry/content-classic.js` 是构建产物，由 `npm run build` 生成，已加入 `.gitignore`，请勿手动编辑。修改 `shared-defaults.js` 或 `content.js` 后需重新构建。
+> `extension/entry/content-bootstrap.iife.js`、`entry/content-main.mjs` 与 `entry/chunks/` 是构建产物，由 `npm run build`（scripts/build-content.js）生成，已加入 `.gitignore`，请勿手动编辑。修改 `shared-defaults.js` 或 `content.js` 后需重新构建。
 
 ## 使用方式
 

@@ -49,11 +49,13 @@ import {
   readVideoDescription,
   applyNoSubtitleState
 } from "./ui.js";
+// ASR 域（pipeline + fallback 及其专属依赖 audio-source/offscreen-bridge.page）
+// 经动态 import 按需加载（候选4 分包）：只有视频无 CC 字幕时才需要语音转写。
 // runAsrPipeline 仅作为注入实参传给 asr/fallback 工厂（回退策略簇本体已迁出；
 // pipeline 传递闭包含 runtime→fetcher，不能由 fallback 直 import，故由本模块
-// 作为组合根提供）。此依赖为单向边，import 环 A 不再成立。
-import { runAsrPipeline } from "../asr/pipeline.js";
-import { createAsrFallback } from "../asr/fallback.js";
+// 作为组合根提供）。此依赖为单向边，import 环 A 不再成立。分包前这些模块随
+// 单文件 bundle 常驻；分包后成为动态 import 边被切进 entry/chunks/。
+// 实例缓存与失败重试语义见 loadAsrFallback()。
 
 // The fetcher is always loaded at startup through the message-handler / entry
 // chain, so registering here is the only wiring needed: the reader side can
@@ -259,7 +261,7 @@ export async function refreshClip() {
 
     // 无字幕时也允许进入阅读视图，只是字幕区域保持空态。
     if (state.clip.subtitles.length === 0) {
-      const asrResult = await asrFallback.maybeRunAsrFallback({ runId });
+      const asrResult = await (await loadAsrFallback()).maybeRunAsrFallback({ runId });
       if (asrResult === "done") {
         return;
       }
@@ -288,7 +290,7 @@ export async function refreshClip() {
     });
 
     if (!preferred) {
-      const asrResult = await asrFallback.maybeRunAsrFallback({ runId });
+      const asrResult = await (await loadAsrFallback()).maybeRunAsrFallback({ runId });
       if (asrResult === "done") {
         return;
       }
@@ -361,9 +363,18 @@ export async function refreshClip() {
     // 探针按当前视频 bvid/cid 匹配——切走视频后仍在后台跑的其它视频转写
     // 不拦截本路径，其成果也不会串到当前 UI（转写与视频切换解耦，见
     // asr/fallback.js）。
-    if (asrFallback.hasActiveAsrTranscribe({ bvid: state.clip.bvid, cid: state.clip.cid })) {
+    // ASR 域懒加载（候选4 分包）：加载失败按「无活动转写」降级继续原错误
+    // 处理——chunk 加载失败绝不能掩盖原始抓取错误。加载成功后与原同步调用
+    // 语义一致（awaitActiveAsrTranscribe 的异常保持原样向上抛）。
+    let asrFallbackInstance = null;
+    try {
+      asrFallbackInstance = await loadAsrFallback();
+    } catch (asrLoadError) {
+      logWarn("[BOC] asr fallback module load failed; treat as no active transcribe", asrLoadError);
+    }
+    if (asrFallbackInstance?.hasActiveAsrTranscribe({ bvid: state.clip.bvid, cid: state.clip.cid })) {
       setStatus(`抓取失败：${getErrorMessage(error)}，继续等待音频转写…`);
-      await asrFallback.awaitActiveAsrTranscribe({ runId, bvid: state.clip.bvid, cid: state.clip.cid });
+      await asrFallbackInstance.awaitActiveAsrTranscribe({ runId, bvid: state.clip.bvid, cid: state.clip.cid });
       return;
     }
     clipState.setSubtitleFetchState("error");
@@ -505,19 +516,42 @@ async function loadAsrProviderList() {
 // 迁至 asr/fallback.js（工厂 createAsrFallback，进行中的转写共享单元闭包在
 // 工厂层）。此处注入运行时与 UI 依赖完成薄接线；broadcastSubtitleStatus 为
 // 本模块内部函数（refreshClip 也在用），作为注入依赖传入。
-const asrFallback = createAsrFallback({
-  getSettings,
-  loadProviders: loadAsrProviderList,
-  setStatus,
-  setMessage,
-  applyNoSubtitleState,
-  refreshDerivedContent,
-  isReaderViewOpen,
-  notifyReaderPresenter,
-  runAsrPipeline,
-  broadcastSubtitleStatus
-});
+//
+// 懒加载边界 c：工厂实例（asrFallback 单例）原为模块顶层创建，分包后顶层
+// 静态 import 会把整个 ASR 域拖回常驻 chunk，因此改为首次调用时动态 import
+// 再创建，Promise 缓存保证单例（与原模块级单例语义一致）；加载失败清空
+// 缓存允许重试。
+let asrFallbackPromise = null;
 
-// ASR 回退入口见 asr/fallback.js（createAsrFallback 工厂，本模块顶部接线为
-// asrFallback 单例）。refreshClip 的无字幕出口与失败兜底经实例方法调用。
+function loadAsrFallback() {
+  if (!asrFallbackPromise) {
+    asrFallbackPromise = Promise.all([
+      import("../asr/pipeline.js"),
+      import("../asr/fallback.js")
+    ])
+      .then(([{ runAsrPipeline }, { createAsrFallback }]) =>
+        createAsrFallback({
+          getSettings,
+          loadProviders: loadAsrProviderList,
+          setStatus,
+          setMessage,
+          applyNoSubtitleState,
+          refreshDerivedContent,
+          isReaderViewOpen,
+          notifyReaderPresenter,
+          runAsrPipeline,
+          broadcastSubtitleStatus
+        })
+      )
+      .catch((error) => {
+        asrFallbackPromise = null;
+        throw error;
+      });
+  }
+  return asrFallbackPromise;
+}
+
+// ASR 回退入口见 asr/fallback.js（createAsrFallback 工厂，本模块经
+// loadAsrFallback() 惰性获取单例）。refreshClip 的无字幕出口与失败兜底经
+// 实例方法调用。
 

@@ -7,12 +7,9 @@ import { sendRuntimeMessage } from "../shared/messaging.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { logInfo, logWarn } from "../shared/logging.js";
 
-import {
-  startPlayerAiQuickAction,
-  stopPlayerAiQuickAction,
-  schedulePlayerAiQuickActionSync,
-  resetPlayerAiQuickActionRetryCount
-} from "../ai/player-ai.js";
+// 播放器 AI 模块经加载器按需引入（候选4 分包）：默认关闭的设置对应的能力
+// 不再常驻，start/stop/sync 全部走 loadPlayerAi() 的动态 import。
+import { loadPlayerAi, isPlayerAiLoaded } from "../core/lazy-player-ai.js";
 
 import { ensureUiReady } from "../ui/ui-renderer.js";
 import {
@@ -88,10 +85,21 @@ function init() {
   // __BOC_FORCE_SYNC_PLAYER_AI__ behavior (only the debug helper resets the
   // retry counter before syncing).
   subscribePlayerAiSync((delayMs, options) => {
-    if (options && options.resetRetry) {
-      resetPlayerAiQuickActionRetryCount();
+    // 未加载 = 快捷开关关闭态：按钮不存在，无需同步（start 自带初始 sync，
+    // 开启后 reader 的同步请求自然恢复语义）。
+    if (!isPlayerAiLoaded()) {
+      return;
     }
-    schedulePlayerAiQuickActionSync(delayMs);
+    loadPlayerAi()
+      .then((playerAi) => {
+        if (options && options.resetRetry) {
+          playerAi.resetPlayerAiQuickActionRetryCount();
+        }
+        playerAi.schedulePlayerAiQuickActionSync(delayMs);
+      })
+      .catch((error) => {
+        logWarn("[BOC] player-ai sync via lazy loader failed", error);
+      });
   });
   bindNormalPageStateGuard();
   // 播放器 AI 按钮的 layout 监听与 observer 改由 startPlayerAiQuickAction
@@ -107,11 +115,13 @@ function init() {
     hydrateReaderStateFromSettings(settings);
     applyReadingViewPresentation();
     // 按设置显式启停：默认关闭（core/defaults.js enablePlayerAiQuickAction:
-    // false）时不绑 layout 监听、不挂 observer，避免关闭态每帧空转 no-op
+    // false）时不绑 layout 监听、不挂 observer，避免关闭态每帧空转 no-op。
+    // 懒加载语义：开启才触发模块加载；关闭时模块未加载即无任何残留可清理，
+    // 加载过（isPlayerAiLoaded）才需要走 stop 收尾。
     if (settings.enablePlayerAiQuickAction) {
-      startPlayerAiQuickAction();
+      startPlayerAiQuickActionLazy();
     } else {
-      stopPlayerAiQuickAction();
+      stopPlayerAiQuickActionLazy();
     }
     if (shouldEnterReaderMode) {
       enterReaderMode().catch((error) => {
@@ -142,9 +152,36 @@ function bindPlayerAiSettingsWatcher() {
       state.settings.enablePlayerAiQuickAction = enabled;
     }
     if (enabled) {
-      startPlayerAiQuickAction();
+      startPlayerAiQuickActionLazy();
     } else {
-      stopPlayerAiQuickAction();
+      stopPlayerAiQuickActionLazy();
     }
   });
+}
+
+// ===== 懒加载边界 a（候选4 分包）：player-ai 的 start/stop 适配 =====
+// 加载器语义：模块未加载时 stop/remove 都是 no-op（按钮只可能由该模块创建，
+// 未加载 ⇒ 无残留），因此「关闭设置」分支只在已加载时才需要真正执行 stop。
+
+function startPlayerAiQuickActionLazy() {
+  loadPlayerAi()
+    .then((playerAi) => {
+      playerAi.startPlayerAiQuickAction();
+    })
+    .catch((error) => {
+      logWarn("[BOC] player-ai module load failed (quick action not started)", error);
+    });
+}
+
+function stopPlayerAiQuickActionLazy() {
+  if (!isPlayerAiLoaded()) {
+    return;
+  }
+  loadPlayerAi()
+    .then((playerAi) => {
+      playerAi.stopPlayerAiQuickAction();
+    })
+    .catch((error) => {
+      logWarn("[BOC] player-ai stop after lazy load failed", error);
+    });
 }

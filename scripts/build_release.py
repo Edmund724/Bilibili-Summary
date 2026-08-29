@@ -118,7 +118,7 @@ def main():
         raise SystemExit("manifest.json is missing a version")
 
     # Version-consistency guard: the extension version lives in three places
-    # (manifest.json, extension/core/defaults.js via build-content-classic.js,
+    # (manifest.json, extension/core/version.js via build-content.js,
     # and package.json). Fail fast if package.json drifts from manifest.json
     # before stamping release folders with a stale version.
     package_version = load_package_version().strip()
@@ -130,11 +130,13 @@ def main():
 
     RELEASE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Rebuild content-classic.js through the esbuild IIFE build before
-    # build_variant() copies the extension dir into release variants.
-    print("Building content-classic.js ...", flush=True)
+    # Rebuild the content script output (classic bootstrap + ESM main package
+    # + dynamic chunks) through the esbuild build before build_variant() copies
+    # the extension dir into release variants. copytree 整目录拷贝，chunks/ 下的
+    # 动态 chunk 因此天然随包分发。
+    print("Building content script bundles (bootstrap + main + chunks) ...", flush=True)
     subprocess.run(
-        ["node", str(ROOT / "scripts" / "build-content-classic.js")],
+        ["node", str(ROOT / "scripts" / "build-content.js")],
         cwd=ROOT,
         check=True,
     )

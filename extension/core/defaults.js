@@ -6,8 +6,10 @@
 // ===== Version =====
 // Single source of truth for the extension version; consumed by the content
 // script and the background side panel. Kept in sync with manifest.json's
-// "version" by scripts/build-content-classic.js' version guard.
-export const BOC_VERSION = "1.1.4";
+// "version" by scripts/build-content.js' version guard.
+// 实体在 core/version.js（bootstrap 只打包这一个常量，不连带全部默认设置），
+// 这里 re-export 维持既有 import 路径不变。
+export { BOC_VERSION } from "./version.js";
 
 // ===== AI Prompts =====
 export const DEFAULT_PLAYER_AI_QUICK_PROMPT = "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。";

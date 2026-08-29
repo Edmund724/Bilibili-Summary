@@ -76,13 +76,25 @@ function emitStorageChange(key, newValue) {
 
 // content.js 顶层即执行 init()；getSettings().then 是微任务链（stub 回调同步），
 // 穿透若干层微任务后设置即已应用。
+//
+// 候选4 分包：content.js 经 core/lazy-player-ai.js 动态加载 player-ai（默认
+// 关闭的设置不再静态常驻），因此这里先 await 加载器 promise（单例缓存）把
+// 模块预热到位，再穿透微任务让 start/stop 的 then 回调落地。
+async function flushMicrotasks(times = 20) {
+  for (let i = 0; i < times; i += 1) {
+    await Promise.resolve();
+  }
+}
+
 async function loadContentScript(settings) {
   setLocationUrl(NORMAL_PAGE_URL);
   stubChrome(settings);
   await import("../../extension/entry/content.js");
-  for (let i = 0; i < 10; i += 1) {
-    await Promise.resolve();
-  }
+  // 预热懒加载的 player-ai 模块（loadPlayerAi 返回缓存的同一 promise）；
+  // 模块加载本身不挂 observer/监听，不影响「设置关闭」用例的断言。
+  const { loadPlayerAi } = await import("../../extension/core/lazy-player-ai.js");
+  await loadPlayerAi();
+  await flushMicrotasks();
   return (await import("../../extension/core/state.js")).state;
 }
 
@@ -228,7 +240,9 @@ describe("player-ai 启停守卫", () => {
     expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(false);
 
     // false → true：启动 observer 与监听，并同步 state.settings
+    // （懒加载接线：start 经 loadPlayerAi().then 异步执行，先穿透微任务再断言）
     emitStorageChange("enablePlayerAiQuickAction", true);
+    await flushMicrotasks();
     expect(state.settings.enablePlayerAiQuickAction).toBe(true);
     expect(state.playerAi.playerAiQuickActionObserver).not.toBeNull();
     expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(true);
@@ -237,6 +251,7 @@ describe("player-ai 启停守卫", () => {
 
     // true → false：observer 断开、layout 监听按同一引用摘除
     emitStorageChange("enablePlayerAiQuickAction", false);
+    await flushMicrotasks();
     expect(state.settings.enablePlayerAiQuickAction).toBe(false);
     expect(state.playerAi.playerAiQuickActionObserver).toBeNull();
     expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(false);
@@ -247,6 +262,7 @@ describe("player-ai 启停守卫", () => {
 
     // false → true：再次启动
     emitStorageChange("enablePlayerAiQuickAction", true);
+    await flushMicrotasks();
     expect(state.playerAi.playerAiQuickActionObserver).not.toBeNull();
     expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(true);
     expect(windowAddSpy.mock.calls.filter(([type]) => type === "resize").length).toBe(2);

@@ -46,10 +46,19 @@
         "https://www.bilibili.com/list/watchlater/",
         "https://www.bilibili.com/list/watchlater/*"
       ],
-      "js": ["entry/content-classic.js"],
+      "js": ["entry/content-bootstrap.iife.js"],
       "css": ["entry/content.css"],
       "run_at": "document_idle",
       "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "entry/content-main.mjs",
+        "entry/chunks/*"
+      ],
+      "matches": ["https://www.bilibili.com/*"]
     }
   ],
   "action": {
