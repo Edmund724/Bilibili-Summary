@@ -1,7 +1,7 @@
 // extension/asr/chunker.js
 // WAV 编码（16bit PCM / 16kHz / 单声道）+ 切片。
 // Service Worker 没有 AudioContext：解码与重采样由 offscreen 文档宿主完成
-// （见 offscreen-bridge.js，接 entry/offscreen.js 基建），本模块只负责
+// （见 offscreen-bridge.js，接 entry/offscreen-asr.js 基建），本模块只负责
 // 编码、切片计划与解码结果校验；offscreen 文档侧用 buildWavChunks 把
 // 解码结果切成 WAV 块，在本 context 内直接交给转写引擎，不跨 context。
 // 核心模块不直接碰 AudioContext，Node/vitest 下可独立测试。WAV header 手写，不引依赖。

@@ -1,5 +1,5 @@
 // pipeline.js + openai-transcriptions 适配器测试。
-// 关键点：转写调度已迁入 offscreen（engine + ASR_ADAPTERS，见 entry/offscreen.js
+// 关键点：转写调度已迁入 offscreen（engine + ASR_ADAPTERS，见 entry/offscreen-asr.js
 // 与 engine.test.js），页面侧 pipeline 只做编排——取音轨 → 任务宿主（生产为
 // offscreen 桥，测试传合成宿主）收文本结果 → 合并/诊断。宿主契约：
 //   async ({ audioUrl, backupUrls, onProgress? }) =>

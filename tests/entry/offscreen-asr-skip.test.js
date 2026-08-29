@@ -1,4 +1,4 @@
-// entry/offscreen.js 的 resolveAsrProvider 结构化 skip 原因测试。
+// entry/offscreen-asr.js 的 resolveAsrProvider 结构化 skip 原因测试。
 //
 // 背景：offscreen 侧配置级问题以 code "asr-skip" 抛出，页面 asr/fallback.js
 // catch 后静默 skip。此前原因只存在于 message 字符串里（页面不做字符串匹配，
@@ -6,13 +6,16 @@
 // 经 port 错误消息（offscreen-bridge）与管线 reject 透传回页面，最终落
 // clipState.noSubtitleReason 供 sidepanel 按原因提示。
 //
-// offscreen.js 模块顶层注册 chrome.runtime.onConnect 监听——beforeEach 的
-// chrome stub 捕获该监听器，测试内拿它接一个可手动驱动消息的假 asr-decode
-// 端口。其余依赖（ai/*、asr/*、core/runtime → fetcher 链）在 jsdom 下均可
-// 真实加载，resolveAsrProvider 本身是纯函数（只读传入的 config 快照）。
+// resolveAsrProvider 是纯函数（只读传入的 config 快照），直接 import
+// offscreen-asr.js 测试（模块顶层不触 chrome）。port 透传契约测试则动态
+// import entry/offscreen.js——它顶层注册 chrome.runtime.onConnect 监听，
+// beforeEach 的 chrome stub 捕获该监听器，测试内拿它接一个可手动驱动消息的
+// 假 asr-decode 端口（接线层把任务转给 offscreen-asr 的执行器）。其余依赖
+// （ai/*、asr/*、core/runtime → fetcher 链）在 jsdom 下均可真实加载。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
+import { resolveAsrProvider } from "../../extension/entry/offscreen-asr.js";
 
 const RUNTIME_CONFIG_OK = {
   asrAutoFallback: true,
@@ -59,9 +62,7 @@ function connectAsrDecodePort() {
 }
 
 describe("resolveAsrProvider 结构化 skip 原因", () => {
-  it("快照关闭（asrAutoFallback === false）：asr-skip 且 reason=asr-disabled", async () => {
-    const { resolveAsrProvider } = await loadOffscreen();
-
+  it("快照关闭（asrAutoFallback === false）：asr-skip 且 reason=asr-disabled", () => {
     expect(() => resolveAsrProvider({ ...RUNTIME_CONFIG_OK, asrAutoFallback: false })).toThrowError(
       expect.objectContaining({
         code: "asr-skip",
@@ -71,9 +72,7 @@ describe("resolveAsrProvider 结构化 skip 原因", () => {
     );
   });
 
-  it("无激活平台（activeAsrProviderId 为空 / 不在列表）：asr-skip 且 reason=no-asr-config", async () => {
-    const { resolveAsrProvider } = await loadOffscreen();
-
+  it("无激活平台（activeAsrProviderId 为空 / 不在列表）：asr-skip 且 reason=no-asr-config", () => {
     expect(() => resolveAsrProvider({ ...RUNTIME_CONFIG_OK, activeAsrProviderId: "" })).toThrowError(
       expect.objectContaining({
         code: "asr-skip",
@@ -82,9 +81,7 @@ describe("resolveAsrProvider 结构化 skip 原因", () => {
       })
     );
 
-    expect(() =>
-      resolveAsrProvider({ ...RUNTIME_CONFIG_OK, activeAsrProviderId: "ghost" })
-    ).toThrowError(
+    expect(() => resolveAsrProvider({ ...RUNTIME_CONFIG_OK, activeAsrProviderId: "ghost" })).toThrowError(
       expect.objectContaining({
         code: "asr-skip",
         reason: "no-asr-config"
@@ -92,9 +89,7 @@ describe("resolveAsrProvider 结构化 skip 原因", () => {
     );
   });
 
-  it("配置齐全：不抛错，provider 附 Key 与生效语言", async () => {
-    const { resolveAsrProvider } = await loadOffscreen();
-
+  it("配置齐全：不抛错，provider 附 Key 与生效语言", () => {
     const provider = resolveAsrProvider(RUNTIME_CONFIG_OK);
 
     expect(provider).toMatchObject({

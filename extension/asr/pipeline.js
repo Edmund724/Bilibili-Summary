@@ -4,7 +4,7 @@
 // 时间戳加片偏移合并为 B 站字幕格式 [{from,to,content}]。
 //
 // 页面不再感知 provider/Key：平台选择、Key 组装、语言档位全部在 offscreen
-// 侧完成（entry/offscreen.js 直调 background 的 get-asr-runtime-config），
+// 侧完成（entry/offscreen-asr.js 直调 background 的 get-asr-runtime-config），
 // 调度引擎（asr/engine.js，活队列 + 逐片重试 + 失败计数）也在 offscreen。
 // 页面职责只剩：回退决策由上游 fallback 承担；本模块负责取音轨地址、
 // 发任务、收文本结果、合并、空结果诊断。
