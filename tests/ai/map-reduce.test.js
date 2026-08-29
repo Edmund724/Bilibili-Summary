@@ -59,8 +59,8 @@ function buildSequencedMock() {
   const fetchMock = vi.fn(async (_url, init) => {
     const body = JSON.parse(init.body);
     const user = body.messages[body.messages.length - 1]?.content || "";
-    const isChunk = user.includes("连续片段");
-    if (isChunk) {
+    const isSegment = user.includes("连续片段");
+    if (isSegment) {
       const m = user.match(/第 (\d+)\//);
       const idx = m ? Number(m[1]) : 1;
       return jsonResponse({ choices: [{ message: { content: summaryTexts[idx] || "小结" } }] });
@@ -142,14 +142,14 @@ describe("orchestrateMapReduce 切片→小结→成稿编排", () => {
     await mod.orchestrateMapReduce({ provider: makeProvider(), context, plan, port });
 
     const userContents = fetchMock.mock.calls.map((c) => JSON.parse(c[1].body).messages.at(-1).content);
-    const chunkPrompt = userContents.find((c) => c.includes("连续片段"));
-    expect(chunkPrompt).toContain("视频标题：测试视频");
-    expect(chunkPrompt).toContain("这是第 1/3 个连续片段");
-    expect(chunkPrompt).toContain("请忠实压缩这个片段");
-    expect(chunkPrompt).toContain("保留重要事实、例子、论证关系和原有时间点");
-    expect(chunkPrompt).toContain("不做评价，不补充外部知识");
+    const segmentPrompt = userContents.find((c) => c.includes("连续片段"));
+    expect(segmentPrompt).toContain("视频标题：测试视频");
+    expect(segmentPrompt).toContain("这是第 1/3 个连续片段");
+    expect(segmentPrompt).toContain("请忠实压缩这个片段");
+    expect(segmentPrompt).toContain("保留重要事实、例子、论证关系和原有时间点");
+    expect(segmentPrompt).toContain("不做评价，不补充外部知识");
     // 时间戳以 [起点-终点] 拼入
-    expect(chunkPrompt).toMatch(/\[00:00-00:05\]/);
+    expect(segmentPrompt).toMatch(/\[00:00-00:05\]/);
   });
 
   it("成稿 prompt 对齐蓝本 _note_prompt：材料带「### 片段 i」标注，标题 # 视频笔记", async () => {
@@ -421,21 +421,21 @@ describe("plan.mode==='map-reduce' 才编排（不归并/超预算判定）", ()
     expect(plan.segments).toEqual([]);
   });
 
-  it("100k 边界一越 → mode=map-reduce 且 needsMerge=false；500k 段数=10 不归并", async () => {
+  it("100k 边界一越 → mode=map-reduce 且 needsReduce=false；500k 段数=10 不归并", async () => {
     const { buildBudgetPlan } = await import("../../extension/ai/budgeter.js");
     const single = buildBudgetPlan({ body: makeSubtitleBody(100000) });
     expect(single.mode).toBe("single");
 
     const over = buildBudgetPlan({ body: makeSubtitleBody(100001) });
     expect(over.mode).toBe("map-reduce");
-    expect(over.needsMerge).toBe(false);
+    expect(over.needsReduce).toBe(false);
 
     const big = buildBudgetPlan({ body: makeSubtitleBody(500000) });
     expect(big.segments).toHaveLength(10);
-    expect(big.needsMerge).toBe(false);
+    expect(big.needsReduce).toBe(false);
   });
 
-  // shouldMerge / 归并层行为由 07 票在 tests/ai/merge.test.js 覆盖；此处不再锁定空壳语义。
+  // shouldReduce / 归并层行为由 07 票在 tests/ai/reduce.test.js 覆盖；此处不再锁定空壳语义。
 });
 
 describe("缓存写入最终失败的上浮（LRU 淘汰后重试仍失败）", () => {

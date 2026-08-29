@@ -11,9 +11,9 @@ import {
   MATERIAL_BUDGET_CHARS,
   SEGMENT_INPUT_CHARS,
   SEGMENT_SUMMARY_CHARS,
-  MERGE_GROUP_INPUT_CHARS,
+  REDUCE_GROUP_INPUT_CHARS,
   FINAL_OUTPUT_CHARS,
-  MERGE_TRIGGER_CHARS
+  REDUCE_TRIGGER_CHARS
 } from "../../extension/ai/budgeter.js";
 
 describe("常量单一事实来源", () => {
@@ -22,9 +22,9 @@ describe("常量单一事实来源", () => {
     expect(MATERIAL_BUDGET_CHARS).toBe(100000);
     expect(SEGMENT_INPUT_CHARS).toBe(50000);
     expect(SEGMENT_SUMMARY_CHARS).toBe(10000);
-    expect(MERGE_GROUP_INPUT_CHARS).toBe(100000);
+    expect(REDUCE_GROUP_INPUT_CHARS).toBe(100000);
     expect(FINAL_OUTPUT_CHARS).toBe(16000);
-    expect(MERGE_TRIGGER_CHARS).toBe(500000);
+    expect(REDUCE_TRIGGER_CHARS).toBe(500000);
   });
 });
 
@@ -57,7 +57,7 @@ describe("buildBudgetPlan 判模式与各档位", () => {
     expect(plan.mode).toBe("single");
     expect(plan.segments).toEqual([]);
     expect(plan.estimatedCalls).toBe(1);
-    expect(plan.needsMerge).toBe(false);
+    expect(plan.needsReduce).toBe(false);
   });
 
   it("body=[] 显式空数组 → single，1 次调用", () => {
@@ -65,7 +65,7 @@ describe("buildBudgetPlan 判模式与各档位", () => {
     expect(plan.mode).toBe("single");
     expect(plan.segments).toEqual([]);
     expect(plan.estimatedCalls).toBe(1);
-    expect(plan.needsMerge).toBe(false);
+    expect(plan.needsReduce).toBe(false);
   });
 
   it("恰好 100k → single，整篇一次成稿", () => {
@@ -75,7 +75,7 @@ describe("buildBudgetPlan 判模式与各档位", () => {
     expect(plan.mode).toBe("single");
     expect(plan.segments).toEqual([]);
     expect(plan.estimatedCalls).toBe(1);
-    expect(plan.needsMerge).toBe(false);
+    expect(plan.needsReduce).toBe(false);
   });
 
   it("100k 边界一越（100001）→ map-reduce", () => {
@@ -83,7 +83,7 @@ describe("buildBudgetPlan 判模式与各档位", () => {
     expect(plan.mode).toBe("map-reduce");
     expect(plan.segments.length).toBe(3);
     expect(plan.estimatedCalls).toBe(4);
-    expect(plan.needsMerge).toBe(false);
+    expect(plan.needsReduce).toBe(false);
   });
 
   it("110k → 3 段小结 + 1 次成稿 ≈ 4 次调用（ADR 示例）", () => {
@@ -93,14 +93,14 @@ describe("buildBudgetPlan 判模式与各档位", () => {
     expect(plan.segments).toHaveLength(3);
     expect(plan.segments.map((s) => s.chars)).toEqual([50000, 50000, 10000]);
     expect(plan.estimatedCalls).toBe(4);
-    expect(plan.needsMerge).toBe(false);
+    expect(plan.needsReduce).toBe(false);
   });
 
-  it("500k 恰好触发线下 → 10 段，不归并（needsMerge=false）", () => {
+  it("500k 恰好触发线下 → 10 段，不归并（needsReduce=false）", () => {
     const plan = buildBudgetPlan({ body: makeSubtitleBody(500000) });
     expect(plan.mode).toBe("map-reduce");
     expect(plan.segments).toHaveLength(10);
-    expect(plan.needsMerge).toBe(false);
+    expect(plan.needsReduce).toBe(false);
     expect(plan.estimatedCalls).toBe(11); // 段数 + 成稿，无归并层
   });
 
@@ -108,7 +108,7 @@ describe("buildBudgetPlan 判模式与各档位", () => {
     const plan = buildBudgetPlan({ body: makeSubtitleBody(501000) });
     expect(plan.mode).toBe("map-reduce");
     expect(plan.segments).toHaveLength(11);
-    expect(plan.needsMerge).toBe(true);
+    expect(plan.needsReduce).toBe(true);
     expect(plan.estimatedCalls).toBeGreaterThan(plan.segments.length + 1);
     expect(plan.estimatedCalls).toBe(15); // 11 段 + 1 成稿 + 3 次归并（2 组 + 1 组）
   });

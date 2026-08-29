@@ -1,9 +1,10 @@
 // 「归并层」模块（07 票）：原始字幕 >500k 时，成稿前先按归并组输入 100k
 // 把多条分段小结多层归并到合计 ≤100k，再交给成稿调用；≤500k 不触发，沿用 03 直接成稿路径。
 // 归并去重但保留观点、依据、例子、时间点与前后关系；prompt 措辞对齐蓝本 _merge_prompt。
+// 归并 = Map-Reduce 的 Reduce 阶段（ADR-0001），代码名一律用 reduce 词根。
 // 纯函数 + 可注入 runPrompts/onProgress/signal，不接 UI、不发请求，供 map-reduce 编排调用。
 
-import { MERGE_GROUP_INPUT_CHARS, MERGE_TRIGGER_CHARS } from "./budgeter.js";
+import { REDUCE_GROUP_INPUT_CHARS, REDUCE_TRIGGER_CHARS } from "./budgeter.js";
 import { makeAbortedError } from "../shared/error-helpers.js";
 
 // 合计字符数：非数组按 0 处理，null/undefined 条目按空串计。
@@ -15,24 +16,24 @@ function sumChars(list) {
 }
 
 /**
- * 是否需要对分段小结做归并：只看原始字幕量是否超 500k（needsMerge 同理）。
+ * 是否需要对分段小结做归并：只看原始字幕量是否超 500k（needsReduce 同理）。
  * 段数 ≥11 是「>500k / 单段 50k」的推论，不是独立触发条件——章节对齐可能切出
  * 多个短段（总字符 ≤500k 却 ≥11 段），此时不应误触归并、多花调用。
  */
-export function shouldMerge(plan) {
+export function shouldReduce(plan) {
   if (!plan) {
     return false;
   }
-  return Number(plan.totalChars) > MERGE_TRIGGER_CHARS || plan.needsMerge === true;
+  return Number(plan.totalChars) > REDUCE_TRIGGER_CHARS || plan.needsReduce === true;
 }
 
 /**
  * 把若干条小结贪心分组为归并组：按输入顺序累积，每组合计字符数 ≤ groupInputChars；
  * 单条超过预算也自成一组（不拆条）；空数组 / 非数组返回 []。
  */
-export function buildMergeGroups(summaries, { groupInputChars = MERGE_GROUP_INPUT_CHARS } = {}) {
+export function buildReduceGroups(summaries, { groupInputChars = REDUCE_GROUP_INPUT_CHARS } = {}) {
   const list = Array.isArray(summaries) ? summaries : [];
-  const maxChars = Number(groupInputChars) > 0 ? Number(groupInputChars) : MERGE_GROUP_INPUT_CHARS;
+  const maxChars = Number(groupInputChars) > 0 ? Number(groupInputChars) : REDUCE_GROUP_INPUT_CHARS;
   const groups = [];
   let current = [];
   let size = 0;
@@ -58,7 +59,7 @@ export function buildMergeGroups(summaries, { groupInputChars = MERGE_GROUP_INPU
  * + 去重但保留观点、依据、例子、时间点与前后关系，不做评价、不补外部知识，只输出连续材料。
  * group 内各条目以 `\n\n` 拼接。
  */
-export function buildMergePrompt({ title, level, groupIndex, groupCount, group }) {
+export function buildReducePrompt({ title, level, groupIndex, groupCount, group }) {
   const material = (Array.isArray(group) ? group : [])
     .map((s) => String(s == null ? "" : s))
     .join("\n\n");
@@ -78,15 +79,15 @@ ${material}`;
  * 每组调用前检查 signal.aborted，中止即抛带 aborted 标记的错误。
  * 返回 { merged, levels }；merged 按组的原始顺序排列。
  */
-export async function mergeSummaries({ summaries, title, runPrompts, signal, onProgress }) {
+export async function reduceSummaries({ summaries, title, runPrompts, signal, onProgress }) {
   let merged = Array.isArray(summaries) ? summaries : [];
   let levels = 0;
 
-  while (sumChars(merged) > MERGE_GROUP_INPUT_CHARS) {
+  while (sumChars(merged) > REDUCE_GROUP_INPUT_CHARS) {
     if (signal?.aborted) {
       throw makeAbortedError();
     }
-    const groups = buildMergeGroups(merged);
+    const groups = buildReduceGroups(merged);
     // 组数不减少 = 每组至多一条、归并无收益 → 停止，避免死循环。
     if (groups.length >= merged.length) {
       break;
@@ -101,7 +102,7 @@ export async function mergeSummaries({ summaries, title, runPrompts, signal, onP
         onProgress(`正在归并第 ${levels} 层 ${g + 1}/${groups.length} 组`);
       }
       const text = await runPrompts({
-        prompt: buildMergePrompt({
+        prompt: buildReducePrompt({
           title,
           level: levels,
           groupIndex: g + 1,
@@ -112,8 +113,8 @@ export async function mergeSummaries({ summaries, title, runPrompts, signal, onP
       const trimmed = String(text || "").trim();
       // 防御性 clamp：单条归并产出截断到归并组输入，避免个别超长输出撑爆下一层组预算。
       next.push(
-        trimmed.length > MERGE_GROUP_INPUT_CHARS
-          ? trimmed.slice(0, MERGE_GROUP_INPUT_CHARS)
+        trimmed.length > REDUCE_GROUP_INPUT_CHARS
+          ? trimmed.slice(0, REDUCE_GROUP_INPUT_CHARS)
           : trimmed
       );
     }

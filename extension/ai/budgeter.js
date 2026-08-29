@@ -12,14 +12,14 @@ export const SEGMENT_INPUT_CHARS = 50000;
 // 分段小结 ≤10k（20% 保留）。
 export const SEGMENT_SUMMARY_CHARS = 10000;
 // 归并组输入：每层归并把若干小结塞进同一份素材（≤100k）。
-export const MERGE_GROUP_INPUT_CHARS = 100000;
+export const REDUCE_GROUP_INPUT_CHARS = 100000;
 // 成稿输出 ≤16k。
 export const FINAL_OUTPUT_CHARS = 16000;
 // 归并触发线：原始字幕 >500k 时才触发归并层（此时段数 ≥11）。
-export const MERGE_TRIGGER_CHARS = 500000;
+export const REDUCE_TRIGGER_CHARS = 500000;
 
 // 每个归并组最多容纳的段数：归并组输入 100k / 单条小结 ≤10k = 10。
-const SEGMENTS_PER_MERGE_GROUP = Math.floor(MERGE_GROUP_INPUT_CHARS / SEGMENT_SUMMARY_CHARS);
+const SEGMENTS_PER_REDUCE_GROUP = Math.floor(REDUCE_GROUP_INPUT_CHARS / SEGMENT_SUMMARY_CHARS);
 
 // 保守地把时间戳转成数值；非有限值（undefined/NaN 等）回落到 0。
 function toSeconds(value) {
@@ -35,13 +35,13 @@ export function estimateTokens(text) {
   return text.length * CHAR_PER_TOKEN;
 }
 
-// 归并调用数估算：每层把 ≤SEGMENTS_PER_MERGE_GROUP 条小结归并为一条，累加各层的分组数
+// 归并调用数估算：每层把 ≤SEGMENTS_PER_REDUCE_GROUP 条小结归并为一条，累加各层的分组数
 // （即实际归并调用次数）。例：11 段 → 第 1 层 ceil(11/10)=2 组(2 次) → 第 2 层 ceil(2/10)=1 组(1 次)，共 3 次。
-function estimateMergeCalls(segmentCount) {
+function estimateReduceCalls(segmentCount) {
   let calls = 0;
   let n = segmentCount;
   while (n > 1) {
-    n = Math.ceil(n / SEGMENTS_PER_MERGE_GROUP);
+    n = Math.ceil(n / SEGMENTS_PER_REDUCE_GROUP);
     calls += n;
   }
   return calls;
@@ -133,11 +133,11 @@ export function buildBudgetPlan({ body = [], chapters = [] } = {}) {
     segments = splitByBudget(items, chapterStarts);
   }
 
-  const needsMerge = totalChars > MERGE_TRIGGER_CHARS;
+  const needsReduce = totalChars > REDUCE_TRIGGER_CHARS;
   const estimatedCalls =
     mode === "single"
       ? 1
-      : segments.length + 1 + (needsMerge ? estimateMergeCalls(segments.length) : 0);
+      : segments.length + 1 + (needsReduce ? estimateReduceCalls(segments.length) : 0);
 
   return {
     totalChars,
@@ -145,6 +145,6 @@ export function buildBudgetPlan({ body = [], chapters = [] } = {}) {
     mode,
     segments,
     estimatedCalls,
-    needsMerge
+    needsReduce
   };
 }

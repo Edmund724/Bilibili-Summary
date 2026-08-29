@@ -11,7 +11,7 @@ import { makeAbortedError } from "../shared/error-helpers.js";
 import { buildBudgetPlan, FINAL_OUTPUT_CHARS, SEGMENT_SUMMARY_CHARS } from "./budgeter.js";
 import { normalizeThinkingLevel, isContextLengthOverflow } from "./client.js";
 import { runMapBounded, DEFAULT_MAP_CONCURRENCY } from "./pool.js";
-import { shouldMerge, mergeSummaries } from "./merge.js";
+import { shouldReduce, reduceSummaries } from "./reduce.js";
 import {
   buildRawSegmentCacheKey,
   buildSegmentSummaryCacheKey,
@@ -45,10 +45,11 @@ export function formatSegmentItem(item) {
 }
 
 /**
- * 分段小结 prompt：对齐蓝本 _chunk_prompt——视频标题 + 第 index/N 个连续片段 +
+ * 分段小结 prompt（本域术语是「分段小结」/ segment；上游蓝本函数名叫 _chunk_prompt）：
+ * 对齐蓝本 _chunk_prompt 措辞——视频标题 + 第 index/N 个连续片段 +
  * 忠实压缩（保留重要事实、例子、论证关系与原有时间点），不做评价、不补外部知识。
  */
-function buildChunkPrompt({ title, index, total, items }) {
+function buildSegmentPrompt({ title, index, total, items }) {
   const segmentLines = (Array.isArray(items) ? items : []).map((item) => {
     const text = formatSegmentItem(item);
     return text.length > MAX_ITEM_CHARS ? text.slice(0, MAX_ITEM_CHARS) + "…" : text;
@@ -184,7 +185,7 @@ async function summarizeSegment({
     throw makeAbortedError();
   }
 
-  const prompt = buildChunkPrompt({
+  const prompt = buildSegmentPrompt({
     title: context?.title || "未知",
     index: segment.index,
     total,
@@ -212,7 +213,7 @@ async function summarizeSegment({
 
 /**
  * 编排主函数（签名固定，04/07/08 只换内部实现）：
- * 切片 → 逐段小结（串行 runMapBounded）→ 成稿（shouldMerge 为真先归并）→ 回吐正文。
+ * 切片 → 逐段小结（串行 runMapBounded）→ 成稿（shouldReduce 为真先归并）→ 回吐正文。
  * 返回 { draft, segmentSummaries, aborted }；aborted 时已回吐内容不串数据、不再 post done。
  */
 export async function orchestrateMapReduce({
@@ -305,10 +306,10 @@ export async function orchestrateMapReduce({
     return abortReturn();
   }
 
-  // 成稿材料：所有小结汇总；shouldMerge 为真先走归并（07 填空后生效）。
+  // 成稿材料：所有小结汇总；shouldReduce 为真先走归并（07 填空后生效）。
   let materialSummaries = segmentSummaries.filter((s) => s != null);
-  if (shouldMerge(resolvedPlan) && materialSummaries.length > 1) {
-    const merged = await mergeSummaries({
+  if (shouldReduce(resolvedPlan) && materialSummaries.length > 1) {
+    const merged = await reduceSummaries({
       summaries: materialSummaries,
       title: ctx.title || "未知",
       runPrompts: async ({ prompt, messages }) => {

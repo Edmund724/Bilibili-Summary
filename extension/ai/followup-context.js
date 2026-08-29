@@ -20,7 +20,7 @@ export const RAW_INJECTION_MAX_CHARS = 30000;
 export const SEGMENT_SUMMARIES_MAX_CHARS = 40000;
 
 // 整体压缩摘要默认上限（分段小结 + 成稿，字符≈token，对齐 ADR-0001 的 chars × 1.0）。
-const COMPACTED_SUMMARY_MAX_CHARS = 60000;
+const COMPRESSED_SUMMARY_MAX_CHARS = 60000;
 // 尾部截断标记：长度计入 maxChars，保证返回串严格 ≤ maxChars。
 const TRUNCATION_MARKER = "\n…（压缩摘要过长，已截断尾部）";
 
@@ -56,10 +56,10 @@ export function trimRecentTurns(history, turns = RECENT_TURNS_DEFAULT) {
 
 // 组装「压缩摘要」字符串：分段小结（每条 `### 片段 i` 小标题 + 正文，先受独立上限约束）
 // + 成稿笔记；整体再受 maxChars 约束（截断尾部）。保留各小结与笔记原文（verbatim）。
-export function buildCompactedSummary({
+export function buildCompressedSummary({
   segmentSummaries = [],
   note = "",
-  maxChars = COMPACTED_SUMMARY_MAX_CHARS
+  maxChars = COMPRESSED_SUMMARY_MAX_CHARS
 } = {}) {
   const summaries = Array.isArray(segmentSummaries) ? segmentSummaries : [];
   const noteText = note == null ? "" : String(note);
@@ -101,17 +101,17 @@ export function buildFollowupSubtitleMarkdown({
     });
   }
 
-  const compacted = buildCompactedSummary({ segmentSummaries: summaries, note: noteText });
+  const compressed = buildCompressedSummary({ segmentSummaries: summaries, note: noteText });
 
   const retrieveFn = typeof retrieveRaw === "function" ? retrieveRaw : () => [];
   const hits = (retrieveFn(userPrompt) || []).filter((text) => typeof text === "string" && text.length > 0);
   if (hits.length === 0) {
-    return compacted;
+    return compressed;
   }
   let injection = hits.join("\n\n");
   // 注入原始段设上限，保证「压缩摘要 + 注入」合计仍在预算内（避免追问静默溢出/无输出）。
   if (injection.length > RAW_INJECTION_MAX_CHARS) {
     injection = injection.slice(0, RAW_INJECTION_MAX_CHARS);
   }
-  return compacted + "\n\n## 相关原始字幕段\n\n" + injection;
+  return compressed + "\n\n## 相关原始字幕段\n\n" + injection;
 }

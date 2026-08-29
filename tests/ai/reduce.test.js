@@ -1,17 +1,17 @@
-// ai/merge.js 归并层测试（07 票）：
-// 覆盖阈值判定（>500k / needsMerge 触发，≤500k 沿用 03 直接成稿）、贪心分组
+// ai/reduce.js 归并层测试（07 票）：
+// 覆盖阈值判定（>500k / needsReduce 触发，≤500k 沿用 03 直接成稿）、贪心分组
 // （每组 ≤100k、单条超预算自成一组、空数组返回 []）、多层归并收敛
 // （levels>0、终态合计 ≤100k、每组恰好调用一次）、进度文案（「正在归并第 L 层 a/b 组」）、
 // prompt 措辞对齐蓝本 _merge_prompt，以及归并期间中止抛 aborted 标记错误。
 
 import { describe, expect, it, vi } from "vitest";
 import {
-  shouldMerge,
-  buildMergeGroups,
-  buildMergePrompt,
-  mergeSummaries
-} from "../../extension/ai/merge.js";
-import { MERGE_GROUP_INPUT_CHARS } from "../../extension/ai/budgeter.js";
+  shouldReduce,
+  buildReduceGroups,
+  buildReducePrompt,
+  reduceSummaries
+} from "../../extension/ai/reduce.js";
+import { REDUCE_GROUP_INPUT_CHARS } from "../../extension/ai/budgeter.js";
 
 // 生成 n 条各 chars 字符的小结（首字符序号区分，便于断言顺序保持）。
 function makeSummaries(count, chars) {
@@ -23,66 +23,66 @@ function groupChars(group) {
   return group.reduce((acc, s) => acc + s.length, 0);
 }
 
-describe("shouldMerge 阈值判定", () => {
+describe("shouldReduce 阈值判定", () => {
   it("totalChars > 500000 触发归并；恰好 500000 不触发（沿用 03 直接成稿）", () => {
-    expect(shouldMerge({ totalChars: 500001, segments: [] })).toBe(true);
-    expect(shouldMerge({ totalChars: 500000, segments: [] })).toBe(false);
+    expect(shouldReduce({ totalChars: 500001, segments: [] })).toBe(true);
+    expect(shouldReduce({ totalChars: 500000, segments: [] })).toBe(false);
   });
 
   it("段数 ≥11 但 totalChars ≤500k（章节对齐切出短段）→ 不触发归并", () => {
-    expect(shouldMerge({ segments: new Array(11).fill({}) })).toBe(false);
-    expect(shouldMerge({ segments: new Array(11).fill({}), totalChars: 450000 })).toBe(false);
-    expect(shouldMerge({ segments: new Array(11).fill({}), totalChars: 500001 })).toBe(true);
+    expect(shouldReduce({ segments: new Array(11).fill({}) })).toBe(false);
+    expect(shouldReduce({ segments: new Array(11).fill({}), totalChars: 450000 })).toBe(false);
+    expect(shouldReduce({ segments: new Array(11).fill({}), totalChars: 500001 })).toBe(true);
   });
 
-  it("needsMerge 显式置真触发", () => {
-    expect(shouldMerge({ needsMerge: true })).toBe(true);
+  it("needsReduce 显式置真触发", () => {
+    expect(shouldReduce({ needsReduce: true })).toBe(true);
   });
 
   it("空对象 / null / undefined 不触发", () => {
-    expect(shouldMerge({})).toBe(false);
-    expect(shouldMerge(null)).toBe(false);
-    expect(shouldMerge(undefined)).toBe(false);
+    expect(shouldReduce({})).toBe(false);
+    expect(shouldReduce(null)).toBe(false);
+    expect(shouldReduce(undefined)).toBe(false);
   });
 });
 
-describe("buildMergeGroups 贪心分组", () => {
+describe("buildReduceGroups 贪心分组", () => {
   it("按输入顺序贪心累积，每组合计 ≤100k，顺序保持", () => {
     // 12 条 × 20k = 240k → 5+5+2 三组（每组恰 100k）
     const input = makeSummaries(12, 20000);
-    const groups = buildMergeGroups(input);
+    const groups = buildReduceGroups(input);
     expect(groups).toHaveLength(3);
     for (const group of groups) {
-      expect(groupChars(group)).toBeLessThanOrEqual(MERGE_GROUP_INPUT_CHARS);
+      expect(groupChars(group)).toBeLessThanOrEqual(REDUCE_GROUP_INPUT_CHARS);
     }
     expect(groups.flat()).toEqual(input);
   });
 
   it("单条超预算也自成一组（不拆条）", () => {
     const big = "x".repeat(150000);
-    const groups = buildMergeGroups([big, "短小结"]);
+    const groups = buildReduceGroups([big, "短小结"]);
     expect(groups).toHaveLength(2);
     expect(groups[0]).toEqual([big]);
     expect(groups[1]).toEqual(["短小结"]);
   });
 
   it("单条恰好 100k 与后一条分属两组", () => {
-    const groups = buildMergeGroups(["x".repeat(100000), "y"]);
+    const groups = buildReduceGroups(["x".repeat(100000), "y"]);
     expect(groups).toHaveLength(2);
     expect(groups[0][0]).toHaveLength(100000);
     expect(groups[1]).toEqual(["y"]);
   });
 
   it("空数组 / 非数组返回 []", () => {
-    expect(buildMergeGroups([])).toEqual([]);
-    expect(buildMergeGroups(null)).toEqual([]);
-    expect(buildMergeGroups("x")).toEqual([]);
+    expect(buildReduceGroups([])).toEqual([]);
+    expect(buildReduceGroups(null)).toEqual([]);
+    expect(buildReduceGroups("x")).toEqual([]);
   });
 });
 
-describe("buildMergePrompt 措辞对齐蓝本 _merge_prompt", () => {
+describe("buildReducePrompt 措辞对齐蓝本 _merge_prompt", () => {
   it("含标题、层/组序号、去重保时间点/前后关系与连续材料输出要求，条目以空行拼接", () => {
-    const prompt = buildMergePrompt({
+    const prompt = buildReducePrompt({
       title: "测试视频",
       level: 2,
       groupIndex: 1,
@@ -99,7 +99,7 @@ describe("buildMergePrompt 措辞对齐蓝本 _merge_prompt", () => {
   });
 
   it("非数组 group 按空串处理不抛错", () => {
-    const prompt = buildMergePrompt({
+    const prompt = buildReducePrompt({
       title: "t",
       level: 1,
       groupIndex: 1,
@@ -110,14 +110,14 @@ describe("buildMergePrompt 措辞对齐蓝本 _merge_prompt", () => {
   });
 });
 
-describe("mergeSummaries 多层归并收敛", () => {
+describe("reduceSummaries 多层归并收敛", () => {
   it("短串产出一次收敛：调用次数 = 组数，终态合计 ≤100k", async () => {
     // 11 条 × 10k = 110k → 10+1 两组，一层归并后骤降到 10 字符
     const summaries = makeSummaries(11, 10000);
     const runPrompts = vi.fn(async () => "组合并结果");
     const onProgress = vi.fn();
 
-    const result = await mergeSummaries({
+    const result = await reduceSummaries({
       summaries,
       title: "测试视频",
       runPrompts,
@@ -127,7 +127,7 @@ describe("mergeSummaries 多层归并收敛", () => {
     expect(result.levels).toBe(1);
     expect(runPrompts).toHaveBeenCalledTimes(2);
     expect(result.merged).toEqual(["组合并结果", "组合并结果"]);
-    expect(groupChars(result.merged)).toBeLessThanOrEqual(MERGE_GROUP_INPUT_CHARS);
+    expect(groupChars(result.merged)).toBeLessThanOrEqual(REDUCE_GROUP_INPUT_CHARS);
     // 进度文案：每组一条「正在归并第 L 层 a/b 组」
     expect(onProgress).toHaveBeenCalledTimes(2);
     for (const notice of onProgress.mock.calls.map((c) => c[0])) {
@@ -142,7 +142,7 @@ describe("mergeSummaries 多层归并收敛", () => {
     const onProgress = vi.fn();
     const runPrompts = vi.fn(async () => "x".repeat(40000));
 
-    const result = await mergeSummaries({
+    const result = await reduceSummaries({
       summaries,
       title: "测试视频",
       runPrompts,
@@ -151,7 +151,7 @@ describe("mergeSummaries 多层归并收敛", () => {
 
     expect(result.levels).toBe(2);
     expect(result.merged).toHaveLength(2);
-    expect(groupChars(result.merged)).toBeLessThanOrEqual(MERGE_GROUP_INPUT_CHARS);
+    expect(groupChars(result.merged)).toBeLessThanOrEqual(REDUCE_GROUP_INPUT_CHARS);
     // 3 + 2 次调用，每个归并 prompt 带对应层/组序号
     expect(runPrompts).toHaveBeenCalledTimes(5);
     const prompts = runPrompts.mock.calls.map((c) => c[0].prompt);
@@ -172,20 +172,20 @@ describe("mergeSummaries 多层归并收敛", () => {
   it("组数不减少（单条超预算归并无收益）时保护性 break，不调 runPrompts", async () => {
     const big = "x".repeat(120000);
     const runPrompts = vi.fn(async () => "");
-    const result = await mergeSummaries({ summaries: [big], title: "t", runPrompts });
+    const result = await reduceSummaries({ summaries: [big], title: "t", runPrompts });
     expect(result).toEqual({ merged: [big], levels: 0 });
     expect(runPrompts).not.toHaveBeenCalled();
   });
 
   it("空数组：levels=0、merged=[]、不调 runPrompts", async () => {
     const runPrompts = vi.fn();
-    const result = await mergeSummaries({ summaries: [], title: "t", runPrompts });
+    const result = await reduceSummaries({ summaries: [], title: "t", runPrompts });
     expect(result).toEqual({ merged: [], levels: 0 });
     expect(runPrompts).not.toHaveBeenCalled();
   });
 });
 
-describe("mergeSummaries 中止", () => {
+describe("reduceSummaries 中止", () => {
   it("归并期间 signal 置 aborted → 抛带 aborted 标记的错误", async () => {
     const controller = new AbortController();
     const runPrompts = vi.fn(async () => {
@@ -194,7 +194,7 @@ describe("mergeSummaries 中止", () => {
     });
 
     await expect(
-      mergeSummaries({
+      reduceSummaries({
         summaries: makeSummaries(30, 10000),
         title: "t",
         runPrompts,
@@ -211,7 +211,7 @@ describe("mergeSummaries 中止", () => {
     const runPrompts = vi.fn();
 
     await expect(
-      mergeSummaries({
+      reduceSummaries({
         summaries: makeSummaries(30, 10000),
         title: "t",
         runPrompts,

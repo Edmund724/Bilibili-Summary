@@ -2,7 +2,7 @@
 // 覆盖首轮回退（尚未成稿仍用原始字幕全文、不误切压缩上下文）、压缩摘要组装
 // （分段小结 + 成稿笔记、不含原始字幕全文）、token 随追问近乎常数、
 // verbatim 保留（压缩摘要保留小结与笔记原文）、检索注入（命中拼「相关原始字幕段」尾部 /
-// 未命中与缺省不含），以及 hasFinalNote / buildCompactedSummary 的边界（空入参、maxChars 截断尾部）。
+// 未命中与缺省不含），以及 hasFinalNote / buildCompressedSummary 的边界（空入参、maxChars 截断尾部）。
 
 import { describe, expect, it } from "vitest";
 import {
@@ -11,7 +11,7 @@ import {
   SEGMENT_SUMMARIES_MAX_CHARS,
   hasFinalNote,
   trimRecentTurns,
-  buildCompactedSummary,
+  buildCompressedSummary,
   buildFollowupSubtitleMarkdown
 } from "../../extension/ai/followup-context.js";
 
@@ -55,14 +55,14 @@ describe("hasFinalNote：首轮 / 尚未成稿判定", () => {
   });
 });
 
-describe("buildCompactedSummary：组装与边界", () => {
+describe("buildCompressedSummary：组装与边界", () => {
   it("空入参 / 空小结与空笔记 → 空串", () => {
-    expect(buildCompactedSummary()).toBe("");
-    expect(buildCompactedSummary({ segmentSummaries: [], note: "" })).toBe("");
+    expect(buildCompressedSummary()).toBe("");
+    expect(buildCompressedSummary({ segmentSummaries: [], note: "" })).toBe("");
   });
 
   it("只有小结 → 含「## 分段小结」与各小结小标题+正文；不含成稿笔记节", () => {
-    const out = buildCompactedSummary({ segmentSummaries: ["小结A内容", "小结B内容"] });
+    const out = buildCompressedSummary({ segmentSummaries: ["小结A内容", "小结B内容"] });
     expect(out).toContain("## 分段小结");
     expect(out).toContain("### 片段 1\n小结A内容");
     expect(out).toContain("### 片段 2\n小结B内容");
@@ -70,7 +70,7 @@ describe("buildCompactedSummary：组装与边界", () => {
   });
 
   it("只有笔记 → 只含成稿笔记节，保留笔记原文", () => {
-    const out = buildCompactedSummary({ note: "笔记原文XYZ" });
+    const out = buildCompressedSummary({ note: "笔记原文XYZ" });
     expect(out).toContain("## 成稿笔记\n\n笔记原文XYZ");
     expect(out).not.toContain("## 分段小结");
   });
@@ -78,7 +78,7 @@ describe("buildCompactedSummary：组装与边界", () => {
   it("小结 + 笔记齐备 → 分段小结在前、成稿笔记在后，均保留原文（verbatim）", () => {
     const note = "成稿笔记：第一段要点。\n第二行要点。";
     const summaries = ["小结一：事实A（时间点 09:15）。", "小结二：事实B。"];
-    const out = buildCompactedSummary({ segmentSummaries: summaries, note });
+    const out = buildCompressedSummary({ segmentSummaries: summaries, note });
     expect(out.indexOf("## 分段小结")).toBeLessThan(out.indexOf("## 成稿笔记"));
     expect(out).toContain(note);
     expect(out).toContain(summaries[0]);
@@ -87,7 +87,7 @@ describe("buildCompactedSummary：组装与边界", () => {
 
   it("maxChars 截断尾部：结果 ≤ maxChars、含截断标记、保留头部", () => {
     const note = "N".repeat(1000);
-    const out = buildCompactedSummary({ note, maxChars: 100 });
+    const out = buildCompressedSummary({ note, maxChars: 100 });
     expect(out.length).toBeLessThanOrEqual(100);
     expect(out).toContain("已截断尾部");
     expect(out.startsWith("## 成稿笔记\n\n")).toBe(true);
@@ -95,14 +95,14 @@ describe("buildCompactedSummary：组装与边界", () => {
   });
 
   it("maxChars 极小（≤ 截断标记长度）时仍不超限", () => {
-    const out = buildCompactedSummary({ note: "x".repeat(500), maxChars: 5 });
+    const out = buildCompressedSummary({ note: "x".repeat(500), maxChars: 5 });
     expect(out.length).toBeLessThanOrEqual(5);
   });
 
   it("分段小结独立上限：小结部分 ≤ SEGMENT_SUMMARIES_MAX_CHARS，笔记不随其截断", () => {
     const note = "N".repeat(200);
     const summaries = Array.from({ length: 10 }, () => "S".repeat(8000)); // 合计 80000 > 40000
-    const out = buildCompactedSummary({ segmentSummaries: summaries, note });
+    const out = buildCompressedSummary({ segmentSummaries: summaries, note });
     const summariesEnd = out.indexOf("## 成稿笔记");
     // 「## 分段小结」到「## 成稿笔记」之间的小结节（含小标题与换行）受独立上限约束
     const summariesSpan = summariesEnd - out.indexOf("## 分段小结");
@@ -112,8 +112,8 @@ describe("buildCompactedSummary：组装与边界", () => {
   });
 
   it("非数组 segmentSummaries 容错为空", () => {
-    expect(buildCompactedSummary({ segmentSummaries: "小结一" })).toBe("");
-    expect(buildCompactedSummary({ segmentSummaries: null, note: "笔记" })).toContain("## 成稿笔记");
+    expect(buildCompressedSummary({ segmentSummaries: "小结一" })).toBe("");
+    expect(buildCompressedSummary({ segmentSummaries: null, note: "笔记" })).toContain("## 成稿笔记");
   });
 });
 
