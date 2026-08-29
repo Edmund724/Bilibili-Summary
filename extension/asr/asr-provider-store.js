@@ -11,7 +11,7 @@
 
 import { normalizeAsrProvider, normalizeBaseUrl } from "../core/presets.js";
 import { createProviderStore } from "../core/provider-store.js";
-import { getMergedSettings } from "../core/ai-provider-store.js";
+import { getMergedSettings } from "../core/settings-store.js";
 
 // ===== ASR 平台列表存储 =====
 

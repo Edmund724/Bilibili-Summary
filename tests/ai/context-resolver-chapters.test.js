@@ -32,7 +32,7 @@ vi.mock("../../extension/bilibili/gateway.js", () => ({
   isBiliUrl: vi.fn(() => true)
 }));
 
-vi.mock("../../extension/core/ai-provider-store.js", () => ({
+vi.mock("../../extension/core/settings-store.js", () => ({
   getMergedSettings: vi.fn(async () => ({ includeTimestampInBody: false }))
 }));
 

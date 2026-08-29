@@ -16,7 +16,7 @@ let syncGetMock;
 let syncSetMock;
 
 async function loadStoreModule() {
-  return import("../../extension/core/ai-provider-store.js");
+  return import("../../extension/core/settings-store.js");
 }
 
 beforeEach(() => {

@@ -7,10 +7,8 @@ import { PRESETS, ASR_PROVIDER_PRESETS } from "../core/presets.js";
 import { normalizePlayerAiQuickPrompt } from "../core/validators.js";
 import { isSupportedBilibiliPage } from "../bilibili/video-id-shared.js";
 import { sleep } from "../shared/utils.js";
+import { getMergedSettings, normalizeSettings, saveSettings } from "../core/settings-store.js";
 import {
-  getMergedSettings,
-  normalizeSettings,
-  saveSettings,
   loadAiProviders,
   saveAiProviders,
   deleteAiProvider,

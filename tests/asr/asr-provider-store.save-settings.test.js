@@ -1,4 +1,4 @@
-// ai-provider-store.js saveSettings ASR 默认项部分保存回归测试。
+// settings-store.js saveSettings ASR 默认项部分保存回归测试。
 // 背景：本仓最近刚修过"部分保存设置覆盖其他设置项"的 bug（commit
 // e102724 / 7de610d）。新增的 ASR 默认项（asrProviders /
 // activeAsrProviderId / asrAutoFallback）必须同样遵循
@@ -11,7 +11,7 @@ import { resetModuleState } from "../setup.js";
 let syncSetMock;
 
 async function loadModule() {
-  return import("../../extension/core/ai-provider-store.js");
+  return import("../../extension/core/settings-store.js");
 }
 
 function extractSetPayload() {

@@ -21,7 +21,7 @@ import {
   pickPreferredSubtitle as pickPreferredSubtitleTrack,
   normalizeSubtitleTracks
 } from "../subtitle/selection.js";
-import { getMergedSettings } from "../core/ai-provider-store.js";
+import { getMergedSettings } from "../core/settings-store.js";
 import { buildAiContextRef } from "./conversation.js";
 
 // ===== 页内状态（由 background.js 注入：ensureReaderContentReady / sendMessageToTab）=====

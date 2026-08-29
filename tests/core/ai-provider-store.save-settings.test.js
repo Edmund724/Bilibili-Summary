@@ -1,4 +1,4 @@
-// ai-provider-store.js saveSettings 部分保存语义测试：
+// settings-store.js saveSettings 部分保存语义测试：
 // saveSettings 只应归一化并写回 payload 中实际存在的 key，
 // 缺失的 key 不得被默认值覆盖（否则如 setThinkingLevel 只传
 // aiThinkingLevel 时会把 enablePlayerAiQuickAction 冲成 false）。
@@ -9,7 +9,7 @@ import { resetModuleState } from "../setup.js";
 let syncSetMock;
 
 async function loadModule() {
-  const module = await import("../../extension/core/ai-provider-store.js");
+  const module = await import("../../extension/core/settings-store.js");
   return module;
 }
 
