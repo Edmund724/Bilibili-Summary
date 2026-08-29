@@ -36,7 +36,6 @@ import {
   getCurrentAid,
   fetchHotComments
 } from "../bilibili/gateway.js";
-import { buildMarkdown } from "../notes/render.js";
 
 export function bindRuntimeEvents() {
   if (state.ui.runtimeEventsBound) {
@@ -119,15 +118,6 @@ export function bindRuntimeEvents() {
     if (message.type === "sidepanel-get-context") {
       const settings = state.settings || DEFAULT_SETTINGS;
       const body = state.clip.subtitleBody || [];
-      let subtitleMarkdown = "";
-      try {
-        subtitleMarkdown = body.length
-          ? buildMarkdown(state, body, { ...settings, includeHotCommentsInNote: false })
-          : "";
-      } catch (e) {
-        subtitleMarkdown = "";
-        logWarn("[BOC] sidepanel-get-context: buildMarkdown failed", e);
-      }
       sendResponse({
         ok: true,
         payload: {
@@ -142,7 +132,11 @@ export function bindRuntimeEvents() {
           pageCount: Number(state.clip.pageCount) > 0 ? Number(state.clip.pageCount) : 0,
           pageTitle: state.clip.pageTitle || "",
           subtitleBody: body,
-          subtitleMarkdown,
+          // 视频时长（fetcher 经 page-context seam 写入 state.clip.videoDuration）：
+          // offscreen 渲染 prompt 时用于 withHours（小时级时间戳）判定。
+          videoDuration: Number(state.clip.videoDuration || 0) || 0,
+          // 字幕时间戳开关透传：offscreen 渲染 prompt 时沿用同一设置；缺失按默认 true。
+          includeTimestampInBody: settings?.includeTimestampInBody !== false,
           // idle/loading/ready/error：loading 且 subtitleBody 为空表示抓取
           // （可能含小时级 ASR 转写）仍在进行，sidepanel 据此等待而非把
           // 空字幕直接发给模型。

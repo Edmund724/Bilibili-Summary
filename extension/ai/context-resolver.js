@@ -3,7 +3,6 @@
 // 从 extension/entry/background.js 提取的深模块，只暴露 background.js 消息处理器
 // 需要调用的函数；B站抓取统一走 bilibili/gateway.js 的 bgFetchJson 传输层。
 
-import { formatCompactTimestamp } from "../shared/string-utils.js";
 import { getSubtitleCacheKey, loadSubtitleFromCache } from "../subtitle/cache.js";
 import {
   fetchVideoMeta,
@@ -22,7 +21,6 @@ import {
   pickPreferredSubtitle as pickPreferredSubtitleTrack,
   normalizeSubtitleTracks
 } from "../subtitle/selection.js";
-import { buildSubtitleSectionLines, shouldShowHoursInNote } from "../notes/render.js";
 import { getMergedSettings } from "../core/ai-provider-store.js";
 import { buildAiContextRef } from "./conversation.js";
 
@@ -48,27 +46,6 @@ function pickPageForAiContext(pages, ref) {
   }
 }
 
-function buildAiConversationMarkdown(meta, body, settings) {
-  const includeTimestampInBody = settings?.includeTimestampInBody !== false;
-  const withHours = shouldShowHoursInNote(meta, body);
-  const lines = [];
-  const chapters = Array.isArray(meta?.chapters) ? meta.chapters : [];
-  if (chapters.length) {
-    lines.push("## 章节", "");
-    chapters.forEach((item) => {
-      const stamp = includeTimestampInBody ? `\`${formatCompactTimestamp(item.from, withHours)}\` ` : "";
-      lines.push(`- ${stamp}${item.title}`);
-    });
-    lines.push("");
-  }
-  const subtitleLines = buildSubtitleSectionLines(body, chapters, { includeTimestampInBody }, withHours);
-  // render 版兜底：无字幕时返回 ["（暂无字幕）"]，章节分桶全空时回退为整段字幕列表。
-  if (subtitleLines.length > 0) {
-    lines.push("## 字幕", "", ...subtitleLines);
-  }
-  return lines.join("\n");
-}
-
 export async function resolveAiSidepanelContext(contextRef) {
   const ref = buildAiContextRef(contextRef);
   if (!ref.isVideoContext || !ref.bvid) {
@@ -77,7 +54,6 @@ export async function resolveAiSidepanelContext(contextRef) {
       url: ref.url,
       author: ref.author,
       uploadDate: ref.uploadDate,
-      subtitleMarkdown: "",
       subtitleBody: [],
       hotComments: [],
       isVideoContext: false
@@ -124,11 +100,7 @@ export async function resolveAiSidepanelContext(contextRef) {
   const uploadDate = String(videoMeta.uploadDate || ref.uploadDate || "").trim();
   const pageTitle = String(page?.part || ref.pageTitle || "").trim();
   const url = buildCanonicalVideoUrl(ref.bvid, pageIndex) || ref.url;
-  const contextMeta = {
-    title,
-    chapters: subtitleBundle.chapters || [],
-    videoDuration: Number(page?.duration || videoMeta.defaultDuration || 0) || 0
-  };
+  const videoDuration = Number(page?.duration || videoMeta.defaultDuration || 0) || 0;
 
   return {
     title,
@@ -143,13 +115,18 @@ export async function resolveAiSidepanelContext(contextRef) {
     subtitleLang: String(selectedTrack.lanDoc || selectedTrack.lan || "").trim(),
     selectedSubtitleId: String(selectedTrack.id || "").trim(),
     selectedSubtitleUrl: String(selectedTrack.subtitleUrl || "").trim(),
-    // 章节透传（来源与本文件 buildAiConversationMarkdown 渲染用的同一份
+    // 章节透传（来源与本文件 return 里的 chapters 为同一份
     // subtitleBundle.chapters）：供侧边栏回传 offscreen 后做章节对齐切段
     // （budgeter）与追问章节名检索（raw-retrieval）。旧持久化会话 ref 无此
     // 字段时为 undefined，下游 Array.isArray 守卫均已容忍。
     chapters: Array.isArray(subtitleBundle.chapters) ? subtitleBundle.chapters : [],
+    // 视频时长（分 P duration，缺省回退全片 defaultDuration）：发模型前由
+    // ai/subtitle-prompt.js 的 buildSubtitlePrompt 用于 withHours（小时级时间戳）判定。
+    videoDuration,
+    // 字幕时间戳开关透传：offscreen 渲染 prompt 时沿用同一设置，保证与预算判定
+    // 同源的渲染产物和笔记样式一致；旧数据缺失时消费方按默认 true 处理。
+    includeTimestampInBody: settings?.includeTimestampInBody !== false,
     subtitleBody: body,
-    subtitleMarkdown: buildAiConversationMarkdown(contextMeta, body, settings),
     subtitleOptions: tracks.map((item) => ({
       id: String(item.id || "").trim(),
       url: String(item.subtitleUrl || "").trim(),
@@ -217,7 +194,6 @@ export async function getAiSidepanelState(tabId, { forceRefresh = false } = {}, 
       url: String(tab.url || "").trim(),
       author: "",
       uploadDate: "",
-      subtitleMarkdown: "",
       subtitleBody: [],
       hotComments: [],
       isVideoContext: false

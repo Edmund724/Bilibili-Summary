@@ -15,9 +15,15 @@ import {
   buildFollowupSubtitleMarkdown
 } from "../../extension/ai/followup-context.js";
 
-// 构造 contextData：subtitleMarkdown 带一个全文独有的标记段，用于断言压缩后绝不含整篇原始字幕。
+// 构造 contextData：原始字幕体（subtitleBody）只含一条正文为整篇 markdown 的
+// 条目（关闭时间戳渲染），用于断言压缩后绝不含整篇原始字幕、未成稿回退输出与
+// body 内容逐字一致。
 function makeContext(markdown) {
-  return { title: "测试视频", subtitleMarkdown: markdown, subtitleBody: [] };
+  return {
+    title: "测试视频",
+    subtitleBody: markdown ? [{ from: 0, to: 1, content: markdown }] : [],
+    includeTimestampInBody: false
+  };
 }
 
 // 全文独有的段落：只存在于原始字幕全文，任何压缩结果都不应包含它。
@@ -114,12 +120,14 @@ describe("buildCompactedSummary：组装与边界", () => {
 describe("buildFollowupSubtitleMarkdown：首轮回退", () => {
   const markdown = makeUniqueMarkdown(200);
 
-  it("note 空 / segmentSummaries 空 → 返回 subtitleMarkdown 原文", () => {
-    expect(buildFollowupSubtitleMarkdown({ contextData: makeContext(markdown) })).toBe(markdown);
-    expect(buildFollowupSubtitleMarkdown({ contextData: makeContext(markdown), note: "笔记" })).toBe(markdown);
+  it("note 空 / segmentSummaries 空 → 返回由 subtitleBody 渲染的原始字幕全文", () => {
+    // 渲染收口：单条字幕体的全文按「## 字幕」分节输出，正文与原文逐字一致。
+    const rendered = "## 字幕\n\n" + markdown;
+    expect(buildFollowupSubtitleMarkdown({ contextData: makeContext(markdown) })).toBe(rendered);
+    expect(buildFollowupSubtitleMarkdown({ contextData: makeContext(markdown), note: "笔记" })).toBe(rendered);
     expect(
       buildFollowupSubtitleMarkdown({ contextData: makeContext(markdown), segmentSummaries: ["小结一"] })
-    ).toBe(markdown);
+    ).toBe(rendered);
   });
 
   it("首轮无字幕 → 返回空串", () => {
@@ -134,7 +142,7 @@ describe("buildFollowupSubtitleMarkdown：首轮回退", () => {
       userPrompt: "09:15 讲了什么",
       retrieveRaw: () => ["检索原始段"]
     });
-    expect(out).toBe(markdown);
+    expect(out).toBe("## 字幕\n\n" + markdown);
     expect(out).not.toContain("## 相关原始字幕段");
   });
 });

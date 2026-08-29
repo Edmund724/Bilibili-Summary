@@ -2,6 +2,7 @@
 
 import { buildMessages, clipSubtitleForContext } from "./context.js";
 import { buildBudgetPlan, estimateTokens, MATERIAL_BUDGET_CHARS } from "./budgeter.js";
+import { buildSubtitlePrompt } from "./subtitle-prompt.js";
 import { parseSsePayload } from "./sse-parser.js";
 
 // OpenAI 兼容协议常量。
@@ -81,17 +82,27 @@ export function isContextLengthOverflow(detailOrError) {
 /**
  * 决定给模型的字幕：素材预算内（≤100k token）整篇原样；超预算回落 50k 硬截断并打标记。
  * 纯函数，streamChat 只负责消费返回的 { markdown, mode, notice, overflowMarked }。
- * body 缺失/空时退化为对 subtitleMarkdown 的 estimateTokens 判定。
+ * 预算输入与发送物同源：发送物由 subtitle-prompt 的 buildSubtitlePrompt 从
+ * subtitleBody 现场渲染（追问压缩路径则直接用 compressedSummaryMarkdown 文本产物）；
+ * body 缺失/空时退化为对实际发送物（空渲染或压缩摘要）的 estimateTokens 判定。
  */
 export function resolveSubtitleForContext(context) {
   const ctx = context || {};
   const body = Array.isArray(ctx.subtitleBody) ? ctx.subtitleBody : [];
-  const markdown = String(ctx.subtitleMarkdown || "");
+  // 追问压缩路径：压缩摘要本身就是最终发送物，预算按其实际长度估 token。
+  const markdown = String(ctx.compressedSummaryMarkdown || "")
+    || buildSubtitlePrompt({
+      body,
+      chapters: ctx.chapters,
+      videoDuration: ctx.videoDuration,
+      includeTimestampInBody: ctx.includeTimestampInBody
+    });
 
   let mode;
   if (body.length > 0) {
     mode = buildBudgetPlan({ body, chapters: ctx.chapters }).mode;
   } else {
+    // body 缺失/空：对实际发送物估 token（空渲染 ≈ 0 → single；压缩摘要按其长度判定）。
     mode = estimateTokens(markdown) > MATERIAL_BUDGET_CHARS ? "map-reduce" : "single";
   }
 
@@ -184,7 +195,9 @@ export async function streamChat({ provider, context, userPrompt, history, port,
   }
 
   const messages = buildMessages({
-    context: { ...context, subtitleMarkdown: subtitleResolution.markdown },
+    // buildMessages 与 resolveSubtitleForContext 从同一份 subtitleBody /
+    // compressedSummaryMarkdown 渲染，无需再注入任何渲染产物字段。
+    context,
     userPrompt,
     history,
     systemPrompt: context?.aiSystemPrompt

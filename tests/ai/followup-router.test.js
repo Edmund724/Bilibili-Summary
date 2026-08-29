@@ -25,7 +25,6 @@ const context = {
   selectedSubtitleId: "sub-1",
   subtitleLang: "zh",
   chapters: [],
-  subtitleMarkdown: "整篇原始字幕全文的唯一标记 __RAW_FULL__",
   subtitleBody: body
 };
 
@@ -124,9 +123,9 @@ describe("resolveFollowupContext", () => {
     });
     expect(result).not.toBeNull();
     expect(result.subtitleBody).toEqual([]);
-    expect(result.subtitleMarkdown).toContain("完整笔记正文。");
-    expect(result.subtitleMarkdown).toContain("小结一：事实A。");
-    expect(result.subtitleMarkdown).not.toContain("__RAW_FULL__");
+    expect(result.compressedSummaryMarkdown).toContain("完整笔记正文。");
+    expect(result.compressedSummaryMarkdown).toContain("小结一：事实A。");
+    expect(result.compressedSummaryMarkdown).not.toContain("__RAW_FULL__");
   });
 
   it("成稿后追问 + 时间戳命中 → 压缩上下文尾部注入相关原始段", async () => {
@@ -145,7 +144,7 @@ describe("resolveFollowupContext", () => {
       userPrompt: "09:00 那里讲了什么", // 540s → 命中第 2 段
       loadSummaries: async () => summariesFixture
     });
-    expect(result.subtitleMarkdown).toContain("## 相关原始字幕段");
-    expect(result.subtitleMarkdown).toContain("后续内容DEF");
+    expect(result.compressedSummaryMarkdown).toContain("## 相关原始字幕段");
+    expect(result.compressedSummaryMarkdown).toContain("后续内容DEF");
   });
 });

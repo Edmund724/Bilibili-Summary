@@ -1,6 +1,7 @@
 // 把 content.js 传来的 context 拼成 chat messages，并提供建议 chip 模板。
 
 import { SEGMENT_INPUT_CHARS } from "./budgeter.js";
+import { buildSubtitlePrompt } from "./subtitle-prompt.js";
 
 export function buildMessages({ context, userPrompt, history, systemPrompt }) {
   const ctx = context || {};
@@ -9,8 +10,18 @@ export function buildMessages({ context, userPrompt, history, systemPrompt }) {
     `作者：${ctx.author || "未知"} | 上传日期：${ctx.uploadDate || "未知"}`
   ];
 
-  if (ctx.subtitleMarkdown) {
-    sections.push(`以下是视频的字幕全文：\n\n${ctx.subtitleMarkdown}`);
+  // 字幕只以 subtitleBody（原始条目）入协议，发送物由此现场渲染，与预算判定同源。
+  // includeTimestampInBody 由 payload 透传（context-resolver / content 侧设置），
+  // 缺失时 buildSubtitlePrompt 默认 true（与历史默认一致）。
+  const subtitleText = String(ctx.compressedSummaryMarkdown || "")
+    || buildSubtitlePrompt({
+      body: ctx.subtitleBody,
+      chapters: ctx.chapters,
+      videoDuration: ctx.videoDuration,
+      includeTimestampInBody: ctx.includeTimestampInBody
+    });
+  if (subtitleText) {
+    sections.push(`以下是视频的字幕全文：\n\n${subtitleText}`);
   } else {
     sections.push("（暂无字幕）");
   }

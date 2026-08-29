@@ -4,6 +4,8 @@
 // 原始字幕段按需检索注入由 06 负责，此处通过注入函数 retrieveRaw 解耦（缺省不注入）。
 // 纯函数、无 side effect，不碰 chrome/DOM。
 
+import { buildSubtitlePrompt } from "./subtitle-prompt.js";
+
 // 近 N 轮 verbatim（N = 最近对话轮数）：由外部 buildMessages(history, userPrompt) 取近 N 轮
 // 拼进消息历史，本模块只负责「字幕体」这一栏的取舍与压缩。
 export const RECENT_TURNS_DEFAULT = 6;
@@ -76,7 +78,8 @@ export function buildCompactedSummary({
 }
 
 // 追问时的字幕体：已成稿 → 压缩摘要 [+ 检索注入的原始段尾缀]；
-// 尚未成稿（首轮 / 无笔记）→ 原样返回原始字幕全文（contextData.subtitleMarkdown）。
+// 尚未成稿（首轮 / 无笔记）→ 由 buildSubtitlePrompt 从原始字幕体（subtitleBody +
+// chapters + videoDuration）现场渲染全文（协议已不含预渲染的 subtitleMarkdown）。
 // retrieveRaw 为 06 注入的 (userPrompt) => string[]，缺省 () => []，完全解耦。
 export function buildFollowupSubtitleMarkdown({
   contextData = {},
@@ -90,7 +93,12 @@ export function buildFollowupSubtitleMarkdown({
   const summaries = Array.isArray(segmentSummaries) ? segmentSummaries : [];
 
   if (!hasFinalNote({ note: noteText, segmentSummaries: summaries })) {
-    return String(ctx.subtitleMarkdown || "");
+    return buildSubtitlePrompt({
+      body: ctx.subtitleBody,
+      chapters: ctx.chapters,
+      videoDuration: ctx.videoDuration,
+      includeTimestampInBody: ctx.includeTimestampInBody
+    });
   }
 
   const compacted = buildCompactedSummary({ segmentSummaries: summaries, note: noteText });

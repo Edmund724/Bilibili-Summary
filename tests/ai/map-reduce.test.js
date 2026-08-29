@@ -35,7 +35,6 @@ function makeContext() {
     cid: "123",
     selectedSubtitleId: "sub-1",
     subtitleBody: makeSubtitleBody(110000),
-    subtitleMarkdown: "x".repeat(110000),
     chapters: []
   };
 }
@@ -359,7 +358,7 @@ describe("streamChat 溢出兜底哨兵", () => {
 
     const result = await streamChatMod.streamChat({
       provider: makeProvider(),
-      context: { title: "t", subtitleMarkdown: "x".repeat(100), subtitleBody: [] },
+      context: { title: "t", subtitleBody: [] },
       userPrompt: "总结",
       history: [],
       port
@@ -402,7 +401,7 @@ describe("streamChat 溢出兜底哨兵", () => {
 
     const result = await streamChatMod.streamChat({
       provider: makeProvider(),
-      context: { title: "t", subtitleMarkdown: "x".repeat(100), subtitleBody: [] },
+      context: { title: "t", subtitleBody: [] },
       userPrompt: "总结",
       history: [],
       port

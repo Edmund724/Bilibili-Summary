@@ -64,9 +64,12 @@ describe("resolveAiSidepanelContext chapters 透传", () => {
     ]);
     // 确实来自字幕 bundle（背景侧唯一章节来源）
     expect(fetchSubtitleBundle).toHaveBeenCalledTimes(1);
-    // 渲染管道未回归：markdown 仍含章节分节
-    expect(result.subtitleMarkdown).toContain("## 章节");
-    expect(result.subtitleMarkdown).toContain("开场");
+    // 协议不再携带预渲染 markdown：改为透传渲染所需输入（body/chapters/
+    // videoDuration/includeTimestampInBody），发送物由 ai/subtitle-prompt.js
+    // 的 buildSubtitlePrompt 在发 prompt 前现场渲染。
+    expect(result.subtitleBody).toEqual([{ from: 0, to: 5, content: "第一句" }]);
+    expect(result.videoDuration).toBe(600);
+    expect(result.includeTimestampInBody).toBe(false);
   });
 
   it("bundle 无章节 → chapters 为空数组（非 undefined）", async () => {

@@ -29,7 +29,7 @@ const FULL_INPUT = {
   isVideoContext: true,
   // 挑选清单之外的负载应被丢弃
   subtitleBody: [{ from: 0, to: 5, content: "x" }],
-  subtitleMarkdown: "# 不应保留"
+  hotComments: []
 };
 
 const EXPECTED_FIELDS = [
@@ -134,13 +134,12 @@ describe("buildAiContextRef 输入兜底", () => {
 });
 
 describe("buildContextPlaceholder 在统一构造器结果上补占位字段", () => {
-  it("15 字段齐 + subtitleMarkdown 空串 + hotComments 空数组", () => {
+  it("15 字段齐 + hotComments 空数组（协议不再有 subtitleMarkdown）", () => {
     const placeholder = buildContextPlaceholder(FULL_INPUT);
-    expect(Object.keys(placeholder)).toEqual([...EXPECTED_FIELDS, "subtitleMarkdown", "hotComments"]);
+    expect(Object.keys(placeholder)).toEqual([...EXPECTED_FIELDS, "hotComments"]);
     expect(placeholder.title).toBe("测试视频");
     expect(placeholder.bvid).toBe("BV1full");
     expect(placeholder.chapters).toEqual([{ title: "开场", from: 0, to: 60 }]);
-    expect(placeholder.subtitleMarkdown).toBe("");
     expect(placeholder.hotComments).toEqual([]);
     expect(placeholder.isVideoContext).toBe(true);
   });
@@ -148,7 +147,6 @@ describe("buildContextPlaceholder 在统一构造器结果上补占位字段", (
   it("chapters 缺省的旧会话 ref → chapters undefined，其余占位字段照常", () => {
     const placeholder = buildContextPlaceholder({ title: "旧会话", bvid: "BV1old" });
     expect(placeholder.chapters).toBeUndefined();
-    expect(placeholder.subtitleMarkdown).toBe("");
     expect(placeholder.hotComments).toEqual([]);
   });
 

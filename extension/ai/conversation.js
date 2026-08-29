@@ -121,7 +121,6 @@ export function buildContextPlaceholder(ref) {
   }
   return {
     ...buildAiContextRef(ref),
-    subtitleMarkdown: "",
     hotComments: []
   };
 }

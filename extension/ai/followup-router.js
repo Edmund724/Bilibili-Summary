@@ -74,7 +74,8 @@ export function lastAssistantContent(history = []) {
 
 /**
  * 解析追问上下文：超预算视频 + 已有历史 + 已能拼出「成稿笔记 + 分段小结」时，
- * 返回供 streamChat 复用的压缩上下文（subtitleMarkdown 换成压缩摘要，subtitleBody 置空）；
+ * 返回供 streamChat 复用的压缩上下文（compressedSummaryMarkdown 换成压缩摘要，
+ * subtitleBody 置空）；
  * 其余情况（≤100k / 首轮 / 尚未成稿）返回 null，表示走完整 Map-Reduce。
  *
  * 段来源两级：会话内直接用内存 plan.segments（行为与既有路径逐字节一致）；
@@ -118,7 +119,7 @@ export async function resolveFollowupContext({
     return null;
   }
 
-  const subtitleMarkdown = buildFollowupSubtitleMarkdown({
+  const compressedSummaryMarkdown = buildFollowupSubtitleMarkdown({
     contextData: context,
     note,
     segmentSummaries,
@@ -126,5 +127,7 @@ export async function resolveFollowupContext({
     retrieveRaw: buildRetrieveRaw({ context, plan: { segments } })
   });
 
-  return { ...context, subtitleMarkdown, subtitleBody: [] };
+  // 压缩摘要本身是文本产物，用显式的 compressedSummaryMarkdown 字段承载，
+  // 不与已从协议删除的 subtitleMarkdown 混淆（context.js / client.js 读新字段）。
+  return { ...context, compressedSummaryMarkdown, subtitleBody: [] };
 }

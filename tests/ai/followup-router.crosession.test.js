@@ -73,7 +73,7 @@ const context = {
   selectedSubtitleId: "sub-9",
   subtitleLang: "zh",
   chapters: [],
-  subtitleMarkdown: "整篇原始字幕全文的唯一标记 __RAW_FULL__"
+  subtitleBody: [{ from: 0, to: 5, content: "整篇原始字幕全文的唯一标记 __RAW_FULL__" }]
 };
 
 const storedSegments = [
@@ -106,13 +106,13 @@ describe("跨会话回退：plan.segments 为空时从段缓存恢复", () => {
 
     expect(result).not.toBeNull();
     // 分段小结从段缓存恢复（会话内内存段已不在）
-    expect(result.subtitleMarkdown).toContain("小结1：第1段摘要。");
-    expect(result.subtitleMarkdown).toContain("小结3：第3段摘要。");
+    expect(result.compressedSummaryMarkdown).toContain("小结1：第1段摘要。");
+    expect(result.compressedSummaryMarkdown).toContain("小结3：第3段摘要。");
     // 检索注入命中落盘的原始段
-    expect(result.subtitleMarkdown).toContain("## 相关原始字幕段");
-    expect(result.subtitleMarkdown).toContain("后续内容DEF");
+    expect(result.compressedSummaryMarkdown).toContain("## 相关原始字幕段");
+    expect(result.compressedSummaryMarkdown).toContain("后续内容DEF");
     // 压缩上下文语义不变：不含原始全文、subtitleBody 置空、视频身份保留
-    expect(result.subtitleMarkdown).not.toContain("__RAW_FULL__");
+    expect(result.compressedSummaryMarkdown).not.toContain("__RAW_FULL__");
     expect(result.subtitleBody).toEqual([]);
     expect(result.bvid).toBe(context.bvid);
     expect(result.cid).toBe(context.cid);
@@ -181,8 +181,8 @@ describe("会话内路径不变：plan.segments 存在时完全优先内存段",
 
     expect(result).not.toBeNull();
     // 09:00（540s）命中内存第 2 段（500-1000）
-    expect(result.subtitleMarkdown).toContain("内存第二段内容");
-    expect(result.subtitleMarkdown).not.toContain("后续内容DEF");
+    expect(result.compressedSummaryMarkdown).toContain("内存第二段内容");
+    expect(result.compressedSummaryMarkdown).not.toContain("后续内容DEF");
     // 内存段在 → 无跨会话回退（loadStoredRawSegments 的 get(null) 枚举不发生）
     expect(storage.local.get).not.toHaveBeenCalledWith(null);
   });
@@ -203,7 +203,7 @@ describe("会话内路径不变：plan.segments 存在时完全优先内存段",
     });
     expect(result).not.toBeNull();
     expect(result.subtitleBody).toEqual([]);
-    expect(result.subtitleMarkdown).toContain("小结一：事实A。");
-    expect(result.subtitleMarkdown).not.toContain("__RAW_FULL__");
+    expect(result.compressedSummaryMarkdown).toContain("小结一：事实A。");
+    expect(result.compressedSummaryMarkdown).not.toContain("__RAW_FULL__");
   });
 });

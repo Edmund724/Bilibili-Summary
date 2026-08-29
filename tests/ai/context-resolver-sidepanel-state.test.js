@@ -26,7 +26,6 @@ function makeTranscribingContentResponder(sent, { refreshResponse } = {}) {
           aid: "1",
           cid: "101",
           subtitleBody: [],
-          subtitleMarkdown: "",
           subtitleFetchState: "loading"
         }
       };
