@@ -19,11 +19,47 @@ import { isReaderViewOpen } from "../reader/index.js";
 
 let playerAiQuickActionRetryCount = 0;
 
+// layout 监听与游标监听的引用缓存：removeEventListener 必须用绑定时的同一
+// 引用才能摘除，stop 生命周期与游标监听的防泄漏清理都依赖这里保存的引用。
+let playerAiQuickActionLayoutHandler = null;
+// 结构：{ host, wrap, showForCursorActivity, hideImmediately }
+let playerAiQuickActionCursorSync = null;
+
 export function resetPlayerAiQuickActionRetryCount() {
   playerAiQuickActionRetryCount = 0;
 }
 
 const PLAYER_CONTAINER_SELECTOR = ".bpx-player-container, #bilibili-player";
+
+// 显式启动入口：绑定 layout 监听并挂 observer。bind/observe 各自带幂等守卫
+// （layoutBound / observer 槽位），重复调用不会重复绑。
+export function startPlayerAiQuickAction() {
+  bindPlayerAiQuickActionLayoutEvents();
+  startPlayerAiQuickActionObserver();
+  // observer 只在 DOM 变化时回调，初始挂载需要主动 sync 一次（与搬迁前
+  // content.js 在 startObserver 后立即 sync 的行为一致）。
+  schedulePlayerAiQuickActionSync();
+}
+
+// 显式停止入口：断开 observer、摘除全部本模块监听（含挂在宿主元素上的游标
+// 监听，修复移除→重建时的泄漏）、清理 retry 定时器与计数并移除按钮。
+export function stopPlayerAiQuickAction() {
+  if (state.playerAi.playerAiQuickActionObserver) {
+    // 容器 observer 与 body 回退 observer 共用同一 state 槽位，统一断开
+    state.playerAi.playerAiQuickActionObserver.disconnect();
+    playerAiState.setObserver(null);
+  }
+  unbindPlayerAiQuickActionLayoutEvents();
+  unbindPlayerAiQuickActionCursorSync();
+  // retry 复用 sync 定时器（schedulePlayerAiQuickActionRetry → scheduleSync），
+  // 清掉定时器与计数，避免 stop 后残留回调再次尝试挂按钮。
+  if (state.playerAi.playerAiQuickActionSyncTimer) {
+    window.clearTimeout(state.playerAi.playerAiQuickActionSyncTimer);
+    playerAiState.setSyncTimer(0);
+  }
+  resetPlayerAiQuickActionRetryCount();
+  removePlayerAiQuickActionButton();
+}
 
 export function startPlayerAiQuickActionObserver() {
   if (state.playerAi.playerAiQuickActionObserver || !document.body) {
@@ -73,7 +109,9 @@ export function bindPlayerAiQuickActionLayoutEvents() {
   if (state.playerAi.playerAiQuickActionLayoutBound) {
     return;
   }
-  const schedule = () => schedulePlayerAiQuickActionSync(80);
+  // handler 提升为模块级引用：stop 时必须用同一引用才能成对摘除监听
+  playerAiQuickActionLayoutHandler = () => schedulePlayerAiQuickActionSync(80);
+  const schedule = playerAiQuickActionLayoutHandler;
   window.addEventListener("resize", schedule, { passive: true });
   window.addEventListener("scroll", schedule, { passive: true });
   window.addEventListener("pageshow", schedule, { passive: true });
@@ -81,6 +119,23 @@ export function bindPlayerAiQuickActionLayoutEvents() {
   document.addEventListener("webkitfullscreenchange", schedule);
   window.visualViewport?.addEventListener?.("resize", schedule, { passive: true });
   playerAiState.setLayoutBound(true);
+}
+
+function unbindPlayerAiQuickActionLayoutEvents() {
+  if (!playerAiQuickActionLayoutHandler) {
+    return;
+  }
+  // addEventListener 的 { passive: true } 不参与 removeEventListener 匹配，
+  // 只需 type + handler（+capture）一致即可摘除
+  const schedule = playerAiQuickActionLayoutHandler;
+  window.removeEventListener("resize", schedule);
+  window.removeEventListener("scroll", schedule);
+  window.removeEventListener("pageshow", schedule);
+  document.removeEventListener("fullscreenchange", schedule);
+  document.removeEventListener("webkitfullscreenchange", schedule);
+  window.visualViewport?.removeEventListener?.("resize", schedule);
+  playerAiQuickActionLayoutHandler = null;
+  playerAiState.setLayoutBound(false);
 }
 
 export function schedulePlayerAiQuickActionSync(delayMs = 120) {
@@ -171,9 +226,20 @@ function bindPlayerAiQuickActionCursorSync(wrap) {
     return;
   }
   const host = wrap.parentElement instanceof HTMLElement ? wrap.parentElement : null;
-  if (!host || wrap.__bocPlayerAiCursorHost === host) {
+  if (!host) {
     return;
   }
+  // 防重挂守卫语义保持：同一 host + 同一 wrap 不重复绑
+  if (
+    playerAiQuickActionCursorSync &&
+    playerAiQuickActionCursorSync.host === host &&
+    playerAiQuickActionCursorSync.wrap === wrap
+  ) {
+    return;
+  }
+  // 按钮移除重建会生成新 wrap（旧闭包仍挂在 host 上），换 host 或重建时
+  // 先摘掉旧监听再绑新的，否则每次移除→重建泄漏 4 个闭包监听
+  unbindPlayerAiQuickActionCursorSync();
   const hideForIdle = () => {
     playerAiState.setCursorHideTimer(0);
     wrap.classList.remove("is-active");
@@ -200,7 +266,20 @@ function bindPlayerAiQuickActionCursorSync(wrap) {
   host.addEventListener("mouseenter", showForCursorActivity, { passive: true });
   host.addEventListener("mouseleave", hideImmediately, { passive: true });
   host.addEventListener("pointermove", showForCursorActivity, { passive: true });
+  playerAiQuickActionCursorSync = { host, wrap, showForCursorActivity, hideImmediately };
   wrap.__bocPlayerAiCursorHost = host;
+}
+
+function unbindPlayerAiQuickActionCursorSync() {
+  if (!playerAiQuickActionCursorSync) {
+    return;
+  }
+  const { host, showForCursorActivity, hideImmediately } = playerAiQuickActionCursorSync;
+  host.removeEventListener("mousemove", showForCursorActivity);
+  host.removeEventListener("mouseenter", showForCursorActivity);
+  host.removeEventListener("mouseleave", hideImmediately);
+  host.removeEventListener("pointermove", showForCursorActivity);
+  playerAiQuickActionCursorSync = null;
 }
 
 function hasPlayerSubtitleControl() {
