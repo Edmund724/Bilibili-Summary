@@ -80,6 +80,7 @@ export async function saveSegmentSummary(key, summary) {
   const result = await writeWithEviction({
     family: SEGMENT_SUMMARY_PREFIX,
     bvid: parseBvidFromCacheKey(key, SEGMENT_SUMMARY_PREFIX),
+    keys: [key], // 本次写入的缓存键，记录进 LRU 索引供淘汰时免全量扫描
     write: () =>
       chrome.storage.local.set({
         [key]: {
@@ -117,6 +118,7 @@ export async function saveRawSegments(key, segments) {
   const result = await writeWithEviction({
     family: RAW_SEGMENT_PREFIX,
     bvid: parseBvidFromCacheKey(key, RAW_SEGMENT_PREFIX),
+    keys: [key], // 本次写入的缓存键，记录进 LRU 索引供淘汰时免全量扫描
     write: () =>
       chrome.storage.local.set({
         [key]: {

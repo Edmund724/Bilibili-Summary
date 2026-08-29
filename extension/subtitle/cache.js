@@ -39,6 +39,7 @@ export async function saveSubtitleToCache(cacheKey, body) {
   const result = await writeWithEviction({
     family: CACHE_KEY_PREFIX,
     bvid: parseBvidFromCacheKey(cacheKey, CACHE_KEY_PREFIX),
+    keys: [cacheKey], // 本次写入的缓存键，记录进 LRU 索引供淘汰时免全量扫描
     write: () =>
       chrome.storage.local.set({
         [cacheKey]: {

@@ -5,8 +5,13 @@
 // 设计决策（与产品确认）：
 //   - 每族只保留最近写入的 keep（默认 3）个视频（按 bvid），LRU 以 lastWriteTimestamp
 //     排序，无字节上限；
-//   - 索引键 boc_cache_lru_index：{ [family]: { [bvid]: lastWriteTimestamp } }，
-//     每次记录写入时更新；
+//   - 索引键 boc_cache_lru_index：{ [family]: { [bvid]: { ts, keys: string[] } } }，
+//     ts 为该视频最近一次写入时间戳，keys 为该 bvid 在该族下的全部缓存键
+//     （每次记录写入时合并去重更新）。旧格式条目（数值 ts，无 keys）在读端归一化
+//     兼容，无需迁移；
+//   - 淘汰优先走索引键清单（避免 get(null) 全量扫描）；仅当某族在索引中无条目、
+//     或存在无 keys 的条目（旧格式/混合状态，键面不全）时，该族回退 get(null)
+//     前缀扫描兜底；
 //   - 淘汰本身静默运行、不提示；仅当「淘汰后重试仍失败」时由调用方把 distinct
 //     失败（CacheWriteError）上浮到各自的 UI 通道（content 状态栏 / offscreen port notice）。
 // chrome.* 访问与既有测试模式一致：直接使用全局 chrome.storage.local，
@@ -59,21 +64,35 @@ export async function readLruIndex() {
   }
 }
 
-// 记录一次写入：family → bvid → lastWriteTimestamp。失败上抛，由 writeWithEviction 统一处理。
-export async function recordCacheWrite(family, bvid, timestamp = Date.now()) {
+// 索引条目归一化：旧格式（数值 ts）→ { ts, keys: [] }；畸形值 → null（调用方忽略）。
+function normalizeIndexEntry(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return { ts: value, keys: [] };
+  }
+  if (value && typeof value === "object" && Number.isFinite(Number(value.ts))) {
+    return { ts: Number(value.ts), keys: Array.isArray(value.keys) ? value.keys.filter((k) => typeof k === "string" && k) : [] };
+  }
+  return null;
+}
+
+// 记录一次写入：family → bvid → { ts, keys }。cacheKeys 是本次写入的缓存键清单，
+// 合并（去重）进该 bvid 条目的 keys。失败上抛，由 writeWithEviction 统一处理。
+export async function recordCacheWrite(family, bvid, timestamp = Date.now(), cacheKeys = []) {
   const storage = requireStorageLocal();
   const index = await readLruIndex();
-  const familyEntry = { ...(index[family] || {}), [bvid]: timestamp };
+  const previous = normalizeIndexEntry((index[family] || {})[bvid]);
+  const mergedKeys = [...new Set([...(previous?.keys || []), ...(Array.isArray(cacheKeys) ? cacheKeys : [])])];
+  const familyEntry = { ...(index[family] || {}), [bvid]: { ts: timestamp, keys: mergedKeys } };
   await storage.set({ [LRU_INDEX_KEY]: { ...index, [family]: familyEntry } });
 }
 
-// 族内 bvid 按最近写入排序（新→旧）：索引时间戳优先；
+// 族内 bvid 按最近写入排序（新→旧）：索引时间戳优先（兼容数值旧格式与 {ts,keys}）；
 // 键里存在但索引缺失的 bvid（历史遗留）视为最旧（时间戳 0），优先淘汰。
 function rankBvidsInFamily(family, indexEntry, familyKeys) {
   const timestamps = new Map();
   const entry = indexEntry && typeof indexEntry === "object" ? indexEntry : {};
-  for (const [bvid, ts] of Object.entries(entry)) {
-    timestamps.set(bvid, Number(ts) || 0);
+  for (const [bvid, value] of Object.entries(entry)) {
+    timestamps.set(bvid, Number(typeof value === "number" ? value : value?.ts) || 0);
   }
   for (const key of familyKeys) {
     const bvid = parseBvidFromCacheKey(key, family);
@@ -85,9 +104,24 @@ function rankBvidsInFamily(family, indexEntry, familyKeys) {
 }
 
 /**
- * 淘汰到每族最近 keep 个视频：按各族前缀列出键，bvid 不在最近 keep 名内的整键删除。
+ * 淘汰到每族最近 keep 个视频：优先按索引里记录的各族键清单列出键（避免全量扫描），
+ * 索引缺 keys 的族回退前缀扫描；bvid 不在最近 keep 名内的整键删除。
  * 返回 { [family]: string[] }（实际删除的键）；淘汰本身静默：任何失败吞掉并返回 {}。
  */
+// 批量探测键现存性：返回实际存在于 storage 的键（索引指向已删键的 no-op 容错）。
+async function filterExistingKeys(storage, keys) {
+  if (keys.length === 0) {
+    return [];
+  }
+  try {
+    const found = await storage.get(keys);
+    return keys.filter((key) => Object.prototype.hasOwnProperty.call(found || {}, key));
+  } catch {
+    // 探测失败退回原清单：storage.remove 对不存在键是 no-op，语义等价。
+    return keys;
+  }
+}
+
 export async function pruneToRecentVideos(families = CACHE_FAMILIES, keep = LRU_KEEP_VIDEOS) {
   try {
     const storage = requireStorageLocal();
@@ -97,12 +131,37 @@ export async function pruneToRecentVideos(families = CACHE_FAMILIES, keep = LRU_
       return {};
     }
 
-    const all = await storage.get(null);
+    // 索引驱动路径：各族先按索引取候选键；仅当某族在索引中无条目或存在无 keys 的
+    // 条目（旧格式/混合状态，键面不全）时，该族回退 get(null) 前缀扫描兜底。
     const index = await readLruIndex();
+    const indexDrivenKeys = new Map(); // family → 索引 keys 并集
+    const fallbackFamilies = [];
+    for (const family of familyList) {
+      const entry = index[family] && typeof index[family] === "object" ? index[family] : {};
+      const bvids = Object.keys(entry);
+      const complete = bvids.length > 0 && bvids.every((bvid) => (normalizeIndexEntry(entry[bvid])?.keys || []).length > 0);
+      if (complete) {
+        const keys = new Set();
+        for (const bvid of bvids) {
+          for (const key of normalizeIndexEntry(entry[bvid]).keys) {
+            keys.add(key);
+          }
+        }
+        indexDrivenKeys.set(family, [...keys]);
+      } else {
+        fallbackFamilies.push(family);
+      }
+    }
+
+    const all = fallbackFamilies.length > 0 ? await storage.get(null) : null;
     const keysToRemove = [];
     const removed = {};
     for (const family of familyList) {
-      const familyKeys = Object.keys(all || {}).filter((key) => key.startsWith(family));
+      // 候选键：索引驱动族用索引 keys 并集；回退族按前缀扫描。索引有、storage 无的
+      // 键视同已删（不参与排序与删除报告）；畸形键（解析不出 bvid）按垃圾回收。
+      const familyKeys = indexDrivenKeys.has(family)
+        ? (await filterExistingKeys(storage, indexDrivenKeys.get(family)))
+        : Object.keys(all || {}).filter((key) => key.startsWith(family));
       const ranked = rankBvidsInFamily(family, index[family], familyKeys);
       const keepSet = new Set(ranked.slice(0, safeKeep).map(([bvid]) => bvid));
       const familyRemoved = familyKeys.filter((key) => {
@@ -149,6 +208,7 @@ export async function writeWithEviction({
   family,
   bvid,
   write,
+  keys = [],
   keep = LRU_KEEP_VIDEOS,
   pruneFamilies = CACHE_FAMILIES
 } = {}) {
@@ -157,7 +217,7 @@ export async function writeWithEviction({
   }
 
   const attempt = async () => {
-    await recordCacheWrite(family, bvid);
+    await recordCacheWrite(family, bvid, Date.now(), keys);
     await write();
   };
 
