@@ -22,16 +22,23 @@ function makeDeps() {
     messages,
     input,
     stopBtn: null,
-    store: { persistCurrent: vi.fn(async () => {}) },
-    setStreamingUiState: vi.fn(),
-    showConversationContextNotice: vi.fn(),
-    removeConversationContextNotice: vi.fn(),
-    hidePresetPopover: vi.fn(),
-    hideHistoryPopover: vi.fn(),
-    removeCenteredState: vi.fn(),
-    removeSuggestions: vi.fn(),
-    resetConversationView: vi.fn(),
-    autosizeInput: vi.fn(),
+    store: {
+      persistCurrent: vi.fn(async () => {}),
+      // 会话身份守卫的单一判定点在 store；mock 与真实现同语义（严格相等，
+      // 含空 id == 空当前 id → true 的新会话首发场景）
+      isCurrent: vi.fn((id) => id === sidepanelState.currentConversationId)
+    },
+    ui: {
+      setStreamingUiState: vi.fn(),
+      showConversationContextNotice: vi.fn(),
+      removeConversationContextNotice: vi.fn(),
+      hidePresetPopover: vi.fn(),
+      hideHistoryPopover: vi.fn(),
+      removeCenteredState: vi.fn(),
+      removeSuggestions: vi.fn(),
+      resetConversationView: vi.fn(),
+      autosizeInput: vi.fn()
+    },
     ensureCurrentContextForSend: vi.fn(async () => true),
     getProviderId: () => "test-provider",
     getTimestampNavDeps: () => ({}),
@@ -254,7 +261,7 @@ describe("sendMessage 无字幕拦截的提前返回", () => {
     expect(deps.messages.querySelector(".sp-msg-user")).toBeNull();
     expect(deps.messages.querySelector(".sp-msg-assistant")).toBeNull();
     expect(deps.input.value).toBe("总结一下这个视频");
-    expect(deps.setStreamingUiState).not.toHaveBeenCalledWith(true, expect.anything());
+    expect(deps.ui.setStreamingUiState).not.toHaveBeenCalledWith(true, expect.anything());
     expect(sidepanelState.chatHistory).toEqual([]);
   });
 

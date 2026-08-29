@@ -46,17 +46,21 @@ const STREAM_SLOW_NOTICE_MS = 15000;
  *     input,           // els.input
  *     stopBtn,         // els.stopBtn (optional)
  *     // ---- conversation-store narrow interface (ticket 05) ----
- *     store,           // conversationStore instance: { persistCurrent() }
- *     // ---- layout / UI sidepanel callbacks (DOM layout stays in sidepanel) ----
- *     setStreamingUiState,               // (isStreaming, { stopping }) => void
- *     showConversationContextNotice,     // (message, autoHideMs) => void
- *     removeConversationContextNotice,   // () => void
- *     hidePresetPopover,                 // () => void
- *     hideHistoryPopover,                // () => void
- *     removeCenteredState,               // () => void
- *     removeSuggestions,                 // () => void  (removes + nulls suggestionsNode)
- *     resetConversationView,             // (stateHtml) => void
- *     autosizeInput,                     // () => void
+ *     store,           // conversationStore instance: { isCurrent(id), persistCurrent() }
+ *                      // isCurrent(id)：会话身份守卫的单一判定点（store 内实现，
+ *                      // finalize/stopped 持久化前调用）
+ *     // ---- UI 门面（sidepanel 布局回调的纯分组，方法名不变）----
+ *     ui: {
+ *       setStreamingUiState,               // (isStreaming, { stopping }) => void
+ *       showConversationContextNotice,     // (message, autoHideMs) => void
+ *       removeConversationContextNotice,   // () => void
+ *       hidePresetPopover,                 // () => void
+ *       hideHistoryPopover,                // () => void
+ *       removeCenteredState,               // () => void
+ *       removeSuggestions,                 // () => void  (removes + nulls suggestionsNode)
+ *       resetConversationView,             // (stateHtml) => void
+ *       autosizeInput,                     // () => void
+ *     },
  *     // ---- context/transport helpers (AI domain, sidepanel local) ----
  *     ensureCurrentContextForSend,       // () => Promise<boolean | NO_SUBTITLE_SEND_BLOCKED>
  *                                        //    true=放行；false=读取失败；
@@ -101,9 +105,11 @@ export function createChatRuntime(deps) {
   let activeAssistantNode = null;
   let activeUserPrompt = "";
   // 会话身份快照：sendMessage 发起时捕获 currentConversationId，finalize /
-  // stopped 持久化前比对。发送后当前会话被删除/清空/切换（id 已变）则只更新
-  // DOM，不 push 进 chatHistory、不 persistCurrent——流式中删除当前会话导致
-  // 会话"复活"的竞态兜底（第一道防线是 store reset 路径注入的 stopActiveChat）。
+  // stopped 持久化前经 deps.store.isCurrent(快照) 判定（守卫逻辑单点收在
+  // store，见 sidepanel-conversation-store.js）。发送后当前会话被删除/清空/
+  // 切换（id 已变）则只更新 DOM，不 push 进 chatHistory、不 persistCurrent——
+  // 流式中删除当前会话导致会话"复活"的竞态兜底（第一道防线是 store reset 路
+  // 径注入的 stopActiveChat）。
   let activeConversationId = "";
   let thinkingNode = null;
   let streamSlowNoticeTimer = 0;
@@ -115,7 +121,7 @@ export function createChatRuntime(deps) {
 
   // ---- internal helpers ----
   function setStreamingUiState(isStreaming, { stopping = false } = {}) {
-    deps.setStreamingUiState(isStreaming, { stopping });
+    deps.ui.setStreamingUiState(isStreaming, { stopping });
   }
 
   function scrollToBottom(force = false) {
@@ -133,12 +139,12 @@ export function createChatRuntime(deps) {
     if (!text || activePort) {
       return;
     }
-    deps.hidePresetPopover();
-    deps.hideHistoryPopover();
+    deps.ui.hidePresetPopover();
+    deps.ui.hideHistoryPopover();
 
     const providerId = deps.getProviderId();
     if (!providerId) {
-      deps.resetConversationView("请先在设置页配置并启用一个 AI 平台。");
+      deps.ui.resetConversationView("请先在设置页配置并启用一个 AI 平台。");
       return;
     }
 
@@ -155,12 +161,12 @@ export function createChatRuntime(deps) {
       sidepanelState.currentConversationMeta = null;
     }
 
-    deps.removeCenteredState();
-    deps.removeSuggestions();
+    deps.ui.removeCenteredState();
+    deps.ui.removeSuggestions();
 
     appendUserMessage(text);
     deps.input.value = "";
-    deps.autosizeInput();
+    deps.ui.autosizeInput();
     setStreamingUiState(true);
     activeUserPrompt = text;
     activeConversationId = sidepanelState.currentConversationId;
@@ -190,7 +196,7 @@ export function createChatRuntime(deps) {
       } else if (msg.type === "error") {
         showAssistantError(activeAssistantNode, msg.error || "未知错误");
       } else if (msg.type === "notice") {
-        deps.showConversationContextNotice(msg.data, 4000);
+        deps.ui.showConversationContextNotice(msg.data, 4000);
       } else if (msg.type === "cost-guard") {
         // offscreen 发起 Map-Reduce 前弹成本护栏，等待确认后回执。
         const ok = window.confirm(String(msg.data?.message || "预计会有多次调用，是否继续？"));
@@ -443,9 +449,10 @@ export function createChatRuntime(deps) {
     clearStreamRuntimeState();
     const raw = getStreamRaw(node);
     renderAssistantMessage(node, raw, { userPrompt: activeUserPrompt });
-    // 身份校验：发送后当前会话已变（删除/清空/切换）→ 只更新 DOM，不写回
-    // chatHistory、不持久化（防会话复活 / 串话）。
-    if (activeUserPrompt && raw && sidepanelState.currentConversationId === activeConversationId) {
+    // 身份校验：守卫判定收在 store（deps.store.isCurrent）。发送后当前会话已变
+    // （删除/清空/切换）→ 只更新 DOM，不写回 chatHistory、不持久化（防会话
+    // 复活 / 串话）。
+    if (activeUserPrompt && raw && deps.store.isCurrent(activeConversationId)) {
       sidepanelState.chatHistory.push({ role: "user", content: activeUserPrompt });
       sidepanelState.chatHistory.push({ role: "assistant", content: raw });
       void deps.store.persistCurrent();
@@ -501,8 +508,9 @@ export function createChatRuntime(deps) {
       stopped.textContent = reason || "已停止生成";
       node.appendChild(stopped);
       if (activeUserPrompt) {
-        // 身份校验同 finalizeAssistant：会话已变则不写回、不持久化
-        if (sidepanelState.currentConversationId === activeConversationId) {
+        // 身份校验同 finalizeAssistant：守卫判定收在 store（isCurrent），
+        // 会话已变则不写回、不持久化
+        if (deps.store.isCurrent(activeConversationId)) {
           sidepanelState.chatHistory.push({ role: "user", content: activeUserPrompt });
           sidepanelState.chatHistory.push({ role: "assistant", content: raw });
           void deps.store.persistCurrent();
@@ -555,7 +563,7 @@ export function createChatRuntime(deps) {
       if (!activePort || streamFirstTokenReceived) {
         return;
       }
-      deps.showConversationContextNotice("模型响应较慢，可能正在思考，请稍候…", 0);
+      deps.ui.showConversationContextNotice("模型响应较慢，可能正在思考，请稍候…", 0);
     }, STREAM_SLOW_NOTICE_MS);
   }
 
@@ -579,7 +587,7 @@ export function createChatRuntime(deps) {
       streamSlowNoticeTimer = 0;
     }
     streamFirstTokenReceived = false;
-    deps.removeConversationContextNotice();
+    deps.ui.removeConversationContextNotice();
   }
 
   // =========================================================================

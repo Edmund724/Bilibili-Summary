@@ -99,6 +99,7 @@ export function needsConversationPageHydration(conversation) {
  *   {
  *     loadAll,                  // → loadSavedConversations
  *     hydratePages,            // → hydrateConversationPageMetadata
+ *     isCurrent(id),           // → 会话身份守卫（见下方 isCurrent 注释）
  *     persistCurrent,          // → persistCurrentConversation
  *     applyById,               // → loadConversationById
  *     apply(conversation),     // → applyConversation（内部也被 load/restore 复用）
@@ -389,6 +390,19 @@ export function createConversationStore(deps) {
   }
 
   // ===========================================================================
+  // isCurrent — 会话身份守卫的单一判定点
+  // ===========================================================================
+  // 判定「id 是否仍是发起流式时的当前会话」：与 sidepanelState.currentConversationId
+  // 严格相等。语义与旧 chat-runtime 内联比对（currentConversationId === 快照）逐
+  // 字等价，包括空 id：新会话首发时快照与当前 id 均为空串 → true（照常写回并
+  // persistCurrent，由 persistCurrent 现场生成会话 id）；快照为空而当前 id 非空
+  // （流式中切换/恢复了会话）→ false，不写回。会话删除/清空/切换后当前 id 已变
+  // 或已清 → false，拦截在途问答复活会话。
+  function isCurrent(id) {
+    return id === sidepanelState.currentConversationId;
+  }
+
+  // ===========================================================================
   // persistCurrentConversation
   // ===========================================================================
   async function persistCurrent() {
@@ -532,6 +546,7 @@ export function createConversationStore(deps) {
   return {
     loadAll,
     hydratePages,
+    isCurrent,
     persistCurrent,
     applyById,
     apply,

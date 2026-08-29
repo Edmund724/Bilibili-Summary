@@ -291,6 +291,41 @@ describe("conversation-store reset 路径在流式中的停流", () => {
 });
 
 // ===========================================================================
+// 会话身份守卫的单一判定点：store.isCurrent(id)
+// ===========================================================================
+describe("store.isCurrent 会话身份守卫", () => {
+  it("当前会话命中：id 与 currentConversationId 相等 → true", async () => {
+    const { store } = makeStreamHarness();
+    sidepanelState.currentConversationId = "c1";
+
+    expect(store.isCurrent("c1")).toBe(true);
+  });
+
+  it("非当前：id 不等（切换/恢复了另一会话）或当前已删（空串）→ false", async () => {
+    const { store } = makeStreamHarness();
+    sidepanelState.currentConversationId = "c1";
+
+    expect(store.isCurrent("c2")).toBe(false);
+
+    // 流式中当前会话被删：currentConversationId 已清空，旧快照不再命中
+    sidepanelState.currentConversationId = "";
+    expect(store.isCurrent("c1")).toBe(false);
+  });
+
+  it("空 id：仅当当前 id 同为空串（新会话首发）→ true，否则 false", async () => {
+    const { store } = makeStreamHarness();
+
+    // 新会话首发：快照与当前 id 均为空串 → 照常写回并 persist（与旧内联比对等价）
+    sidepanelState.currentConversationId = "";
+    expect(store.isCurrent("")).toBe(true);
+
+    // 当前已有会话 → 空快照不命中（流式中恢复/新建了会话）
+    sidepanelState.currentConversationId = "c1";
+    expect(store.isCurrent("")).toBe(false);
+  });
+});
+
+// ===========================================================================
 // 防线二：chat-runtime finalize/stopped 的会话身份校验（竞态兜底）
 // ===========================================================================
 describe("chat-runtime 流结束的会话身份校验", () => {
@@ -310,16 +345,23 @@ describe("chat-runtime 流结束的会话身份校验", () => {
       messages,
       input,
       stopBtn: null,
-      store: { persistCurrent: vi.fn(async () => {}) },
-      setStreamingUiState: vi.fn(),
-      showConversationContextNotice: vi.fn(),
-      removeConversationContextNotice: vi.fn(),
-      hidePresetPopover: vi.fn(),
-      hideHistoryPopover: vi.fn(),
-      removeCenteredState: vi.fn(),
-      removeSuggestions: vi.fn(),
-      resetConversationView: vi.fn(),
-      autosizeInput: vi.fn(),
+      store: {
+        persistCurrent: vi.fn(async () => {}),
+        // 会话身份守卫的单一判定点在 store；mock 与真实现同语义（严格相等，
+        // 含空 id == 空当前 id → true 的新会话首发场景）
+        isCurrent: vi.fn((id) => id === sidepanelState.currentConversationId)
+      },
+      ui: {
+        setStreamingUiState: vi.fn(),
+        showConversationContextNotice: vi.fn(),
+        removeConversationContextNotice: vi.fn(),
+        hidePresetPopover: vi.fn(),
+        hideHistoryPopover: vi.fn(),
+        removeCenteredState: vi.fn(),
+        removeSuggestions: vi.fn(),
+        resetConversationView: vi.fn(),
+        autosizeInput: vi.fn()
+      },
       ensureCurrentContextForSend: vi.fn(async () => true),
       getProviderId: () => "test-provider",
       getTimestampNavDeps: () => ({}),

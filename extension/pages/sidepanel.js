@@ -179,18 +179,21 @@ const chatRuntime = createChatRuntime({
   messages: els.messages,
   input: els.input,
   stopBtn: els.stopBtn,
-  // ---- conversation-store 窄接口（05 产出实例）----
+  // ---- conversation-store 窄接口（05 产出实例；isCurrent 为会话身份守卫
+  // 的单一判定点，chat-runtime finalize/stopped 持久化前调用）----
   store: conversationStore,
-  // ---- 布局 / UI 回调（DOM 布局留在 sidepanel）----
-  setStreamingUiState,
-  showConversationContextNotice,
-  removeConversationContextNotice,
-  hidePresetPopover,
-  hideHistoryPopover,
-  removeCenteredState,
-  removeSuggestions,
-  resetConversationView,
-  autosizeInput,
+  // ---- UI 门面（布局 / UI 回调的纯分组，DOM 布局留在 sidepanel）----
+  ui: {
+    setStreamingUiState,
+    showConversationContextNotice,
+    removeConversationContextNotice,
+    hidePresetPopover,
+    hideHistoryPopover,
+    removeCenteredState,
+    removeSuggestions,
+    resetConversationView,
+    autosizeInput
+  },
   // ---- AI 域 / 上下文 / 传输辅助（sidepanel 本地）----
   ensureCurrentContextForSend,
   getProviderId: () => els.modelSelect.value,
