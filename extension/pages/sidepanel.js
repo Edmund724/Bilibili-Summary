@@ -17,7 +17,7 @@
 // 页面级 transport 辅助（delay / waitForTabComplete / sendMessageToActiveTab）
 // 由 ../shared/tab-utils.js 提供（08 新增共享模块，同时供
 // ui/timestamp-nav.js 的 seek 流程复用）；truncate 由 ../shared/string-utils.js
-// 提供；sendRuntimeMessage 由 ../core/runtime.js 提供（core 域）。
+// 提供；sendRuntimeMessage 由 ../shared/messaging.js 提供（shared 传输层）。
 
 import {
   DEFAULT_PRESET_PROMPTS,
@@ -39,7 +39,7 @@ import {
 } from "../ai/conversation.js";
 import { escapeHtml, truncate } from "../shared/string-utils.js";
 import { sendMessageToActiveTab, waitForTabComplete } from "../shared/tab-utils.js";
-import { sendRuntimeMessage } from "../core/runtime.js";
+import { sendRuntimeMessage } from "../shared/messaging.js";
 import { renderMarkdown, stripThinkBlocks } from "../ui/markdown.js";
 import { linkifyAssistantTimestamps } from "../ui/timestamp-nav.js";
 import { normalizeMarkdownForSectionPaste } from "../notes/paste.js";

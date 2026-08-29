@@ -7,7 +7,8 @@
 // - 测试连接报文形状（AI 平铺 / ASR provider 包裹且仅重输 Key 时携带）与
 //   成功状态的禁用输入 + 定时恢复；
 // - 删除接线（AI 仅后台消息 / ASR 额外触发注入的 onDelete）。
-// core/runtime.js 被整体 mock，避免拖入 content script 依赖图。
+// shared/messaging.js（sendRuntimeMessage，原 core/runtime.js）被整体 mock，
+// 避免拖入 content script 依赖图。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
@@ -17,7 +18,7 @@ const { sendRuntimeMessageMock } = vi.hoisted(() => ({
   sendRuntimeMessageMock: vi.fn()
 }));
 
-vi.mock("../../extension/core/runtime.js", () => ({
+vi.mock("../../extension/shared/messaging.js", () => ({
   sendRuntimeMessage: sendRuntimeMessageMock
 }));
 

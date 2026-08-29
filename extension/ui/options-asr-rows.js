@@ -8,7 +8,7 @@
 
 import { ASR_PROVIDER_PRESETS } from "../core/presets.js";
 import { escapeHtml } from "../shared/string-utils.js";
-import { sendRuntimeMessage } from "../core/runtime.js";
+import { sendRuntimeMessage } from "../shared/messaging.js";
 import { createProviderRow } from "./provider-row.js";
 
 const ASR_STATUS_SUCCESS_MIN_MS = 2000;

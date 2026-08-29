@@ -2,7 +2,8 @@ import { state } from "../core/state.js";
 import { BOC_VERSION } from "../core/defaults.js";
 
 import { isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
-import { getSettings, sendRuntimeMessage } from "../core/runtime.js";
+import { getSettings } from "../core/runtime.js";
+import { sendRuntimeMessage } from "../shared/messaging.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { logInfo, logWarn } from "../shared/logging.js";
 
@@ -69,9 +70,10 @@ function init() {
   bindRuntimeEvents();
   bindSettingsWatcher();
   bindReaderPresenter();
-  // Reader settings persistence/loading live in core/runtime.js; reader-impl.js
-  // must not import runtime (import cycle), so content.js wires the presenter
-  // seam callbacks here.
+  // Reader settings persistence (sendRuntimeMessage, shared/messaging.js) and
+  // loading (getSettings, core/runtime.js) are outside the reader domain;
+  // reader-impl.js must not import them (import cycle), so content.js wires
+  // the presenter seam callbacks here.
   subscribeReaderSettingsPersist(() => {
     sendRuntimeMessage({ type: "save-settings", settings: state.settings }).catch((error) => {
       logWarn("[BOC] failed to persist reader settings", error);

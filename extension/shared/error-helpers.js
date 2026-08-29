@@ -137,3 +137,8 @@ export function makeAbortedError(message = "已停止生成") {
   err.aborted = true;
   return err;
 }
+
+export function isExtensionContextInvalidated(error) {
+  const msg = String(error?.message || "");
+  return msg.includes("Extension context invalidated");
+}

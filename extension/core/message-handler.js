@@ -1,11 +1,8 @@
 import { state, uiState, playerAiState, clipState } from "./state.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
 
-import {
-  replaceReaderModeUrl,
-  startUrlWatcher,
-  BOC_URL_CHANGE_EVENT
-} from "./runtime.js";
+import { startUrlWatcher, BOC_URL_CHANGE_EVENT } from "./url-watcher.js";
+import { replaceReaderModeUrl } from "../bilibili/reader-url.js";
 import {
   getErrorMessage,
   isStaleRunError
@@ -272,10 +269,10 @@ export function computeSidepanelStateSignature(snapshot) {
   ].join("|");
 }
 
-// URL 变化编排（自 core/runtime.js 搬入）：runtime 只负责给 history 打补丁并
-// 广播 boc:urlchange（纯机制），本组合根监听 popstate/hashchange/boc:urlchange，
-// 按原顺序编排：更新 clip 签名 → 恢复普通页状态 → 确保 UI → 重置 clip →
-// player-ai 按钮同步 → reader 同步/字幕刷新。行为与顺序与搬迁前完全一致。
+// URL 变化编排（自 core/runtime.js 搬入）：core/url-watcher.js 只负责给 history
+// 打补丁并广播 boc:urlchange（纯机制），本组合根监听 popstate/hashchange/
+// boc:urlchange，按原顺序编排：更新 clip 签名 → 恢复普通页状态 → 确保 UI →
+// 重置 clip → player-ai 按钮同步 → reader 同步/字幕刷新。行为与顺序与搬迁前完全一致。
 let urlChangeHandlerBound = false;
 
 export function bindUrlChangeHandler() {

@@ -3,10 +3,8 @@ import { buildPlayerAiQuickActionIconSvg } from "../ui/icons.js";
 import {
   isReaderMode
 } from "../bilibili/video-id-shared.js";
-import {
-  sendRuntimeMessage,
-  getSettings
-} from "../core/runtime.js";
+import { sendRuntimeMessage } from "../shared/messaging.js";
+import { getSettings } from "../core/runtime.js";
 import {
   getErrorMessage
 } from "../shared/error-helpers.js";

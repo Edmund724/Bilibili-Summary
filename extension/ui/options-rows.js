@@ -15,7 +15,7 @@ import {
   validateAiProviders
 } from "../core/validators.js";
 import { escapeHtml } from "../shared/string-utils.js";
-import { sendRuntimeMessage } from "../core/runtime.js";
+import { sendRuntimeMessage } from "../shared/messaging.js";
 import { createProviderRow, TRASH_ICON_PATHS } from "./provider-row.js";
 
 const MAX_NOTE_PLACEHOLDER_SECTIONS = 5;

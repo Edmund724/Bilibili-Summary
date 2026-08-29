@@ -1,11 +1,8 @@
 import { state, uiState } from "../core/state.js";
 import { byId } from "../shared/dom-utils.js";
-import {
-  sendRuntimeMessage,
-  isExtensionContextInvalidated,
-  replaceReaderModeUrl
-} from "../core/runtime.js";
-import { getErrorMessage, toReadableText } from "../shared/error-helpers.js";
+import { sendRuntimeMessage } from "../shared/messaging.js";
+import { getErrorMessage, toReadableText, isExtensionContextInvalidated } from "../shared/error-helpers.js";
+import { replaceReaderModeUrl } from "../bilibili/reader-url.js";
 import {
   cleanVideoUrl,
   isReaderMode,

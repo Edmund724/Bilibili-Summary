@@ -4,7 +4,7 @@
 // 仅在页面环境加载（bundle 链路：pipeline → fallback → content script），
 // 协议常量与契约注释唯一地址见 asr/protocol.js。
 
-import { sendOffloadMessage } from "../core/runtime.js";
+import { sendOffloadMessage } from "../shared/messaging.js";
 import {
   ASR_DECODE_PORT_NAME,
   ASR_DECODE_ACTION,

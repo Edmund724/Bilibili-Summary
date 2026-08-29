@@ -9,7 +9,7 @@ import {
   validateNotePlaceholderSections,
   validateAiProviders
 } from "../core/validators.js";
-import { sendRuntimeMessage } from "../core/runtime.js";
+import { sendRuntimeMessage } from "../shared/messaging.js";
 import {
   renderFixedPropertyRows,
   addFixedPropertyRow,

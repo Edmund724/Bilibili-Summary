@@ -12,7 +12,7 @@
 // 行构建器只依赖参数与回调，不直接访问 DOM 全局。
 
 import { escapeHtml } from "../shared/string-utils.js";
-import { sendRuntimeMessage } from "../core/runtime.js";
+import { sendRuntimeMessage } from "../shared/messaging.js";
 
 // 垃圾桶图标路径：固定属性行 / 笔记段落行 / AI 平台行 / ASR 平台行共用同一份
 // path 定义（此前在 options-rows.js 与 options-asr-rows.js 各自内联了 4 份）。

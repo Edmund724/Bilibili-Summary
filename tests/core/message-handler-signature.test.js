@@ -9,10 +9,14 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../extension/core/runtime.js", () => ({
-  replaceReaderModeUrl: vi.fn(),
+// 原 core/runtime.js 的三个符号已按职责拆分：startUrlWatcher / BOC_URL_CHANGE_EVENT
+// 在 core/url-watcher.js，replaceReaderModeUrl 在 bilibili/reader-url.js。
+vi.mock("../../extension/core/url-watcher.js", () => ({
   startUrlWatcher: vi.fn(),
   BOC_URL_CHANGE_EVENT: "boc:urlchange"
+}));
+vi.mock("../../extension/bilibili/reader-url.js", () => ({
+  replaceReaderModeUrl: vi.fn()
 }));
 vi.mock("../../extension/bilibili/video-probe.js", () => ({
   getRuntimeVideoElement: vi.fn(() => null)

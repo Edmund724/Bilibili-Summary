@@ -28,7 +28,7 @@ const OTHER_VIDEO_READER_URL = "https://www.bilibili.com/video/BV1test999999/?bo
 
 let state;
 let clipState;
-let runtime;
+let readerUrl;
 let messageHandler;
 let videoIdShared;
 let uiRenderer;
@@ -38,9 +38,9 @@ async function loadModules() {
   const stateModule = await import("../../extension/core/state.js");
   state = stateModule.state;
   clipState = stateModule.clipState;
-  runtime = await import("../../extension/core/runtime.js");
-  // URL 变化编排（handleUrlChange 监听）已搬到组合根 message-handler；
-  // runtime.startUrlWatcher 只负责 history 补丁与 boc:urlchange 广播。
+  readerUrl = await import("../../extension/bilibili/reader-url.js");
+  // URL 变化编排（handleUrlChange 监听）在组合根 message-handler；
+  // url-watcher.startUrlWatcher 只负责 history 补丁与 boc:urlchange 广播。
   messageHandler = await import("../../extension/core/message-handler.js");
   videoIdShared = await import("../../extension/bilibili/video-id-shared.js");
   uiRenderer = await import("../../extension/ui/ui-renderer.js");
@@ -73,7 +73,7 @@ describe("replaceState 补丁与章节清空（5be8f39 嫌疑路径）", () => {
     seedFetchedClip();
     messageHandler.bindUrlChangeHandler();
 
-    runtime.replaceReaderModeUrl(OTHER_VIDEO_READER_URL);
+    readerUrl.replaceReaderModeUrl(OTHER_VIDEO_READER_URL);
 
     expect(state.clip.chapters.length).toBe(2);
     expect(state.clip.title).toBe("测试视频");

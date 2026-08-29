@@ -11,7 +11,7 @@
 //     fetcher 经 asr-providers-list 消息直读 provider-store）、setStatus、
 //     setMessage、applyNoSubtitleState、refreshDerivedContent、
 //     isReaderViewOpen、notifyReaderPresenter、
-//     runAsrPipeline（pipeline 闭包经 offscreen-bridge.page →core/runtime→fetcher）、
+//     runAsrPipeline（pipeline 闭包经 offscreen-bridge.page →shared/messaging→fetcher）、
 //     broadcastSubtitleStatus（fetcher 内部函数）。
 // 模块不 import extension/entry/ 与 extension/pages/ 的任何内容。
 

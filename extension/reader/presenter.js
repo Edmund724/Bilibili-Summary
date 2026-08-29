@@ -15,10 +15,11 @@
 //     module load via subscribeSubtitleRefresh. This reverses the former
 //     reader-impl.js → subtitle/fetcher.js import, breaking the cycle.
 //   reader → runtime (capability callbacks):
-//     reader-impl.js delegates capabilities that live in core/runtime.js
-//     (sendRuntimeMessage for settings persistence, getSettings for the
-//     settings-change watcher) to callbacks registered by content.js, which
-//     imports core/runtime.js itself. This keeps reader-impl.js free of any
+//     reader-impl.js delegates capabilities that live outside the reader
+//     domain (sendRuntimeMessage for settings persistence, from
+//     shared/messaging.js; getSettings for the settings-change watcher, from
+//     core/runtime.js) to callbacks registered by content.js, which imports
+//     them itself. This keeps reader-impl.js free of any
 //     static import back into core/runtime.js.
 //   reader → player-ai (sync callbacks):
 //     reader-impl.js delegates player-ai quick-action sync to a callback
@@ -98,7 +99,7 @@ export function requestSubtitleRefresh() {
 }
 
 // Registers the content-script callback that persists reader settings via
-// core/runtime.js's sendRuntimeMessage. reader-impl.js calls
+// shared/messaging.js's sendRuntimeMessage. reader-impl.js calls
 // persistReaderSettingsThroughSeam() instead of importing sendRuntimeMessage.
 export function subscribeReaderSettingsPersist(handler) {
   persistSettingsHandler = typeof handler === "function" ? handler : null;

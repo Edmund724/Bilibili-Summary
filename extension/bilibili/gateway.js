@@ -14,8 +14,8 @@
 // fetchHotComments) are thin wrappers over the pure orchestration + contentFetchJson.
 
 import { formatLocalDate } from "../shared/utils.js";
-import { toReadableText } from "../shared/error-helpers.js";
-import { sendRuntimeMessage, isExtensionContextInvalidated } from "../core/runtime.js";
+import { toReadableText, isExtensionContextInvalidated } from "../shared/error-helpers.js";
+import { sendRuntimeMessage } from "../shared/messaging.js";
 import { state } from "../core/state.js";
 import { getRuntimeVideoElement } from "./video-probe.js";
 import { logInfo } from "../shared/logging.js";
