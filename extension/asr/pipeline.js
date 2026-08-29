@@ -13,7 +13,7 @@
 // 缓存），中止只剩真断连（页面关闭/扩展重载 → port disconnect）。
 
 import { getSourceAudioUrl } from "./audio-source.js";
-import { createOffscreenChunkHost } from "./offscreen-bridge.js";
+import { createOffscreenChunkHost } from "./offscreen-bridge.page.js";
 
 // 把单片的转写结果合成 {from,to,content}[]：
 //   有 segments → 每条 = startSec + seg.start/end；

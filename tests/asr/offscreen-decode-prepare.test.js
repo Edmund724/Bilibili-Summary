@@ -73,7 +73,7 @@ beforeEach(() => {
 describe("handleAsrDecodePrepare 的 offscreen 文档守卫", () => {
   it("无文档时真正创建 offscreen 文档（回归：不再静默吞掉 matchAll TypeError）", async () => {
     const { createDocument } = stubSwEnv({ matchAllResult: [] });
-    bridge = await import("../../extension/asr/offscreen-bridge.js");
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
 
     const sendResponse = vi.fn();
     await bridge.handleAsrDecodePrepare({ taskType: "asr-decode-prepare" }, {}, sendResponse);
@@ -90,7 +90,7 @@ describe("handleAsrDecodePrepare 的 offscreen 文档守卫", () => {
 
   it("文档已存在（如 sidepanel 聊天创建的 offscreen-chat 文档）时不重复创建", async () => {
     const { createDocument } = stubSwEnv({ matchAllResult: existingDocClients });
-    bridge = await import("../../extension/asr/offscreen-bridge.js");
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
 
     const sendResponse = vi.fn();
     await bridge.handleAsrDecodePrepare({ taskType: "asr-decode-prepare" }, {}, sendResponse);
@@ -101,7 +101,7 @@ describe("handleAsrDecodePrepare 的 offscreen 文档守卫", () => {
 
   it("matchAll 异常按既有语义吞掉并返回 ok:true（不阻塞后续端口连接尝试）", async () => {
     const { createDocument } = stubSwEnv({ matchAllError: new Error("boom") });
-    bridge = await import("../../extension/asr/offscreen-bridge.js");
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
 
     const sendResponse = vi.fn();
     await bridge.handleAsrDecodePrepare({ taskType: "asr-decode-prepare" }, {}, sendResponse);
@@ -144,7 +144,7 @@ describe("防盗链规则 id 按任务分配（多转写任务并发互不删除
   it("并发两次 prepare 分配不同 ruleId，两条规则并存且内容与旧版一致", async () => {
     const store = makeRuleStore();
     stubSwEnv({ matchAllResult: existingDocClients, updateSessionRules: store.updateSessionRules });
-    bridge = await import("../../extension/asr/offscreen-bridge.js");
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
 
     const first = await prepareOnce();
     const second = await prepareOnce();
@@ -167,7 +167,7 @@ describe("防盗链规则 id 按任务分配（多转写任务并发互不删除
   it("一次 cleanup 只删自己的 ruleId，另一并发任务的规则仍在", async () => {
     const store = makeRuleStore();
     stubSwEnv({ matchAllResult: existingDocClients, updateSessionRules: store.updateSessionRules });
-    bridge = await import("../../extension/asr/offscreen-bridge.js");
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
 
     const first = await prepareOnce();
     const second = await prepareOnce();
@@ -185,7 +185,7 @@ describe("防盗链规则 id 按任务分配（多转写任务并发互不删除
   it("重复 cleanup 与未知 ruleId 的 cleanup 幂等：ok:true、不抛、不污染 id 池", async () => {
     const store = makeRuleStore();
     stubSwEnv({ matchAllResult: existingDocClients, updateSessionRules: store.updateSessionRules });
-    bridge = await import("../../extension/asr/offscreen-bridge.js");
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
 
     const first = await prepareOnce();
     const cleanup = (ruleId) => cleanupOnce(ruleId);
@@ -206,7 +206,7 @@ describe("防盗链规则 id 按任务分配（多转写任务并发互不删除
   it("cleanup 归还 id 后分配器复用：新任务拿回已释放的 id", async () => {
     const store = makeRuleStore();
     stubSwEnv({ matchAllResult: existingDocClients, updateSessionRules: store.updateSessionRules });
-    bridge = await import("../../extension/asr/offscreen-bridge.js");
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
 
     const first = await prepareOnce();
     await cleanupOnce(first.ruleId);
@@ -226,7 +226,7 @@ describe("防盗链规则 id 按任务分配（多转写任务并发互不删除
         })
         .mockImplementation(store.updateSessionRules)
     });
-    bridge = await import("../../extension/asr/offscreen-bridge.js");
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
 
     const failed = await prepareOnce();
     expect(failed.ok).toBe(false);

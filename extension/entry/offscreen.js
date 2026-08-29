@@ -9,6 +9,7 @@ import { getErrorMessage } from "../shared/error-helpers.js";
 import { logWarn } from "../shared/logging.js";
 import { shouldCloseAfterAsrTask } from "./offscreen-lifecycle.js";
 import { createAsrDecodeHandler } from "./offscreen-asr.js";
+import { ASR_DECODE_PORT_NAME, ASR_DECODE_ACTION } from "../asr/protocol.js";
 
 let activeAbortController = null;
 let pendingCostGuard = null;
@@ -51,13 +52,13 @@ function clearIdleTimeout() {
 }
 
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name === "asr-decode") {
+  if (port.name === ASR_DECODE_PORT_NAME) {
     activeAsrPorts.add(port);
     port.onDisconnect.addListener(() => {
       activeAsrPorts.delete(port);
     });
     port.onMessage.addListener((msg) => {
-      if (!msg || msg.action !== "asr-decode") return;
+      if (!msg || msg.action !== ASR_DECODE_ACTION) return;
       handleAsrDecodeTask(msg.task || {}, port);
     });
     return;

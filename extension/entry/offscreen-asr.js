@@ -11,7 +11,14 @@
 // chrome.runtime / AudioContext 等全局在 offscreen 环境固定可直接用；纯逻辑
 // （resolveAsrProvider / makeAsrSkipError）保持模块级可导出可测。
 
-import { MAX_AUDIO_BYTES, ASR_DECODE_TIMEOUT_MS } from "../asr/offscreen-bridge.js";
+import {
+  MAX_AUDIO_BYTES,
+  ASR_DECODE_TIMEOUT_MS,
+  ASR_MSG_PROGRESS,
+  ASR_MSG_CHUNK_RESULT,
+  ASR_MSG_DONE,
+  ASR_MSG_ERROR
+} from "../asr/protocol.js";
 import { buildChunkPlan, buildWavChunks, makeDecodedBuffer } from "../asr/chunker.js";
 import { streamWavChunks } from "../asr/stream-chunker.js";
 import { createTranscriptionEngine } from "../asr/engine.js";
@@ -146,7 +153,7 @@ export function createAsrDecodeHandler({ onTaskTerminal }) {
           // result 只含适配器结果（text/segments?/…），durationSec 为兄弟字段。
           const { durationSec, ...adapterResult } = result;
           port.postMessage({
-            type: "chunk-result",
+            type: ASR_MSG_CHUNK_RESULT,
             index: chunk.index,
             startSec: chunk.startSec,
             durationSec,
@@ -156,7 +163,7 @@ export function createAsrDecodeHandler({ onTaskTerminal }) {
         // 引擎产出的进度文本（语音识别中 N 片…）原样中继给页面
         onProgress: (text) => {
           try {
-            port.postMessage({ type: "progress", text });
+            port.postMessage({ type: ASR_MSG_PROGRESS, text });
           } catch {
             // port 已断开，忽略
           }
@@ -234,7 +241,7 @@ export function createAsrDecodeHandler({ onTaskTerminal }) {
         throw new Error("音频切片为空，无法转写");
       }
       port.postMessage({
-        type: "done",
+        type: ASR_MSG_DONE,
         totalChunks: summary.acceptedChunks,
         skippedSegments,
         failedChunks: summary.failedChunks
@@ -246,7 +253,7 @@ export function createAsrDecodeHandler({ onTaskTerminal }) {
         return;
       }
       try {
-        const payload = { type: "error", error: String(e?.message || e) };
+        const payload = { type: ASR_MSG_ERROR, error: String(e?.message || e) };
         if (e?.code) {
           payload.code = e.code;
         }

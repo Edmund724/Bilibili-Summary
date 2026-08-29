@@ -3,7 +3,7 @@
 // 背景：offscreen 侧配置级问题以 code "asr-skip" 抛出，页面 asr/fallback.js
 // catch 后静默 skip。此前原因只存在于 message 字符串里（页面不做字符串匹配，
 // 无法归类）；现新增结构化 reason 字段（"asr-disabled" / "no-asr-config"），
-// 经 port 错误消息（offscreen-bridge）与管线 reject 透传回页面，最终落
+// 经 port 错误消息（offscreen-bridge.page）与管线 reject 透传回页面，最终落
 // clipState.noSubtitleReason 供 sidepanel 按原因提示。
 //
 // resolveAsrProvider 是纯函数（只读传入的 config 快照），直接 import

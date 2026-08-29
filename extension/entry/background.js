@@ -37,7 +37,8 @@ import {
   resolveAiSidepanelPageRef
 } from "../ai/context-resolver.js";
 import { bgFetchJson } from "../bilibili/gateway.js";
-import { handleAsrDecodePrepare, handleAsrDecodeCleanup } from "../asr/offscreen-bridge.js";
+import { handleAsrDecodePrepare, handleAsrDecodeCleanup } from "../asr/offscreen-bridge.bg.js";
+import { ASR_TASK_PREPARE, ASR_TASK_CLEANUP } from "../asr/protocol.js";
 
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 
@@ -224,8 +225,8 @@ const handleGetAsrRuntimeConfig = createAsrRuntimeConfigHandler({
 // 加防盗链规则（页面侧随后直连 offscreen 的 asr-decode 端口传下载解码任务），
 // asr-decode-cleanup 清规则。消息类型分发给对应执行函数。
 const offloadTaskHandlers = new Map([
-  ["asr-decode-prepare", handleAsrDecodePrepare],
-  ["asr-decode-cleanup", handleAsrDecodeCleanup]
+  [ASR_TASK_PREPARE, handleAsrDecodePrepare],
+  [ASR_TASK_CLEANUP, handleAsrDecodeCleanup]
 ]);
 
 function handleOffloadTask(message, sender, sendResponse) {

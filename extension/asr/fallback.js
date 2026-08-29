@@ -9,7 +9,7 @@
 //   - 注入 deps（传递闭包含 runtime.js→fetcher 或随 UI/上下文成环）：
 //     getSettings、setStatus、setMessage、applyNoSubtitleState、
 //     refreshDerivedContent、isReaderViewOpen、notifyReaderPresenter、
-//     runAsrPipeline（pipeline 闭包经 offscreen-bridge →core/runtime→fetcher）、
+//     runAsrPipeline（pipeline 闭包经 offscreen-bridge.page →core/runtime→fetcher）、
 //     broadcastSubtitleStatus（fetcher 内部函数）。
 // 模块不 import extension/entry/ 与 extension/pages/ 的任何内容。
 

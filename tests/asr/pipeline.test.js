@@ -6,7 +6,7 @@
 //     { results, totalChunks, skippedSegments, failedChunks }
 // 网络层用 fake fetch（vi.stubGlobal("fetch")）断言 FormData 与请求体。
 // 管线不带 runId/isStale 守卫：转写与视频切换解耦（切走视频任务照跑，
-// 中止只剩真断连），见 fallback 的 UI 门控与 offscreen-bridge。
+// 中止只剩真断连），见 fallback 的 UI 门控与 offscreen-bridge.page。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";

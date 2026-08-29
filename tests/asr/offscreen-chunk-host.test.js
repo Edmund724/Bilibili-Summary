@@ -1,4 +1,4 @@
-// offscreen-bridge.js 页面侧客户端测试（createOffscreenChunkHost）：
+// offscreen-bridge.page.js 页面侧客户端测试（createOffscreenChunkHost）：
 // - mock chrome.runtime.connect：连 "asr-decode" 端口，手动派发 progress/
 //   chunk-result/done/error/断连消息，验证页面侧收包逻辑
 // - 跨 port 只传文本结果：chunk-result 的 result 原样透传（无 Blob/base64），
@@ -62,7 +62,7 @@ beforeEach(() => {
 describe("createOffscreenChunkHost 文本结果收包", () => {
   it("任务参数透传：audioUrl/backupUrls，不再携带 chunkSeconds（切片计划由 offscreen 决定）", async () => {
     const { connect, connections } = installConnectMock();
-    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const bridge = await import("../../extension/asr/offscreen-bridge.page.js");
     const host = bridge.createOffscreenChunkHost();
 
     const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: ["https://y/a.m4s"] });
@@ -84,7 +84,7 @@ describe("createOffscreenChunkHost 文本结果收包", () => {
 
   it("chunk-result 按 index 排序收集，result 原样透传；done 汇总计数", async () => {
     const { connections } = installConnectMock();
-    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const bridge = await import("../../extension/asr/offscreen-bridge.page.js");
     const host = bridge.createOffscreenChunkHost();
 
     const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [] });
@@ -143,7 +143,7 @@ describe("createOffscreenChunkHost 文本结果收包", () => {
       callback?.({ ok: true });
       return undefined;
     });
-    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const bridge = await import("../../extension/asr/offscreen-bridge.page.js");
     const host = bridge.createOffscreenChunkHost();
 
     const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [] });
@@ -159,7 +159,7 @@ describe("createOffscreenChunkHost 文本结果收包", () => {
 
   it("progress 文本原样中继 onProgress", async () => {
     const { connections } = installConnectMock();
-    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const bridge = await import("../../extension/asr/offscreen-bridge.page.js");
     const host = bridge.createOffscreenChunkHost();
     const onProgress = vi.fn();
 
@@ -175,7 +175,7 @@ describe("createOffscreenChunkHost 文本结果收包", () => {
 
   it("error 消息 reject 且带 code（asr-skip 映射为 Error.code）", async () => {
     const { connections } = installConnectMock();
-    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const bridge = await import("../../extension/asr/offscreen-bridge.page.js");
     const host = bridge.createOffscreenChunkHost();
 
     const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [] });
@@ -192,7 +192,7 @@ describe("createOffscreenChunkHost 文本结果收包", () => {
 
   it("port 断连且未 done → reject「音频解码中断」", async () => {
     const { connections } = installConnectMock();
-    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const bridge = await import("../../extension/asr/offscreen-bridge.page.js");
     const host = bridge.createOffscreenChunkHost();
 
     const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [] });
@@ -213,7 +213,7 @@ describe("createOffscreenChunkHost 文本结果收包", () => {
       callback?.({ ok: true });
       return undefined;
     });
-    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const bridge = await import("../../extension/asr/offscreen-bridge.page.js");
     const host = bridge.createOffscreenChunkHost();
 
     await expect(host({ audioUrl: "https://x/a.m4s", backupUrls: [] })).rejects.toThrow(
@@ -226,7 +226,7 @@ describe("createOffscreenChunkHost 文本结果收包", () => {
 describe("任务取消只剩真断连（isStale 跨 context 复核已移除）", () => {
   it("转写中切换视频不再中止任务：即使调用方仍传 isStale 也不被消费，收包照常", async () => {
     const { connections } = installConnectMock();
-    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const bridge = await import("../../extension/asr/offscreen-bridge.page.js");
     const host = bridge.createOffscreenChunkHost();
 
     // 旧契约按注入的 isStale 在每条 port 消息到达时断连 reject；新契约宿主
@@ -248,7 +248,7 @@ describe("任务取消只剩真断连（isStale 跨 context 复核已移除）",
 
   it("port 断连仍是唯一取消路径：未 done 断连 → reject「音频解码中断」", async () => {
     const { connections } = installConnectMock();
-    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const bridge = await import("../../extension/asr/offscreen-bridge.page.js");
     const host = bridge.createOffscreenChunkHost();
 
     const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [] });
