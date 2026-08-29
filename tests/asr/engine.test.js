@@ -9,10 +9,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createTranscriptionEngine,
   transcribeChunk,
-  DEFAULT_CONCURRENCY,
   DEFAULT_RETRIES,
   DEFAULT_RETRY_DELAY_MS
 } from "../../extension/asr/engine.js";
+import { ASR_CONCURRENCY } from "../../extension/shared/offscreen-constants.js";
 import * as errorHelpers from "../../extension/shared/error-helpers.js";
 
 // 真实 retryAsync：必须在首次 spyOn 之前捕获原函数引用（clearMocks 不恢复
@@ -113,7 +113,7 @@ describe("transcribeChunk 单片语义（镜像 pipeline transcribeChunk）", ()
     expect(transcribe).toHaveBeenCalledTimes(2);
     // 与 pipeline.js transcribeChunk 完全一致的重试参数
     expect(retryCalls).toEqual([{ retries: DEFAULT_RETRIES, delayMs: DEFAULT_RETRY_DELAY_MS }]);
-    expect(DEFAULT_CONCURRENCY).toBe(5);
+    expect(ASR_CONCURRENCY).toBe(5);
   });
 
   it("不可重试错误直接上抛（一次尝试，不重试）", async () => {

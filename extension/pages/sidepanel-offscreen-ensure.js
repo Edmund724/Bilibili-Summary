@@ -14,11 +14,10 @@
 
 import { logWarn } from "../shared/logging.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
-
-export const CHAT_OFFSCREEN_PATH = "entry/offscreen.html";
+import { OFFSCREEN_URL, OFFSCREEN_CREATE_REASON } from "../shared/offscreen-constants.js";
 
 export async function ensureChatOffscreenDocument() {
-  const url = chrome.runtime.getURL(CHAT_OFFSCREEN_PATH);
+  const url = chrome.runtime.getURL(OFFSCREEN_URL);
   try {
     const contexts = await chrome.runtime.getContexts({
       contextTypes: ["OFFSCREEN_DOCUMENT"],
@@ -33,7 +32,10 @@ export async function ensureChatOffscreenDocument() {
   try {
     await chrome.offscreen.createDocument({
       url,
-      reasons: ["DOM_SCRAPING"],
+      // reason 统一取 BLOBS（shared/offscreen-constants.js）：同一文档由本处
+      // 与 background asr-decode-prepare 共同创建/复用，先到者定 reason；
+      // 不能用 AUDIO_PLAYBACK（无真实播放 30s 强制关闭，会打断长视频解码）。
+      reasons: [OFFSCREEN_CREATE_REASON],
       justification: "Run AI stream fetch in background to avoid Side Panel freeze when tab is hidden."
     });
     return true;

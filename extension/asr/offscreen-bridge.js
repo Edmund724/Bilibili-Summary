@@ -23,13 +23,12 @@
 // 访问）。
 
 import { sendOffloadMessage } from "../core/runtime.js";
+import { OFFSCREEN_URL, OFFSCREEN_CREATE_REASON } from "../shared/offscreen-constants.js";
 
 // 音频体积上限 200MB（offscreen 文档侧下载时 HEAD 探大小据此拒绝超长视频）
 export const MAX_AUDIO_BYTES = 200 * 1024 * 1024;
 // offscreen 文档内的任务超时（解码与下载共用）
 export const ASR_DECODE_TIMEOUT_MS = 10 * 60 * 1000;
-// background 为任务创建的 offscreen 文档 URL
-export const ASR_DECODE_OFFSCREEN_URL = "entry/offscreen.html";
 // 防盗链会话规则 id 池下界：id 按任务独立分配（一个任务一条规则，多任务
 // 并发时规则并存、cleanup 只删自己的），自此单调递增；任务结束归还空闲池
 // 复用，防止长会话 id 无限增长。上界之外的活跃任务按错误路径上报。
@@ -219,15 +218,16 @@ async function ensureAsrOffscreenDocument() {
     // 被外层 catch 吞掉、无文档时从不创建 offscreen 文档，页面侧 asr-decode
     // 端口因找不到接收端 ~2ms 断连（「音频解码中断：后台连接已断开」）。
     const clients = await self.clients.matchAll({ includeUncontrolled: true });
-    const hasDoc = clients.some((client) => client.url?.includes(ASR_DECODE_OFFSCREEN_URL));
+    const hasDoc = clients.some((client) => client.url?.includes(OFFSCREEN_URL));
     if (!hasDoc) {
       await chrome.offscreen.createDocument({
-        url: chrome.runtime.getURL(ASR_DECODE_OFFSCREEN_URL),
+        url: chrome.runtime.getURL(OFFSCREEN_URL),
         // 不用 AUDIO_PLAYBACK：Chrome 对无真实播放的 AUDIO_PLAYBACK 文档
         // 30 秒强制关闭（长视频解码 >30s 会「音频解码中断」）；本文档实际
         // 是解码 + 转写（WAV Blob 仅在本 context 内经 FormData 上传），
-        // BLOBS 不受该限制。
-        reasons: ["BLOBS"],
+        // BLOBS 不受该限制。取值统一收拢在 shared/offscreen-constants.js
+        //（与 sidepanel 聊天自愈的创建方共用同一 reason）。
+        reasons: [OFFSCREEN_CREATE_REASON],
         justification: "Download, decode, slice and transcribe video audio for ASR subtitles."
       });
     }

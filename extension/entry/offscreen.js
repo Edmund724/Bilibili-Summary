@@ -15,6 +15,7 @@ import { streamWavChunks } from "../asr/stream-chunker.js";
 import { createTranscriptionEngine } from "../asr/engine.js";
 import { transcribe as transcribeOpenAi } from "../asr/adapters/openai-transcriptions.js";
 import { isFragmentedMp4, adtsFromFmp4, parseAudioSpecificConfig } from "../asr/adts.js";
+import { ASR_CONCURRENCY } from "../shared/offscreen-constants.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { logWarn } from "../shared/logging.js";
 import { shouldCloseAfterAsrTask } from "./offscreen-lifecycle.js";
@@ -295,9 +296,10 @@ async function resolveProviderWithKey(port, providerId) {
 // ===== ASR 下载 + 解码 + 切片 + 转写任务 =====
 
 // type → 适配器映射（原 pipeline.js ADAPTERS 表随转写迁入 offscreen）。
-// 映射表缺 type 时发 error，页面显示「暂不支持的平台类型」。
+// 映射表缺 type 时发 error，页面显示「暂不支持的平台类型」。并发上限与
+// asr/engine.js 调度默认共用 shared/offscreen-constants.js 的 ASR_CONCURRENCY。
 const ASR_ADAPTERS = {
-  "openai-transcriptions": { adapter: transcribeOpenAi, concurrency: 5 }
+  "openai-transcriptions": { adapter: transcribeOpenAi, concurrency: ASR_CONCURRENCY }
 };
 
 // ASR 运行时配置：offscreen 直调 background 的 get-asr-runtime-config 取

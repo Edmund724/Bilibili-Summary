@@ -9,10 +9,9 @@
 //
 // 调度模式与旧 pipeline.js runWithConcurrency（固定批次：全部解码完 → 一次性
 // 建 task 数组，该函数已随转写迁出页面而删除）的差异：push(chunk) 可在运行中
-// 持续喂入，解码与转写流水线重叠；并发上限 DEFAULT_CONCURRENCY=5（与
-// entry/offscreen.js ASR_ADAPTERS["openai-transcriptions"].concurrency 一致）；
-// close() 是流结束标记——之后不再接受新 chunk，排队与在途片全部消化后
-// resolve 汇总。
+// 持续喂入，解码与转写流水线重叠；并发上限取 shared/offscreen-constants.js 的
+// ASR_CONCURRENCY（offscreen 接线层 ASR_ADAPTERS 注入同一常量）；close() 是
+// 流结束标记——之后不再接受新 chunk，排队与在途片全部消化后 resolve 汇总。
 //
 // 单片语义（原 pipeline.js transcribeChunk，随调度引擎保留在此）：
 //   - retryAsync(task, 2, 500)：isRetryableNetworkError 或 error.retryable===true
@@ -31,9 +30,8 @@
 
 import { getErrorMessage, retryAsync } from "../shared/error-helpers.js";
 import { logWarn } from "../shared/logging.js";
+import { ASR_CONCURRENCY } from "../shared/offscreen-constants.js";
 
-// 并发上限：与 entry/offscreen.js ASR_ADAPTERS["openai-transcriptions"].concurrency 一致
-export const DEFAULT_CONCURRENCY = 5;
 // 每片重试参数：与原 pipeline.js transcribeChunk 的 retryAsync(task, 2, 500) 一致
 export const DEFAULT_RETRIES = 2;
 export const DEFAULT_RETRY_DELAY_MS = 500;
@@ -83,7 +81,7 @@ export function createTranscriptionEngine({
   isAborted,
   onChunkResult,
   onProgress,
-  concurrency = DEFAULT_CONCURRENCY,
+  concurrency = ASR_CONCURRENCY,
   retries = DEFAULT_RETRIES,
   retryDelayMs = DEFAULT_RETRY_DELAY_MS
 } = {}) {
@@ -91,7 +89,7 @@ export function createTranscriptionEngine({
     throw new Error("createTranscriptionEngine 需要注入 transcribe 函数");
   }
   const aborted = typeof isAborted === "function" ? isAborted : () => false;
-  const limit = Number(concurrency) > 0 ? Math.floor(Number(concurrency)) : DEFAULT_CONCURRENCY;
+  const limit = Number(concurrency) > 0 ? Math.floor(Number(concurrency)) : ASR_CONCURRENCY;
 
   const queue = [];
   const failures = [];

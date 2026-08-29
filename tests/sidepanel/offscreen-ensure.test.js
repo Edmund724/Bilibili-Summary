@@ -8,7 +8,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 // 被测模块无自身状态（chrome 只在函数体内访问），静态导入即可；
 // stubChrome 在 beforeEach 重置后逐用例重建，避免 mock 污染。
-import { CHAT_OFFSCREEN_PATH, ensureChatOffscreenDocument } from "../../extension/pages/sidepanel-offscreen-ensure.js";
+import { ensureChatOffscreenDocument } from "../../extension/pages/sidepanel-offscreen-ensure.js";
+import { OFFSCREEN_URL, OFFSCREEN_CREATE_REASON } from "../../extension/shared/offscreen-constants.js";
 
 function stubChrome({ contexts, contextsError, createError } = {}) {
   const createDocument = vi.fn(async () => {
@@ -43,13 +44,13 @@ describe("ensureChatOffscreenDocument", () => {
     expect(createDocument).not.toHaveBeenCalled();
   });
 
-  it("查无文档 → 以原参数创建（url/reasons/justification 与 init 历史行为一致）", async () => {
+  it("查无文档 → 以统一常量创建（url/reason 收拢在 shared/offscreen-constants.js）", async () => {
     const { createDocument } = stubChrome({ contexts: [] });
     await expect(ensureChatOffscreenDocument()).resolves.toBe(true);
     expect(createDocument).toHaveBeenCalledTimes(1);
     expect(createDocument.mock.calls[0][0]).toEqual({
-      url: `chrome-extension://test/${CHAT_OFFSCREEN_PATH}`,
-      reasons: ["DOM_SCRAPING"],
+      url: `chrome-extension://test/${OFFSCREEN_URL}`,
+      reasons: [OFFSCREEN_CREATE_REASON],
       justification: "Run AI stream fetch in background to avoid Side Panel freeze when tab is hidden."
     });
   });

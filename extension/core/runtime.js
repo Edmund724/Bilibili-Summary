@@ -125,9 +125,11 @@ export function sendRuntimeMessage(message) {
   });
 }
 
-// 通用 offscreen 任务通道：发消息给 background 执行为单个任务创建的
-// offscreen 文档（background 保证至多一个活跃文档、任务间互斥、异常透传），
-// 消息结构随任务类型定。用于 ASR 音频解码（audio-bytes → typedArray）。
+// 通用 offscreen 任务通道：发 "offload-task" 消息给 background，按 taskType
+// 分发给注册的任务执行器（现承载 asr-decode-prepare / asr-decode-cleanup，
+// 见 asr/offscreen-bridge.js：前者建 offscreen 文档 + 为该任务分配独立 id 的
+// dnr 防盗链规则，后者按消息携带的 ruleId 只清自己的规则——多任务并发规则
+// 并存、互不影响）。消息结构随任务类型定，执行器异常原样透传。
 export function sendOffloadMessage(message) {
   return sendRuntimeMessage({ type: "offload-task", ...message });
 }
