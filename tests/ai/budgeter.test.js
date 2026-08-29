@@ -9,7 +9,6 @@ import {
   estimateTokens,
   CHAR_PER_TOKEN,
   MATERIAL_BUDGET_CHARS,
-  MODEL_WINDOW_CHARS,
   SEGMENT_INPUT_CHARS,
   SEGMENT_SUMMARY_CHARS,
   MERGE_GROUP_INPUT_CHARS,
@@ -18,10 +17,9 @@ import {
 } from "../../extension/ai/budgeter.js";
 
 describe("常量单一事实来源", () => {
-  it("素材预算 / 窗口 / 段 / 归并 / 成稿 / 系数与 ADR-0001 对齐", () => {
+  it("素材预算 / 段 / 归并 / 成稿 / 系数与 ADR-0001 对齐", () => {
     expect(CHAR_PER_TOKEN).toBe(1.0);
     expect(MATERIAL_BUDGET_CHARS).toBe(100000);
-    expect(MODEL_WINDOW_CHARS).toBe(256000);
     expect(SEGMENT_INPUT_CHARS).toBe(50000);
     expect(SEGMENT_SUMMARY_CHARS).toBe(10000);
     expect(MERGE_GROUP_INPUT_CHARS).toBe(100000);

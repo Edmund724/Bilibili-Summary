@@ -7,8 +7,6 @@
 export const CHAR_PER_TOKEN = 1.0;
 // 素材预算（100k token × 1.0）：预算内一次成稿，超出即进入分段 + 归并。
 export const MATERIAL_BUDGET_CHARS = 100000;
-// 模型统一按 256k 窗口。
-export const MODEL_WINDOW_CHARS = 256000;
 // 单段输入：分段写入小结的原始字幕字符上限。
 export const SEGMENT_INPUT_CHARS = 50000;
 // 分段小结 ≤10k（20% 保留）。

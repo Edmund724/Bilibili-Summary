@@ -33,8 +33,9 @@ export function buildChatRequestBody({ model, messages, thinkingLevel }) {
   return body;
 }
 
-// 超预算回落时的提示文案：仅提示不报错，超预算/溢出标记供 03 接管。
-export const OVER_BUDGET_NOTICE = "超长视频整理即将支持";
+// 超预算回落时的提示文案：如实描述——本次单次调用不发，offscreen 收到
+// overflow 哨兵后立即转 Map-Reduce 分段整理（对用户表现为进度逐段推进）。
+export const OVER_BUDGET_NOTICE = "字幕过长，已切换为分段整理模式";
 
 /**
  * 判定一段错误文案是否属于 context-length 溢出（纯函数，供单测与 03 兜底复用）。

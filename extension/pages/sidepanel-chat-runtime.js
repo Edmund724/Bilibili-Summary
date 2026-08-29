@@ -215,10 +215,11 @@ export function createChatRuntime(deps) {
       thinkingLevel: deps.getThinkingLevel(),
       context: {
         ...deps.getContextData(),
-        aiSystemPrompt: deps.getAiPrefs().aiSystemPrompt,
-        chatHistory: chatHistory()
+        aiSystemPrompt: deps.getAiPrefs().aiSystemPrompt
       },
       prompt: text,
+      // 历史只走顶层 history（offscreen/ai 侧统一读 msg.history）；
+      // 不再向 context 里塞 chatHistory 副本（无任何读取方的死负载）。
       history: chatHistory()
     });
   }

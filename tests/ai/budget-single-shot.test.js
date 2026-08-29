@@ -57,7 +57,7 @@ describe("resolveSubtitleForContext 超预算回落", () => {
     });
     expect(result.mode).toBe("map-reduce");
     expect(result.notice).toBe(OVER_BUDGET_NOTICE);
-    expect(result.notice).toBe("超长视频整理即将支持");
+    expect(result.notice).toBe("字幕过长，已切换为分段整理模式");
     expect(result.overflowMarked).toBe(true);
     expect(result.markdown).toBe(clipSubtitleForContext(markdown));
     expect(result.markdown).not.toBe(markdown);
