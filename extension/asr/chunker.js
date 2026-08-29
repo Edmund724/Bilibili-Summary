@@ -3,7 +3,7 @@
 // Service Worker 没有 AudioContext：解码与重采样由 offscreen 文档宿主完成
 // （见 offscreen-bridge.js，接 entry/offscreen.js 基建），本模块只负责
 // 编码、切片计划与解码结果校验；offscreen 文档侧用 buildWavChunks 把
-// 解码结果切成 WAV 块，跨 context 只回传 base64。
+// 解码结果切成 WAV 块，在本 context 内直接交给转写引擎，不跨 context。
 // 核心模块不直接碰 AudioContext，Node/vitest 下可独立测试。WAV header 手写，不引依赖。
 
 // ===== WAV 编码 =====
@@ -132,10 +132,10 @@ export function validateDecodedAudio(audioBuffer) {
 
 // ===== 切片编码：校验 → 切片 → 编码 =====
 
-// 直接按切片计划把已解码音频切成 WAV 块（offscreen 文档侧用，跨 context
-// 只回传 base64 字符串；解码与重采样由宿主侧完成后把结果传入）。
+// 直接按切片计划把已解码音频切成 WAV 块（offscreen 文档侧用，产出在本
+// context 内交给转写引擎上平台；解码与重采样由宿主侧完成后把结果传入）。
 // 返回 [{ index, startSec, durationSec, wavBlob }]，durationSec 由
-// decideChunks 产出（页面上游依赖该字段推算片边界）。
+// decideChunks 产出（转写结果合并依赖该字段推算片边界）。
 export function buildWavChunks(audioBuffer, plan) {
   const totalDurationSec = validateDecodedAudio(audioBuffer);
   const channelData = audioBuffer.getChannelData(0);

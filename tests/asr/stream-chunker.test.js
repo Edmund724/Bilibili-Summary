@@ -171,3 +171,111 @@ describe("streamWavChunks 与 buildWavChunks 基准一致", () => {
     expect(out[2].durationSec).toBeCloseTo(40, 6);
   });
 });
+
+// ===== 段级解码降级（Q8a）：单个 ADTS 段解码失败 → 重试 1 次 → 仍失败跳过
+// 计数继续；全部段失败（零片产出）才算整体失败。decodeSegment 全部 fake。 =====
+
+// 解码器 fake：failures 集合内的段下标抛错（可编程每次调用的行为）。
+function makeFailingDecoder({ failAt, failTimes = Infinity, abortAt = -1, abortSentinel }) {
+  const calls = new Map(); // segmentIndex → 调用次数
+  const decodeSegment = async (seg) => {
+    const index = seg.__index;
+    const count = (calls.get(index) || 0) + 1;
+    calls.set(index, count);
+    if (index === abortAt) {
+      throw abortSentinel;
+    }
+    if (failAt.includes(index) && count <= failTimes) {
+      throw new Error(`音频解码失败：段 ${index} 损坏`);
+    }
+    return seg;
+  };
+  return { decodeSegment, calls };
+}
+
+// 给段打上下标（fake 解码器据此决定失败/中止）
+function tagSegments(segments) {
+  return segments.map((seg, __index) => Object.assign(seg, { __index }));
+}
+
+describe("段级解码降级（Q8a）", () => {
+  it("默认（无 decodeRetries/skip）：段解码失败直接上抛（现状语义不变）", async () => {
+    const segments = tagSegments(makeSegments(600, 200)); // 3 段
+    const decoder = makeFailingDecoder({ failAt: [1] });
+    await expect(
+      streamWavChunks(segments, {
+        chunkSeconds: 1200,
+        decodeSegment: decoder.decodeSegment,
+        onChunk: async () => {}
+      })
+    ).rejects.toThrow(/段 1 损坏/);
+  });
+
+  it("decodeRetries=1：首次失败重试成功 → 不跳过、片产出正常", async () => {
+    const segments = tagSegments(makeSegments(600, 200));
+    // 段 1 第一次失败、第二次成功
+    const decoder = makeFailingDecoder({ failAt: [1], failTimes: 1 });
+    const out = [];
+    const meta = await streamWavChunks(segments, {
+      chunkSeconds: 1200,
+      decodeSegment: decoder.decodeSegment,
+      onChunk: async (chunk) => out.push(chunk),
+      decodeRetries: 1
+    });
+    expect(decoder.calls.get(1)).toBe(2); // 重试 1 次
+    expect(meta.totalChunks).toBe(1);
+    expect(meta.skippedSegments).toBe(0);
+    expect(out).toHaveLength(1);
+  });
+
+  it("decodeRetries=1 + skipFailedSegments：重试仍失败 → 跳过该段计数，后续段继续", async () => {
+    const segments = tagSegments(makeSegments(600, 200));
+    const decoder = makeFailingDecoder({ failAt: [1] }); // 段 1 恒失败
+    const out = [];
+    const meta = await streamWavChunks(segments, {
+      chunkSeconds: 1200,
+      decodeSegment: decoder.decodeSegment,
+      onChunk: async (chunk) => out.push(chunk),
+      decodeRetries: 1,
+      skipFailedSegments: true
+    });
+    // 段 1 重试 1 次后跳过；段 0/2 的采样拼成一片
+    expect(decoder.calls.get(1)).toBe(2);
+    expect(meta.skippedSegments).toBe(1);
+    expect(meta.totalChunks).toBe(1);
+    expect(out).toHaveLength(1);
+    expect(out[0].durationSec).toBeCloseTo(400, 6); // 200s × 2 段
+  });
+
+  it("全部段失败（零片产出）→ totalChunks 0，不抛错（整体失败由调用方判定）", async () => {
+    const segments = tagSegments(makeSegments(600, 200));
+    const decoder = makeFailingDecoder({ failAt: [0, 1, 2] });
+    const meta = await streamWavChunks(segments, {
+      chunkSeconds: 1200,
+      decodeSegment: decoder.decodeSegment,
+      onChunk: async () => {},
+      decodeRetries: 1,
+      skipFailedSegments: true
+    });
+    expect(meta.totalChunks).toBe(0);
+    expect(meta.skippedSegments).toBe(3);
+  });
+
+  it("isAbortError 命中：不重试不跳过，直接向上传播（断连取消优先于降级）", async () => {
+    const segments = tagSegments(makeSegments(600, 200));
+    const abortSentinel = Object.freeze({ asrAborted: true });
+    const decoder = makeFailingDecoder({ failAt: [], abortAt: 1, abortSentinel });
+    await expect(
+      streamWavChunks(segments, {
+        chunkSeconds: 1200,
+        decodeSegment: decoder.decodeSegment,
+        onChunk: async () => {},
+        decodeRetries: 1,
+        skipFailedSegments: true,
+        isAbortError: (error) => error === abortSentinel
+      })
+    ).rejects.toBe(abortSentinel);
+    // 段 1 首次抛哨兵即中止：未重试
+    expect(decoder.calls.get(1)).toBe(1);
+  });
+});

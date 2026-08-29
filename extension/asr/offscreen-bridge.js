@@ -1,15 +1,20 @@
-// ASR 音频「下载 + 解码 + 切片 + WAV 编码」的 offscreen 通道。MV3 service
-// worker 没有 AudioContext，且 chrome.runtime 消息是 JSON 序列化——二进制
-// （Uint8Array / Float32Array）跨 context 会变成数字键普通对象，字节全损。
-// 因此下载、解码、切片、WAV 编码整体搬进 offscreen 文档，跨 context 只传
-// 字符串（base64）与小 JSON，转写层（页面侧逐片 fetch 语音平台）不动。
+// ASR「下载 + 解码 + 切片 + 转写」的 offscreen 通道。MV3 service worker 没有
+// AudioContext，且 chrome.runtime 消息是 JSON 序列化——二进制（Uint8Array /
+// Float32Array）跨 context 会变成数字键普通对象，字节全损。因此下载、解码、
+// 切片、转写整体搬进 offscreen 文档（转写引擎 asr/engine.js 与适配器与解码同
+// context 加载），跨 context 只传文本结果与小 JSON；音频字节与 API Key 都不出
+// offscreen（Key 由 offscreen 直调 background 的 get-asr-runtime-config 获取）。
 //
 // 数据流：runAsrPipeline → createOffscreenChunkHost()（page 侧）→
 //   sendOffloadMessage({ taskType:"asr-decode-prepare" }) → background 建
 //   offscreen 文档 + 加 dnr 防盗链规则 → 页面连 "asr-decode" port 直连
-//   文档 → postMessage 任务 → 逐片收 { type:"chunk", wavBase64 } →
-//   { type:"done" } → base64 还原为 Blob 返回 → 再发
+//   文档 → postMessage 任务 { audioUrl, backupUrls } → 逐条收
+//   { type:"progress" } / { type:"chunk-result" } → { type:"done" } →
+//   汇总按片 index 对齐的文本结果返回 → 再发
 //   { taskType:"asr-decode-cleanup" } 清 dnr 规则。
+//   isStale 是页面闭包过不了 port：桥在每条 port 消息到达时复核（pipeline
+//   注入的回调），为真即 port.disconnect() + reject STALE_RUN——offscreen 侧
+//   断连 → aborted → 解码停止、引擎停止调度（现成机制）。
 //
 // 本模块同时在 background 与页面两个环境加载：顶层不触碰 worker-only API
 // （chrome.declarativeNetRequest / chrome.offscreen 只在各自 handler 函数体内
@@ -27,46 +32,22 @@ export const ASR_DECODE_OFFSCREEN_URL = "entry/offscreen.html";
 // updateSessionRules 采用"移除全部旧规则再添加"的方式天然去重。
 const ASR_AUDIO_SESSION_RULE_ID = 32001;
 
-// ===== 共享工具（页面/文档双侧共用） =====
-
-// Uint8Array → base64 字符串（btoa 0x8000 分块，避免 String.fromCharCode
-// 栈溢出）。浏览器用 btoa，Node 下退 Buffer。
-export function bytesToBase64(bytes) {
-  const source = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  if (typeof btoa === "function") {
-    let binary = "";
-    const chunkSize = 0x8000;
-    for (let i = 0; i < source.length; i += chunkSize) {
-      binary += String.fromCharCode.apply(null, source.subarray(i, i + chunkSize));
-    }
-    return btoa(binary);
-  }
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(source).toString("base64");
-  }
-  throw new Error("当前环境不支持 base64 编码（无 btoa / Buffer）");
-}
-
-// base64 字符串 → Uint8Array（bytesToBase64 的逆操作）
-export function base64ToBytes(b64) {
-  const binary = atob(String(b64 || ""));
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    out[i] = binary.charCodeAt(i);
-  }
-  return out;
-}
-
 // ===== 页面侧 chunk host =====
 
-// 页面侧合成宿主：一次发起「下载 + 解码 + 切片 + WAV 编码」任务，音频字节
-// 全程不跨 context（offscreen 文档自己 fetch），每片 WAV 以 base64 字符串
-// 回传后还原为 Blob。契约：
-//   async ({ audioUrl, backupUrls, plan }) =>
-//     [{ index, startSec, durationSec, wavBlob }]
-// 失败 reject 带用户可读文案；成功失败都会发 asr-decode-cleanup 清 dnr 规则。
+// 页面侧客户端：一次发起「下载 + 解码 + 切片 + 转写」任务，音频字节与
+// API Key 全程不出 offscreen（offscreen 自己 fetch、自己取配置），页面只收
+// 逐片文本结果。契约：
+//   async ({ audioUrl, backupUrls, isStale?, onProgress? }) =>
+//     { results, totalChunks, skippedSegments, failedChunks }
+//     results 为按片 index 排序的 [{ index, startSec, durationSec, result }]，
+//     result 是适配器单片结果 { text, segments?, _asrDiag? }；
+//     totalChunks 为产出片数，skippedSegments 为解码失败跳过的段数，
+//     failedChunks 为转写失败跳过的片数（Q8a 口径：个别失败不整体失败）。
+// isStale 为真时（视频已切换）立即断连并 reject STALE_RUN；onProgress 中继
+// offscreen 引擎产出的进度文本。失败 reject 带用户可读文案；成功失败都会发
+// asr-decode-cleanup 清 dnr 规则。
 export function createOffscreenChunkHost() {
-  return async function offscreenChunkHost({ audioUrl, backupUrls, plan }) {
+  return async function offscreenChunkHost({ audioUrl, backupUrls, isStale, onProgress }) {
     // 先让 background 建 offscreen 文档 + 加防盗链规则，再直连文档传任务
     const prepared = await sendOffloadMessage({ taskType: "asr-decode-prepare" });
     if (!prepared?.ok) {
@@ -74,8 +55,11 @@ export function createOffscreenChunkHost() {
     }
 
     return new Promise((resolve, reject) => {
-      const chunks = [];
+      const results = [];
       let done = false;
+      let totalChunks = 0;
+      let skippedSegments = 0;
+      let failedChunks = 0;
 
       const cleanup = () => {
         sendOffloadMessage({ taskType: "asr-decode-cleanup" }).catch(() => {
@@ -96,26 +80,48 @@ export function createOffscreenChunkHost() {
 
       const port = chrome.runtime.connect({ name: "asr-decode" });
       port.onMessage.addListener((msg) => {
-        if (!msg || typeof msg !== "object") return;
-        if (msg.type === "chunk") {
-          // done 之前未知 index 的 chunk 也收下，done 后统一按 index 排序
-          chunks.push({
+        if (!msg || typeof msg !== "object" || done) return;
+        // stale 中止的跨 context 检查：isStale 是页面闭包过不了 port，每条
+        // 消息到达时复核；为真即断连 + reject（offscreen 断连 → aborted →
+        // 解码与引擎调度停止，成果不再回传）
+        if (typeof isStale === "function" && isStale()) {
+          const error = new Error("Stale refresh run");
+          error.code = "STALE_RUN";
+          finish(reject, error);
+          return;
+        }
+        if (msg.type === "progress") {
+          // offscreen 引擎产出的进度文本（语音识别中 N 片…）原样中继
+          try {
+            onProgress?.(String(msg.text || ""));
+          } catch {
+            // 进度回调异常不影响收包
+          }
+          return;
+        }
+        if (msg.type === "chunk-result") {
+          results.push({
             index: Number(msg.index) || 0,
             startSec: Number(msg.startSec) || 0,
             durationSec: Number(msg.durationSec) || 0,
-            wavBlob: new Blob([base64ToBytes(msg.wavBase64)], { type: "audio/wav" })
+            result: msg.result
           });
           return;
         }
         if (msg.type === "done") {
-          const ordered = chunks
-            .slice()
-            .sort((a, b) => a.index - b.index);
-          finish(resolve, ordered);
+          totalChunks = Number(msg.totalChunks) || results.length;
+          skippedSegments = Number(msg.skippedSegments) || 0;
+          failedChunks = Number(msg.failedChunks) || 0;
+          results.sort((a, b) => a.index - b.index);
+          finish(resolve, { results, totalChunks, skippedSegments, failedChunks });
           return;
         }
         if (msg.type === "error") {
-          finish(reject, new Error(msg.error || "音频解码失败"));
+          const error = new Error(msg.error || "音频转写失败");
+          if (msg.code) {
+            error.code = msg.code;
+          }
+          finish(reject, error);
         }
       });
       port.onDisconnect.addListener(() => {
@@ -128,8 +134,7 @@ export function createOffscreenChunkHost() {
         action: "asr-decode",
         task: {
           audioUrl: String(audioUrl || "").trim(),
-          backupUrls: Array.isArray(backupUrls) ? backupUrls : [],
-          chunkSeconds: Number(plan?.chunkSeconds) || 0
+          backupUrls: Array.isArray(backupUrls) ? backupUrls : []
         }
       });
     });
@@ -176,9 +181,10 @@ async function ensureAsrOffscreenDocument() {
         url: chrome.runtime.getURL(ASR_DECODE_OFFSCREEN_URL),
         // 不用 AUDIO_PLAYBACK：Chrome 对无真实播放的 AUDIO_PLAYBACK 文档
         // 30 秒强制关闭（长视频解码 >30s 会「音频解码中断」）；本文档实际
-        // 只是解码 + 生成 WAV Blob，BLOBS 不受该限制。
+        // 是解码 + 转写（WAV Blob 仅在本 context 内经 FormData 上传），
+        // BLOBS 不受该限制。
         reasons: ["BLOBS"],
-        justification: "Download, decode and slice video audio for ASR transcription."
+        justification: "Download, decode, slice and transcribe video audio for ASR subtitles."
       });
     }
   } catch {

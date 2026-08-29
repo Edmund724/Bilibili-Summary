@@ -70,21 +70,12 @@ function installMemoryStorage() {
 }
 
 let memoryStorage;
-let asrRuntimeConfig;
 let deps;
 let fallback;
 
 beforeEach(() => {
   resetModuleState();
   memoryStorage = installMemoryStorage();
-  asrRuntimeConfig = {
-    ok: true,
-    providers: [PROVIDER],
-    activeAsrProviderId: "p1",
-    activeKey: "sk-local",
-    asrLanguage: "auto",
-    asrAutoFallback: true
-  };
 
   clipState.setFetchRunId(1);
   clipState.setBvid(BVID);
@@ -93,16 +84,17 @@ beforeEach(() => {
   clipState.setSubtitles([]);
   clipState.setSubtitleBody([]);
   clipState.setSubtitleFetchState("idle");
-  state.settings = { ...state.settings, asrAutoFallback: true, activeAsrProviderId: "p1" };
+  // provider 元数据（无 Key）经设置快照供页面侧取用；Key 组装在 offscreen
+  state.settings = {
+    ...state.settings,
+    asrAutoFallback: true,
+    activeAsrProviderId: "p1",
+    asrProviders: [PROVIDER],
+    asrLanguage: "auto"
+  };
 
   deps = {
     getSettings: vi.fn(async () => state.settings),
-    sendRuntimeMessage: vi.fn(async (message) => {
-      if (message?.type === "get-asr-runtime-config") {
-        return asrRuntimeConfig;
-      }
-      return { ok: true };
-    }),
     setStatus: vi.fn(),
     setMessage: vi.fn(),
     applyNoSubtitleState: vi.fn(),

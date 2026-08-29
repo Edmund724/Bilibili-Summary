@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import { normalizeDownloadFormat } from "../core/validators.js";
 import { state, clipState } from "../core/state.js";
 import { extractBvid, computeCurrentClipSignature } from "../bilibili/video-id-shared.js";
-import { getSettings, sendRuntimeMessage } from "../core/runtime.js";
+import { getSettings } from "../core/runtime.js";
 import { byId } from "../shared/dom-utils.js";
 import { ensureRunActive, isStaleRunError, getErrorMessage, toReadableText, isRetryableNetworkError, retryAsync } from "../shared/error-helpers.js";
 import { logInfo, logWarn } from "../shared/logging.js";
@@ -477,7 +477,6 @@ function broadcastSubtitleStatus(phase) {
 // 本模块内部函数（refreshClip 也在用），作为注入依赖传入。
 const asrFallback = createAsrFallback({
   getSettings,
-  sendRuntimeMessage,
   setStatus,
   setMessage,
   applyNoSubtitleState,

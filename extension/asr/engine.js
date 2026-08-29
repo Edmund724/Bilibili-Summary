@@ -7,18 +7,19 @@
 // chunk 陆续产出（活队列 push 喂入），每片完成即经 onChunkResult 交付（接线层
 // 拿到就往 port 发 chunk-result，不等全部完成），页面只收转写文本。
 //
-// 与 pipeline.js runWithConcurrency（固定批次：全部解码完 → 一次性建 task 数组）
-// 的差异：push(chunk) 可在运行中持续喂入，解码与转写流水线重叠；并发上限
-// DEFAULT_CONCURRENCY=5（与 pipeline ADAPTERS["openai-transcriptions"].concurrency
-// 一致）；close() 是流结束标记——之后不再接受新 chunk，排队与在途片全部消化后
+// 调度模式与旧 pipeline.js runWithConcurrency（固定批次：全部解码完 → 一次性
+// 建 task 数组，该函数已随转写迁出页面而删除）的差异：push(chunk) 可在运行中
+// 持续喂入，解码与转写流水线重叠；并发上限 DEFAULT_CONCURRENCY=5（与
+// entry/offscreen.js ASR_ADAPTERS["openai-transcriptions"].concurrency 一致）；
+// close() 是流结束标记——之后不再接受新 chunk，排队与在途片全部消化后
 // resolve 汇总。
 //
-// 每片语义镜像 pipeline.js transcribeChunk：
+// 单片语义（原 pipeline.js transcribeChunk，随调度引擎保留在此）：
 //   - retryAsync(task, 2, 500)：isRetryableNetworkError 或 error.retryable===true
 //     才重试，指数退避上限 5000ms（shared/error-helpers 实现）；
 //   - 进度：onProgress thunk 交给注入的 transcribe（接线层透传给适配器，适配器
-//     每次请求后调用），文案 `语音识别中 ${chunk.index + 1} 片…` 与 pipeline 一致
-//     （总片数在活队列下未知，由接线层自行拼接）；
+//     每次请求后调用），文案 `语音识别中 ${chunk.index + 1} 片…`，接线层经
+//     port 原样中继给页面；
 //   - 返回形状：{ ...result, durationSec: chunk.durationSec }——mergeChunkResults
 //     的单片输入契约（text / segments[{start,end,text}] / 可选 _asrDiag）；
 //   - pipeline 的 ensureActive() 后置守卫在 offscreen 侧由 isAborted() 轮询替代：
@@ -31,9 +32,9 @@
 import { getErrorMessage, retryAsync } from "../shared/error-helpers.js";
 import { logWarn } from "../shared/logging.js";
 
-// 并发上限：与 pipeline.js ADAPTERS["openai-transcriptions"].concurrency 一致
+// 并发上限：与 entry/offscreen.js ASR_ADAPTERS["openai-transcriptions"].concurrency 一致
 export const DEFAULT_CONCURRENCY = 5;
-// 每片重试参数：与 pipeline.js transcribeChunk 的 retryAsync(task, 2, 500) 一致
+// 每片重试参数：与原 pipeline.js transcribeChunk 的 retryAsync(task, 2, 500) 一致
 export const DEFAULT_RETRIES = 2;
 export const DEFAULT_RETRY_DELAY_MS = 500;
 

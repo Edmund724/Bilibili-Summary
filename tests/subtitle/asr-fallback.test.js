@@ -1,14 +1,15 @@
 // asr/fallback.js 的 ASR 回退策略簇回归测试（直测 createAsrFallback 工厂）。
 // 依赖注入 seam：cache/cache-lru 直 import 真实模块，跑在测试内构造的内存版
 // chrome.storage.local（Map 承载，支持 get(null) 全量枚举）之上；runAsrPipeline、
-// getSettings、sendRuntimeMessage 与 UI 回调（setStatus / setMessage /
-// applyNoSubtitleState / refreshDerivedContent / isReaderViewOpen /
-// notifyReaderPresenter / broadcastSubtitleStatus）全部为测试内构造的假依赖。
-// 不再经 vi.mock 间接测 fetcher 内部。
-// 重点断言：skip 闸门（开关关 / 无激活平台 / 运行时快照缺失或关闭）、缓存命中
-// （时长校验过 → done；不过 → 清缓存重生成）、空结果诊断、错误路径
-// （asr-failed 广播 + applyNoSubtitleState）、成功路径（写缓存 +
-// clearStaleAsrSubtitleCache 孤儿清理 + 伪轨道收尾）、stale run。
+// getSettings 与 UI 回调（setStatus / setMessage / applyNoSubtitleState /
+// refreshDerivedContent / isReaderViewOpen / notifyReaderPresenter /
+// broadcastSubtitleStatus）全部为测试内构造的假依赖。不经 vi.mock 间接测
+// fetcher 内部。
+// provider 元数据（name/model/language）从设置快照取（Key 不再进页面——组装
+// 移到 offscreen）；重点断言：skip 闸门（开关关 / 无激活平台 / 平台不在设置
+// 列表 / offscreen asr-skip）、缓存命中（时长校验过 → done；不过 → 清缓存重生
+// 成）、空结果诊断、错误路径（asr-failed 广播 + applyNoSubtitleState）、成功路
+// 径（写缓存 + clearStaleAsrSubtitleCache 孤儿清理 + 伪轨道收尾）、stale run。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
@@ -83,27 +84,9 @@ async function seedCache(key, body) {
   await globalThis.chrome.storage.local.set({ [key]: { body, timestamp: Date.now() } });
 }
 
-// 可编程的 get-asr-runtime-config 回包快照
-function defaultRuntimeConfig() {
-  return {
-    ok: true,
-    providers: [PROVIDER],
-    activeAsrProviderId: "p1",
-    activeKey: "sk-local",
-    asrLanguage: "auto",
-    asrAutoFallback: true
-  };
-}
-
 function buildDeps(overrides = {}) {
   return {
     getSettings: vi.fn(async () => state.settings),
-    sendRuntimeMessage: vi.fn(async (message) => {
-      if (message?.type === "get-asr-runtime-config") {
-        return asrRuntimeConfig;
-      }
-      return { ok: true };
-    }),
     setStatus: vi.fn(),
     setMessage: vi.fn(),
     applyNoSubtitleState: vi.fn(),
@@ -117,14 +100,12 @@ function buildDeps(overrides = {}) {
 }
 
 let memoryStorage;
-let asrRuntimeConfig;
 let deps;
 let fallback;
 
 beforeEach(() => {
   resetModuleState();
   memoryStorage = installMemoryStorage();
-  asrRuntimeConfig = defaultRuntimeConfig();
 
   clipState.setFetchRunId(RUN_ID);
   clipState.setBvid(BVID);
@@ -133,7 +114,14 @@ beforeEach(() => {
   clipState.setSubtitles([]);
   clipState.setSubtitleBody([]);
   clipState.setSubtitleFetchState("idle");
-  state.settings = { ...state.settings, asrAutoFallback: true, activeAsrProviderId: "p1" };
+  // provider 元数据（无 Key）经设置快照供页面侧取用：缓存键/平台名来源
+  state.settings = {
+    ...state.settings,
+    asrAutoFallback: true,
+    activeAsrProviderId: "p1",
+    asrProviders: [PROVIDER],
+    asrLanguage: "auto"
+  };
 
   deps = buildDeps();
   fallback = createAsrFallback(deps);
@@ -151,14 +139,13 @@ function stubPendingPipeline() {
 }
 
 describe("maybeRunAsrFallback skip 闸门", () => {
-  it("开关关闭（settings.asrAutoFallback=false）：返回 skip，快速出口先于消息请求", async () => {
+  it("开关关闭（settings.asrAutoFallback=false）：返回 skip，快速出口先于任务发起", async () => {
     state.settings.asrAutoFallback = false;
 
     const result = await fallback.maybeRunAsrFallback({ runId: RUN_ID });
 
     expect(result).toBe("skip");
     expect(deps.runAsrPipeline).not.toHaveBeenCalled();
-    expect(deps.sendRuntimeMessage).not.toHaveBeenCalled();
     expect(deps.broadcastSubtitleStatus).not.toHaveBeenCalled();
     expect(deps.applyNoSubtitleState).not.toHaveBeenCalled();
   });
@@ -170,36 +157,35 @@ describe("maybeRunAsrFallback skip 闸门", () => {
 
     expect(result).toBe("skip");
     expect(deps.runAsrPipeline).not.toHaveBeenCalled();
-    expect(deps.sendRuntimeMessage).not.toHaveBeenCalled();
-  });
-
-  it("运行时配置消息失败：视为无 ASR 配置，静默跳过回退", async () => {
-    deps.sendRuntimeMessage.mockImplementation(async () => ({ ok: false, error: "storage boom" }));
-
-    const result = await fallback.maybeRunAsrFallback({ runId: RUN_ID });
-
-    expect(result).toBe("skip");
-    expect(deps.runAsrPipeline).not.toHaveBeenCalled();
     expect(deps.broadcastSubtitleStatus).not.toHaveBeenCalled();
+  });
+
+  it("激活平台 id 不在设置快照的 asrProviders 列表中：返回 skip", async () => {
+    state.settings.asrProviders = [{ id: "other", type: "openai-transcriptions", name: "其他" }];
+
+    const result = await fallback.maybeRunAsrFallback({ runId: RUN_ID });
+
+    expect(result).toBe("skip");
+    expect(deps.runAsrPipeline).not.toHaveBeenCalled();
+  });
+
+  it("offscreen 配置级 asr-skip：静默返回 skip，补 asr-done 终态广播解除等待标志", async () => {
+    // 页面设置闸门放行后，offscreen 侧运行时配置缺失/关闭（Key 组装在
+    // offscreen，页面无感）→ pipeline 以 code "asr-skip" reject
+    deps.runAsrPipeline.mockRejectedValue(
+      Object.assign(new Error("没有激活的语音识别平台"), { code: "asr-skip" })
+    );
+
+    const result = await fallback.maybeRunAsrFallback({ runId: RUN_ID });
+
+    expect(result).toBe("skip");
     expect(deps.applyNoSubtitleState).not.toHaveBeenCalled();
-  });
-
-  it("激活平台 id 不在运行时快照的 providers 列表中：返回 skip", async () => {
-    asrRuntimeConfig.providers = [{ id: "other", type: "openai-transcriptions", name: "其他" }];
-
-    const result = await fallback.maybeRunAsrFallback({ runId: RUN_ID });
-
-    expect(result).toBe("skip");
-    expect(deps.runAsrPipeline).not.toHaveBeenCalled();
-  });
-
-  it("运行时快照 asrAutoFallback=false：返回 skip", async () => {
-    asrRuntimeConfig.asrAutoFallback = false;
-
-    const result = await fallback.maybeRunAsrFallback({ runId: RUN_ID });
-
-    expect(result).toBe("skip");
-    expect(deps.runAsrPipeline).not.toHaveBeenCalled();
+    // asr-transcribing 已广播（转写提示已展示），asr-skip 静默跳过必须补
+    // 终态广播，否则 sidepanel 一键总结的 asrTranscribingActive 卡死
+    expect(deps.broadcastSubtitleStatus.mock.calls.map((c) => c[0])).toEqual([
+      "asr-transcribing",
+      "asr-done"
+    ]);
   });
 });
 
@@ -214,20 +200,19 @@ describe("maybeRunAsrFallback 成功与缓存", () => {
 
     expect(result).toBe("done");
     expect(deps.runAsrPipeline).toHaveBeenCalledTimes(1);
-    // 语言档位来自运行时快照的 asrLanguage，激活平台 Key 经 seam 注入
-    expect(deps.runAsrPipeline).toHaveBeenCalledWith(
+    // 页面侧不再传 provider/Key/durationSec（provider+Key 组装移到 offscreen）；
+    // 语言档位/模型来自设置快照，只体现为缓存键
+    const pipelineArgs = deps.runAsrPipeline.mock.calls[0][0];
+    expect(pipelineArgs).toEqual(
       expect.objectContaining({
         bvid: BVID,
         cid: CID,
-        durationSec: VIDEO_DURATION,
-        runId: RUN_ID,
-        provider: expect.objectContaining({
-          language: "auto",
-          model: "whisper-large-v3",
-          apiKey: "sk-local"
-        })
+        runId: RUN_ID
       })
     );
+    expect(pipelineArgs.provider).toBeUndefined();
+    expect(pipelineArgs.durationSec).toBeUndefined();
+    expect(typeof pipelineArgs.isStale).toBe("function");
 
     // 伪轨道收尾：subtitles 首项为 asr 伪轨，body/选中态/ready 全部落位
     expect(state.clip.subtitleFetchState).toBe("ready");

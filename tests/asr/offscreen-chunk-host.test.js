@@ -1,9 +1,12 @@
-// offscreen-bridge.js 页面侧 chunk host 测试（createOffscreenChunkHost）：
-// - mock chrome.runtime.connect：连 "asr-decode" 端口，手动派发 chunk/done/
-//   error/断连消息，验证页面侧收包还原逻辑
-// - chunk 按 index 排序收集 + base64 还原为 Blob + done resolve
-// - error 消息 reject 且带文案；port 断连未 done → reject「音频解码中断」
-// - bytesToBase64 / base64ToBytes 往返一致
+// offscreen-bridge.js 页面侧客户端测试（createOffscreenChunkHost）：
+// - mock chrome.runtime.connect：连 "asr-decode" 端口，手动派发 progress/
+//   chunk-result/done/error/断连消息，验证页面侧收包逻辑
+// - 跨 port 只传文本结果：chunk-result 的 result 原样透传（无 Blob/base64），
+//   done 后按 index 排序汇总 { results, totalChunks, skippedSegments, failedChunks }
+// - progress 文本原样中继 onProgress；error 消息 reject 且带 code（asr-skip）；
+//   port 断连未 done → reject「音频解码中断」
+// - stale 中止跨 context：每条消息到达时复核注入的 isStale，为真即断连 +
+//   reject STALE_RUN
 // 参考 probes 测试的 mock 风格：beforeEach 重建 chrome stub，用例内直接
 // 捕获 connect 返回的 port 手动触发事件。
 
@@ -13,8 +16,14 @@ import { resetModuleState } from "../setup.js";
 // 构造一个可手动驱动的 chrome.runtime.connect mock：
 // 捕获每次 connect 调用，把 port 的 onMessage/onDisconnect 监听器存下来，
 // 用例内调用 emitMessage/emitDisconnect 派发事件，postMessage 记录调用。
+// sendMessage 每次重建（默认回 ok:true），避免前一用例的 mockImplementation
+// 污染（jsdom 全局 chrome 一经 stub 便不重置）。
 function installConnectMock() {
   const connections = [];
+  const sendMessage = vi.fn((_message, callback) => {
+    callback?.({ ok: true });
+    return undefined;
+  });
   const connect = vi.fn(() => {
     const listeners = new Set();
     const disconnectListeners = new Set();
@@ -37,62 +46,82 @@ function installConnectMock() {
     ...globalThis.chrome,
     runtime: {
       ...globalThis.chrome.runtime,
+      sendMessage,
       connect
     }
   });
-  return { connect, connections };
+  return { connect, connections, sendMessage };
 }
-
-let bridge;
 
 beforeEach(() => {
   resetModuleState();
 });
 
-describe("createOffscreenChunkHost 收包与还原", () => {
-  it("chunk 消息按 index 排序收集 + base64 还原为 Blob + done resolve", async () => {
+describe("createOffscreenChunkHost 文本结果收包", () => {
+  it("任务参数透传：audioUrl/backupUrls，不再携带 chunkSeconds（切片计划由 offscreen 决定）", async () => {
     const { connect, connections } = installConnectMock();
-    bridge = await import("../../extension/asr/offscreen-bridge.js");
-
-    const { bytesToBase64, base64ToBytes } = bridge;
-    // 片 1 与片 2 的 WAV 字节（内容可辨识：不同样本值序列）
-    const wav1 = new Uint8Array([1, 2, 3, 4, 5]);
-    const wav2 = new Uint8Array([9, 8, 7, 6, 5]);
+    const bridge = await import("../../extension/asr/offscreen-bridge.js");
     const host = bridge.createOffscreenChunkHost();
 
-    const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [], plan: { chunkSeconds: 600 } });
+    const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: ["https://y/a.m4s"] });
 
     // host 内部先 await prepare 消息（异步），flush 微任务后再取 port
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(connect).toHaveBeenCalledTimes(1);
     const port = connections[0];
-    // 任务参数透传：audioUrl / chunkSeconds 折算
     expect(port.posted).toHaveLength(1);
     expect(port.posted[0]).toEqual({
       action: "asr-decode",
-      task: { audioUrl: "https://x/a.m4s", backupUrls: [], chunkSeconds: 600 }
+      task: { audioUrl: "https://x/a.m4s", backupUrls: ["https://y/a.m4s"] }
     });
 
-    // 乱序发送：先发 index=1，再发 index=0，验证 done 前收集、done 后排序
-    port._emit({ type: "chunk", index: 1, startSec: 600, durationSec: 60, wavBase64: bytesToBase64(wav2) });
-    port._emit({ type: "chunk", index: 0, startSec: 0, durationSec: 600, wavBase64: bytesToBase64(wav1) });
-    port._emit({ type: "done", totalChunks: 2 });
+    port._emit({ type: "done", totalChunks: 0, skippedSegments: 0, failedChunks: 0 });
+    const out = await promise;
+    expect(out.results).toEqual([]);
+  });
 
-    const chunks = await promise;
-    expect(chunks).toHaveLength(2);
-    expect(chunks.map((c) => c.index)).toEqual([0, 1]);
-    expect(chunks[0].startSec).toBe(0);
-    expect(chunks[0].durationSec).toBe(600);
-    expect(chunks[1].startSec).toBe(600);
-    for (const c of chunks) {
-      expect(c.wavBlob).toBeInstanceOf(Blob);
-      expect(c.wavBlob.type).toBe("audio/wav");
-    }
-    // base64 还原字节与原始一致
-    const bytes0 = new Uint8Array(await chunks[0].wavBlob.arrayBuffer());
-    const bytes1 = new Uint8Array(await chunks[1].wavBlob.arrayBuffer());
-    expect([...bytes0]).toEqual([...wav1]);
-    expect([...bytes1]).toEqual([...wav2]);
+  it("chunk-result 按 index 排序收集，result 原样透传；done 汇总计数", async () => {
+    const { connections } = installConnectMock();
+    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const host = bridge.createOffscreenChunkHost();
+
+    const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const port = connections[0];
+
+    // 乱序发送：先发 index=1，再发 index=0，验证 done 前收集、done 后排序
+    port._emit({
+      type: "chunk-result",
+      index: 1,
+      startSec: 1200,
+      durationSec: 300,
+      result: { text: "片二", segments: [{ start: 0, end: 1, text: "第三句" }] }
+    });
+    port._emit({
+      type: "chunk-result",
+      index: 0,
+      startSec: 0,
+      durationSec: 1200,
+      result: { text: "片一", _asrDiag: { request: 2 } }
+    });
+    port._emit({ type: "done", totalChunks: 2, skippedSegments: 1, failedChunks: 0 });
+
+    const out = await promise;
+    expect(out.totalChunks).toBe(2);
+    expect(out.skippedSegments).toBe(1);
+    expect(out.failedChunks).toBe(0);
+    expect(out.results.map((r) => r.index)).toEqual([0, 1]);
+    // result 原样透传（纯 JSON 文本结果，无 Blob/base64 还原）
+    expect(out.results[0]).toEqual({
+      index: 0,
+      startSec: 0,
+      durationSec: 1200,
+      result: { text: "片一", _asrDiag: { request: 2 } }
+    });
+    expect(out.results[1].result).toEqual({
+      text: "片二",
+      segments: [{ start: 0, end: 1, text: "第三句" }]
+    });
     // done 后 disconnect + cleanup 消息（sendOffloadMessage 带 type 前缀）
     expect(port.disconnect).toHaveBeenCalledTimes(1);
     expect(globalThis.chrome.runtime.sendMessage).toHaveBeenCalledWith(
@@ -101,26 +130,45 @@ describe("createOffscreenChunkHost 收包与还原", () => {
     );
   });
 
-  it("error 消息 reject 且带文案", async () => {
-    const { connect, connections } = installConnectMock();
-    bridge = await import("../../extension/asr/offscreen-bridge.js");
+  it("progress 文本原样中继 onProgress", async () => {
+    const { connections } = installConnectMock();
+    const bridge = await import("../../extension/asr/offscreen-bridge.js");
     const host = bridge.createOffscreenChunkHost();
+    const onProgress = vi.fn();
 
-    const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [], plan: {} });
+    const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [], onProgress });
     await new Promise((resolve) => setTimeout(resolve, 0));
     const port = connections[0];
-    port._emit({ type: "error", error: "音频解码失败：解码结果疑似静音（时长 1s、峰值幅度 0）" });
+    port._emit({ type: "progress", text: "语音识别中 2 片…" });
+    port._emit({ type: "done", totalChunks: 2, skippedSegments: 0, failedChunks: 0 });
 
-    await expect(promise).rejects.toThrow(/疑似静音/);
+    await promise;
+    expect(onProgress).toHaveBeenCalledWith("语音识别中 2 片…");
+  });
+
+  it("error 消息 reject 且带 code（asr-skip 映射为 Error.code）", async () => {
+    const { connections } = installConnectMock();
+    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const host = bridge.createOffscreenChunkHost();
+
+    const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const port = connections[0];
+    port._emit({ type: "error", code: "asr-skip", error: "没有激活的语音识别平台" });
+
+    await expect(promise).rejects.toMatchObject({
+      code: "asr-skip",
+      message: "没有激活的语音识别平台"
+    });
     expect(port.disconnect).toHaveBeenCalledTimes(1);
   });
 
   it("port 断连且未 done → reject「音频解码中断」", async () => {
-    const { connect, connections } = installConnectMock();
-    bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const { connections } = installConnectMock();
+    const bridge = await import("../../extension/asr/offscreen-bridge.js");
     const host = bridge.createOffscreenChunkHost();
 
-    const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [], plan: {} });
+    const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [] });
     await new Promise((resolve) => setTimeout(resolve, 0));
     const port = connections[0];
     port._emitDisconnect();
@@ -129,8 +177,8 @@ describe("createOffscreenChunkHost 收包与还原", () => {
   });
 
   it("prepare 返回非 ok → 直接 reject，不建端口", async () => {
-    const { connect, connections } = installConnectMock();
-    globalThis.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+    const { connect, sendMessage } = installConnectMock();
+    sendMessage.mockImplementation((message, callback) => {
       if (message?.taskType === "asr-decode-prepare") {
         callback?.({ ok: false, error: "创建 offscreen 文档失败" });
         return undefined;
@@ -138,38 +186,68 @@ describe("createOffscreenChunkHost 收包与还原", () => {
       callback?.({ ok: true });
       return undefined;
     });
-    bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const bridge = await import("../../extension/asr/offscreen-bridge.js");
     const host = bridge.createOffscreenChunkHost();
 
-    await expect(host({ audioUrl: "https://x/a.m4s", backupUrls: [], plan: {} })).rejects.toThrow(
+    await expect(host({ audioUrl: "https://x/a.m4s", backupUrls: [] })).rejects.toThrow(
       "创建 offscreen 文档失败"
     );
     expect(connect).not.toHaveBeenCalled();
   });
 });
 
-describe("bytesToBase64 / base64ToBytes 往返", () => {
-  it("随机字节往返一致（覆盖多分块路径：>0x8000 字节）", async () => {
-    bridge = await import("../../extension/asr/offscreen-bridge.js");
-    const { bytesToBase64, base64ToBytes } = bridge;
+describe("stale 中止跨 context（isStale 在 port 消息到达时复核）", () => {
+  it("isStale 为真：首条消息到达即断连 + reject STALE_RUN，后续消息不再处理", async () => {
+    const { connections } = installConnectMock();
+    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const host = bridge.createOffscreenChunkHost();
+    let stale = false;
 
-    const total = 0x8000 * 3 + 123;
-    const bytes = new Uint8Array(total);
-    for (let i = 0; i < total; i++) {
-      bytes[i] = (i * 31 + 7) % 256;
-    }
-    const b64 = bytesToBase64(bytes);
-    expect(typeof b64).toBe("string");
-    const restored = base64ToBytes(b64);
-    expect(restored).toBeInstanceOf(Uint8Array);
-    expect(restored.byteLength).toBe(total);
-    expect([...restored]).toEqual([...bytes]);
+    const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [], isStale: () => stale });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const port = connections[0];
+
+    stale = true; // 转写中切换视频
+    port._emit({ type: "progress", text: "语音识别中 1 片…" });
+
+    await expect(promise).rejects.toMatchObject({ code: "STALE_RUN" });
+    // 主动断连：offscreen 侧 onDisconnect → aborted → 解码与引擎调度停止
+    expect(port.disconnect).toHaveBeenCalledTimes(1);
+    // done 后不再处理消息：不产生二次 finish
+    port._emit({ type: "done", totalChunks: 1, skippedSegments: 0, failedChunks: 0 });
   });
 
-  it("空字节数组往返：base64 为空串", async () => {
-    bridge = await import("../../extension/asr/offscreen-bridge.js");
-    const { bytesToBase64, base64ToBytes } = bridge;
-    expect(bytesToBase64(new Uint8Array(0))).toBe("");
-    expect(base64ToBytes("").byteLength).toBe(0);
+  it("isStale 为假：正常收包不受影响", async () => {
+    const { connections } = installConnectMock();
+    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const host = bridge.createOffscreenChunkHost();
+
+    const promise = host({
+      audioUrl: "https://x/a.m4s",
+      backupUrls: [],
+      isStale: () => false
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const port = connections[0];
+    port._emit({ type: "chunk-result", index: 0, startSec: 0, durationSec: 60, result: { text: "x" } });
+    port._emit({ type: "done", totalChunks: 1, skippedSegments: 0, failedChunks: 0 });
+
+    const out = await promise;
+    expect(out.results).toHaveLength(1);
+    expect(out.results[0].result.text).toBe("x");
+  });
+
+  it("未注入 isStale：不做跨 context 复核（runId 守卫留在 pipeline 侧）", async () => {
+    const { connections } = installConnectMock();
+    const bridge = await import("../../extension/asr/offscreen-bridge.js");
+    const host = bridge.createOffscreenChunkHost();
+
+    const promise = host({ audioUrl: "https://x/a.m4s", backupUrls: [] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const port = connections[0];
+    port._emit({ type: "chunk-result", index: 0, startSec: 0, durationSec: 60, result: { text: "x" } });
+    port._emit({ type: "done", totalChunks: 1, skippedSegments: 0, failedChunks: 0 });
+
+    await expect(promise).resolves.toMatchObject({ totalChunks: 1 });
   });
 });

@@ -1,20 +1,22 @@
 // offscreen.js — 隐藏后台页面，负责 SSE 流式请求，避免 Side Panel 被冻结。
-// 同时承接 ASR 音频解码任务（asr-decode 端口）：service worker 无
-// AudioContext，解码+重采样在这里用 OfflineAudioContext 完成。
+// 同时承接 ASR 音频「下载 → 解码 → 切片 → 转写」任务（asr-decode 端口）：
+// service worker 无 AudioContext，解码+重采样在这里用 OfflineAudioContext
+// 完成；转写引擎与适配器也加载在本 context——音频字节与 API Key 都不出
+// offscreen，跨 port 只回传转写文本结果。
 import { streamChat } from "../ai/client.js";
 import { buildBudgetPlan } from "../ai/budgeter.js";
 import { orchestrateMapReduce } from "../ai/map-reduce.js";
 import { resolveFollowupContext } from "../ai/followup-router.js";
 import { trimRecentTurns } from "../ai/followup-context.js";
 import { buildCostGuardNotice } from "../ai/cost-guard.js";
-import {
-  MAX_AUDIO_BYTES,
-  ASR_DECODE_TIMEOUT_MS,
-  bytesToBase64
-} from "../asr/offscreen-bridge.js";
-import { buildWavChunks, makeDecodedBuffer } from "../asr/chunker.js";
+import { MAX_AUDIO_BYTES, ASR_DECODE_TIMEOUT_MS } from "../asr/offscreen-bridge.js";
+import { buildChunkPlan, buildWavChunks, makeDecodedBuffer } from "../asr/chunker.js";
 import { streamWavChunks } from "../asr/stream-chunker.js";
+import { createTranscriptionEngine } from "../asr/engine.js";
+import { transcribe as transcribeOpenAi } from "../asr/adapters/openai-transcriptions.js";
 import { isFragmentedMp4, adtsFromFmp4, parseAudioSpecificConfig } from "../asr/adts.js";
+import { getErrorMessage } from "../shared/error-helpers.js";
+import { logWarn } from "../shared/logging.js";
 
 let activeAbortController = null;
 let pendingCostGuard = null;
@@ -244,17 +246,68 @@ async function resolveProviderWithKey(port, providerId) {
   return { provider: { ...provider, apiKey }, apiKey };
 }
 
-// ===== ASR 音频解码任务 =====
+// ===== ASR 下载 + 解码 + 切片 + 转写任务 =====
 
-// 收 { task: { audioUrl, backupUrls, chunkSeconds } }：在 offscreen 文档内
-// 完成「下载（HEAD 探大小、主备 URL 轮换）→ 解码 → 校验 → 切片 → WAV 编码」，
-// 每片 WAV 转 base64 字符串回传（chrome.runtime 消息是 JSON 序列化，二进制
-// 跨 context 会变成数字键对象字节全损，base64 是唯一可靠通道）。音频字节
-// 全程不跨 context。
+// type → 适配器映射（原 pipeline.js ADAPTERS 表随转写迁入 offscreen）。
+// 映射表缺 type 时发 error，页面显示「暂不支持的平台类型」。
+const ASR_ADAPTERS = {
+  "openai-transcriptions": { adapter: transcribeOpenAi, concurrency: 5 }
+};
+
+// ASR 运行时配置：offscreen 直调 background 的 get-asr-runtime-config 取
+// provider + Key + 语言（与 AI 聊天 resolveProviderWithKey 走同一通道）。
+// Key 只进本 context，不经过页面、也不放进 port 任务消息。5s 超时竞速镜像
+// 原 fetcher requestAsrRuntimeConfig 的 race 模式。
+async function requestAsrRuntimeConfig(timeoutMs = 5000) {
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("get-asr-runtime-config timeout")), timeoutMs);
+  });
+  const response = await Promise.race([
+    chrome.runtime.sendMessage({ type: "get-asr-runtime-config" }),
+    timeoutPromise
+  ]);
+  if (!response?.ok) {
+    throw new Error(response?.error || "get-asr-runtime-config failed");
+  }
+  return response;
+}
+
+// 配置级缺失/关闭/无激活 provider → code "asr-skip"：页面 fallback catch 后
+// 映射为静默 skip（与设置闸门 skip 同语义，零用户可见错误）。
+function makeAsrSkipError(cause) {
+  const error = new Error(String(cause?.message || cause || "ASR 配置缺失"));
+  error.code = "asr-skip";
+  return error;
+}
+
+// 从运行时快照解析 provider（附 Key 与生效语言）。快照关闭 / 无激活平台 /
+// 激活平台不在列表中 → 抛 asr-skip。
+function resolveAsrProvider(config) {
+  if (config.asrAutoFallback === false) {
+    throw makeAsrSkipError("ASR 自动回退未开启");
+  }
+  const activeId = String(config.activeAsrProviderId || "").trim();
+  const activeProvider = (config.providers || []).find((p) => p.id === activeId);
+  if (!activeProvider) {
+    throw makeAsrSkipError("没有激活的语音识别平台");
+  }
+  // 生效转写语言：全局 asrLanguage 设置（popup 顶部切换，默认 auto）；
+  // auto 不传语言参数，交服务端自动检测。
+  const provider = { ...activeProvider, apiKey: String(config.activeKey || "") };
+  provider.language = config.asrLanguage || "auto";
+  return provider;
+}
+
+// 收 { task: { audioUrl, backupUrls } }：在 offscreen 文档内完成「下载（HEAD
+// 探大小、主备 URL 轮换）→ 解码 → 校验 → 切片 → 逐片转写」，每片转写完成
+// 即把文本结果经 port 发回页面（chrome.runtime 消息是 JSON 序列化，二进制
+// 跨 context 会变成数字键对象字节全损——音频字节与 API Key 都不出本 context，
+// 跨 port 只传文本结果与小 JSON）。provider/Key/语言由本侧直调 background
+// 获取，配置级问题以 code "asr-skip" 结束。
 async function handleAsrDecodeTask(task, port) {
   let aborted = false;
   port.onDisconnect.addListener(() => {
-    // 断连视为取消：下载/切片循环处检查标志并静默退出（原 asr-audio 通道风格）
+    // 断连视为取消：下载/解码/调度各处检查标志并静默退出（原 asr-audio 通道风格）
     aborted = true;
   });
   try {
@@ -262,15 +315,74 @@ async function handleAsrDecodeTask(task, port) {
     if (!audioUrl) {
       throw new Error("asr-decode 任务参数不完整");
     }
-    const chunkSeconds = Number(task?.chunkSeconds) || 0;
+
+    // 运行时配置先行：配置级问题不做任何下载/解码。
+    let provider;
+    try {
+      provider = resolveAsrProvider(await requestAsrRuntimeConfig());
+    } catch (error) {
+      if (error?.code === "asr-skip") {
+        throw error;
+      }
+      // 消息失败/超时也按配置缺失处理（页面静默 skip，与原 fallback 同语义）
+      logWarn("[BOC] get-asr-runtime-config failed, skipping asr task", {
+        error: getErrorMessage(error)
+      });
+      throw makeAsrSkipError(error);
+    }
+
+    // 适配器与切片计划由 provider.type 决定（原 pipeline 的 ADAPTERS 表与
+    // buildChunkPlan 调用随转写迁入 offscreen，页面不再感知平台类型）。
+    const adapterEntry = ASR_ADAPTERS[provider.type];
+    if (!adapterEntry) {
+      throw new Error("暂不支持的平台类型：" + provider.type);
+    }
+    const chunkSeconds = buildChunkPlan(provider.type).chunkSeconds;
+
+    // 转写调度引擎：解码流式产片 push 进活队列（解码与转写流水线重叠），
+    // 每片完成即经 onChunkResult 把文本结果发回页面，不等全部完成。
+    const engine = createTranscriptionEngine({
+      transcribe: (chunk, { onProgress }) =>
+        adapterEntry.adapter({
+          wavBlob: chunk.wavBlob,
+          startSec: chunk.startSec,
+          durationSec: chunk.durationSec,
+          provider,
+          signal: undefined,
+          onProgress
+        }),
+      isAborted: () => aborted,
+      concurrency: adapterEntry.concurrency,
+      onChunkResult: (chunk, result) => {
+        // engine 交付的单片形状 { ...adapterResult, durationSec }；拆开回传，
+        // result 只含适配器结果（text/segments?/…），durationSec 为兄弟字段。
+        const { durationSec, ...adapterResult } = result;
+        port.postMessage({
+          type: "chunk-result",
+          index: chunk.index,
+          startSec: chunk.startSec,
+          durationSec,
+          result: adapterResult
+        });
+      },
+      // 引擎产出的进度文本（语音识别中 N 片…）原样中继给页面
+      onProgress: (text) => {
+        try {
+          port.postMessage({ type: "progress", text });
+        } catch {
+          // port 已断开，忽略
+        }
+      }
+    });
 
     const audioBytes = await fetchAudioBytes([audioUrl, ...(task?.backupUrls || [])], aborted);
     if (aborted) return;
 
-    // 主路径：fMP4 音轨拆 ADTS 分段，逐段解码 + 流式切片回传（有界内存）。
-    // 历史背景：旧实现把整条音轨一次性 decodeAudioData——4 小时视频在 48kHz
-    // 双声道下产出 ~6.4GB Float32 AudioBuffer，offscreen 渲染进程被 OOM 击杀，
-    // 扩展整包崩溃。分段后峰值降到 O(单段 + 单片)，音轨长度不再受内存限制。
+    // 主路径：fMP4 音轨拆 ADTS 分段，逐段解码 + 流式切片喂入转写引擎（有界
+    // 内存）。历史背景：旧实现把整条音轨一次性 decodeAudioData——4 小时视频在
+    // 48kHz 双声道下产出 ~6.4GB Float32 AudioBuffer，offscreen 渲染进程被 OOM
+    // 击杀，扩展整包崩溃。分段后峰值降到 O(单段 + 单片)，音轨长度不再受内存
+    // 限制。段级解码降级（Q8a）：单段失败重试 1 次，仍失败跳过计数继续。
     const fragment = isFragmentedMp4(audioBytes);
     const segments = fragment ? adtsFromFmp4(audioBytes, parseAudioSpecificConfig(audioBytes) || {}) : [];
     if (fragment && segments.length === 0) {
@@ -279,6 +391,7 @@ async function handleAsrDecodeTask(task, port) {
     }
 
     let totalChunks;
+    let skippedSegments = 0;
     if (segments.length > 0) {
       const AudioCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
       if (!AudioCtor) {
@@ -295,51 +408,59 @@ async function handleAsrDecodeTask(task, port) {
             stop();
             return decodeSegmentTo16kMono(seg, audioCtx);
           },
-          onChunk: async ({ index, startSec, durationSec, wavBlob }) => {
+          onChunk: (chunk) => {
             stop();
-            port.postMessage({
-              type: "chunk",
-              index,
-              startSec,
-              durationSec,
-              wavBase64: bytesToBase64(new Uint8Array(await wavBlob.arrayBuffer()))
-            });
-          }
+            engine.push(chunk);
+          },
+          decodeRetries: 1,
+          skipFailedSegments: true,
+          isAbortError: (error) => error === ASR_ABORT_SENTINEL
         });
         totalChunks = stream.totalChunks;
+        skippedSegments = stream.skippedSegments;
       } finally {
         audioCtx.close();
       }
     } else {
       // 非 fMP4（B 站 fnval=16 音轨均为 fMP4，理论不会走到）：历史行为全量解码。
-      // 静音/零时长校验 + 切片（chunkSeconds<=0 不切，整段一片，与 chunker 既有语义一致）。
-      // data 是裸 Float32Array，须经 makeDecodedBuffer 适配为 chunker 契约的
-      // AudioBuffer 鸭子类型（sampleRate 16k + diagnostic），否则会被误报「时长为零」。
+      // 静音/零时长校验 + 切片（chunkSeconds<=0 不切，整段一片，与 chunker
+      // 既有语义一致）。data 是裸 Float32Array，须经 makeDecodedBuffer 适配为
+      // chunker 契约的 AudioBuffer 鸭子类型（sampleRate 16k + diagnostic），
+      // 否则会被误报「时长为零」。
       const { data, diagnostic } = await decodeTo16kMono(audioBytes, 0);
       const chunks = buildWavChunks(makeDecodedBuffer(data, { diagnostic }), { chunkSeconds });
       for (const chunk of chunks) {
         if (aborted) return;
-        port.postMessage({
-          type: "chunk",
-          index: chunk.index,
-          startSec: chunk.startSec,
-          durationSec: chunk.durationSec,
-          wavBase64: bytesToBase64(new Uint8Array(await chunk.wavBlob.arrayBuffer()))
-        });
+        engine.push(chunk);
       }
       totalChunks = chunks.length;
     }
     if (aborted) return;
-    if (!(totalChunks > 0)) {
+
+    // close() 汇总：acceptedChunks/completedChunks/failedChunks/droppedByAbort。
+    // 等待全部在途片消化（最后一片的转写可能晚于解码结束数秒）。
+    const summary = await engine.close();
+    if (aborted) return;
+    // 全部段解码失败（零片产出）才算整体失败；个别段/片失败已跳过计数。
+    if (!(summary.acceptedChunks > 0)) {
       throw new Error("音频切片为空，无法转写");
     }
-    port.postMessage({ type: "done", totalChunks });
+    port.postMessage({
+      type: "done",
+      totalChunks: summary.acceptedChunks,
+      skippedSegments,
+      failedChunks: summary.failedChunks
+    });
   } catch (e) {
     if (aborted) {
       return;
     }
     try {
-      port.postMessage({ type: "error", error: String(e?.message || e) });
+      const payload = { type: "error", error: String(e?.message || e) };
+      if (e?.code) {
+        payload.code = e.code;
+      }
+      port.postMessage(payload);
     } catch {
       // port 已断开，忽略
     }

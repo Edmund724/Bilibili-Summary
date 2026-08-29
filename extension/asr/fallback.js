@@ -7,10 +7,10 @@
 //   - 直 import（传递 import 闭包不触及 subtitle/fetcher.js）：shared/
 //     error-helpers、shared/logging、core/state、subtitle/cache、subtitle/selection；
 //   - 注入 deps（传递闭包含 runtime.js→fetcher 或随 UI/上下文成环）：
-//     getSettings、sendRuntimeMessage、setStatus、setMessage、
-//     applyNoSubtitleState、refreshDerivedContent、isReaderViewOpen、
-//     notifyReaderPresenter、runAsrPipeline（pipeline 闭包经 offscreen-bridge
-//     →core/runtime→fetcher）、broadcastSubtitleStatus（fetcher 内部函数）。
+//     getSettings、setStatus、setMessage、applyNoSubtitleState、
+//     refreshDerivedContent、isReaderViewOpen、notifyReaderPresenter、
+//     runAsrPipeline（pipeline 闭包经 offscreen-bridge →core/runtime→fetcher）、
+//     broadcastSubtitleStatus（fetcher 内部函数）。
 // 模块不 import extension/entry/ 与 extension/pages/ 的任何内容。
 
 import { ensureRunActive, isStaleRunError, getErrorMessage } from "../shared/error-helpers.js";
@@ -28,7 +28,6 @@ import { validateSubtitleByDuration } from "../subtitle/selection.js";
 export function createAsrFallback(deps) {
   const {
     getSettings,
-    sendRuntimeMessage,
     setStatus,
     setMessage,
     applyNoSubtitleState,
@@ -46,34 +45,10 @@ export function createAsrFallback(deps) {
   // 只能从头重转。key 为 ASR 缓存键（bvid/cid/provider/model/language）。
   let activeAsrTranscribe = null;
 
-  // ASR 回退运行时配置：经 background 消息获取（与 getSettings 同一传输层，
-  // 形状也镜像 getSettings 的超时 + 降级语义）。失败/超时按"无 ASR 配置"
-  // 处理：logWarn 后返回 null，调用方静默跳过本轮回退（与旧存储读取失败同
-  // 语义），不做 UI 提示。无缓存——回退每次尝试现查，避免 Key 过期问题。
-  async function requestAsrRuntimeConfig(timeoutMs = 5000) {
-    try {
-      const timeoutPromise = new Promise((_, reject) => {
-        window.setTimeout(() => reject(new Error("get-asr-runtime-config timeout")), timeoutMs);
-      });
-      const response = await Promise.race([
-        sendRuntimeMessage({ type: "get-asr-runtime-config" }),
-        timeoutPromise
-      ]);
-      if (!response?.ok) {
-        throw new Error(response?.error || "get-asr-runtime-config failed");
-      }
-      return response;
-    } catch (error) {
-      logWarn("[BOC] get-asr-runtime-config failed, skipping asr fallback this round", {
-        error: getErrorMessage(error)
-      });
-      return null;
-    }
-  }
-
   // 无字幕轨时的语音识别回退入口。流程：
-  //   skip（未启用开关 / 无激活平台）→ 返回 "skip"，调用方走原有无字幕提示
-  //   （提示文案已追加引导句，见 applyNoSubtitleState 调用处）；
+  //   skip（未启用开关 / 无激活平台 / offscreen 侧配置级 asr-skip）→ 返回
+  //   "skip"，调用方走原有无字幕提示（提示文案已追加引导句，见
+  //   applyNoSubtitleState 调用处）；
   //   缓存命中 → 直接走成功收尾（不发 playurl、不下载、不转写）；
   //   成功 → 塞伪轨道 + setSubtitleBody + ready + 写缓存，返回 "done"；
   //   空结果 / 失败 → 落回 applyNoSubtitleState 并展示对应文案。
@@ -91,35 +66,25 @@ export function createAsrFallback(deps) {
         return "skip";
       }
 
-      // provider 列表 + 激活平台 Key 改经 background 消息获取（provider-store
-      // 存储层不再进内容 bundle）。响应是 background 侧的一次性一致快照
-      // （activeAsrProviderId/activeKey/asrLanguage 同源），provider 选择与
-      // 开关判定仍留在内容侧；不做内容侧缓存（低频调用，缓存会引入 Key 过期）。
-      const asrRuntime = await requestAsrRuntimeConfig();
-      ensureRunActive(runId);
-      if (!asrRuntime || asrRuntime.asrAutoFallback === false) {
-        return "skip";
-      }
-      const runtimeActiveId = String(asrRuntime.activeAsrProviderId || "").trim();
-      const activeProvider = (asrRuntime.providers || []).find((p) => p.id === runtimeActiveId);
+      // provider 元数据（name/model，无 Key——Key 单独存储、组装在 offscreen）
+      // 从设置快照取，仅用于平台名展示与缓存键；激活平台不在列表中 → skip。
+      // 转写所需的完整 provider+Key+语言由 offscreen 直调 background 的
+      // get-asr-runtime-config 获取（配置级缺失/关闭时 offscreen 回 asr-skip，
+      // 由下方 catch 静默跳过），apiKey 不再进页面 context。
+      const activeProvider = (settings.asrProviders || []).find((p) => p.id === activeId);
       if (!activeProvider) {
         return "skip";
       }
-
-      // 组装 provider（附激活平台已存 Key），准备跑管线
-      const provider = { ...activeProvider, apiKey: String(asrRuntime.activeKey || "") };
-      // 生效转写语言：全局 asrLanguage 设置（popup 顶部切换，默认 auto）。
-      // auto 不传语言参数，交服务端自动检测。
-      provider.language = asrRuntime.asrLanguage || "auto";
-      const platformName = provider.name || "语音识别平台";
-      const model = String(provider.model || "").trim();
+      const language = String(settings.asrLanguage || "").trim() || "auto";
+      const platformName = activeProvider.name || "语音识别平台";
+      const model = String(activeProvider.model || "").trim();
       // 固定本轮视频身份：孤儿清理/缓存键都以发起转写时的 bvid+cid 为准。
       const bvid = state.clip.bvid;
       const cid = state.clip.cid;
       const cacheKey = getSubtitleCacheKey({
         bvid,
         cid,
-        subtitleId: `asr:${runtimeActiveId}:${model}:${provider.language}`
+        subtitleId: `asr:${activeId}:${model}:${language}`
       });
 
       // 缓存命中：直接收尾（校验通过才用，不通过则清掉重新生成）
@@ -171,8 +136,6 @@ export function createAsrFallback(deps) {
       const transcribePromise = runAsrPipeline({
         bvid: state.clip.bvid,
         cid: state.clip.cid,
-        durationSec: state.clip.videoDuration,
-        provider,
         runId,
         isStale,
         onProgress: (msg) => setStatus(msg),
@@ -223,6 +186,14 @@ export function createAsrFallback(deps) {
       // stale（换视频被顶掉）不广播：新视频的抓取流程会发出自己的阶段标记。
       if (isStaleRunError(error)) {
         throw error;
+      }
+      // offscreen 配置级缺失/关闭/无激活平台 → asr-skip：静默跳过本轮回退，
+      // 返回 "skip" 走原有无字幕提示（与设置闸门 skip 同语义，零用户可见
+      // 错误）。此时"正在使用语音识别"提示与 asr-transcribing 广播已发出，
+      // 补一个 asr-done 终态广播解除 sidepanel 一键总结的等待标志。
+      if (error?.code === "asr-skip") {
+        broadcastSubtitleStatus("asr-done");
+        return "skip";
       }
       setStatus(`语音识别失败：${getErrorMessage(error)}`);
       broadcastSubtitleStatus("asr-failed");

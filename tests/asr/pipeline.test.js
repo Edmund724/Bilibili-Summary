@@ -1,8 +1,11 @@
 // pipeline.js + openai-transcriptions 适配器测试。
-// 关键点：pipeline 的切片宿主可注入（chunkHost 参数），单测直接传合成
-// 宿主，不真正路由到 offscreen（避免依赖 chrome.offscreen / AudioContext）；
-// 网络层全部用 fake fetch（vi.stubGlobal("fetch")）断言 FormData 与请求体。
-// runId 作废（STALE_RUN）与缓存命中通过 mock fetcher / 真实 state 验证。
+// 关键点：转写调度已迁入 offscreen（engine + ASR_ADAPTERS，见 entry/offscreen.js
+// 与 engine.test.js），页面侧 pipeline 只做编排——取音轨 → 任务宿主（生产为
+// offscreen 桥，测试传合成宿主）收文本结果 → 合并/诊断。宿主契约：
+//   async ({ audioUrl, backupUrls, isStale?, onProgress? }) =>
+//     { results, totalChunks, skippedSegments, failedChunks }
+// 网络层用 fake fetch（vi.stubGlobal("fetch")）断言 FormData 与请求体。
+// runId 作废（STALE_RUN）通过真实 state 验证。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
@@ -23,17 +26,11 @@ vi.mock("../../extension/asr/audio-source.js", () => ({
     backupUrls: []
   }))
 }));
-// 依赖 chrome.storage 的 provider store 也用不到（pipeline 直接收 provider）。
-vi.mock("../../extension/asr/asr-provider-store.js", () => ({
-  loadAsrProviders: vi.fn(async () => []),
-  getAsrProviderKey: vi.fn(async () => "")
-}));
-// retryAsync 已移入 shared/error-helpers.js（pipeline 与 fetcher 共用）。这里不用
-// vi.mock 工厂：resetModuleState 的 vi.resetModules 不会重跑 mock 工厂，工厂里
+// retryAsync 已移入 shared/error-helpers.js（转写重试现由 offscreen 侧
+// engine.js 调用，见 engine.test.js）。这里不用 vi.mock 工厂：
+// resetModuleState 的 vi.resetModules 不会重跑 mock 工厂，工厂里
 // importOriginal 捕获的真实导出会闭包到过期的 state 实例（ensureRunActive 因此
-// 看不到用例内 setFetchRunId 的变更）。改为 beforeEach 里对新导入的模块命名空间
-// vi.spyOn，每用例拿到新鲜实例，retryAsync 之外的真实导出（ensureRunActive 等）
-// 保持逐用例新鲜。
+// 看不到用例内 setFetchRunId 的变更）。保持直 import 真实模块，逐用例新鲜。
 vi.mock("../../extension/reader/presenter.js", () => ({
   subscribeSubtitleRefresh: vi.fn(),
   notifyReaderPresenter: vi.fn()
@@ -66,51 +63,22 @@ vi.mock("../../extension/bilibili/gateway.js", async (importOriginal) => {
   return { ...actual, contentFetchJson: vi.fn() };
 });
 
-// 合成切片宿主：模拟 offscreen 文档返回的切片（[{index,startSec,durationSec,
-// wavBlob}]），durationSec 按 plan.chunkSeconds 切（chunker 的 decideChunks
-// 语义），wavBlob 用 chunker 的 encodeWav 生成真实 WAV（16k 单声道固定样本值）。
-// 测试视频时长由调用方传入 durationSec，宿主按时长生成对应长度的采样。
-function makeSynthChunkHost({ durationSec = 60 } = {}) {
-  return async function synthChunkHost({ plan }) {
-    const chunkSeconds = Number(plan?.chunkSeconds) || 0;
-    const totalSamples = Math.max(1, Math.round(durationSec * 16000));
-    const samples = new Float32Array(totalSamples).fill(0.25);
-    const chunks = [];
-    let startSec = 0;
-    let index = 0;
-    while (totalSamples - Math.round(startSec * 16000) > 0) {
-      const secs = chunkSeconds > 0 ? chunkSeconds : durationSec;
-      const dur = Math.min(secs, durationSec - startSec);
-      const startSample = Math.round(startSec * 16000);
-      const sampleCount = Math.max(1, Math.round(dur * 16000));
-      chunks.push({
-        index,
-        startSec,
-        durationSec: dur,
-        wavBlob: encodeWav(samples.subarray(startSample, startSample + sampleCount), 16000)
-      });
-      startSec += dur;
-      index += 1;
-      if (chunkSeconds <= 0) break;
-    }
-    return chunks;
-  };
-}
-
-// 计数信号量 fake adapter：记录峰值并发并制造可控延迟，用于断言并发上限。
-function makeCountingAdapter() {
-  let active = 0;
-  let peak = 0;
-  let calls = 0;
-  const adapter = async () => {
-    active += 1;
-    peak = Math.max(peak, active);
-    calls += 1;
-    await new Promise((r) => setTimeout(r, 10));
-    active -= 1;
-    return { text: `片 ${calls}` };
-  };
-  return { adapter, getPeak: () => peak, getCalls: () => calls };
+// 合成任务宿主：模拟 offscreen 桥返回的文本结果（{results, totalChunks,
+// skippedSegments, failedChunks}），results 为按片 index 对齐的单片记录
+// [{ index, startSec, durationSec, result }]。durationSec 对齐 offscreen
+// streamWavChunks 的实际解码片长语义（测试按时长切好传入）。
+function makeSynthTaskHost(chunks) {
+  return vi.fn(async () => ({
+    results: chunks.map((chunk, index) => ({
+      index,
+      startSec: chunk.startSec,
+      durationSec: chunk.durationSec,
+      result: chunk.result
+    })),
+    totalChunks: chunks.length,
+    skippedSegments: 0,
+    failedChunks: 0
+  }));
 }
 
 // 默认 provider（openai-transcriptions，带时间戳）
@@ -124,16 +92,11 @@ const OPENAI_PROVIDER = {
   apiKey: "sk-test"
 };
 
-import { encodeWav } from "../../extension/asr/chunker.js";
-
 let pipeline;
-let retryAsyncMock;
 
 beforeEach(async () => {
   resetModuleState();
   pipeline = await import("../../extension/asr/pipeline.js");
-  const errorHelpers = await import("../../extension/shared/error-helpers.js");
-  retryAsyncMock = vi.spyOn(errorHelpers, "retryAsync").mockImplementation((fn) => fn());
   // fetch mock：默认直接 200 返回空 text（transcribe 各用例自己覆盖）
   vi.stubGlobal("fetch", vi.fn(async () => {
     return { ok: true, status: 200, json: async () => ({ text: "" }) };
@@ -278,40 +241,35 @@ describe("openai-transcriptions 适配器", () => {
 
 describe("pipeline 时间戳合成与偏移合并", () => {
   it("25 分钟视频 20 分钟片 → 2 片，全局偏移正确且递增", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          text: "片一",
-          segments: [
-            { start: 0, end: 1, text: "第一句" },
-            { start: 2, end: 3, text: "第二句" }
-          ]
-        })
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          text: "片二",
-          segments: [
-            { start: 0, end: 1, text: "第三句" },
-            { start: 1.5, end: 2.5, text: "第四句" }
-          ]
-        })
-      });
-    vi.stubGlobal("fetch", fetchMock);
-
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      durationSec: 25 * 60,
-      provider: { ...OPENAI_PROVIDER, supportsTimestamps: true },
       runId: getValidRunId(),
       onProgress: vi.fn(),
-      chunkHost: makeSynthChunkHost({ durationSec: 25 * 60 })
+      chunkHost: makeSynthTaskHost([
+        {
+          startSec: 0,
+          durationSec: 1200,
+          result: {
+            text: "片一",
+            segments: [
+              { start: 0, end: 1, text: "第一句" },
+              { start: 2, end: 3, text: "第二句" }
+            ]
+          }
+        },
+        {
+          startSec: 1200,
+          durationSec: 300,
+          result: {
+            text: "片二",
+            segments: [
+              { start: 0, end: 1, text: "第三句" },
+              { start: 1.5, end: 2.5, text: "第四句" }
+            ]
+          }
+        }
+      ])
     });
 
     expect(body).toEqual([
@@ -326,204 +284,199 @@ describe("pipeline 时间戳合成与偏移合并", () => {
     }
   });
 
-  it("无 segments（降级路径）：整片一条粗粒度字幕 {from,to,content}", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ text: "整片文本" }) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ text: "整片文本" }) });
-    vi.stubGlobal("fetch", fetchMock);
+  it("任务参数：host 收到音轨地址与 isStale/onProgress 透传，进度文本原样中继", async () => {
+    const onProgress = vi.fn();
+    const isStale = () => false;
+    const host = vi.fn(async ({ onProgress: relay }) => {
+      relay?.("语音识别中 1 片…");
+      return {
+        results: [{ index: 0, startSec: 0, durationSec: 60, result: { text: "片文本" } }],
+        totalChunks: 1,
+        skippedSegments: 0,
+        failedChunks: 0
+      };
+    });
 
+    await pipeline.runAsrPipeline({
+      bvid: "BV1test",
+      cid: "101",
+      runId: getValidRunId(),
+      isStale,
+      onProgress,
+      chunkHost: host
+    });
+
+    expect(host).toHaveBeenCalledTimes(1);
+    const hostArgs = host.mock.calls[0][0];
+    expect(hostArgs.audioUrl).toBe("https://example.com/audio.m4s");
+    expect(hostArgs.backupUrls).toEqual([]);
+    // isStale 原样透传（offscreen 桥在每条 port 消息到达时复核）
+    expect(hostArgs.isStale).toBe(isStale);
+    // 页面自身的阶段文案 + offscreen 引擎进度文本原样中继
+    expect(onProgress).toHaveBeenCalledWith("无字幕轨，正在获取音频流…");
+    expect(onProgress).toHaveBeenCalledWith("音频下载与解码中…");
+    expect(onProgress).toHaveBeenCalledWith("语音识别中 1 片…");
+  });
+
+  it("无 segments（降级路径）：整片一条粗粒度字幕 {from,to,content}", async () => {
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      durationSec: 10 * 60,
-      provider: { ...OPENAI_PROVIDER, supportsTimestamps: false },
       runId: getValidRunId(),
       onProgress: vi.fn(),
-      chunkHost: makeSynthChunkHost({ durationSec: 10 * 60 })
+      chunkHost: makeSynthTaskHost([
+        { startSec: 0, durationSec: 600, result: { text: "整片文本" } }
+      ])
     });
 
-    // 10 分钟整段 → 1 片（统一 20 分钟片）
     expect(body).toEqual([{ from: 0, to: 600, content: "整片文本" }]);
   });
 
   it("to 不超过片末边界（segments 越界被截断）", async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        text: "x",
-        segments: [{ start: 0, end: 99999, text: "越界句" }]
-      })
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      durationSec: 120,
-      provider: { ...OPENAI_PROVIDER, supportsTimestamps: true },
       runId: getValidRunId(),
-      chunkHost: makeSynthChunkHost({ durationSec: 120 })
+      chunkHost: makeSynthTaskHost([
+        {
+          startSec: 0,
+          durationSec: 120,
+          result: { text: "x", segments: [{ start: 0, end: 99999, text: "越界句" }] }
+        }
+      ])
     });
     expect(body[0]).toEqual({ from: 0, to: 120, content: "越界句" });
-  });
-});
-
-describe("pipeline 并发上限与 runId 作废", () => {
-  it("openai-transcriptions 最多 5 片并发：计数信号量 fake adapter 峰值 ≤5", async () => {
-    // 用适配器级并发窗口验证：直接调用 runWithConcurrency（导出的纯函数）
-    const counting = makeCountingAdapter();
-    const tasks = Array.from({ length: 10 }, (_, i) => async () => {
-      await counting.adapter();
-      return i;
-    });
-    const results = await pipeline.runWithConcurrency(tasks, 5);
-    expect(counting.getPeak()).toBeLessThanOrEqual(5);
-    expect(counting.getCalls()).toBe(10);
-    expect(results).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
   it("runId 作废：pipeline 各步守卫在 runId 不匹配时立即中止上抛", async () => {
     const { clipState } = await import("../../extension/core/state.js");
     // 模拟切换视频：fetchRunId 已前进，旧 runId 作废
     clipState.setFetchRunId(99);
+    const host = makeSynthTaskHost([{ startSec: 0, durationSec: 60, result: { text: "x" } }]);
 
     await expect(
       pipeline.runAsrPipeline({
         bvid: "BV1test",
         cid: "101",
-        durationSec: 11 * 60,
-        provider: { ...OPENAI_PROVIDER, supportsTimestamps: true },
         runId: 0,
         onProgress: vi.fn(),
-        chunkHost: makeSynthChunkHost({ durationSec: 11 * 60 })
+        chunkHost: host
       })
     ).rejects.toThrow("Stale refresh run");
+    // 守卫先于任务发起：宿主未被调用
+    expect(host).not.toHaveBeenCalled();
   });
 
   it("isStale 注入：回调返回 true 时中止上抛 STALE_RUN（fetcher 传视频键比较）", async () => {
+    const host = makeSynthTaskHost([{ startSec: 0, durationSec: 60, result: { text: "x" } }]);
     await expect(
       pipeline.runAsrPipeline({
         bvid: "BV1test",
         cid: "101",
-        durationSec: 11 * 60,
-        provider: { ...OPENAI_PROVIDER, supportsTimestamps: true },
         runId: getValidRunId(),
         isStale: () => true,
         onProgress: vi.fn(),
-        chunkHost: makeSynthChunkHost({ durationSec: 11 * 60 })
+        chunkHost: host
       })
     ).rejects.toMatchObject({ code: "STALE_RUN" });
+    expect(host).not.toHaveBeenCalled();
   });
 
   it("isStale 注入：返回 false 时即使 runId 过期也不中止（同视频并发抓取不误杀转写）", async () => {
     const { clipState } = await import("../../extension/core/state.js");
     clipState.setFetchRunId(99); // runId 已过期
 
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ text: "片文本" })
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      durationSec: 10 * 60,
-      provider: { ...OPENAI_PROVIDER, supportsTimestamps: false },
       runId: 0,
       isStale: () => false, // 视频键未变
       onProgress: vi.fn(),
-      chunkHost: makeSynthChunkHost({ durationSec: 10 * 60 })
+      chunkHost: makeSynthTaskHost([
+        { startSec: 0, durationSec: 600, result: { text: "片文本" } }
+      ])
     });
     expect(body).toEqual([{ from: 0, to: 600, content: "片文本" }]);
   });
 });
 
-describe("pipeline 重试与未知类型", () => {
-  it("网络错误/5xx：retryAsync 指数退避重试（transcribe 抛 HTTP 5xx）", async () => {
-    // 断言 pipeline 调用 retryAsync 时传了重试次数 2（指数退避由 shared/error-helpers
-    // 的 retryAsync 实现，这里 mock 掉直调，验证传参而非真实退避耗时）。
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
-      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
-      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ text: "ok" }) })
-      .mockResolvedValue({ ok: true, status: 200, json: async () => ({ text: "ok" }) });
-    vi.stubGlobal("fetch", fetchMock);
-
-    // 第 1 链：verbose 500 → 降级 json 500 → transcribe 抛 HTTP 500
-    // retryAsync mock 直调：抛错 → 但被 retryAsync 包装的 task 内部没有重试
-    // （mock 的 retryAsync 只调一次 fn）。要验证重试，改用真实 retryAsync 行为。
-    // 这里先断言 pipeline 以 retries=2 调用 retryAsync。
-    const { clipState } = await import("../../extension/core/state.js");
-    clipState.setFetchRunId(0);
-
-    const retrySpy = vi.fn(async (fn) => {
-      // 模拟 retryAsync 指数退避：最多 retries 次
-      let lastErr;
-      for (let attempt = 0; attempt <= 2; attempt += 1) {
-        try {
-          return await fn();
-        } catch (e) {
-          lastErr = e;
-        }
-      }
-      throw lastErr;
-    });
-    retryAsyncMock.mockImplementation(retrySpy);
-
-    const body = await pipeline.runAsrPipeline({
-      bvid: "BV1test",
-      cid: "101",
-      durationSec: 60,
-      provider: { ...OPENAI_PROVIDER, supportsTimestamps: true },
-      runId: 0,
-      chunkHost: makeSynthChunkHost({ durationSec: 60 })
-    });
-
-    // retryAsync 被调用（每片一次），重试 1 次后成功：
-    // 尝试1：verbose 500 + json 降级 500（2 请求）→ 失败；
-    // 尝试2：verbose 500（第 3 个 500）+ json 降级 200（第 4 个）→ 成功。
-    // 共 4 个请求。
-    expect(retrySpy).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(body).toEqual([{ from: 0, to: 60, content: "ok" }]);
-  });
-
-  it("未知平台类型：throw 明确错误", async () => {
-    await expect(
-      pipeline.runAsrPipeline({
-        bvid: "BV1test",
-        cid: "101",
-        durationSec: 60,
-        provider: { type: "mystery", baseUrl: "https://x", model: "m" },
-        runId: getValidRunId(),
-        chunkHost: makeSynthChunkHost({ durationSec: 60 })
-      })
-    ).rejects.toThrow("暂不支持的平台类型");
-  });
-});
-
-describe("pipeline 空结果", () => {
+describe("pipeline 空结果与诊断", () => {
   it("全部 text 为空白 → 返回 []", async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ text: "   " })
-    }));
-    vi.stubGlobal("fetch", fetchMock);
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",
-      durationSec: 60,
-      provider: { ...OPENAI_PROVIDER, supportsTimestamps: false },
       runId: getValidRunId(),
-      chunkHost: makeSynthChunkHost({ durationSec: 60 })
+      chunkHost: makeSynthTaskHost([
+        { startSec: 0, durationSec: 60, result: { text: "   " } }
+      ])
     });
     expect(body).toEqual([]);
+  });
+
+  it("空结果诊断：分片数/各片文本长度/事件诊断拼进文案", async () => {
+    const onEmptyDiagnostic = vi.fn();
+    await pipeline.runAsrPipeline({
+      bvid: "BV1test",
+      cid: "101",
+      runId: getValidRunId(),
+      chunkHost: makeSynthTaskHost([
+        { startSec: 0, durationSec: 60, result: { text: "", _asrDiag: { noSpeech: true } } }
+      ]),
+      onEmptyDiagnostic
+    });
+
+    expect(onEmptyDiagnostic).toHaveBeenCalledTimes(1);
+    const diagText = onEmptyDiagnostic.mock.calls[0][0];
+    expect(diagText).toContain("分片 1 片");
+    expect(diagText).toContain("各片文本长度[0]");
+    expect(diagText).toContain("事件诊断");
+    expect(diagText).not.toContain("转写失败");
+  });
+
+  it("空结果诊断追加失败计数：N 片转写失败、M 段解码失败已跳过", async () => {
+    const onEmptyDiagnostic = vi.fn();
+    // 转写失败片/解码失败段不产生 result 记录，只有 done 计数上来
+    const host = vi.fn(async () => ({
+      results: [],
+      totalChunks: 3,
+      skippedSegments: 2,
+      failedChunks: 1
+    }));
+
+    const body = await pipeline.runAsrPipeline({
+      bvid: "BV1test",
+      cid: "101",
+      runId: getValidRunId(),
+      chunkHost: host,
+      onEmptyDiagnostic
+    });
+
+    expect(body).toEqual([]);
+    const diagText = onEmptyDiagnostic.mock.calls[0][0];
+    expect(diagText).toContain("分片 3 片");
+    expect(diagText).toContain("1 片转写失败");
+    expect(diagText).toContain("2 段解码失败已跳过");
+  });
+
+  it("非空结果不追加失败计数（不改变成功路径文案）", async () => {
+    const onEmptyDiagnostic = vi.fn();
+    const host = vi.fn(async () => ({
+      results: [{ index: 0, startSec: 0, durationSec: 60, result: { text: "有内容" } }],
+      totalChunks: 2,
+      skippedSegments: 1,
+      failedChunks: 1
+    }));
+
+    const body = await pipeline.runAsrPipeline({
+      bvid: "BV1test",
+      cid: "101",
+      runId: getValidRunId(),
+      chunkHost: host,
+      onEmptyDiagnostic
+    });
+
+    expect(body).toEqual([{ from: 0, to: 60, content: "有内容" }]);
+    // 有文本产出 → 诊断回调不触发
+    expect(onEmptyDiagnostic).not.toHaveBeenCalled();
   });
 });
