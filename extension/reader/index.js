@@ -14,12 +14,15 @@
 // 符号按新家转发，保持对外接口与迁移前一致。
 //
 // Implementation modules behind the facade (issue 06+):
+//   ./ports.js         LEAF      explicit callback port (LAYOUT→SYNC /
+//                                SYNC→LIFECYCLE back-edges; registered by lifecycle)
 //   ./page-frame.js    LAYOUT    page frame: DOM focus/pruning/inline host
 //   ./player-host.js   LAYOUT    player mount/controls/observer + shared fns
 //   ./sync.js          SYNC      playback↔transcript sync (depends on LAYOUT)
 //   ./lifecycle.js     LIFECYCLE reader shell: lifecycle + render
 //                               (depends on LAYOUT + SYNC)
-// The dependency graph is acyclic: SYNC → LAYOUT, LIFECYCLE → SYNC + LAYOUT.
+// The dependency graph is acyclic: SYNC → LAYOUT, LIFECYCLE → SYNC + LAYOUT
+// （ports.js 为零依赖叶子，承载逆依赖回调；lifecycle.js 启动时单点注册）。
 // External code must not import these directly.
 //
 // Import-cycle note (issue 08): the reader implementation modules deliberately
@@ -105,6 +108,9 @@ export { startReadingViewSync } from "./sync.js";
 export { stopReadingViewSync } from "./sync.js";
 export { syncReadingViewPlayback } from "./sync.js";
 export { jumpReadingTarget } from "./sync.js";
+// seek 深入口（候选06）：阅读视图内点击与侧栏时间戳 seek 的唯一规范序入口
+//（清暂停 → 设跟随 → currentTime → 同步；resumePlayback 参数化播放策略）。
+export { seekReadingTarget } from "./sync.js";
 export { onReadingChapterClick } from "./sync.js";
 export { onReadingTranscriptClick } from "./sync.js";
 export { noteManualReaderInteraction } from "./sync.js";

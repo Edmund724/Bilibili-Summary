@@ -27,14 +27,13 @@ import { loadPlayerAi, isPlayerAiLoaded } from "./lazy-player-ai.js";
 // reader 域经加载器按需引入（候选02 分层惰性）：重符号（enterReaderMode 等）
 // 在处理器内 ensureReaderDomain() 后经命名空间取用；启动必需的轻符号直接从
 // 常驻微模块 import（isReaderViewOpen=纯 state 读、enforceNormalPageState-
-// IfNeeded=DOM 守卫、renderReadingStatus=状态栏文案写入、resetManualScrollPause
-// =共享叶子），不拖入 reader 重文件。
+// IfNeeded=DOM 守卫、renderReadingStatus=状态栏文案写入），不拖入 reader 重文件。
+// （候选06：seek 的滚动暂停重置/跟随设置已收进 reader 域单入口
+// seekReadingTarget 的规范序，本文件不再触碰 scroll-state 与跟随状态。）
 import { ensureReaderDomain } from "./lazy-reader.js";
 import { isReaderViewOpen } from "../reader/view-state.js";
 import { enforceNormalPageStateIfNeeded } from "../reader/page-state.js";
 import { renderReadingStatus } from "../reader/presentation.js";
-// 滚动暂停重置位于 reader 域的共享叶子模块（不再经 reader/index.js 转发）
-import { resetManualScrollPause } from "../reader/scroll-state.js";
 // 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
 import { logWarn } from "../shared/logging.js";
 
@@ -222,33 +221,36 @@ export function bindRuntimeEvents() {
     if (message.type === "sidepanel-seek-video-time") {
       // video-probe 动态装载（候选02，见文件头 import 注）：本地 chunk ~10ms，
       // 被用户点击到执行的时间差掩盖；响应形状与搬迁前一致（ok/currentTime）。
+      // 候选06 seek 深入口：reader 开着时定位收敛为 reader 域单入口
+      // seekReadingTarget（规范序：清暂停 → 设跟随 → currentTime → 同步），
+      // resumePlayback:false = 暂停中不自动播放（与旧侧栏行为等价）；reader
+      // 未开时保持旧行为：只 seek 视频，正在播放才续播，不触碰 reader 状态。
       import("../bilibili/video-probe.js")
-        .then(({ getRuntimeVideoElement }) => {
-          const seconds = Number(message.seconds);
+        .then(async ({ getRuntimeVideoElement }) => {
           const video = getRuntimeVideoElement();
           if (!video) {
             sendResponse({ ok: false, error: "当前页面没有找到可联动的视频播放器。" });
             return;
           }
+          if (isReaderViewOpen()) {
+            // 视图开 ⇒ 域已装载（ensure 即命中缓存）；装载/执行失败统一走
+            // 下方 catch 的错误口径回包。
+            const reader = await ensureReaderDomain();
+            const seekedTo = reader.seekReadingTarget(message.seconds, { resumePlayback: false });
+            if (seekedTo === null) {
+              // reader 域内未绑定到视频（与无视频同型降级）。
+              sendResponse({ ok: false, error: "当前页面没有找到可联动的视频播放器。" });
+              return;
+            }
+            sendResponse({ ok: true, currentTime: seekedTo });
+            return;
+          }
+          const seconds = Number(message.seconds);
           const nextTime = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
           const wasPaused = Boolean(video.paused);
           video.currentTime = nextTime;
           if (!wasPaused) {
             video.play().catch(() => {});
-          }
-          if (isReaderViewOpen()) {
-            resetManualScrollPause();
-            state.reader.setNextScrollBehavior("auto");
-            // 候选02：跟随/同步属 reader 重域（视图开着 ⇒ 域几乎必然已装载，ensure
-            // 即命中缓存）；sendResponse 不等它，与旧行为一致地立即回当前时间。
-            ensureReaderDomain()
-              .then((reader) => {
-                reader.updateReaderFollowState();
-                reader.syncReadingViewPlayback(true);
-              })
-              .catch((error) => {
-                logWarn("[BOC] reader follow sync after seek failed", error);
-              });
           }
           sendResponse({ ok: true, currentTime: nextTime });
         })

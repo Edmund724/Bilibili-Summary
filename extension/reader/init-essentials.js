@@ -7,8 +7,8 @@
 // ensureReaderDomain() 动态装载。
 //
 // 依赖全部为常驻叶子（core/state、shared/logging、./presenter、
-// ./presentation、./view-state、core/lazy-reader），不 import
-// lifecycle/player-host/page-frame/sync。
+// ./presentation、./view-state、core/lazy-reader、./presentation-fields 纯常量），
+// 不 import lifecycle/player-host/page-frame/sync。
 import { state, uiState } from "../core/state.js";
 import { logWarn } from "../shared/logging.js";
 import {
@@ -22,6 +22,15 @@ import {
 } from "./presentation.js";
 import { isReaderViewOpen } from "./view-state.js";
 import { ensureReaderDomain, isReaderDomainLoaded } from "../core/lazy-reader.js";
+// 候选06：监听键清单从呈现属性表派生（单一事实源 presentation-fields.js）。
+// 相对旧手抄清单的修正与保留：
+//   - 补进实际读写键 readerChapterVisible（旧清单盯的是改名前的旧键
+//     readerChapterVisibility，属 8c2e4ff 改名后的手抄走样）；
+//   - 旧键 readerChapterVisibility 仍在监听（settings-store 依旧归一化/落盘
+//     它以兼容旧存储数据），经表的 legacyStorageKey 覆盖；
+//   - enablePlayerAiQuickAction / playerAiQuickPrompt 两枚非呈现设置键以
+//     kind:"settings" 收进表（无属性落位，只为本监听键清单服务）。
+import { READER_SETTINGS_WATCH_KEYS } from "./presentation-fields.js";
 
 // 阅读模式调试辅助（__BOC_READER_DEBUG_SNAPSHOT__ 等）。注册保持常驻轻量；
 // 快照真身（createReaderDebugSnapshot，读播放器链布局/样式）在 reader 域内，
@@ -58,17 +67,9 @@ export function bindSettingsWatcher() {
     if (areaName !== "sync" && areaName !== "local") {
       return;
     }
-    if (
-      !changes.enablePlayerAiQuickAction &&
-      !changes.playerAiQuickPrompt &&
-      !changes.readerTheme &&
-      !changes.readerFontScale &&
-      !changes.readerLetterSpacing &&
-      !changes.readerLineHeight &&
-      !changes.readerContentWidth &&
-      !changes.readerChapterVisibility &&
-      !changes.readerTranscriptVisible
-    ) {
+    // 候选06：键清单表驱动（READER_SETTINGS_WATCH_KEYS = 全部 storageKey ∪
+    // legacyStorageKey），不再手抄。
+    if (!READER_SETTINGS_WATCH_KEYS.some((key) => changes[key])) {
       return;
     }
 

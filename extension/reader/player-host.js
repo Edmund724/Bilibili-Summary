@@ -1,15 +1,21 @@
 // Reader LAYOUT 层 · player-host 域（自 reader-impl.js 机械拆分）。
 //
 // 本文件拥有播放器宿主生命周期：挂载（ensureReaderPlayerMounted）/布局
-// （layoutReaderPlayerHost）/控制条恢复与悬停/小窗关闭调度/观察器，以及原
-// reader-impl.js 头部的共享函数（closeReaderCleanup、
-// updateReadingTranscriptTailSpacer、renderReadingStatus）与闭包访问器
-// （getPlayerHost/setVideoEventsBound/clearLayoutTimersForSyncStop）。
-// 分节函数体逐字节搬自原 reader-impl.js 的 player-host 分节（原 :680-1486），
-// 行为零变化。页面框架（DOM 焦点/剪枝/内联宿主）在 ./page-frame.js。
+// （layoutReaderPlayerHost）/控制条恢复与悬停/小窗关闭调度/观察器，以及闭包
+// 访问器（getPlayerHost/setVideoEventsBound/clearLayoutTimersForSyncStop）与
+// 宿主停止清理（closeReaderCleanup）。分节函数体逐字节搬自原 reader-impl.js
+// 的 player-host 分节（原 :680-1486），行为零变化。页面框架（DOM 焦点/剪枝/
+// 内联宿主/转写尾部留白）在 ./page-frame.js；状态栏文案在 ./presentation.js。
 //
-// SYNC 域调用经 ./sync-adapter.js 反环叶子（callSync）；./sync.js 与
-// ./lifecycle.js 依赖本层，本文件不得反向 import 它们。
+// 候选06 端口半边：原寄居本文件的「只为破环」符号已各归其位——
+// flushReadingTranscriptToIndex/setReadingTranscriptFlush 槽迁入 ./ports.js
+// 显式端口（实现由 lifecycle.js 单点注册）；renderReadingStatus 转发删除
+// （消费方直接 import ./presentation.js）；updateReadingTranscriptTailSpacer
+// 迁往 ./page-frame.js（内联宿主的滚动留白属页面框架）。closeReaderCleanup 与
+// clearLayoutTimersForSyncStop 留在本文件：它们清的是本域闭包定时器/瞬态
+//（属主在此），sync.js 经合法 SYNC→LAYOUT 静态边调用，并非反环 seam。
+// SYNC 域回调经 ./ports.js 显式端口（缺失即抛错）；./sync.js 与 ./lifecycle.js
+// 依赖本层，本文件不得反向 import 它们。
 // playerRetryTimer 闭包变量整体迁入 ./lifecycle.js（属主启动/清除都在那），
 // clearLayoutTimersForSyncStop 因此不再清它（closeReadingView 原本就在
 // stopReadingViewSync 之前自清；presenter reset 路径由 lifecycle 补齐清除）。
@@ -19,13 +25,16 @@ import { getReaderElement, isVisibleReaderControl } from "../shared/dom-utils.js
 import { sleep } from "../shared/utils.js";
 import { isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
-// 跨域模块接口：reader 私有 DOM id 表、页面宽度上限与小窗关闭（page-frame.js 导出）。
-import { ids, getReaderMainWidthLimit, dismissReaderMiniPlayer } from "./page-frame.js";
-import { callSync } from "./sync-adapter.js";
-// 候选02 分层惰性：renderReadingStatus 是纯 DOM 文案写入的轻函数，已迁往
-// 常驻微模块 ./presentation.js（message-handler/content.js 等常驻侧直接 import
-// 该模块，不再为一句状态栏文案拖入本域）。此处 re-export 维持域内旧路径。
-export { renderReadingStatus } from "./presentation.js";
+// 跨域模块接口：reader 私有 DOM id 表、页面宽度上限、小窗关闭与转写尾部留白
+//（page-frame.js 导出）。
+import {
+  ids,
+  getReaderMainWidthLimit,
+  dismissReaderMiniPlayer,
+  updateReadingTranscriptTailSpacer
+} from "./page-frame.js";
+// 候选06：SYNC 域回调经 reader 域唯一显式端口（ports.js 叶子，缺失即抛错）。
+import { readerPorts } from "./ports.js";
 
 // ===== reader-domain private bookkeeping (module-level closure state) =====
 //
@@ -107,30 +116,6 @@ function cancelScheduledReaderLayout() {
   }
 }
 
-// ===== 候选10 批2：字幕分批渲染的「同步补渲染」seam =====
-//
-// SYNC 域（sync.js）的跳转/跟随定位要求「目标条目未上屏时先同步补渲染到目标
-// index 再滚动」，但分批渲染任务归 LIFECYCLE（lifecycle.js）所有，而
-// SYNC → LIFECYCLE 是依赖图禁止的边（LIFECYCLE → SYNC + LAYOUT 才合法）。
-// 与 sync-adapter.js（SYNC 注册、LAYOUT 调用）互为镜像：LIFECYCLE 在模块加载
-// 时把补渲染实现注册进本基座，SYNC 经 flushReadingTranscriptToIndex 调用，
-// 依赖图保持无环。
-let transcriptFlushHandler = null;
-
-export function setReadingTranscriptFlush(handler) {
-  transcriptFlushHandler = typeof handler === "function" ? handler : null;
-}
-
-// 供 SYNC 域调用：目标 index 未上屏时同步补渲染。无注册实现（如测试只挂骨架、
-// 或列表本就无需分批）时直接返回 true，调用方的后续 querySelector 行为与
-// 未引入分批渲染前一致。
-export function flushReadingTranscriptToIndex(targetIndex) {
-  if (!transcriptFlushHandler) {
-    return true;
-  }
-  return Boolean(transcriptFlushHandler(targetIndex));
-}
-
 // ===== reader facade accessors for closure state =====
 //
 // These accessors are the seam between the layout (player-host.js) closure and
@@ -168,11 +153,11 @@ export function clearLayoutTimersForSyncStop() {
 }
 
 
-// Shared by the LAYOUT and LIFECYCLE domains: layoutReaderPlayerHost /
-// moveReadingMainInline call updateReadingTranscriptTailSpacer, and
-// stopReadingViewSync (sync.js) / cleanupReaderPlayerHost call
-// closeReaderCleanup. They live in the base layer so neither dependent module
-// needs a back-edge to this one.
+// 停止路径清理（LAYOUT 自有服务，非反环 seam）：closeReaderCleanup 清本域的
+// 控制条恢复定时器/在途标志，stopReadingViewSync（sync.js，合法 SYNC→LAYOUT
+// 静态边）与 cleanupReaderPlayerHost（本域）在停止/清理时调用。
+// 候选06 起 player-host 不再寄居任何「仅为破环」的符号——逆依赖回调一律走
+// ./ports.js 显式端口，本文件只保留播放器宿主自身的状态与清理。
 export function closeReaderCleanup() {
   if (controlsRecoveryTimer) {
     window.clearTimeout(controlsRecoveryTimer);
@@ -181,26 +166,9 @@ export function closeReaderCleanup() {
   controlsRecoveryInFlight = false;
 }
 
-export function updateReadingTranscriptTailSpacer() {
-  const spacer = document.getElementById(ids.readingTranscriptTailSpacer);
-  if (!spacer) {
-    return;
-  }
-  const inlineHost = document.getElementById("boc-reading-inline-host");
-  const transcriptList = document.getElementById(ids.readingTranscriptList);
-  const hostHeight = inlineHost?.clientHeight || transcriptList?.clientHeight || 0;
-  const spacerHeight = Math.max(hostHeight, Math.round(window.innerHeight * 0.92), 320);
-  // 候选10 批1 脏检查：现值与目标一致则跳写（250ms tick / 每帧追加都会调到）。
-  // 读现值而非缓存快照：换新 spacer 节点（重建后 style.height 为空）或外部
-  // 篡改时自动重写，无需额外的节点身份失效逻辑。
-  if (spacer.style.height === `${spacerHeight}px`) {
-    return;
-  }
-  spacer.style.height = `${spacerHeight}px`;
-}
-
-// renderReadingStatus 已迁往 ./presentation.js（文件头 re-export）：SYNC 与
-// LIFECYCLE 域经旧路径继续可用，常驻侧则直接 import 微模块。
+// renderReadingStatus 已迁往 ./presentation.js（消费方直接 import，本文件不再
+// 转发）；updateReadingTranscriptTailSpacer 已迁往 ./page-frame.js（内联宿主
+// 的滚动留白属页面框架域，本文件经 import 取用）。
 
 async function ensureReaderPlayerControlsRecovered(
   playerHostArg = playerHost,
@@ -709,9 +677,9 @@ export function bindReadingViewVideo(video = getRuntimeVideoElement()) {
       if (latestHost && latestHost !== playerHost) {
         queueEnsureReaderPlayerMounted();
       }
-      // Resolved at call time through the sync adapter, so this never
-      // creates a static reader-impl → sync.js cycle.
-      callSync("syncReadingViewPlayback");
+      // Resolved at call time through the explicit reader ports leaf
+      // (./ports.js), so this never creates a static player-host → sync.js edge.
+      readerPorts.syncReadingViewPlayback();
     }
   };
   video.addEventListener("timeupdate", syncHandler);

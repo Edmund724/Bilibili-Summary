@@ -6,9 +6,10 @@
 // on the base LAYOUT layer (page-frame.js + player-host.js) and on ./sync.js;
 // neither may import it, so the dependency graph stays acyclic:
 //
-//   LAYOUT       page-frame.js + player-host.js
-//   SYNC         sync.js            depends on LAYOUT
-//   LIFECYCLE    lifecycle.js       depends on LAYOUT + SYNC
+//   ports.js   显式回调端口叶子（本模块在文件尾单点注册全部端口实现）
+//   LAYOUT     page-frame.js + player-host.js    → ports
+//   SYNC       sync.js                           → LAYOUT + ports
+//   LIFECYCLE  lifecycle.js（本文件）            → SYNC + LAYOUT + ports
 //
 // The player-host layout closure is read here through the exported accessors
 // (getPlayerHost/...); playerRetryTimer's variable itself moved into this
@@ -58,6 +59,7 @@ import {
   applyReadingViewPresentation,
   getReaderStepperConfig
 } from "./presentation.js";
+import { READER_CLOSE_ATTRS } from "./presentation-fields.js";
 
 // LAYOUT (page-frame) functions this module drives:
 import {
@@ -67,7 +69,9 @@ import {
   clearReaderPageFocus,
   moveReadingMainInline,
   restoreReadingMainInline,
-  cleanupReaderFloatingArtifacts
+  cleanupReaderFloatingArtifacts,
+  // 候选06：转写尾部留白自 player-host 迁入 page-frame（内联宿主的滚动留白）。
+  updateReadingTranscriptTailSpacer
 } from "./page-frame.js";
 // LAYOUT (player-host) functions this module drives:
 import {
@@ -76,17 +80,17 @@ import {
   hasNativeReaderPlayerLayoutIssue,
   isReaderPresentationStable,
   layoutReaderPlayerHost,
-  setReadingTranscriptFlush,
   startReaderPlayerObserver,
   stopReaderPlayerObserver,
   ensureReaderPlayerMounted,
   scheduleReaderMiniPlayerDismiss,
   bindReaderHeaderActionsHover,
   cleanupReaderPlayerHost,
-  unbindReaderLayout,
-  updateReadingTranscriptTailSpacer
+  unbindReaderLayout
 } from "./player-host.js";
 import { resetManualScrollPause, setProgrammaticScrollUntil } from "./scroll-state.js";
+// 候选06 端口半边：reader 域唯一显式端口的单点注册入口（见文件尾注册区）。
+import { registerReaderPorts } from "./ports.js";
 
 // playerRetryTimer（readingPlayerRetryTimer）自 reader-impl.js 闭包迁入：属主启动
 //（scheduleReaderPlayerRetry）与清除（closeReadingView、presenter reset）都在本
@@ -104,7 +108,8 @@ let playerRetryTimer = 0;
 //   - 每批追加后调 updateReadingTranscriptTailSpacer 廉价收敛 spacer（其内部
 //     带脏检查），全部渲染完成后的最终布局与整段重建等价；
 //   - 跳转/跟随目标未上屏时经 ensureReadingTranscriptRenderedUpTo 同步补渲染
-//     （经 player-host 基座 seam 供 sync.js 调用，见文件尾注册）；
+//     （实现由本文件尾部的 registerReaderPorts 单点注册进显式端口，供 sync.js
+//     经 readerPorts.flushReadingTranscriptToIndex 回调）；
 //   - 渲染期间再次 renderReadingView（切轨/重进阅读模式）先取消上一轮任务。
 // 章节列表量小（几十条），保持整段渲染不变。
 const TRANSCRIPT_FIRST_BATCH = 120;
@@ -219,17 +224,29 @@ function ensureReadingTranscriptRenderedUpTo(targetIndex) {
   return true;
 }
 
-// 注册进 LAYOUT 基座（player-host）：SYNC 域的跳转/跟随定位经
-// flushReadingTranscriptToIndex 调到本模块。SYNC → LIFECYCLE 是依赖图禁止的
-// 边，经基座 seam 反转（与 sync-adapter.js 的 LAYOUT→SYNC 注册互为镜像）。
-// 函数声明有提升，模块求值时表已完整。
-setReadingTranscriptFlush(ensureReadingTranscriptRenderedUpTo);
+// ===== 候选06 端口半边：reader 域唯一显式端口的单点注册 =====
+//
+// 本模块是 reader 域的组装根（合法依赖 SYNC + LAYOUT），在模块求值时把全部
+// 端口实现一次性注册进 ./ports.js：
+//   - syncReadingViewPlayback / noteManualReaderInteraction：SYNC 域实现
+//    （LAYOUT 两域经端口回调，替代已删除的 sync-adapter.js 注册槽）；
+//   - flushReadingTranscriptToIndex → ensureReadingTranscriptRenderedUpTo：
+//     本域的分批补渲染实现（SYNC 经端口回调，替代已删除的 player-host
+//     setReadingTranscriptFlush 基座槽——旧槽无实现时静默返回 true，现缺失
+//     即抛错）。SYNC → LIFECYCLE 是依赖图禁止的边，经端口叶子反转。
+// 函数声明有提升，模块求值时表已完整；重复注册由端口侧报错拦截。
+registerReaderPorts({
+  syncReadingViewPlayback,
+  noteManualReaderInteraction,
+  flushReadingTranscriptToIndex: ensureReadingTranscriptRenderedUpTo
+});
 
 // SYNC functions this module drives (from sync.js):
 import {
   startReadingViewSync,
   stopReadingViewSync,
   syncReadingViewPlayback,
+  noteManualReaderInteraction,
   updateReaderFollowState
 } from "./sync.js";
 
@@ -451,24 +468,19 @@ export function closeReadingView() {
   readingView.classList.remove("open", "reader-page");
   readingView.setAttribute("aria-hidden", "true");
   readingView.setAttribute("data-boc-reader-ready", "0");
-  readingView.removeAttribute("data-boc-reader-follow");
-  document.body.removeAttribute("data-boc-reading-active");
-  document.documentElement.removeAttribute("data-boc-reader-mode");
-  document.body.removeAttribute("data-boc-reader-mode");
-  document.documentElement.removeAttribute("data-boc-reader-theme");
-  document.documentElement.removeAttribute("data-boc-reader-font-scale");
-  document.documentElement.removeAttribute("data-boc-reader-letter-spacing");
-  document.documentElement.removeAttribute("data-boc-reader-line-height");
-  document.documentElement.removeAttribute("data-boc-reader-content-width");
-  document.documentElement.removeAttribute("data-boc-reader-chapter-visibility");
-  document.documentElement.removeAttribute("data-boc-reader-has-chapters");
-  document.body.removeAttribute("data-boc-reader-theme");
-  document.body.removeAttribute("data-boc-reader-font-scale");
-  document.body.removeAttribute("data-boc-reader-letter-spacing");
-  document.body.removeAttribute("data-boc-reader-line-height");
-  document.body.removeAttribute("data-boc-reader-content-width");
-  document.body.removeAttribute("data-boc-reader-chapter-visibility");
-  document.body.removeAttribute("data-boc-reader-has-chapters");
+  // 候选06：移除清单从呈现属性表派生（presentation-fields.js 的 clearOnClose
+  // 标志），不再手抄。相对旧清单的修正：html/body 补清 transcript-visible——
+  // 153b976 引入该属性时只加了写入、漏补 close 清单，属走样而非故意（守卫
+  // 清理清单与 CSS 消费方均按可清除对待，详见 presentation-fields.js 头注）。
+  for (const attr of READER_CLOSE_ATTRS.readingView) {
+    readingView.removeAttribute(attr);
+  }
+  for (const attr of READER_CLOSE_ATTRS.body) {
+    document.body.removeAttribute(attr);
+  }
+  for (const attr of READER_CLOSE_ATTRS.html) {
+    document.documentElement.removeAttribute(attr);
+  }
   restoreReadingMainInline();
   // 候选10 批2：关闭阅读视图时取消未完成的字幕分批追加（rAF 与任务一并作废），
   // 避免关闭后还往已脱离上下文的列表追加节点。

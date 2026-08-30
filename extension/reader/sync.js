@@ -2,21 +2,25 @@
 // formerly the transcript-sync.js segment, issue 06+).
 //
 // Deep module owning the sync timer and the manual/programmatic scroll-pause
-// deadlines. Layout is the base layer (extension/reader/page-frame.js +
-// player-host.js); this module depends on it and must never be imported by it
-// (the dependency graph is acyclic: SYNC → LAYOUT).
+// deadlines, plus the reader 域唯一定位入口 seekReadingTarget（阅读视图内点击
+// 与侧栏时间戳 seek 的共享规范序）。
 //
-//   LAYOUT   page-frame.js + player-host.js
+// Layer graph (acyclic; ports.js is the zero-dependency leaf):
+//
+//   ports.js  显式回调端口（本域逆依赖的唯一通道，lifecycle 单点注册）
+//   LAYOUT    page-frame.js + player-host.js        → ports
 //                               module-level closure: playerHost, videoEventsBound,
 //                               scroll-pause variables, timer variables
-//   SYNC     sync.js            syncTimer lives here; scroll deadlines live here;
+//   SYNC      sync.js（本文件）                     → LAYOUT + ports
+//                               syncTimer lives here; scroll deadlines live here;
 //                               reads/writes the layout closure only through the
 //                               exported layout functions (imported below)
+//   LIFECYCLE lifecycle.js                          → SYNC + LAYOUT
 //
 // LAYOUT must not import this module — its layout/shell functions that need
-// sync-domain behavior call it through the adapter registered below
-// (registerSyncAdapter, in ./sync-adapter.js), keeping the dependency graph
-// acyclic: SYNC → LAYOUT.
+// sync-domain behavior call it through the explicit reader ports leaf
+// (./ports.js, registered once by lifecycle.js), keeping the dependency graph
+// acyclic: SYNC → LAYOUT. 不允许任何 `?.[` 式静默端口调用回潮。
 import { state } from "../core/state.js";
 import { formatCompactTimestamp } from "../shared/string-utils.js";
 import { getReaderElement } from "../shared/dom-utils.js";
@@ -35,31 +39,17 @@ import {
   bindReadingViewVideo,
   queueEnsureReaderPlayerMounted,
   scheduleReaderLayout,
-  flushReadingTranscriptToIndex,
   stopReaderPlayerObserver,
   unbindReaderPlayerControlsHover,
   closeReaderCleanup,
-  renderReadingStatus,
   setVideoEventsBound,
   clearLayoutTimersForSyncStop
 } from "./player-host.js";
-import { registerSyncAdapter } from "./sync-adapter.js";
-
-// Register this module's function table with the sync-adapter leaf
-// (./sync-adapter.js) so the LAYOUT functions (page-frame/player-host) can call
-// into the sync domain synchronously. Function declarations
-// are hoisted, so the table is complete at module-evaluation time. Removed in
-// the lifecycle extraction commit, when the shell segment moves to
-// lifecycle.js and imports ./sync.js directly.
-registerSyncAdapter({
-  startReadingViewSync,
-  stopReadingViewSync,
-  syncReadingViewPlayback,
-  updateReaderFollowState,
-  noteManualReaderInteraction,
-  resetManualScrollPause,
-  setProgrammaticScrollUntil
-});
+// 候选02 分层惰性：状态栏文案属常驻微模块，直接 import（不再经 player-host 转发）。
+import { renderReadingStatus } from "./presentation.js";
+// 候选06 端口半边：SYNC → LIFECYCLE 的字幕同步补渲染经显式端口回调
+//（实现由 lifecycle.js 启动时单点注册，缺失即抛错）。
+import { readerPorts } from "./ports.js";
 
 // ===== sync-domain private bookkeeping (module-level closure state) =====
 //
@@ -201,7 +191,9 @@ function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll = false
     // 先同步补渲染到目标 index 再取节点滚动，保证「跳不过去」不发生；章节
     // 列表始终整段渲染，无此问题。
     if (!scrollTranscriptNode && subtitleIndex >= 0) {
-      flushReadingTranscriptToIndex(subtitleIndex);
+      // 候选06：补渲染实现属 LIFECYCLE（分批渲染状态机在 lifecycle.js），经
+      // 显式端口回调（lifecycle 启动时注册，缺失即抛错，不再静默返回 true）。
+      readerPorts.flushReadingTranscriptToIndex(subtitleIndex);
       scrollTranscriptNode = transcriptList.querySelector(`[data-index="${subtitleIndex}"]`);
       if (scrollTranscriptNode) {
         // 补渲染后才拿到节点：同步补上 is-active 并刷新缓存，与「节点本就在屏」
@@ -286,22 +278,48 @@ function scrollReadingTranscriptItemIntoView(node) {
   });
 }
 
-export function jumpReadingTarget(seconds) {
+// ===== seek 深入口（候选06 端口半边） =====
+//
+// reader 域的唯一定位入口：阅读视图内点击章节/字幕时间戳与侧栏时间戳 seek
+// 一律收敛到这里（此前侧栏路径在 message-handler 手抄了一份乱序版本——先
+// currentTime 后清暂停，currentTime 触发的 timeupdate 会在手动暂停标志未清时
+// 跑同步，吞掉一次跟随滚动，属真 bug 风险）。
+//
+// 规范序锁死（不得重排）：
+//   1) resetManualScrollPause                    清手动滚动暂停
+//   2) setNextScrollBehavior("auto") + 跟随状态   设程序化跟随
+//   3) video.currentTime = nextTime              赋值定位（触发的事件落在干净状态上）
+//   4) resumePlayback 且暂停中才 play            播放策略参数化
+//   5) syncReadingViewPlayback(true)             立即同步高亮/滚动
+//
+// 播放策略：阅读视图内点击传 resumePlayback:true（旧行为：暂停即播放）；侧栏
+// seek 传 resumePlayback:false（暂停中不自动播放，与旧侧栏行为等价——旧侧栏
+// 只在「seek 前正在播放」时补一次 play，本就在播的视频无需干预）。
+export function seekReadingTarget(seconds, { resumePlayback = false } = {}) {
   const video = bindReadingViewVideo();
   if (!video) {
     renderReadingStatus("当前页面没有找到可联动的视频播放器。");
-    return;
+    return null;
   }
 
-  const nextTime = Math.max(0, Number(seconds || 0) || 0);
+  // 统一两侧旧实现的截断语义：非有限值（NaN/Infinity）一律回 0，
+  // 负值截为 0。返回截断后的时间供消息处理器回包使用。
+  const raw = Number(seconds);
+  const nextTime = Math.max(0, Number.isFinite(raw) ? raw : 0);
   resetManualScrollPause();
   state.reader.setNextScrollBehavior("auto");
   updateReaderFollowState();
   video.currentTime = nextTime;
-  if (video.paused) {
+  if (resumePlayback && video.paused) {
     video.play().catch(() => {});
   }
   syncReadingViewPlayback(true);
+  return nextTime;
+}
+
+// 阅读视图内点击跳转：自动播放策略（resumePlayback:true）委托给 seek 深入口。
+export function jumpReadingTarget(seconds) {
+  seekReadingTarget(seconds, { resumePlayback: true });
 }
 
 export function onReadingChapterClick(event) {

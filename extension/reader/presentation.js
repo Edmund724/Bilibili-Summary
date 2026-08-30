@@ -29,6 +29,7 @@ import {
 import { escapeHtml } from "../shared/string-utils.js";
 import { ids } from "./ids.js";
 import { ensureReaderDomain } from "../core/lazy-reader.js";
+import { READER_APPLY_FIELDS } from "./presentation-fields.js";
 
 // ===== 状态栏文案（自 player-host.js 迁入；sync/lifecycle 域内继续经本模块取用） =====
 
@@ -81,27 +82,28 @@ export function hydrateReaderStateFromSettings(settings = state.settings) {
 
 export function applyReadingViewPresentation() {
   const readingView = getReaderElement(ids.readingView);
-  readingView.dataset.theme = state.reader.readingTheme;
-  readingView.dataset.fontScale = state.reader.readingFontScale;
-  readingView.dataset.letterSpacing = state.reader.readingLetterSpacing;
-  readingView.dataset.lineHeight = state.reader.readingLineHeight;
-  readingView.dataset.contentWidth = state.reader.readingContentWidth;
-  readingView.dataset.chapterVisibility = state.reader.readingChapterVisible ? "auto" : "hide";
-  readingView.dataset.transcriptVisible = state.reader.readingTranscriptVisible ? "1" : "0";
-  document.documentElement.dataset.bocReaderTheme = state.reader.readingTheme;
-  document.documentElement.dataset.bocReaderFontScale = state.reader.readingFontScale;
-  document.documentElement.dataset.bocReaderLetterSpacing = state.reader.readingLetterSpacing;
-  document.documentElement.dataset.bocReaderLineHeight = state.reader.readingLineHeight;
-  document.documentElement.dataset.bocReaderContentWidth = state.reader.readingContentWidth;
-  document.documentElement.dataset.bocReaderChapterVisibility = state.reader.readingChapterVisible ? "auto" : "hide";
-  document.documentElement.dataset.bocReaderTranscriptVisible = state.reader.readingTranscriptVisible ? "1" : "0";
-  document.body.dataset.bocReaderTheme = state.reader.readingTheme;
-  document.body.dataset.bocReaderFontScale = state.reader.readingFontScale;
-  document.body.dataset.bocReaderLetterSpacing = state.reader.readingLetterSpacing;
-  document.body.dataset.bocReaderLineHeight = state.reader.readingLineHeight;
-  document.body.dataset.bocReaderContentWidth = state.reader.readingContentWidth;
-  document.body.dataset.bocReaderChapterVisibility = state.reader.readingChapterVisible ? "auto" : "hide";
-  document.body.dataset.bocReaderTranscriptVisible = state.reader.readingTranscriptVisible ? "1" : "0";
+  // 候选06：字段清单/作用目标/dataset 键/取值换算唯一来源 presentation-fields.js
+  //（READER_APPLY_FIELDS 子表），写入方不再手抄。写入顺序与迁移前逐字一致：
+  // readingView（短名）→ documentElement → body，各段内按表序逐字段。
+  const values = {};
+  for (const field of READER_APPLY_FIELDS) {
+    values[field.id] = field.readValue(state.reader);
+  }
+  for (const field of READER_APPLY_FIELDS) {
+    if (field.targets.readingView) {
+      readingView.dataset[field.datasetKeys.readingView] = values[field.id];
+    }
+  }
+  for (const field of READER_APPLY_FIELDS) {
+    if (field.targets.html) {
+      document.documentElement.dataset[field.datasetKeys.html] = values[field.id];
+    }
+  }
+  for (const field of READER_APPLY_FIELDS) {
+    if (field.targets.body) {
+      document.body.dataset[field.datasetKeys.body] = values[field.id];
+    }
+  }
   const readingChapterVisibleEl = getReaderElement(ids.readingChapterVisible);
   if (readingChapterVisibleEl) {
     readingChapterVisibleEl.checked = state.reader.readingChapterVisible;

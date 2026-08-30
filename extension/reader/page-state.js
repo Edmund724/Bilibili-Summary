@@ -3,8 +3,9 @@
 // 启动必需的三件套：clearReaderModePageState（清阅读模式页面标记）、
 // enforceNormalPageStateIfNeeded（非阅读页状态收敛）、bindNormalPageStateGuard
 // （MutationObserver 守卫）。它们全是「DOM 属性读写 + observer 注册」的轻操作，
-// 依赖只有 core/state.js 与 bilibili/video-id-shared.js（isReaderMode）——均为
-// 常驻轻模块，不触碰 LAYOUT/SYNC/LIFECYCLE 的任何重符号，因此整体下沉为常驻，
+// 依赖只有 core/state.js、bilibili/video-id-shared.js（isReaderMode）与
+// ./presentation-fields.js（纯常量表，候选06 单一事实源）——均为常驻轻模块，
+// 不触碰 LAYOUT/SYNC/LIFECYCLE 的任何重符号，因此整体下沉为常驻，
 // content.js init 无需为它们动态装载 reader 域。
 // 函数体逐字搬自 page-frame.js 对应分节，行为零变化。
 //
@@ -15,20 +16,21 @@
 // 模块内直接收敛页面状态，行为不受影响。
 import { state, uiState } from "../core/state.js";
 import { isReaderMode } from "../bilibili/video-id-shared.js";
+// 候选06：清理清单与 observer 的 attributeFilter 均从呈现属性表派生
+//（单一事实源 presentation-fields.js），本文件不再手抄字段清单。
+import { READER_GUARD_CLEAR_ATTRS, READER_GUARD_FILTER } from "./presentation-fields.js";
 
 export function clearReaderModePageState() {
-  document.documentElement.removeAttribute("data-boc-reader-mode");
-  document.documentElement.removeAttribute("data-boc-reader-line-height");
-  document.documentElement.removeAttribute("data-boc-reader-theme");
-  document.documentElement.removeAttribute("data-boc-reader-font-scale");
-  document.documentElement.removeAttribute("data-boc-reader-letter-spacing");
-  document.documentElement.removeAttribute("data-boc-reader-content-width");
-  document.documentElement.removeAttribute("data-boc-reader-chapter-visibility");
-  document.documentElement.removeAttribute("data-boc-reader-has-chapters");
-  document.documentElement.removeAttribute("data-boc-reader-transcript-visible");
-  document.body.removeAttribute("data-boc-reader-mode");
-  document.body.removeAttribute("data-boc-reader-line-height");
-  document.body.removeAttribute("data-boc-reading-active");
+  // 修正走样：旧手抄的 body 清单只有 mode/line-height/reading-active 三项，
+  // 与 html 全集不对称且无 CSS 依据（content.css 里 body 与 html 的选择器面
+  // 完全一致），残留属脏状态；按正确超集对齐全集（见 presentation-fields.js
+  // 头注的清单漂移考古）。
+  for (const attr of READER_GUARD_CLEAR_ATTRS.html) {
+    document.documentElement.removeAttribute(attr);
+  }
+  for (const attr of READER_GUARD_CLEAR_ATTRS.body) {
+    document.body.removeAttribute(attr);
+  }
 }
 
 function shouldForceNormalPageState(url = location.href) {
@@ -51,23 +53,15 @@ export function bindNormalPageStateGuard() {
   const observer = new MutationObserver(() => {
     enforceNormalPageStateIfNeeded();
   });
+  // 候选06：filter 从表派生（watchedByGuard 标志）。body 侧旧手抄只有 3 项
+  //（走样，同 clearReaderModePageState），现与 html 对齐为全集 + reading-active。
   observer.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: [
-      "data-boc-reader-mode",
-      "data-boc-reader-line-height",
-      "data-boc-reader-theme",
-      "data-boc-reader-font-scale",
-      "data-boc-reader-letter-spacing",
-      "data-boc-reader-content-width",
-      "data-boc-reader-chapter-visibility",
-      "data-boc-reader-has-chapters",
-      "data-boc-reader-transcript-visible"
-    ]
+    attributeFilter: READER_GUARD_FILTER.html
   });
   observer.observe(document.body, {
     attributes: true,
-    attributeFilter: ["data-boc-reader-mode", "data-boc-reader-line-height", "data-boc-reading-active"]
+    attributeFilter: READER_GUARD_FILTER.body
   });
   enforceNormalPageStateIfNeeded();
 }

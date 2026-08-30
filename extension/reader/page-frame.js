@@ -6,11 +6,13 @@
 // 搬自原 reader-impl.js 的 page-frame 分节（原 :257-679），行为零变化。
 // 播放器宿主（挂载/布局/控制条/观察器）在 ./player-host.js；两域互调一律走
 // 显式模块导出：本文件导出 getReaderMainWidthLimit/dismissReaderMiniPlayer，
-// player-host.js 导出 getPlayerHost/layoutReaderPlayerHost/
-// updateReadingTranscriptTailSpacer。page-frame ⇄ player-host 为 LAYOUT 层
-// 内部的相互依赖（全部为函数互调，运行时经 ESM live binding 解析）。
+// player-host.js 导出 getPlayerHost/layoutReaderPlayerHost。
+// page-frame ⇄ player-host 为 LAYOUT 层内部的相互依赖（全部为函数互调，运行时
+// 经 ESM live binding 解析）。转写列表尾部留白（updateReadingTranscriptTailSpacer）
+// 候选06 自 player-host 迁入本文件：它读取的 boc-reading-inline-host 正是本域
+// moveReadingMainInline 创建的内联宿主，属页面框架的滚动留白。
 //
-// SYNC 域调用经 ./sync-adapter.js 反环叶子（callSync）；./sync.js 与
+// SYNC 域调用经 ./ports.js 显式端口叶子（readerPorts）；./sync.js 与
 // ./lifecycle.js 依赖本层，本文件不得反向 import 它们。
 //
 // 候选02 分层惰性：页面状态守卫三件套（clearReaderModePageState /
@@ -24,8 +26,9 @@ import { isReaderMode } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import { isProgrammaticScrolling } from "./scroll-state.js";
 // 跨域模块接口：播放器宿主状态与布局函数（player-host.js 导出）。
-import { getPlayerHost, layoutReaderPlayerHost, updateReadingTranscriptTailSpacer } from "./player-host.js";
-import { callSync } from "./sync-adapter.js";
+import { getPlayerHost, layoutReaderPlayerHost } from "./player-host.js";
+// 候选06：SYNC 域回调经 reader 域唯一显式端口（ports.js 叶子，缺失即抛错）。
+import { readerPorts } from "./ports.js";
 import { applyInlineHostPresentation } from "./presentation.js";
 // 候选02 分层惰性：id 表已迁往 ./ids.js（常驻微模块），本文件内部仍大量按 id
 // 读写 reader DOM，经该 import 取用（此前为本地 const 定义，迁移后补上）。
@@ -174,7 +177,7 @@ export function moveReadingMainInline() {
       if (isProgrammaticScrolling()) {
         return;
       }
-      callSync("noteManualReaderInteraction");
+      readerPorts.noteManualReaderInteraction();
     };
     inlineHost.addEventListener("scroll", handleInlineHostManualScroll);
     inlineHost.addEventListener("wheel", handleInlineHostManualScroll, { passive: true });
@@ -201,6 +204,29 @@ export function restoreReadingMainInline() {
   inlineHost?.remove();
   mainOriginalParent = null;
   mainOriginalNextSibling = null;
+}
+
+// 转写列表尾部留白（候选06 自 player-host.js 迁入）：高度取内联宿主
+//（boc-reading-inline-host，由本域 moveReadingMainInline 创建）或转写列表的
+// 可视高度与视口的较大者——留白是内联滚动框架的一部分，故归页面框架域。
+// 消费方：player-host.layoutReaderPlayerHost（native/slot 两分支收尾）、本域
+// moveReadingMainInline、lifecycle 的分批追加/整段渲染，均经合法静态边取用。
+export function updateReadingTranscriptTailSpacer() {
+  const spacer = document.getElementById(ids.readingTranscriptTailSpacer);
+  if (!spacer) {
+    return;
+  }
+  const inlineHost = document.getElementById("boc-reading-inline-host");
+  const transcriptList = document.getElementById(ids.readingTranscriptList);
+  const hostHeight = inlineHost?.clientHeight || transcriptList?.clientHeight || 0;
+  const spacerHeight = Math.max(hostHeight, Math.round(window.innerHeight * 0.92), 320);
+  // 候选10 批1 脏检查：现值与目标一致则跳写（250ms tick / 每帧追加都会调到）。
+  // 读现值而非缓存快照：换新 spacer 节点（重建后 style.height 为空）或外部
+  // 篡改时自动重写，无需额外的节点身份失效逻辑。
+  if (spacer.style.height === `${spacerHeight}px`) {
+    return;
+  }
+  spacer.style.height = `${spacerHeight}px`;
 }
 
 function pruneReaderNonKeepBranches(node) {
