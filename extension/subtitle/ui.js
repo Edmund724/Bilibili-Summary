@@ -2,18 +2,82 @@ import { BOC_VERSION } from "../core/defaults.js";
 import { loadSubtitle } from "./fetcher.js";
 import { buildSubtitlePreview } from "../notes/render.js";
 import { isAiSubtitle } from "./selection.js";
-import { sanitizeFileName } from "../shared/string-utils.js";
+import { sanitizeFileName, escapeHtml } from "../shared/string-utils.js";
 import { cleanVideoUrl } from "../bilibili/video-id-shared.js";
 import { getSettings } from "../core/runtime.js";
 import { byId } from "../shared/dom-utils.js";
 import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import { normalizeDownloadFormat } from "../core/validators.js";
-import { state, clipState } from "../core/state.js";
+import { state } from "../core/state.js";
 import { setMessage } from "../ui/ui-renderer.js";
-import { ids } from "../reader/index.js";
+// ids 为常驻微模块（候选02 分层惰性）：纯常量表，不经 reader/index.js facade
+// 转发（否则总结链会静态拖起整个 reader 域）。
+import { ids } from "../reader/ids.js";
 import { refreshDerivedContent, rebuildDerivedContent } from "./core.js";
-import { setBusyState, setStatus } from "../ui/ui-renderer.js";
+import { setStatus } from "../ui/ui-renderer.js";
+
+// ===== 抓取结果渲染（候选02 分层惰性：自 ui/ui-renderer.js 移入） =====
+//
+// renderMeta / renderSubtitleSelect / setBusyState 只渲染「抓取结果」（视频属性、
+// 字幕轨列表、忙碌态），唯一调用方是总结链（fetcher 的抓取收尾/重置）与本模块
+// 的交互回调——留在 ui-renderer（常驻）会把它对 selection.js（isAiSubtitle）及
+// cache/cache-lru 的依赖一并拖回常驻。setStatus/setMessage 仍在 ui-renderer：
+// URL 变化编排与本模块错误提示在启动期使用。
+export function setBusyState(disabled) {
+  byId(ids.copyBtn).disabled = disabled;
+  byId(ids.downloadBtn).disabled = disabled;
+  byId(ids.refreshBtn).disabled = disabled;
+  byId(ids.settingsBtn).disabled = disabled;
+  byId(ids.subtitleSelect).disabled = disabled || state.clip.subtitles.length === 0;
+}
+
+export function renderMeta() {
+  const meta = byId(ids.meta);
+  if (!state.clip.bvid) {
+    meta.innerHTML = '<div class="boc-meta-item">尚未抓取视频信息</div>';
+    return;
+  }
+
+  const subtitleCount = state.clip.subtitles.length;
+  meta.innerHTML = `
+    <div class="boc-meta-item"><strong>标题：</strong>${escapeHtml(state.clip.title)}</div>
+    <div class="boc-meta-item"><strong>URL：</strong>${escapeHtml(cleanVideoUrl())}</div>
+    <div class="boc-meta-item"><strong>作者：</strong>${escapeHtml(state.clip.author || "未知")}</div>
+    <div class="boc-meta-item"><strong>日期：</strong>${escapeHtml(state.clip.uploadDate || "未知")}</div>
+    <div class="boc-meta-item"><strong>字幕轨：</strong>${subtitleCount}</div>
+  `;
+}
+
+export function renderSubtitleSelect() {
+  const select = byId(ids.subtitleSelect);
+  const subtitles = state.clip.subtitles || [];
+
+  if (subtitles.length === 0) {
+    select.innerHTML = '<option value="">暂无字幕</option>';
+    select.disabled = true;
+    return;
+  }
+
+  select.innerHTML = subtitles
+    .map((item) => {
+      const selectedById =
+        state.clip.selectedSubtitleId && String(item.id) === String(state.clip.selectedSubtitleId);
+      const selectedByUrl = item.subtitleUrl === state.clip.selectedSubtitleUrl;
+      const selected = selectedById || selectedByUrl ? "selected" : "";
+      const label = item.lanDoc || item.lan || "unknown";
+      const isAi = isAiSubtitle(item);
+      const aiTag = isAi ? " [AI自动]" : "";
+      const optionLabel = `${label}${aiTag}`;
+      return `<option value="${escapeHtml(item.subtitleUrl)}" data-lang="${escapeHtml(
+        label
+      )}" data-id="${escapeHtml(String(item.id || ""))}" data-isai="${isAi}" ${selected}>${escapeHtml(
+        optionLabel
+      )}</option>`;
+    })
+    .join("");
+  select.disabled = false;
+}
 
 export async function onSubtitleChange(event) {
   const value = event.target.value;
@@ -117,18 +181,10 @@ export function getPopupPayload() {
   };
 }
 
-export function applyNoSubtitleState() {
-  clipState.setSelectedSubtitleId("");
-  clipState.setSelectedSubtitleUrl("");
-  clipState.setSelectedSubtitleLang("");
-  clipState.setSubtitleBody([]);
-  clipState.setSubtitleFetchState("empty");
-  clipState.setHotComments([]);
-  clipState.setMarkdown("");
-  clipState.setSrt("");
-  clipState.setTxt("");
-  byId(ids.preview).value = "";
-}
+// applyNoSubtitleState 已迁入 subtitle/commit.js（commitNoSubtitle，无字幕出口
+// 逆事务的唯一实现，CONTEXT.md「字幕接受」词条）——清空选中态/body/派生内容
+// 与预览 DOM 属该事务，调用点（fetcher 的 finishNoSubtitle、asr/fallback 的
+// 失败出口）一律改走 commit。
 
 export function readVideoDescription() {
   const descNode = document.querySelector(

@@ -158,6 +158,8 @@ export function isAiSubtitle(item) {
 // 候选10 批1：写入端统一保证 subtitleBody 按 from 升序（稳定排序，同 from
 // 保持原有相对顺序，与读路径旧线性扫描的命中顺序一致）。core.js 的
 // findActiveSubtitleIndex 二分查找依赖该不变量；读路径一律不排序。
+// 唯一写入点为字幕接受事务（subtitle/commit.js acceptSubtitle）；缓存写入前
+// 的调用方预备排序（fetcher 网络路径落缓存）是仅有的例外。
 // 返回新数组，不原地修改入参（调用方持有的原引用保持不变）。
 export function sortSubtitleBodyByFrom(body) {
   if (!Array.isArray(body)) {

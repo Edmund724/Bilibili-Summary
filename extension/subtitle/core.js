@@ -70,7 +70,8 @@ export function getReadingTranscriptPlaceholderText() {
 }
 
 // 候选10 批1：二分命中回扫上限。写入端已保证 subtitleBody 按 from 升序
-// （fetcher / asr fallback 落 state 前统一经 sortSubtitleBodyByFrom 稳定排序），
+// （字幕接受事务 subtitle/commit.js 落 state 前统一经 sortSubtitleBodyByFrom
+// 稳定排序），
 // 正常顺序字幕区间互不重叠，二分候选点（最后一个 from <= currentTime 的条目）
 // 就是唯一可能命中者，第一步即返回或即无命中。回扫只为兼容写入端排序前遗留
 // 的重叠区间脏缓存，上限之外的深层重叠本就不会出现在正常数据里。

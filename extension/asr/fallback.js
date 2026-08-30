@@ -9,9 +9,11 @@
 //   - 注入 deps（传递闭包含 runtime.js→fetcher 或随 UI/上下文成环）：
 //     getSettings、loadProviders（provider 列表，asrProviders 已摘出 settings，
 //     fetcher 经 asr-providers-list 消息直读 provider-store）、setStatus、
-//     setMessage、applyNoSubtitleState、refreshDerivedContent、
-//     isReaderViewOpen、notifyReaderPresenter、
-//     runAsrPipeline（pipeline 闭包经 offscreen-bridge.page →shared/messaging→fetcher）、
+//     setMessage、acceptSubtitle / commitNoSubtitle（字幕接受事务的唯一入口，
+//     subtitle/commit.js，沿用依赖注入 seam——本模块对 subtitle 的直 import
+//     只保留 cache/selection 纯叶子，事务层闭包含 core→gateway/messaging，
+//     仍不走静态边）、runAsrPipeline（pipeline 闭包经
+//     offscreen-bridge.page →shared/messaging→fetcher）、
 //     broadcastSubtitleStatus（fetcher 内部函数）。
 // 模块不 import extension/entry/ 与 extension/pages/ 的任何内容。
 
@@ -25,7 +27,7 @@ import {
   saveSubtitleToCache,
   clearStaleAsrSubtitleCache
 } from "../subtitle/cache.js";
-import { validateSubtitleByDuration, sortSubtitleBodyByFrom } from "../subtitle/selection.js";
+import { validateSubtitleByDuration } from "../subtitle/selection.js";
 
 // STALE_RUN 信号构造：在本模块里只表示"调用方让位、零 UI 写入"（fetcher 的
 // catch 对 STALE_RUN 静默返回），不再表示转写被中止——切视频不取消任务。
@@ -50,10 +52,8 @@ export function createAsrFallback(deps) {
     loadProviders,
     setStatus,
     setMessage,
-    applyNoSubtitleState,
-    refreshDerivedContent,
-    isReaderViewOpen,
-    notifyReaderPresenter,
+    acceptSubtitle,
+    commitNoSubtitle,
     runAsrPipeline,
     broadcastSubtitleStatus
   } = deps;
@@ -71,11 +71,11 @@ export function createAsrFallback(deps) {
 
   // 无字幕轨时的语音识别回退入口。流程：
   //   skip（未启用开关 / 无激活平台 / offscreen 侧配置级 asr-skip）→ 返回
-  //   "skip"，调用方走原有无字幕提示（提示文案已追加引导句，见
-  //   applyNoSubtitleState 调用处）；
-  //   缓存命中 → 直接走成功收尾（不发 playurl、不下载、不转写）；
-  //   成功 → 塞伪轨道 + setSubtitleBody + ready + 写缓存，返回 "done"；
-  //   空结果 / 失败 → 落回 applyNoSubtitleState 并展示对应文案。
+  //   "skip"，调用方（fetcher 的 finishNoSubtitle）走无字幕出口逆事务
+  //  （commit.commitNoSubtitle，skip 分支的状态栏文案已追加引导句）；
+  //   缓存命中 → 直接走字幕接受事务收尾（不发 playurl、不下载、不转写）；
+  //   成功 → 塞伪轨道 + 字幕接受事务 + 写缓存，返回 "done"；
+  //   空结果 / 失败 → 落回无字幕出口逆事务并展示对应文案。
   // 过期语义与转写解耦：runId 守卫只拦截"发起前调用方已被顶掉"（早期快出，
   // 零副作用）；转写一旦发起就不再因切视频/runId 前进而中止——isStale（bvid/cid
   // 快照 vs 实时 clip）只门控 UI 应用点，成果一律落缓存并广播终态。
@@ -140,18 +140,16 @@ export function createAsrFallback(deps) {
       if (cachedBody && Array.isArray(cachedBody) && cachedBody.length > 0) {
         const cachedCheck = validateSubtitleByDuration(cachedBody, state.clip.videoDuration);
         if (cachedCheck.ok) {
-          clipState.setSelectedSubtitleId("asr");
-          clipState.setSelectedSubtitleUrl("");
-          clipState.setSelectedSubtitleLang(`语音识别（${platformName}）`);
-          // 候选10 批1：ASR 缓存命中同样落 state 前稳定排序（旧缓存条目可能
-          // 无序），维持「subtitleBody 按 from 升序」不变量供读路径二分。
-          clipState.setSubtitleBody(sortSubtitleBodyByFrom(cachedBody));
-          clipState.setSubtitleFetchState("ready");
-          clipState.setNoSubtitleReason(null);
-          await refreshDerivedContent();
-          if (isReaderViewOpen()) {
-            notifyReaderPresenter("subtitle-ready");
-          }
+          // 字幕接受事务（subtitle/commit.js）：ASR 缓存命中同样经事务收尾——
+          // 旧缓存条目可能无序，幂等稳定排序由事务单点完成（「subtitleBody 按
+          // from 升序」不变量）；写 selected 三项 → ready → 清原因 → 刷新派生 →
+          // 通知 reader 全在事务内。
+          await acceptSubtitle({
+            body: cachedBody,
+            selectedSubtitleId: "asr",
+            selectedSubtitleUrl: "",
+            selectedSubtitleLang: `语音识别（${platformName}）`
+          });
           setStatus("语音识别完成（缓存命中）。");
           return "done";
         }
@@ -293,10 +291,12 @@ export function createAsrFallback(deps) {
         clipState.setNoSubtitleReason(noSubtitleReasonFromAsrSkipError(error));
         return "skip";
       }
-      clipState.setNoSubtitleReason("asr-failed");
       setStatus(`语音识别失败：${getErrorMessage(error)}`);
       broadcastSubtitleStatus("asr-failed");
-      applyNoSubtitleState();
+      // 无字幕出口走字幕接受事务的逆操作（subtitle/commit.js）：清空选中态/
+      // body/派生内容，fetchState 落 empty。失败原因随出口写入事务（不再提前
+      // 直写）；asrResult 非 skip，不出引导文案。
+      await commitNoSubtitle({ noSubtitleReason: "asr-failed", asrResult: "error" });
       return "error";
     }
   }
@@ -331,31 +331,26 @@ export function createAsrFallback(deps) {
     }
   }
 
-  // ASR 转写成功后的收尾：塞伪轨道 → body → ready → 派生内容 → 完成提示。
-  // 缓存写入已在转写共享单元内完成。runId 只守卫 UI 状态收尾（被更新的
-  // 抓取顶掉时静默让位，转写成果本身已落缓存）。
-  function finishAsrFallback({ runId, body, platformName }) {
+  // ASR 转写成功后的收尾：塞伪轨道（路径特有的前置动作，留在本模块）→ 字幕
+  // 接受事务（subtitle/commit.js）→ 完成提示。pipeline 产物本身已按 from 排序，
+  // 事务内幂等再收口一次（含共享转写/缓存副本路径），「subtitleBody 按 from
+  // 升序」不变量单点保证。缓存写入已在转写共享单元内完成。runId 只守卫 UI
+  // 状态收尾（被更新的抓取顶掉时静默让位，转写成果本身已落缓存）。
+  async function finishAsrFallback({ runId, body, platformName }) {
     ensureRunActive(runId);
     clipState.setSubtitles([
       { id: "asr", lan: "asr-zh", lanDoc: `语音识别（${platformName}）`, subtitleUrl: "" },
       ...(state.clip.subtitles || [])
     ]);
-    clipState.setSelectedSubtitleId("asr");
-    clipState.setSelectedSubtitleUrl("");
-    clipState.setSelectedSubtitleLang(`语音识别（${platformName}）`);
-    // 候选10 批1：pipeline 产物本身已按 from 排序，这里统一再走一次稳定排序
-    // 收口（含共享转写/缓存副本路径），保证「subtitleBody 按 from 升序」不变量。
-    clipState.setSubtitleBody(sortSubtitleBodyByFrom(body));
-    clipState.setSubtitleFetchState("ready");
-    clipState.setNoSubtitleReason(null);
-    return refreshDerivedContent().then(() => {
-      if (isReaderViewOpen()) {
-        notifyReaderPresenter("subtitle-ready");
-      }
-      setStatus(`语音识别完成，已生成 ${body.length} 条字幕。`);
-      broadcastSubtitleStatus("asr-done");
-      return "done";
+    await acceptSubtitle({
+      body,
+      selectedSubtitleId: "asr",
+      selectedSubtitleUrl: "",
+      selectedSubtitleLang: `语音识别（${platformName}）`
     });
+    setStatus(`语音识别完成，已生成 ${body.length} 条字幕。`);
+    broadcastSubtitleStatus("asr-done");
+    return "done";
   }
 
   // 进行中转写探针（"当前视频在转写"语义，按 bvid/cid 匹配）：fetcher 的

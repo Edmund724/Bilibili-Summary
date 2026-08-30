@@ -8,13 +8,20 @@
 // 跑、成果照落缓存，其它视频的并行转写各自在册、完成只清自己的键；切回原
 // 视频经共享单元/缓存命中自动接上。
 // mock 结构：与 asr-fallback.test.js 相同——内存版 chrome.storage.local 承载
-// 真实 cache.js，其余依赖为测试内构造的假依赖，不经 vi.mock。
+// 真实 cache.js；字幕接受事务（acceptSubtitle / commitNoSubtitle）注入 vi.fn
+// 包装的真实实现（真实落 state + 可观察调用），其余依赖为测试内构造的假依赖，
+// 不经 vi.mock。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 import { createAsrFallback } from "../../extension/asr/fallback.js";
 import { state, clipState } from "../../extension/core/state.js";
 import { getSubtitleCacheKey } from "../../extension/subtitle/cache.js";
+import {
+  acceptSubtitle as realAcceptSubtitle,
+  commitNoSubtitle as realCommitNoSubtitle,
+  configureCommitUi
+} from "../../extension/subtitle/commit.js";
 
 const BVID = "BV1test000000";
 const CID = "101";
@@ -84,6 +91,16 @@ beforeEach(() => {
   resetModuleState();
   memoryStorage = installMemoryStorage();
 
+  // 真实 commitNoSubtitle 需要注入渲染回调 + 预览 DOM 节点（见 asr-fallback.test.js）
+  configureCommitUi({
+    renderMeta: vi.fn(),
+    renderSubtitleSelect: vi.fn(),
+    setStatus: vi.fn()
+  });
+  const preview = document.createElement("textarea");
+  preview.id = "boc-preview";
+  document.body.appendChild(preview);
+
   clipState.setFetchRunId(1);
   clipState.setBvid(BVID);
   clipState.setCid(CID);
@@ -105,10 +122,9 @@ beforeEach(() => {
     loadProviders: vi.fn(async () => [PROVIDER]),
     setStatus: vi.fn(),
     setMessage: vi.fn(),
-    applyNoSubtitleState: vi.fn(),
-    refreshDerivedContent: vi.fn(async () => {}),
-    isReaderViewOpen: vi.fn(() => false),
-    notifyReaderPresenter: vi.fn(),
+    // 字幕接受事务：vi.fn 包装真实实现（真实落 state + 可观察调用）
+    acceptSubtitle: vi.fn(realAcceptSubtitle),
+    commitNoSubtitle: vi.fn(realCommitNoSubtitle),
     runAsrPipeline: vi.fn(async () => []),
     broadcastSubtitleStatus: vi.fn()
   };
@@ -195,14 +211,16 @@ describe("ASR 转写中并发调用（共享转写、成果落缓存）", () => 
     expect(statusCalls.some((s) => s.includes("缓存命中"))).toBe(true);
   });
 
-  it("转写失败：asr-failed 广播发出，落回 applyNoSubtitleState", async () => {
+  it("转写失败：asr-failed 广播发出，走无字幕出口逆事务（commit.commitNoSubtitle）", async () => {
     deps.runAsrPipeline.mockRejectedValue(new Error("音频解码失败"));
 
     const result = await fallback.maybeRunAsrFallback({ runId: 1 });
 
     expect(result).toBe("error");
     expect(deps.broadcastSubtitleStatus).toHaveBeenCalledWith("asr-failed");
-    expect(deps.applyNoSubtitleState).toHaveBeenCalledTimes(1);
+    expect(deps.commitNoSubtitle).toHaveBeenCalledTimes(1);
+    expect(deps.commitNoSubtitle).toHaveBeenCalledWith({ noSubtitleReason: "asr-failed", asrResult: "error" });
+    expect(state.clip.subtitleFetchState).toBe("empty");
   });
 
   it("转写进行中走 awaitActiveAsrTranscribe（fetcher 失败兜底路径）：跟随共享转写收尾，不重复转写", async () => {
@@ -247,7 +265,11 @@ describe("ASR 转写中并发调用（共享转写、成果落缓存）", () => 
     // 等待者静默退出；发起者走自己的 catch（error 收尾）
     await expect(waiter).resolves.toBeUndefined();
     await expect(first).resolves.toBe("error");
-    expect(state.clip.subtitleFetchState).toBe("idle"); // 收尾未执行（等待者失败路径静默）
+    // 等待者不重复收尾（finishAsrFallback 未执行）；发起者的无字幕出口逆事务
+    // 恰好执行一次，fetchState 落 empty（生产语义：真实 applyNoSubtitleState 同样如此）
+    expect(deps.acceptSubtitle).not.toHaveBeenCalled();
+    expect(deps.commitNoSubtitle).toHaveBeenCalledTimes(1);
+    expect(state.clip.subtitleFetchState).toBe("empty");
   });
 });
 

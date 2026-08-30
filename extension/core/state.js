@@ -82,8 +82,10 @@ const clipState = {
   //   "asr-disabled"  无字幕自动转写开关未开启
   //   "asr-failed"    语音识别失败
   //   "asr-empty"     语音识别成功但未识别到语音内容
-  // 写入点在 asr/fallback.js 各终态分支；清除点为 resetClipState 与所有
-  // subtitleFetchState → "ready" 的写入点（见 fetcher.js / fallback.js）。
+  // 写入点在 asr/fallback.js 各终态分支（skip/empty 原因；失败原因随无字幕
+  // 出口逆事务 commitNoSubtitle 写入）；清除点为 resetClipState 与字幕接受
+  // 事务（subtitle/commit.js acceptSubtitle，subtitleFetchState → "ready"
+  // 的唯一写入点）。
   noSubtitleReason: null,
   chapters: [],
   hotComments: [],

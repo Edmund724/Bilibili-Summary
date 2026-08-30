@@ -2,14 +2,16 @@
 // 依赖注入 seam：cache/cache-lru 直 import 真实模块，跑在测试内构造的内存版
 // chrome.storage.local（Map 承载，支持 get(null) 全量枚举）之上；runAsrPipeline、
 // getSettings、loadProviders（provider 列表，provider-store 形状）与 UI 回调
-// （setStatus / setMessage / applyNoSubtitleState / refreshDerivedContent /
-// isReaderViewOpen / notifyReaderPresenter / broadcastSubtitleStatus）全部为
-// 测试内构造的假依赖。不经 vi.mock 间接测 fetcher 内部。
+// （setStatus / setMessage / broadcastSubtitleStatus）全部为测试内构造的假依赖。
+// 字幕接受事务（acceptSubtitle / commitNoSubtitle，subtitle/commit.js）注入
+// vi.fn 包装的真实实现：端到端 state 断言不变（事务真实落 state），同时锁
+// 「调用了 commit」；reader 通知职责在事务内（经真实 presenter 订阅观察）。
+// 不经 vi.mock 间接测 fetcher 内部。
 // provider 元数据（name/model）经注入的 loadProviders 取（asrProviders 已摘出
 // settings——列表归 provider-store，Key 不再进页面——组装移到 offscreen）；
 // 重点断言：skip 闸门（开关关 / 无激活平台 / 平台不在 provider 列表 / offscreen
 // asr-skip）、缓存命中（时长校验过 → done；不过 → 清缓存重新生成）、空结果诊
-// 断、错误路径（asr-failed 广播 + applyNoSubtitleState）、成功路径（写缓存 +
+// 断、错误路径（asr-failed 广播 + 无字幕出口逆事务）、成功路径（写缓存 +
 // clearStaleAsrSubtitleCache 孤儿清理 + 伪轨道收尾）、stale run。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +19,12 @@ import { resetModuleState } from "../setup.js";
 import { createAsrFallback } from "../../extension/asr/fallback.js";
 import { state, clipState } from "../../extension/core/state.js";
 import { getSubtitleCacheKey, saveSubtitleToCache } from "../../extension/subtitle/cache.js";
+import {
+  acceptSubtitle as realAcceptSubtitle,
+  commitNoSubtitle as realCommitNoSubtitle,
+  configureCommitUi
+} from "../../extension/subtitle/commit.js";
+import { subscribeReaderPresenter } from "../../extension/reader/presenter.js";
 
 const BVID = "BV1test000000";
 const CID = "101";
@@ -91,10 +99,9 @@ function buildDeps(overrides = {}) {
     loadProviders: vi.fn(async () => [PROVIDER]),
     setStatus: vi.fn(),
     setMessage: vi.fn(),
-    applyNoSubtitleState: vi.fn(),
-    refreshDerivedContent: vi.fn(async () => {}),
-    isReaderViewOpen: vi.fn(() => false),
-    notifyReaderPresenter: vi.fn(),
+    // 字幕接受事务：vi.fn 包装真实实现（真实落 state + 可观察调用）
+    acceptSubtitle: vi.fn(realAcceptSubtitle),
+    commitNoSubtitle: vi.fn(realCommitNoSubtitle),
     runAsrPipeline: vi.fn(async () => []),
     broadcastSubtitleStatus: vi.fn(),
     ...overrides
@@ -108,6 +115,17 @@ let fallback;
 beforeEach(() => {
   resetModuleState();
   memoryStorage = installMemoryStorage();
+
+  // 真实 commitNoSubtitle 会渲染轨道/元信息（注入回调）并清空预览 DOM：
+  // 注入 vi.fn 渲染回调 + 提供 jsdom 空节点即可，不依赖真实渲染。
+  configureCommitUi({
+    renderMeta: vi.fn(),
+    renderSubtitleSelect: vi.fn(),
+    setStatus: vi.fn()
+  });
+  const preview = document.createElement("textarea");
+  preview.id = "boc-preview";
+  document.body.appendChild(preview);
 
   clipState.setFetchRunId(RUN_ID);
   clipState.setBvid(BVID);
@@ -148,7 +166,7 @@ describe("maybeRunAsrFallback skip 闸门", () => {
     expect(result).toBe("skip");
     expect(deps.runAsrPipeline).not.toHaveBeenCalled();
     expect(deps.broadcastSubtitleStatus).not.toHaveBeenCalled();
-    expect(deps.applyNoSubtitleState).not.toHaveBeenCalled();
+    expect(deps.commitNoSubtitle).not.toHaveBeenCalled();
     // 无字幕原因：转写开关未开启（sidepanel 按此提示引导开启）
     expect(clipState.noSubtitleReason).toBe("asr-disabled");
   });
@@ -185,7 +203,7 @@ describe("maybeRunAsrFallback skip 闸门", () => {
     const result = await fallback.maybeRunAsrFallback({ runId: RUN_ID });
 
     expect(result).toBe("skip");
-    expect(deps.applyNoSubtitleState).not.toHaveBeenCalled();
+    expect(deps.commitNoSubtitle).not.toHaveBeenCalled();
     // asr-transcribing 已广播（转写提示已展示），asr-skip 静默跳过必须补
     // 终态广播，否则 sidepanel 一键总结的 asrTranscribingActive 卡死
     expect(deps.broadcastSubtitleStatus.mock.calls.map((c) => c[0])).toEqual([
@@ -267,6 +285,15 @@ describe("maybeRunAsrFallback 成功与缓存", () => {
     expect(state.clip.selectedSubtitleId).toBe("asr");
     expect(state.clip.selectedSubtitleLang).toBe("语音识别（本地 Whisper）");
 
+    // 收尾走字幕接受事务（vi.fn 包装真实实现：state 断言如上即事务效果）
+    expect(deps.acceptSubtitle).toHaveBeenCalledTimes(1);
+    expect(deps.acceptSubtitle).toHaveBeenCalledWith({
+      body: TRANSCRIBED_BODY,
+      selectedSubtitleId: "asr",
+      selectedSubtitleUrl: "",
+      selectedSubtitleLang: "语音识别（本地 Whisper）"
+    });
+
     // 成果落缓存 + 孤儿清理：新键写入、旧变体被移除
     const cacheKey = asrCacheKey();
     expect(memoryStorage.get(cacheKey)?.body).toEqual(TRANSCRIBED_BODY);
@@ -281,13 +308,19 @@ describe("maybeRunAsrFallback 成功与缓存", () => {
     expect(statusCalls.some((s) => s.includes("语音识别完成，已生成 3 条字幕。"))).toBe(true);
   });
 
-  it("阅读视图打开时收尾通知 presenter：subtitle-ready", async () => {
-    deps.isReaderViewOpen.mockReturnValue(true);
+  it("阅读视图打开时收尾通知 presenter：subtitle-ready（通知职责在字幕接受事务内）", async () => {
+    // reader 通知由 commit.acceptSubtitle 负责（本文件不经 vi.mock）：经真实
+    // presenter seam 订阅观察端到端通知。
+    const handler = vi.fn();
+    const unsubscribe = subscribeReaderPresenter(handler);
+    state.reader.setViewOpen(true);
     deps.runAsrPipeline.mockResolvedValue(TRANSCRIBED_BODY);
 
     await fallback.maybeRunAsrFallback({ runId: RUN_ID });
 
-    expect(deps.notifyReaderPresenter).toHaveBeenCalledWith("subtitle-ready");
+    expect(handler).toHaveBeenCalledWith("subtitle-ready");
+    unsubscribe();
+    state.reader.setViewOpen(false);
   });
 
   it("缓存命中（时长校验过）：不转写、不写缓存，直接 done 收尾", async () => {
@@ -307,6 +340,14 @@ describe("maybeRunAsrFallback 成功与缓存", () => {
     expect(state.clip.subtitleFetchState).toBe("ready");
     expect(state.clip.subtitleBody).toEqual(cachedBody);
     expect(clipState.noSubtitleReason).toBe(null);
+    // 缓存命中同样经字幕接受事务收尾
+    expect(deps.acceptSubtitle).toHaveBeenCalledTimes(1);
+    expect(deps.acceptSubtitle).toHaveBeenCalledWith({
+      body: cachedBody,
+      selectedSubtitleId: "asr",
+      selectedSubtitleUrl: "",
+      selectedSubtitleLang: "语音识别（本地 Whisper）"
+    });
     const statusCalls = deps.setStatus.mock.calls.map((c) => String(c[0]));
     expect(statusCalls.some((s) => s.includes("缓存命中"))).toBe(true);
   });
@@ -351,7 +392,7 @@ describe("maybeRunAsrFallback 空结果与失败", () => {
     const statusCalls = deps.setStatus.mock.calls.map((c) => String(c[0]));
     expect(statusCalls.some((s) => s.includes("未识别到语音内容"))).toBe(true);
     expect(deps.broadcastSubtitleStatus).toHaveBeenCalledWith("asr-done");
-    expect(deps.applyNoSubtitleState).not.toHaveBeenCalled(); // empty 由调用点收尾
+    expect(deps.commitNoSubtitle).not.toHaveBeenCalled(); // empty 由调用点收尾
     expect(memoryStorage.has(asrCacheKey())).toBe(false);
     // 无字幕原因：未识别到语音内容
     expect(clipState.noSubtitleReason).toBe("asr-empty");
@@ -372,7 +413,10 @@ describe("maybeRunAsrFallback 空结果与失败", () => {
     ).toBe(true);
   });
 
-  it("管线失败：语音识别失败文案 + asr-failed 广播 + applyNoSubtitleState，不崩", async () => {
+  it("管线失败：语音识别失败文案 + asr-failed 广播 + 无字幕出口逆事务，不崩", async () => {
+    // 预放脏数据：失败出口必须清空（逆事务的端到端效果）
+    clipState.setSelectedSubtitleId("asr");
+    clipState.setSubtitleBody(TRANSCRIBED_BODY);
     deps.runAsrPipeline.mockRejectedValue(new Error("音频解码失败"));
 
     const result = await fallback.maybeRunAsrFallback({ runId: RUN_ID });
@@ -381,7 +425,12 @@ describe("maybeRunAsrFallback 空结果与失败", () => {
     const statusCalls = deps.setStatus.mock.calls.map((c) => String(c[0]));
     expect(statusCalls.some((s) => s.includes("语音识别失败：音频解码失败"))).toBe(true);
     expect(deps.broadcastSubtitleStatus).toHaveBeenCalledWith("asr-failed");
-    expect(deps.applyNoSubtitleState).toHaveBeenCalledTimes(1);
+    // 失败出口走 commit.commitNoSubtitle（逆事务），原因随出口写入
+    expect(deps.commitNoSubtitle).toHaveBeenCalledTimes(1);
+    expect(deps.commitNoSubtitle).toHaveBeenCalledWith({ noSubtitleReason: "asr-failed", asrResult: "error" });
+    expect(state.clip.subtitleFetchState).toBe("empty");
+    expect(state.clip.subtitleBody).toEqual([]);
+    expect(state.clip.selectedSubtitleId).toBe("");
     // 无字幕原因：语音识别失败
     expect(clipState.noSubtitleReason).toBe("asr-failed");
   });
@@ -394,7 +443,7 @@ describe("maybeRunAsrFallback 空结果与失败", () => {
     // 切视频前的 UI 写入基线（发起阶段的转写提示）
     const statusCallsAtSwitch = deps.setStatus.mock.calls.length;
     const messageCallsAtSwitch = deps.setMessage.mock.calls.length;
-    const refreshCallsAtSwitch = deps.refreshDerivedContent.mock.calls.length;
+    const acceptCallsAtSwitch = deps.acceptSubtitle.mock.calls.length;
 
     // 换视频：bvid 变化 → isStale 判真；任务不再被中止，转写照常到站
     clipState.setBvid("BV1other");
@@ -413,9 +462,8 @@ describe("maybeRunAsrFallback 空结果与失败", () => {
     // UI 零写入：切走后不碰状态栏/消息栏/clipState/reader（不执行 finishAsrFallback）
     expect(deps.setStatus).toHaveBeenCalledTimes(statusCallsAtSwitch);
     expect(deps.setMessage).toHaveBeenCalledTimes(messageCallsAtSwitch);
-    expect(deps.refreshDerivedContent).toHaveBeenCalledTimes(refreshCallsAtSwitch);
-    expect(deps.applyNoSubtitleState).not.toHaveBeenCalled();
-    expect(deps.notifyReaderPresenter).not.toHaveBeenCalled();
+    expect(deps.acceptSubtitle).toHaveBeenCalledTimes(acceptCallsAtSwitch);
+    expect(deps.commitNoSubtitle).not.toHaveBeenCalled();
     expect(state.clip.subtitleFetchState).toBe("idle");
   });
 
@@ -437,7 +485,7 @@ describe("maybeRunAsrFallback 空结果与失败", () => {
     ]);
     // 空结果文案不上新视频状态栏
     expect(deps.setStatus).toHaveBeenCalledTimes(statusCallsAtSwitch);
-    expect(deps.applyNoSubtitleState).not.toHaveBeenCalled();
+    expect(deps.commitNoSubtitle).not.toHaveBeenCalled();
     expect(memoryStorage.has(asrCacheKey())).toBe(false);
   });
 
@@ -458,7 +506,7 @@ describe("maybeRunAsrFallback 空结果与失败", () => {
       "asr-failed"
     ]);
     expect(deps.setStatus).toHaveBeenCalledTimes(statusCallsAtSwitch);
-    expect(deps.applyNoSubtitleState).not.toHaveBeenCalled();
+    expect(deps.commitNoSubtitle).not.toHaveBeenCalled();
   });
 
   it("stale 进度门控：转写中切视频，onProgress 不再触发 setStatus", async () => {

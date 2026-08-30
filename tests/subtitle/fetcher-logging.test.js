@@ -55,9 +55,15 @@ vi.mock("../../extension/subtitle/core.js", () => ({
   readUploadDate: vi.fn(() => "2026-01-01"),
   refreshDerivedContent: vi.fn(async () => {})
 }));
+// 候选02 分层惰性：renderMeta/renderSubtitleSelect/setBusyState 已自
+// ui/ui-renderer.js 移入 subtitle/ui.js，fetcher 的 import 随之指向本模块，
+// mock 需补齐这三个导出。（applyNoSubtitleState 已迁入 subtitle/commit.js，
+// 不再是 ui.js 的导出。）
 vi.mock("../../extension/subtitle/ui.js", () => ({
-  applyNoSubtitleState: vi.fn(),
-  readVideoDescription: vi.fn(() => "")
+  readVideoDescription: vi.fn(() => ""),
+  renderMeta: vi.fn(),
+  renderSubtitleSelect: vi.fn(),
+  setBusyState: vi.fn()
 }));
 vi.mock("../../extension/subtitle/cache.js", () => ({
   buildSubtitleCandidates: vi.fn((tracks, preferred) => {
@@ -127,6 +133,10 @@ describe("tryLoadSubtitleCandidates 日志路径", () => {
 
     // 让 fetchVideoMeta 抛错，使 refreshClip 在 logInfo 出现之前就失败——若
     // 错误路径依赖未定义的 logInfo，这里会 reject 而不是 resolve。
+    // 注意：本文件 beforeEach 走 resetModuleState（vi.resetModules），mock 工厂
+    // 不重跑 → fetcher 闭包固定在首纪元 state 上；对 fetchState 终值的断言
+    // 须在同纪元实例上读，见 fetcher-no-subtitle-reason.test.js 的
+    // 586c61b 回归用例（单纪元 + 真实 state）。
     const fetchMetaMock = (await import("../../extension/subtitle/fetcher.js")).fetchVideoMeta;
     fetchMetaMock.mockRejectedValue(new Error("meta down"));
 
