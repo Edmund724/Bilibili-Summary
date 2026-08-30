@@ -18,8 +18,11 @@ export const FINAL_OUTPUT_CHARS = 16000;
 // 归并触发线：原始字幕 >500k 时才触发归并层（此时段数 ≥11）。
 export const REDUCE_TRIGGER_CHARS = 500000;
 
-// 每个归并组最多容纳的段数：归并组输入 100k / 单条小结 ≤10k = 10。
-const SEGMENTS_PER_REDUCE_GROUP = Math.floor(REDUCE_GROUP_INPUT_CHARS / SEGMENT_SUMMARY_CHARS);
+// 每个归并组最多容纳的段数：归并组输入 / 单条小结上限。
+// 随归并组输入参数化（溢出放宽预算重跑时组输入减半，每组条数相应减半）。
+function segmentsPerReduceGroup(reduceGroupInputChars) {
+  return Math.floor(reduceGroupInputChars / SEGMENT_SUMMARY_CHARS);
+}
 
 // 保守地把时间戳转成数值；非有限值（undefined/NaN 等）回落到 0。
 function toSeconds(value) {
@@ -35,13 +38,13 @@ export function estimateTokens(text) {
   return text.length * CHAR_PER_TOKEN;
 }
 
-// 归并调用数估算：每层把 ≤SEGMENTS_PER_REDUCE_GROUP 条小结归并为一条，累加各层的分组数
+// 归并调用数估算：每层把 ≤ 每组段数条小结归并为一条，累加各层的分组数
 // （即实际归并调用次数）。例：11 段 → 第 1 层 ceil(11/10)=2 组(2 次) → 第 2 层 ceil(2/10)=1 组(1 次)，共 3 次。
-function estimateReduceCalls(segmentCount) {
+function estimateReduceCalls(segmentCount, reduceGroupInputChars) {
   let calls = 0;
   let n = segmentCount;
   while (n > 1) {
-    n = Math.ceil(n / SEGMENTS_PER_REDUCE_GROUP);
+    n = Math.ceil(n / segmentsPerReduceGroup(reduceGroupInputChars));
     calls += n;
   }
   return calls;
@@ -49,7 +52,7 @@ function estimateReduceCalls(segmentCount) {
 
 // 沿字幕项顺序累积字符到单段输入预算；遇到章节边界（上一条在上一章、本条已进入
 // chapter.from 之后）时在前一条处收段，让新段对齐到章节起点——不要求字幕与章节时间戳逐秒相等。
-function splitByBudget(items, chapterStarts) {
+function splitByBudget(items, chapterStarts, segmentInputChars) {
   const segments = [];
   let current = null;
   let prevFrom = null;
@@ -76,7 +79,7 @@ function splitByBudget(items, chapterStarts) {
     prevFrom = item.from;
 
     // 累积到单段输入预算即收段。
-    if (current.chars >= SEGMENT_INPUT_CHARS) {
+    if (current.chars >= segmentInputChars) {
       segments.push(current);
       current = null;
     }
@@ -97,7 +100,19 @@ function splitByBudget(items, chapterStarts) {
 
 // 产出预算计划：估 token → 判模式（single / map-reduce）→ 分段计划与调用次数预估。
 // body 字幕项 { from, to, content }（秒级时间戳 + 文本）；chapters { from, to, title }。
-export function buildBudgetPlan({ body = [], chapters = [] } = {}) {
+// options 供溢出放宽预算重跑（map-reduce 编排）收紧入口侧预算：
+// - segmentInputChars：单段原始字幕输入上限（默认 SEGMENT_INPUT_CHARS）。
+// - reduceGroupInputChars：归并组输入上限（默认 REDUCE_GROUP_INPUT_CHARS），
+//   随 plan.reduceGroupInputChars 带出，供归并层（reduceSummaries）消费。
+// 模式判定（100k 线）与归并触发线（500k 线）不随 options 变：二者本质是
+// 「材料体量 ≈ 输入 20%」的出口侧语义，与单段/单组输入多大（入口侧）无关。
+export function buildBudgetPlan({ body = [], chapters = [] } = {}, options = {}) {
+  const segmentInputChars =
+    Number(options.segmentInputChars) > 0 ? Number(options.segmentInputChars) : SEGMENT_INPUT_CHARS;
+  const reduceGroupInputChars =
+    Number(options.reduceGroupInputChars) > 0
+      ? Number(options.reduceGroupInputChars)
+      : REDUCE_GROUP_INPUT_CHARS;
   const bodyItems = Array.isArray(body) ? body : [];
   const chapterItems = Array.isArray(chapters) ? chapters : [];
 
@@ -130,14 +145,14 @@ export function buildBudgetPlan({ body = [], chapters = [] } = {}) {
         chapterStarts.push(start);
       }
     }
-    segments = splitByBudget(items, chapterStarts);
+    segments = splitByBudget(items, chapterStarts, segmentInputChars);
   }
 
   const needsReduce = totalChars > REDUCE_TRIGGER_CHARS;
   const estimatedCalls =
     mode === "single"
       ? 1
-      : segments.length + 1 + (needsReduce ? estimateReduceCalls(segments.length) : 0);
+      : segments.length + 1 + (needsReduce ? estimateReduceCalls(segments.length, reduceGroupInputChars) : 0);
 
   return {
     totalChars,
@@ -145,6 +160,7 @@ export function buildBudgetPlan({ body = [], chapters = [] } = {}) {
     mode,
     segments,
     estimatedCalls,
-    needsReduce
+    needsReduce,
+    reduceGroupInputChars
   };
 }

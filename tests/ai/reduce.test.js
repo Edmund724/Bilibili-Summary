@@ -221,3 +221,45 @@ describe("reduceSummaries 中止", () => {
     expect(runPrompts).not.toHaveBeenCalled();
   });
 });
+
+describe("reduceSummaries groupInputChars 参数化（溢出放宽预算重跑用）", () => {
+  function makeSummaries(count, chars) {
+    return Array.from({ length: count }, (_, i) => `s${i}`.padEnd(chars, "x"));
+  }
+
+  it("合计不超默认组输入 → 不归并；收紧 groupInputChars 后同批内容触发归并", async () => {
+    const summaries = makeSummaries(3, 20000); // 合计 60k
+    const runPrompts = vi.fn(async ({ prompt }) => `m(${prompt.length})`);
+
+    const normal = await reduceSummaries({ summaries, title: "t", runPrompts });
+    expect(normal.levels).toBe(0);
+    expect(runPrompts).not.toHaveBeenCalled();
+
+    const tight = await reduceSummaries({ summaries, title: "t", runPrompts, groupInputChars: 50000 });
+    // 60k > 50k → 分组 [s0,s1]（40k）+ [s2] → 2 组归并 → 40k ≤ 50k 收敛。
+    expect(tight.levels).toBe(1);
+    expect(runPrompts).toHaveBeenCalledTimes(2);
+  });
+
+  it("归并产出 clamp 到收紧后的组输入（而不是全局常量）", async () => {
+    const summaries = makeSummaries(3, 20000);
+    const runPrompts = vi.fn(async () => "z".repeat(80000)); // 单条产出 80k
+    const result = await reduceSummaries({
+      summaries,
+      title: "t",
+      runPrompts,
+      groupInputChars: 50000
+    });
+    for (const item of result.merged) {
+      expect(item.length).toBeLessThanOrEqual(50000);
+    }
+  });
+
+  it("非法 groupInputChars（0 / 非数）回落全局常量", async () => {
+    const summaries = makeSummaries(3, 40000); // 合计 120k > 100k 默认组输入
+    const runPrompts = vi.fn(async ({ prompt }) => `m(${prompt.length})`);
+    const result = await reduceSummaries({ summaries, title: "t", runPrompts, groupInputChars: 0 });
+    expect(runPrompts).toHaveBeenCalled();
+    expect(result.levels).toBeGreaterThan(0);
+  });
+});

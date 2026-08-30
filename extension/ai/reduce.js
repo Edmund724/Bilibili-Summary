@@ -74,20 +74,22 @@ ${material}`;
 }
 
 /**
- * 多层归并：while 所有小结合计 >100k 时，按归并组输入贪心分组、逐组调模型归并，
- * 直到合计 ≤100k（或组数不减少，防止单条超预算等不收敛死循环）。
- * 每组调用前检查 signal.aborted，中止即抛带 aborted 标记的错误。
- * 返回 { merged, levels }；merged 按组的原始顺序排列。
+ * 多层归并：while 所有小结合计 > 归并组输入时，按归并组输入贪心分组、逐组调模型归并，
+ * 直到合计 ≤ 归并组输入（或组数不减少，防止单条超预算等不收敛死循环）。
+ * groupInputChars：归并组输入上限（默认 REDUCE_GROUP_INPUT_CHARS；溢出放宽预算
+ * 重跑时由编排层传入收紧后的值）。每组调用前检查 signal.aborted，中止即抛带
+ * aborted 标记的错误。返回 { merged, levels }；merged 按组的原始顺序排列。
  */
-export async function reduceSummaries({ summaries, title, runPrompts, signal, onProgress }) {
+export async function reduceSummaries({ summaries, title, runPrompts, signal, onProgress, groupInputChars = REDUCE_GROUP_INPUT_CHARS }) {
+  const maxChars = Number(groupInputChars) > 0 ? Number(groupInputChars) : REDUCE_GROUP_INPUT_CHARS;
   let merged = Array.isArray(summaries) ? summaries : [];
   let levels = 0;
 
-  while (sumChars(merged) > REDUCE_GROUP_INPUT_CHARS) {
+  while (sumChars(merged) > maxChars) {
     if (signal?.aborted) {
       throw makeAbortedError();
     }
-    const groups = buildReduceGroups(merged);
+    const groups = buildReduceGroups(merged, { groupInputChars: maxChars });
     // 组数不减少 = 每组至多一条、归并无收益 → 停止，避免死循环。
     if (groups.length >= merged.length) {
       break;
@@ -113,9 +115,7 @@ export async function reduceSummaries({ summaries, title, runPrompts, signal, on
       const trimmed = String(text || "").trim();
       // 防御性 clamp：单条归并产出截断到归并组输入，避免个别超长输出撑爆下一层组预算。
       next.push(
-        trimmed.length > REDUCE_GROUP_INPUT_CHARS
-          ? trimmed.slice(0, REDUCE_GROUP_INPUT_CHARS)
-          : trimmed
+        trimmed.length > maxChars ? trimmed.slice(0, maxChars) : trimmed
       );
     }
     merged = next;

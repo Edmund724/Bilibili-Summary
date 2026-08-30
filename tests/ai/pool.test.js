@@ -251,3 +251,30 @@ describe("重试语义", () => {
     expect(doneResults).toEqual(["ok1", "ok2"]);
   });
 });
+
+describe("溢出错误不重试（同素材重发必然再溢出，交上层放宽预算重跑）", () => {
+  it("worker 抛 overflow 标记错误 → 不重试（调用 1 次）、整体 rethrow", async () => {
+    const overflowError = new Error("上下文超出模型限制");
+    overflowError.overflow = true;
+    let calls = 0;
+    const worker = vi.fn(async () => {
+      calls += 1;
+      throw overflowError;
+    });
+
+    await expect(mod.runMapBounded({ items: [1], worker })).rejects.toBe(overflowError);
+    expect(calls).toBe(1);
+    expect(worker).toHaveBeenCalledTimes(1);
+  });
+
+  it("对照：普通错误仍按 MAX_MAP_RETRIES 重试", async () => {
+    let calls = 0;
+    const worker = vi.fn(async () => {
+      calls += 1;
+      throw new Error("网络错误");
+    });
+
+    await expect(mod.runMapBounded({ items: [1], worker })).rejects.toBeTruthy();
+    expect(calls).toBe(3); // 1 次初始 + 2 次重试
+  });
+});

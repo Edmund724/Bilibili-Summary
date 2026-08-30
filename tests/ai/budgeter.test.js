@@ -186,3 +186,39 @@ describe("buildBudgetPlan 分段边界", () => {
     expect(plan.estimatedCalls).toBe(1);
   });
 });
+
+describe("buildBudgetPlan options：入口侧预算参数化（溢出放宽预算重跑用）", () => {
+  it("segmentInputChars 减半 → 段数翻倍；mode / needsReduce 不受影响", () => {
+    // 600k 字符：默认 50k 收段 → 12 段；25k 收段 → 24 段。
+    const body = makeSubtitleBody(600000);
+    const normal = buildBudgetPlan({ body });
+    expect(normal.segments).toHaveLength(12);
+    expect(normal.needsReduce).toBe(true);
+
+    const tight = buildBudgetPlan({ body }, { segmentInputChars: 25000, reduceGroupInputChars: 50000 });
+    expect(tight.segments).toHaveLength(24);
+    // 模式判定（100k 线）与归并触发线（500k 线）是出口侧材料体量语义，不随入口预算变。
+    expect(tight.mode).toBe("map-reduce");
+    expect(tight.needsReduce).toBe(true);
+  });
+
+  it("reduceGroupInputChars 随 plan 带出，estimatedCalls 的归并层数随之重算", () => {
+    const body = makeSubtitleBody(600000);
+    const normal = buildBudgetPlan({ body });
+    expect(normal.reduceGroupInputChars).toBe(REDUCE_GROUP_INPUT_CHARS);
+    // 12 段：归并层 ceil(12/10)=2 组 + ceil(2/10)=1 组 = 3 次 → 12+1+3。
+    expect(normal.estimatedCalls).toBe(16);
+
+    const tight = buildBudgetPlan({ body }, { segmentInputChars: 25000, reduceGroupInputChars: 50000 });
+    expect(tight.reduceGroupInputChars).toBe(50000);
+    // 24 段、每组 5 条（50k/10k）：ceil(24/5)=5 + ceil(5/5)=1 = 6 次 → 24+1+6。
+    expect(tight.estimatedCalls).toBe(31);
+  });
+
+  it("非法 options（0 / 负数 / 非数）回落默认常量", () => {
+    const body = makeSubtitleBody(120000);
+    const plan = buildBudgetPlan({ body }, { segmentInputChars: 0, reduceGroupInputChars: -1 });
+    expect(plan.segments).toHaveLength(3);
+    expect(plan.reduceGroupInputChars).toBe(REDUCE_GROUP_INPUT_CHARS);
+  });
+});

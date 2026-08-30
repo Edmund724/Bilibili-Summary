@@ -399,3 +399,154 @@ describe("缓存写入最终失败的上浮（LRU 淘汰后重试仍失败）", 
     expect(postMessages.some((m) => m.type === "done")).toBe(true);
   });
 });
+
+describe("溢出放宽预算重跑（context-length 溢出的编排级兜底）", () => {
+  // 溢出响应：HTTP 400 + context-length 文案（completion.js 判定 → makeOverflowError）。
+  function overflowResponse() {
+    return { ok: false, status: 400, text: async () => "maximum context length exceeded" };
+  }
+
+  // 依调用序分段/成稿 mock：segmentCalls 前 N 次溢出（模拟常态预算超模型窗口），
+  // noteCalls 前 M 次溢出；其余按序返回小结/笔记。
+  function buildOverflowSequencedMock({ overflowSegments = 0, overflowNotes = 0 } = {}) {
+    let segmentCalls = 0;
+    let noteCalls = 0;
+    const fetchMock = vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      const user = body.messages[body.messages.length - 1]?.content || "";
+      if (user.includes("连续片段")) {
+        segmentCalls += 1;
+        if (segmentCalls <= overflowSegments) {
+          return overflowResponse();
+        }
+        const m = user.match(/第 (\d+)\//);
+        return jsonResponse({ choices: [{ message: { content: `小结${m ? Number(m[1]) : 1}。` } }] });
+      }
+      noteCalls += 1;
+      if (noteCalls <= overflowNotes) {
+        return overflowResponse();
+      }
+      return jsonResponse({ choices: [{ message: { content: "# 视频笔记：《测试视频》\n完整笔记正文。" } }] });
+    });
+    return { fetchMock, counters: { get segmentCalls() { return segmentCalls; }, get noteCalls() { return noteCalls; } } };
+  }
+
+  it("段小结溢出 → notice 告知 → 按 0.5 倍预算重切段整轮重跑 → 成功回吐一次", async () => {
+    // 110k 字符：常态 50k 段 = 3 段；收紧 25k 段 = 5 段。首轮 3 段全部溢出。
+    const { fetchMock } = buildOverflowSequencedMock({ overflowSegments: 3 });
+    vi.stubGlobal("fetch", fetchMock);
+    const port = makePort();
+    const context = makeContext();
+    const plan = (await import("../../extension/ai/budgeter.js")).buildBudgetPlan({
+      body: context.subtitleBody,
+      chapters: []
+    });
+    expect(plan.segments).toHaveLength(3);
+
+    const result = await mod.orchestrateMapReduce({ provider: makeProvider(), context, plan, port });
+
+    expect(result.aborted).toBe(false);
+    expect(result.draft).toBe("# 视频笔记：《测试视频》\n完整笔记正文。");
+
+    const postMessages = port.postMessage.mock.calls.map((c) => c[0]);
+    // 重跑发起的 notice 恰好一条
+    expect(postMessages.filter((m) => m.type === "notice" && String(m.data).includes("已自动调低单段素材量并重试"))).toHaveLength(1);
+    // 成功回吐恰一次
+    expect(postMessages.filter((m) => m.type === "done")).toHaveLength(1);
+    expect(postMessages.filter((m) => m.type === "token")).toHaveLength(1);
+
+    // 首轮 3 段（1/3）+ 重跑 5 段（1/5）+ 成稿 1 次 = 9 次调用
+    expect(fetchMock).toHaveBeenCalledTimes(9);
+    const userContents = fetchMock.mock.calls.map((c) => JSON.parse(c[1].body).messages.at(-1).content);
+    expect(userContents.some((c) => c.includes("这是第 1/3 个连续片段"))).toBe(true);
+    expect(userContents.some((c) => c.includes("这是第 1/5 个连续片段"))).toBe(true);
+  });
+
+  it("重跑仍溢出 → 带明确文案抛出（不静默），无 done/token", async () => {
+    const { fetchMock } = buildOverflowSequencedMock({ overflowSegments: Infinity });
+    vi.stubGlobal("fetch", fetchMock);
+    const port = makePort();
+    const context = makeContext();
+    const plan = (await import("../../extension/ai/budgeter.js")).buildBudgetPlan({
+      body: context.subtitleBody,
+      chapters: []
+    });
+
+    await expect(
+      mod.orchestrateMapReduce({ provider: makeProvider(), context, plan, port })
+    ).rejects.toThrow("调低分段量后仍超出模型上下文");
+
+    const postMessages = port.postMessage.mock.calls.map((c) => c[0]);
+    expect(postMessages.some((m) => m.type === "notice" && String(m.data).includes("已自动调低单段素材量并重试"))).toBe(true);
+    expect(postMessages.some((m) => m.type === "done")).toBe(false);
+    expect(postMessages.some((m) => m.type === "token")).toBe(false);
+    // 首轮 3 段（并发全发全溢出）+ 重跑首波 3 段（首个溢出即 settle 终止，
+    // 剩余 2 段不再拉起）——绝不进入第三轮。
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it("非溢出错误（HTTP 500）→ 原样上抛，不触发预算重跑", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, text: async () => "server error" })));
+    const port = makePort();
+    const context = makeContext();
+    const plan = (await import("../../extension/ai/budgeter.js")).buildBudgetPlan({
+      body: context.subtitleBody,
+      chapters: []
+    });
+
+    await expect(
+      mod.orchestrateMapReduce({ provider: makeProvider(), context, plan, port })
+    ).rejects.toThrow("HTTP 500");
+
+    const postMessages = port.postMessage.mock.calls.map((c) => c[0]);
+    expect(postMessages.some((m) => m.type === "notice" && String(m.data).includes("已自动调低单段素材量并重试"))).toBe(false);
+    expect(postMessages.some((m) => m.type === "done")).toBe(false);
+  });
+
+  it("成稿阶段溢出 → 已完成段不浪费判断，整轮重跑后成稿成功", async () => {
+    // 首轮 3 段成功、成稿溢出 → 重跑 5 段（成功）+ 成稿成功 = 3+1+5+1 = 10 次。
+    const { fetchMock } = buildOverflowSequencedMock({ overflowNotes: 1 });
+    vi.stubGlobal("fetch", fetchMock);
+    const port = makePort();
+    const context = makeContext();
+    const plan = (await import("../../extension/ai/budgeter.js")).buildBudgetPlan({
+      body: context.subtitleBody,
+      chapters: []
+    });
+
+    const result = await mod.orchestrateMapReduce({ provider: makeProvider(), context, plan, port });
+
+    expect(result.draft).toBe("# 视频笔记：《测试视频》\n完整笔记正文。");
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+    const postMessages = port.postMessage.mock.calls.map((c) => c[0]);
+    expect(postMessages.filter((m) => m.type === "done")).toHaveLength(1);
+  });
+
+  it("中止（aborted）不触发预算重跑：stopped 收束，无重试 notice", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      const e = new Error("已停止生成");
+      e.aborted = true;
+      throw e;
+    }));
+    const port = makePort();
+    const controller = new AbortController();
+    const context = makeContext();
+    const plan = (await import("../../extension/ai/budgeter.js")).buildBudgetPlan({
+      body: context.subtitleBody,
+      chapters: []
+    });
+
+    const result = await mod.orchestrateMapReduce({
+      provider: makeProvider(),
+      context,
+      plan,
+      port,
+      signal: controller.signal
+    });
+
+    expect(result.aborted).toBe(true);
+    const postMessages = port.postMessage.mock.calls.map((c) => c[0]);
+    expect(postMessages.some((m) => m.type === "stopped")).toBe(true);
+    expect(postMessages.some((m) => m.type === "notice" && String(m.data).includes("已自动调低单段素材量并重试"))).toBe(false);
+  });
+});

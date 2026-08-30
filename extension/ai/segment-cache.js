@@ -14,21 +14,29 @@ const SEGMENT_SUMMARY_PREFIX = "boc_lvs_summary_";
 // 原始字幕段缓存键前缀。
 const RAW_SEGMENT_PREFIX = "boc_lvs_raw_";
 
-/**
- * 分段小结缓存键：bvid + cid + 字幕轨 source key + 段序号。
- * source key 随字幕轨（subtitleId / subtitleUrl / lang）区分，切换字幕轨不串。
- */
-export function getSegmentSummaryKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "", segmentIndex }) {
-  const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
-  return `${SEGMENT_SUMMARY_PREFIX}${bvid}_${cid}_${sourceKey}_${segmentIndex}`;
+// 段序号之外的预算代后缀：同一 (bvid, cid, 字幕轨) 在不同预算档下的分段边界不同，
+// 段序号相同不代表内容相同——不带代标记的 key 会命中错位小结（内容串段）。
+// budgetScale=1（常态档）不带后缀，key 形状与历史逐字节一致，已有缓存零迁移。
+function budgetScaleSuffix(budgetScale) {
+  const scale = Number(budgetScale);
+  return Number.isFinite(scale) && scale !== 1 ? `_b${Math.round(scale * 100)}` : "";
 }
 
 /**
- * 原始字幕段缓存键：同样含 bvid + cid + 字幕轨 + 段序号。
+ * 分段小结缓存键：bvid + cid + 字幕轨 source key + 段序号 [+ 预算代]。
+ * source key 随字幕轨（subtitleId / subtitleUrl / lang）区分，切换字幕轨不串。
  */
-export function getRawSegmentKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "", segmentIndex }) {
+export function getSegmentSummaryKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "", segmentIndex, budgetScale = 1 }) {
   const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
-  return `${RAW_SEGMENT_PREFIX}${bvid}_${cid}_${sourceKey}_${segmentIndex}`;
+  return `${SEGMENT_SUMMARY_PREFIX}${bvid}_${cid}_${sourceKey}_${segmentIndex}${budgetScaleSuffix(budgetScale)}`;
+}
+
+/**
+ * 原始字幕段缓存键：同样含 bvid + cid + 字幕轨 + 段序号 [+ 预算代]。
+ */
+export function getRawSegmentKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "", segmentIndex, budgetScale = 1 }) {
+  const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
+  return `${RAW_SEGMENT_PREFIX}${bvid}_${cid}_${sourceKey}_${segmentIndex}${budgetScaleSuffix(budgetScale)}`;
 }
 
 // AI 上下文对象 → 段缓存键位字段的唯一映射（bvid/cid + 字幕轨 source key 三元组，
@@ -47,16 +55,20 @@ export function segmentCacheKeyFields(context) {
 
 /**
  * 从 AI 上下文 + 段序号拼分段小结缓存键（与 getSegmentSummaryKey 手拼逐字节一致）。
+ * budgetScale：预算档（默认 1 = 常态档，key 不带代后缀）；溢出放宽预算重跑（0.5）等
+ * 非常态档带代后缀，与常态档的段序号空间隔离，防止段边界漂移后命中错位小结。
  */
-export function buildSegmentSummaryCacheKey(context, segmentIndex) {
-  return getSegmentSummaryKey({ ...segmentCacheKeyFields(context), segmentIndex });
+export function buildSegmentSummaryCacheKey(context, segmentIndex, budgetScale = 1) {
+  return getSegmentSummaryKey({ ...segmentCacheKeyFields(context), segmentIndex, budgetScale });
 }
 
 /**
  * 从 AI 上下文 + 段序号拼原始字幕段缓存键（与 getRawSegmentKey 手拼逐字节一致）。
+ * budgetScale 语义同 buildSegmentSummaryCacheKey；原始段只按常态档落盘
+ * （供 followup 检索），非常态档不写原始段。
  */
-export function buildRawSegmentCacheKey(context, segmentIndex) {
-  return getRawSegmentKey({ ...segmentCacheKeyFields(context), segmentIndex });
+export function buildRawSegmentCacheKey(context, segmentIndex, budgetScale = 1) {
+  return getRawSegmentKey({ ...segmentCacheKeyFields(context), segmentIndex, budgetScale });
 }
 
 /**

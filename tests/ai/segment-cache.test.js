@@ -311,3 +311,40 @@ describe("容错：读写失败 logWarn 且不抛异常", () => {
     expect(rawResult.error).toBeInstanceOf(Error);
   });
 });
+
+describe("预算代隔离：budgetScale≠1 时 key 带代后缀（防段边界漂移命中错位小结）", () => {
+  const context = {
+    bvid: "BV1scale",
+    cid: "5",
+    selectedSubtitleId: "sub-1",
+    selectedSubtitleUrl: "",
+    subtitleLang: "zh-CN"
+  };
+
+  it("budgetScale=1 / 缺省 → key 不带后缀，与历史键逐字节一致（零迁移）", () => {
+    const byDefault = mod.buildSegmentSummaryCacheKey(context, 3);
+    const scaleOne = mod.buildSegmentSummaryCacheKey(context, 3, 1);
+    const explicit = mod.buildSegmentSummaryCacheKey(context, 3, undefined);
+    expect(byDefault).toBe(scaleOne);
+    expect(byDefault).toBe(explicit);
+    expect(byDefault).toBe("boc_lvs_summary_BV1scale_5_id_sub-1_3");
+    expect(mod.buildRawSegmentCacheKey(context, 3)).toBe("boc_lvs_raw_BV1scale_5_id_sub-1_3");
+  });
+
+  it("budgetScale=0.5 → 追加 _b50 后缀；scale=2 → _b200；raw / summary 两族同规则", () => {
+    expect(mod.buildSegmentSummaryCacheKey(context, 3, 0.5)).toBe("boc_lvs_summary_BV1scale_5_id_sub-1_3_b50");
+    expect(mod.buildRawSegmentCacheKey(context, 3, 0.5)).toBe("boc_lvs_raw_BV1scale_5_id_sub-1_3_b50");
+    expect(mod.buildSegmentSummaryCacheKey(context, 3, 2)).toBe("boc_lvs_summary_BV1scale_5_id_sub-1_3_b200");
+  });
+
+  it("同段序号不同预算档 → key 不同（0.5 档绝不命中 1 档已落盘小结）", async () => {
+    await mod.saveSegmentSummary(mod.buildSegmentSummaryCacheKey(context, 1), "常态档小结");
+    expect(await mod.loadSegmentSummary(mod.buildSegmentSummaryCacheKey(context, 1))).toBe("常态档小结");
+    // 0.5 档查同一序号：key 不同 → 未命中，编排重跑会重新调用模型而不是串段。
+    expect(await mod.loadSegmentSummary(mod.buildSegmentSummaryCacheKey(context, 1, 0.5))).toBeNull();
+  });
+
+  it("非法 budgetScale（非数）按缺省档处理（无后缀）", () => {
+    expect(mod.buildSegmentSummaryCacheKey(context, 3, "x")).toBe("boc_lvs_summary_BV1scale_5_id_sub-1_3");
+  });
+});
