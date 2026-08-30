@@ -22,6 +22,10 @@ import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-
 // 跨域模块接口：reader 私有 DOM id 表、页面宽度上限与小窗关闭（page-frame.js 导出）。
 import { ids, getReaderMainWidthLimit, dismissReaderMiniPlayer } from "./page-frame.js";
 import { callSync } from "./sync-adapter.js";
+// 候选02 分层惰性：renderReadingStatus 是纯 DOM 文案写入的轻函数，已迁往
+// 常驻微模块 ./presentation.js（message-handler/content.js 等常驻侧直接 import
+// 该模块，不再为一句状态栏文案拖入本域）。此处 re-export 维持域内旧路径。
+export { renderReadingStatus } from "./presentation.js";
 
 // ===== reader-domain private bookkeeping (module-level closure state) =====
 //
@@ -195,19 +199,8 @@ export function updateReadingTranscriptTailSpacer() {
   spacer.style.height = `${spacerHeight}px`;
 }
 
-// Shared by the SYNC and LIFECYCLE domains (both render status text into the
-// reading view); lives in the base layer so neither dependent module needs a
-// back-edge to this one.
-export function renderReadingStatus(text) {
-  const node = getReaderElement(ids.readingStatus);
-  const next = String(text || "");
-  // 候选10 批1：250ms tick 会反复写同一文案，值未变时跳过 textContent 写入，
-  // 避免无谓的 DOM 变更（节点缺失时仍按原样经 byId 抛错，行为不变）。
-  if (node.textContent === next) {
-    return;
-  }
-  node.textContent = next;
-}
+// renderReadingStatus 已迁往 ./presentation.js（文件头 re-export）：SYNC 与
+// LIFECYCLE 域经旧路径继续可用，常驻侧则直接 import 微模块。
 
 async function ensureReaderPlayerControlsRecovered(
   playerHostArg = playerHost,

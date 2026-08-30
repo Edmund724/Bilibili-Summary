@@ -12,17 +12,25 @@ import { logInfo, logWarn } from "../shared/logging.js";
 import { loadPlayerAi, isPlayerAiLoaded } from "../core/lazy-player-ai.js";
 
 import { ensureUiReady } from "../ui/ui-renderer.js";
+// 候选02 分层惰性：init() 的启动符号全部来自常驻微模块/轻呈现层——
+//   启动接线（debug 辅助/设置监听/presenter 注册）：./reader/init-essentials.js
+//   页面状态守卫（clear/guard）：./reader/page-state.js
+//   设置水合/排版呈现/状态栏文案：./reader/presentation.js
+// 它们只依赖常驻叶子，不把 reader 重域（lifecycle/page-frame/player-host/sync）
+// 拖进常驻。唯一例外是 enterReaderMode（reader 直达 URL 路径）：reader 重域
+// 符号，经 ensureReaderDomain() 动态装载后调用（带 promise 缓存与失败重试）。
 import {
   installReaderDebugHelpers,
   bindSettingsWatcher,
-  bindReaderPresenter,
+  bindReaderPresenter
+} from "../reader/init-essentials.js";
+import { clearReaderModePageState, bindNormalPageStateGuard } from "../reader/page-state.js";
+import {
   hydrateReaderStateFromSettings,
   applyReadingViewPresentation,
-  enterReaderMode,
-  renderReadingStatus,
-  clearReaderModePageState,
-  bindNormalPageStateGuard
-} from "../reader/index.js";
+  renderReadingStatus
+} from "../reader/presentation.js";
+import { ensureReaderDomain } from "../core/lazy-reader.js";
 
 import {
   subscribeReaderSettingsPersist,
@@ -124,9 +132,14 @@ function init() {
       stopPlayerAiQuickActionLazy();
     }
     if (shouldEnterReaderMode) {
-      enterReaderMode().catch((error) => {
-        renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
-      });
+      // 候选02：enterReaderMode 属 reader 重域，经 ensureReaderDomain 动态装载
+      // 后进入（阅读模式直达链接的装载开销被页面跳转掩盖）；装载失败与启动
+      // 失败同走状态栏提示（renderReadingStatus 为常驻轻函数）。
+      ensureReaderDomain()
+        .then((reader) => reader.enterReaderMode())
+        .catch((error) => {
+          renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
+        });
     }
   });
 }

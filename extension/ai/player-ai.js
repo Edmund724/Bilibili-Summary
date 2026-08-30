@@ -13,7 +13,10 @@ import {
 } from "../bilibili/video-probe.js";
 import { state, playerAiState } from "../core/state.js";
 import { isVisibleReaderControl } from "../shared/dom-utils.js";
-import { isReaderViewOpen } from "../reader/index.js";
+// isReaderViewOpen 位于常驻微模块（候选02 分层惰性）：纯 state 读取。原先经
+// reader/index.js facade 静态转发，会把整个 reader 域拖进本模块的动态 chunk
+// 闭包，并经 esbuild 提升为常驻静态共享 chunk——分层后改走微模块。
+import { isReaderViewOpen } from "../reader/view-state.js";
 
 let playerAiQuickActionRetryCount = 0;
 

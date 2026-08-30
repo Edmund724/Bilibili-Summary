@@ -13,9 +13,11 @@
 // The player-host layout closure is read here through the exported accessors
 // (getPlayerHost/...); playerRetryTimer's variable itself moved into this
 // module (its owner starts/clears it here), so it is read/written directly.
-import { state, uiState } from "../core/state.js";
-import { logWarn } from "../shared/logging.js";
+import { state } from "../core/state.js";
 import { getReaderElement } from "../shared/dom-utils.js";
+import { sleep } from "../shared/utils.js";
+// 候选02：updateReaderPreferences/renderReaderPanels 自 presentation.js 移回，
+// 步进器取值归一化（validators）随之回到本文件的 import 列表。
 import {
   normalizeReaderTheme,
   normalizeReaderFontScale,
@@ -24,8 +26,7 @@ import {
   normalizeReaderContentWidth,
   normalizeReaderTranscriptVisible
 } from "../core/validators.js";
-import { sleep } from "../shared/utils.js";
-import { isReaderMode, isWatchlaterPage, cleanVideoUrl } from "../bilibili/video-id-shared.js";
+import { isReaderMode, cleanVideoUrl } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
 import {
@@ -41,13 +42,22 @@ import {
   formatCompactTimestamp
 } from "../shared/string-utils.js";
 import { shouldShowHoursInNote } from "../notes/render.js";
+import { requestSubtitleRefresh, persistReaderSettingsThroughSeam } from "./presenter.js";
+
+// 候选02 分层惰性：启动接线（bindReaderPresenter / installReaderDebugHelpers /
+// bindSettingsWatcher）与启动期呈现（hydrate/apply/renderReadingStatus/stepper
+// 模板）在常驻微模块 ./init-essentials.js、./presentation.js；阅读视图打开后
+// 的交互呈现（updateReaderPreferences/renderReaderPanels/renderReadingInfoPanel
+// /renderReaderStepperState/applyReaderStepperPreference）属本域重活，自
+// presentation.js 移回此处（原 lifecycle.js 分节回归）。本文件只保留 reader 域
+// 的重活：进入/退出生命周期、阅读视图渲染、偏好/面板呈现、调试快照与
+// presenter 通知处理体。
 import {
-  subscribeReaderPresenter,
-  requestSubtitleRefresh,
-  persistReaderSettingsThroughSeam,
-  loadReaderSettingsThroughSeam,
-  requestPlayerAiSync
-} from "./presenter.js";
+  renderReadingStatus,
+  hydrateReaderStateFromSettings,
+  applyReadingViewPresentation,
+  getReaderStepperConfig
+} from "./presentation.js";
 
 // LAYOUT (page-frame) functions this module drives:
 import {
@@ -57,7 +67,6 @@ import {
   clearReaderPageFocus,
   moveReadingMainInline,
   restoreReadingMainInline,
-  applyInlineHostPresentation,
   cleanupReaderFloatingArtifacts
 } from "./page-frame.js";
 // LAYOUT (player-host) functions this module drives:
@@ -75,8 +84,7 @@ import {
   bindReaderHeaderActionsHover,
   cleanupReaderPlayerHost,
   unbindReaderLayout,
-  updateReadingTranscriptTailSpacer,
-  renderReadingStatus
+  updateReadingTranscriptTailSpacer
 } from "./player-host.js";
 import { resetManualScrollPause, setProgrammaticScrollUntil } from "./scroll-state.js";
 
@@ -238,93 +246,45 @@ function maybeRefreshReaderSubtitleInBackground() {
   });
 }
 
-// Subtitle fetcher publishes reader data changes through the presenter seam;
-// the reader side registers a single handler that performs the rendering.
-export function bindReaderPresenter() {
-  return subscribeReaderPresenter((kind, text) => {
-    switch (kind) {
-      case "reset":
-        stopReadingViewSync();
-        // 原 clearLayoutTimersForSyncStop 内的 playerRetryTimer 清除分支随变量
-        // 迁入本模块：stopReadingViewSync 不再清它，在此补齐同等清除。
-        if (playerRetryTimer) {
-          window.clearTimeout(playerRetryTimer);
-          playerRetryTimer = 0;
-        }
-        stopReaderPlayerObserver();
-        break;
-      case "subtitle-ready":
-        if (state.reader.readingViewOpen) {
-          moveReadingMainInline();
-          renderReadingView();
-          renderReadingStatus(String(text || "") || "抓取完成，阅读视图已同步最新字幕。");
-          startReadingViewSync();
-          startReaderPlayerObserver();
-          syncReadingViewPlayback(true);
-        }
-        break;
-      case "rerender":
-        if (state.reader.readingViewOpen) {
-          renderReadingView();
-        }
-        break;
-      case "status":
-        renderReadingStatus(String(text || ""));
-        break;
-      default:
-        break;
-    }
-  });
-}
-
-export function installReaderDebugHelpers() {
-  const snapshotReader = (label = "manual") => createReaderDebugSnapshot(label);
-  globalThis.__BOC_READER_DEBUG_SNAPSHOT__ = snapshotReader;
-  globalThis.__BOC_DEBUG__ = {
-    ...(globalThis.__BOC_DEBUG__ || {}),
-    snapshotReader
-  };
-  globalThis.__BOC_FORCE_SYNC_PLAYER_AI__ = () => {
-    requestPlayerAiSync(0, { resetRetry: true });
-  };
-}
-
-export function bindSettingsWatcher() {
-  if (state.ui.settingsWatcherBound || !chrome.storage?.onChanged) {
-    return;
+// Presenter seam 通知的 reader 侧处理体（原 bindReaderPresenter 回调函数体
+// 原样搬移）。注册接线在常驻微模块 ./init-essentials.js：回调经
+// ensureReaderDomain() 惰性装载本域后转发到这里，因此本函数只在 reader 域
+// 装载后被调用，行为与搬迁前逐字一致。
+export function handleReaderPresenterNotification(kind, text) {
+  switch (kind) {
+    case "reset":
+      stopReadingViewSync();
+      // 原 clearLayoutTimersForSyncStop 内的 playerRetryTimer 清除分支随变量
+      // 迁入本模块：stopReadingViewSync 不再清它，在此补齐同等清除。
+      if (playerRetryTimer) {
+        window.clearTimeout(playerRetryTimer);
+        playerRetryTimer = 0;
+      }
+      stopReaderPlayerObserver();
+      break;
+    case "subtitle-ready":
+      if (state.reader.readingViewOpen) {
+        moveReadingMainInline();
+        renderReadingView();
+        renderReadingStatus(String(text || "") || "抓取完成，阅读视图已同步最新字幕。");
+        startReadingViewSync();
+        startReaderPlayerObserver();
+        syncReadingViewPlayback(true);
+      }
+      break;
+    case "rerender":
+      if (state.reader.readingViewOpen) {
+        renderReadingView();
+      }
+      break;
+    case "status":
+      renderReadingStatus(String(text || ""));
+      break;
+    default:
+      break;
   }
-  uiState.setSettingsWatcherBound(true);
-
-  chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "sync" && areaName !== "local") {
-      return;
-    }
-    if (
-      !changes.enablePlayerAiQuickAction &&
-      !changes.playerAiQuickPrompt &&
-      !changes.readerTheme &&
-      !changes.readerFontScale &&
-      !changes.readerLetterSpacing &&
-      !changes.readerLineHeight &&
-      !changes.readerContentWidth &&
-      !changes.readerChapterVisibility &&
-      !changes.readerTranscriptVisible
-    ) {
-      return;
-    }
-
-    loadReaderSettingsThroughSeam()
-      .then((settings) => {
-        state.setSettings(settings);
-        hydrateReaderStateFromSettings(settings);
-        applyReadingViewPresentation();
-        requestPlayerAiSync();
-      })
-      .catch((error) => {
-        logWarn("[BOC] failed to refresh settings after storage change", error);
-      });
-  });
 }
+
 function renderReadingSubtitleSelect() {
   const select = getReaderElement(ids.readingSubtitleSelect);
   const subtitles = state.clip.subtitles || [];
@@ -611,49 +571,9 @@ export function renderReadingView() {
   state.reader.setActiveChapterIndex(-1);
 }
 
-export function hydrateReaderStateFromSettings(settings = state.settings) {
-  state.reader.setTheme(normalizeReaderTheme(settings?.readerTheme));
-  state.reader.setFontScale(normalizeReaderFontScale(settings?.readerFontScale));
-  state.reader.setLetterSpacing(normalizeReaderLetterSpacing(settings?.readerLetterSpacing ?? settings?.readerLineHeight));
-  state.reader.setLineHeight(normalizeReaderLineHeight(settings?.readerLineHeight));
-  state.reader.setContentWidth(normalizeReaderContentWidth(settings?.readerContentWidth));
-  state.reader.setChapterVisible(settings?.readerChapterVisible !== undefined ? Boolean(settings.readerChapterVisible) : true);
-  state.reader.setTranscriptVisible(normalizeReaderTranscriptVisible(settings?.readerTranscriptVisible));
-}
-
-export function applyReadingViewPresentation() {
-  const readingView = getReaderElement(ids.readingView);
-  readingView.dataset.theme = state.reader.readingTheme;
-  readingView.dataset.fontScale = state.reader.readingFontScale;
-  readingView.dataset.letterSpacing = state.reader.readingLetterSpacing;
-  readingView.dataset.lineHeight = state.reader.readingLineHeight;
-  readingView.dataset.contentWidth = state.reader.readingContentWidth;
-  readingView.dataset.chapterVisibility = state.reader.readingChapterVisible ? "auto" : "hide";
-  readingView.dataset.transcriptVisible = state.reader.readingTranscriptVisible ? "1" : "0";
-  document.documentElement.dataset.bocReaderTheme = state.reader.readingTheme;
-  document.documentElement.dataset.bocReaderFontScale = state.reader.readingFontScale;
-  document.documentElement.dataset.bocReaderLetterSpacing = state.reader.readingLetterSpacing;
-  document.documentElement.dataset.bocReaderLineHeight = state.reader.readingLineHeight;
-  document.documentElement.dataset.bocReaderContentWidth = state.reader.readingContentWidth;
-  document.documentElement.dataset.bocReaderChapterVisibility = state.reader.readingChapterVisible ? "auto" : "hide";
-  document.documentElement.dataset.bocReaderTranscriptVisible = state.reader.readingTranscriptVisible ? "1" : "0";
-  document.body.dataset.bocReaderTheme = state.reader.readingTheme;
-  document.body.dataset.bocReaderFontScale = state.reader.readingFontScale;
-  document.body.dataset.bocReaderLetterSpacing = state.reader.readingLetterSpacing;
-  document.body.dataset.bocReaderLineHeight = state.reader.readingLineHeight;
-  document.body.dataset.bocReaderContentWidth = state.reader.readingContentWidth;
-  document.body.dataset.bocReaderChapterVisibility = state.reader.readingChapterVisible ? "auto" : "hide";
-  document.body.dataset.bocReaderTranscriptVisible = state.reader.readingTranscriptVisible ? "1" : "0";
-  const readingChapterVisibleEl = getReaderElement(ids.readingChapterVisible);
-  if (readingChapterVisibleEl) {
-    readingChapterVisibleEl.checked = state.reader.readingChapterVisible;
-  }
-  const main = document.querySelector(".boc-reading-main");
-  if (main) {
-    main.style.display = state.reader.readingTranscriptVisible ? "" : "none";
-  }
-  applyInlineHostPresentation();
-}
+// hydrateReaderStateFromSettings / applyReadingViewPresentation 已迁往
+// ./presentation.js（常驻微模块）；enterReaderMode/renderReadingView 等
+// 域内调用方经文件头 import 的 presentation 绑定取用。
 
 export function updateReaderChapterPresence(hasChapters) {
   const value = hasChapters ? "1" : "0";
@@ -663,93 +583,46 @@ export function updateReaderChapterPresence(hasChapters) {
   document.body.dataset.bocReaderHasChapters = value;
 }
 
-function getToggleLabel(key, value) {
-  const labels = {
-    fontScale: { xs: "最小", s: "偏小", m: "标准", l: "偏大", xl: "最大" },
-    letterSpacing: { tighter: "最紧", tight: "偏紧", normal: "标准", relaxed: "偏松", loose: "最松" },
-    lineHeight: { compact: "最紧", tight: "偏紧", normal: "标准", relaxed: "偏松", loose: "最松" },
-    contentWidth: { compact: "最窄", narrow: "偏窄", medium: "标准", wide: "偏宽", full: "最宽" }
-  };
-  return labels[key]?.[value] || "标准";
-}
+// ===== 设置面板/步进器/偏好更新（候选02：自 presentation.js 移回本域——
+// 仅在阅读视图交互时执行，常驻侧经 ensureReaderDomain 转发到这些导出） =====
 
-function getReaderStepperConfig(settingKey) {
-  const configs = {
-    readerFontScale: {
-      options: ["xs", "s", "m", "l", "xl"],
-      labelKey: "fontScale",
-      getCurrent: () => state.reader.readingFontScale,
-      buildPayload: (value) => ({ readerFontScale: value })
-    },
-    readerLetterSpacing: {
-      options: ["tighter", "tight", "normal", "relaxed", "loose"],
-      labelKey: "letterSpacing",
-      getCurrent: () => state.reader.readingLetterSpacing,
-      buildPayload: (value) => ({ readerLetterSpacing: value })
-    },
-    readerLineHeight: {
-      options: ["compact", "tight", "normal", "relaxed", "loose"],
-      labelKey: "lineHeight",
-      getCurrent: () => state.reader.readingLineHeight,
-      buildPayload: (value) => ({ readerLineHeight: value })
-    },
-    readerContentWidth: {
-      options: ["compact", "narrow", "medium", "wide", "full"],
-      labelKey: "contentWidth",
-      getCurrent: () => state.reader.readingContentWidth,
-      buildPayload: (value) => ({ readerContentWidth: value })
-    }
-  };
-  return configs[settingKey] || null;
-}
-
-export function buildReaderStepperControl({
-  id,
-  title,
-  settingKey
-}) {
-  const config = getReaderStepperConfig(settingKey);
-  if (!config) {
-    return "";
-  }
-  return `
-    <div id="${id}" class="boc-reading-stepper" data-reader-setting-id="${id}">
-      <span class="boc-reading-stepper-title">${escapeHtml(title)}</span>
-      <div class="boc-reading-stepper-buttons" role="group" aria-label="${escapeHtml(title)}">
-        ${config.options
-          .map(
-            (option, index) => `
-          <button
-            type="button"
-            class="boc-reading-stepper-btn"
-            data-value="${escapeHtml(option)}"
-            aria-label="${escapeHtml(title)} ${escapeHtml(getToggleLabel(config.labelKey, option))}"
-            title="${escapeHtml(getToggleLabel(config.labelKey, option))}"
-          >${index + 1}</button>
-        `
-          )
-          .join("")}
-      </div>
-    </div>
-  `;
-}
-
-export function bindReaderStepperControl(node, settingKey) {
-  if (!node || node.dataset.bocBound === "1") {
-    return;
-  }
-
-  node.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-value]");
-    if (!button) {
-      return;
-    }
-    setReaderPreference(settingKey, button.dataset.value || "");
+export function updateReaderPreferences(next, { persist = true } = {}) {
+  state.reader.setTheme(normalizeReaderTheme(next.readerTheme ?? state.reader.readingTheme));
+  state.reader.setFontScale(normalizeReaderFontScale(next.readerFontScale ?? state.reader.readingFontScale));
+  state.reader.setLetterSpacing(
+    normalizeReaderLetterSpacing(next.readerLetterSpacing ?? state.reader.readingLetterSpacing)
+  );
+  state.reader.setLineHeight(normalizeReaderLineHeight(next.readerLineHeight ?? state.reader.readingLineHeight));
+  state.reader.setContentWidth(normalizeReaderContentWidth(next.readerContentWidth ?? state.reader.readingContentWidth));
+  state.reader.setChapterVisible(next.readerChapterVisible !== undefined ? Boolean(next.readerChapterVisible) : state.reader.readingChapterVisible);
+  state.reader.setTranscriptVisible(
+    normalizeReaderTranscriptVisible(next.readerTranscriptVisible ?? state.reader.readingTranscriptVisible)
+  );
+  state.setSettings({
+    ...state.settings,
+    readerTheme: state.reader.readingTheme,
+    readerFontScale: state.reader.readingFontScale,
+    readerLetterSpacing: state.reader.readingLetterSpacing,
+    readerLineHeight: state.reader.readingLineHeight,
+    readerContentWidth: state.reader.readingContentWidth,
+    readerChapterVisible: state.reader.readingChapterVisible,
+    readerTranscriptVisible: state.reader.readingTranscriptVisible
   });
-  node.dataset.bocBound = "1";
+  applyReadingViewPresentation();
+  renderReaderPanels();
+  if (persist) {
+    persistReaderSettings();
+  }
 }
 
-function setReaderPreference(settingKey, nextValue) {
+function persistReaderSettings() {
+  persistReaderSettingsThroughSeam();
+}
+
+// 步进器点击的偏好应用（原 presentation.js 私有 setReaderPreference，候选02
+// 更名导出：常驻侧 bindReaderStepperControl 的监听回调经 ensureReaderDomain
+// 转发到这里）。值校验/去重语义与搬迁前逐字一致。
+export function applyReaderStepperPreference(settingKey, nextValue) {
   const config = getReaderStepperConfig(settingKey);
   if (!config) {
     return;
@@ -762,7 +635,7 @@ function setReaderPreference(settingKey, nextValue) {
   updateReaderPreferences(config.buildPayload(nextValue), { persist: true });
 }
 
-export function renderReaderStepperState(node, settingKey) {
+function renderReaderStepperState(node, settingKey) {
   const config = getReaderStepperConfig(settingKey);
   if (!node || !config) {
     return;
@@ -852,39 +725,6 @@ function buildReadingSummaryItems() {
   return items;
 }
 
-export function updateReaderPreferences(next, { persist = true } = {}) {
-  state.reader.setTheme(normalizeReaderTheme(next.readerTheme ?? state.reader.readingTheme));
-  state.reader.setFontScale(normalizeReaderFontScale(next.readerFontScale ?? state.reader.readingFontScale));
-  state.reader.setLetterSpacing(
-    normalizeReaderLetterSpacing(next.readerLetterSpacing ?? state.reader.readingLetterSpacing)
-  );
-  state.reader.setLineHeight(normalizeReaderLineHeight(next.readerLineHeight ?? state.reader.readingLineHeight));
-  state.reader.setContentWidth(normalizeReaderContentWidth(next.readerContentWidth ?? state.reader.readingContentWidth));
-  state.reader.setChapterVisible(next.readerChapterVisible !== undefined ? Boolean(next.readerChapterVisible) : state.reader.readingChapterVisible);
-  state.reader.setTranscriptVisible(
-    normalizeReaderTranscriptVisible(next.readerTranscriptVisible ?? state.reader.readingTranscriptVisible)
-  );
-  state.setSettings({
-    ...state.settings,
-    readerTheme: state.reader.readingTheme,
-    readerFontScale: state.reader.readingFontScale,
-    readerLetterSpacing: state.reader.readingLetterSpacing,
-    readerLineHeight: state.reader.readingLineHeight,
-    readerContentWidth: state.reader.readingContentWidth,
-    readerChapterVisible: state.reader.readingChapterVisible,
-    readerTranscriptVisible: state.reader.readingTranscriptVisible
-  });
-  applyReadingViewPresentation();
-  renderReaderPanels();
-  if (persist) {
-    persistReaderSettings();
-  }
-}
-
-function persistReaderSettings() {
-  persistReaderSettingsThroughSeam();
-}
-
 function buildReadingMetaLine() {
   const parts = [];
   if (state.clip.author) {
@@ -917,7 +757,9 @@ function setReadingViewReady(ready) {
   readingView.setAttribute("aria-busy", state.reader.readingViewReady ? "false" : "true");
 }
 
-function createReaderDebugSnapshot(label = "manual") {
+// 调试快照真身（常驻侧 __BOC_READER_DEBUG_SNAPSHOT__ 经 ensureReaderDomain
+// 转发到这里）。注册在 ./init-essentials.js，本函数只在 reader 域装载后可达。
+export function createReaderDebugSnapshot(label = "manual") {
   const pickNodeSnapshot = (selector) => {
     const node = document.querySelector(selector);
     if (!node) {

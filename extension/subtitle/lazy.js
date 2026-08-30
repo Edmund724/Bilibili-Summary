@@ -1,0 +1,53 @@
+// 总结链（subtitle/fetcher.js 抓取编排 + subtitle/ui.js + notes/render.js 及
+// 其独占依赖）的按需加载器（候选02 分层惰性）。
+//
+// 为什么惰性：抓字幕/笔记渲染链（~20KB）只在首次抓字幕（popup-refresh、刷新
+// 抓取按钮、URL 变化自动刷新、阅读模式进入后的后台刷新）时才有职责。候选02
+// 之前它经 message-handler / ui-renderer 的静态 import 常驻。分层后这里成为
+// 动态 import 边：esbuild 把 fetcher 连同其独占依赖切进独立 chunk，只在首次
+// ensureSummarizeChain() 时才下载。一键总结热路径（点击 AI 键 → popup-refresh）
+// 上的装载是本地 chunk 动态 import（~10ms），被两轮消息往返完全掩盖。
+//
+// 写法与 core/lazy-player-ai.js、core/lazy-reader.js 同款（手写 promise 缓存 +
+// 失败清缓存可重试），保持仓库现有加载器风格一致。双入口（fetcher + ui）用
+// Promise.all 并行装载，与 fetcher.js 的 loadAsrFallback 同款。
+//
+// 为什么直接写相对路径：本模块身处 ESM 主包模块图内，动态 import() 的相对
+// 路径按扩展自身 URL 解析（bootstrap 已用 chrome.runtime.getURL 的绝对路径
+// 拉起主包），无需也不应再经 getURL 拼绝对路径。
+//
+// 失败语义：加载失败清空缓存 promise，允许下次触发重试。
+//
+// 消费约定：链内函数（refreshClip/loadSubtitle/resetClipState/getPopupPayload/
+// onSubtitleChange/copyMarkdown/downloadSubtitle）不静态 import fetcher/ui，
+// 一律 `ensureSummarizeChain().then((chain) => chain.xxx())`；promise 缓存天然
+// 去重并发调用。reader 侧的 requestSubtitleRefresh（presenter seam）在无
+// handler 时也会先 ensure 本链再转发——链装载成功路径上的 initSummarizeChain
+// 会把 refreshClip 注册进 seam，闭环成立。
+
+let chainPromise = null;
+
+async function loadSummarizeChain() {
+  // fetcher（抓取编排 + resetClipState）与 ui（popup payload / 复制下载回调）
+  // 同属链层，一次 ensure 全部就位；两文件间本就互相引用（ui → fetcher），
+  // 并行装载只是把等待重叠。
+  const [fetcher, chainUi] = await Promise.all([import("./fetcher.js"), import("./ui.js")]);
+  // 顶层副作用迁移（原 fetcher.js 模块求值时的 subscribeSubtitleRefresh(refreshClip)）：
+  // 该注册依赖「fetcher 总在启动时装载」的假设。链改为按需装载后，注册时机
+  // 与装载绑定——ensure 成功路径上执行一次（subscribeSubtitleRefresh 自带
+  // 去重，重复调用安全）。
+  fetcher.initSummarizeChain();
+  // 合并成单一 chain 门面：两模块导出无重名（fetcher=抓取编排，ui=payload/交互）。
+  return { ...fetcher, ...chainUi };
+}
+
+// 按需装载总结链，同一文档内重复调用共享同一 promise。
+export function ensureSummarizeChain() {
+  if (!chainPromise) {
+    chainPromise = loadSummarizeChain().catch((error) => {
+      chainPromise = null;
+      throw error;
+    });
+  }
+  return chainPromise;
+}

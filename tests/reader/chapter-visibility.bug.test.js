@@ -123,7 +123,12 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
     seedChapters();
     presenter.notifyReaderPresenter("subtitle-ready");
 
-    expect(chapterButtons().length).toBe(2);
+    // 候选02 分层惰性：presenter 注册接线（bindReaderPresenter）改为常驻微模块
+    // 内经 ensureReaderDomain() 装载 reader 域后转发处理体，通知处理由同步变为
+    // 装载后异步。断言语义不变（迟到章节触发重渲染），仅补装载等待。
+    await vi.waitFor(() => {
+      expect(chapterButtons().length).toBe(2);
+    });
     expect(railVisibilityAttrs().readingViewHasChapters).toBe("1");
   });
 
@@ -141,16 +146,23 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
     expect(checkbox.checked).toBe(true);
 
     // 取消勾选 → hide（CSS 隐藏 rail）
+    // 候选02 分层惰性：ui-renderer 的 change 回调经 ensureReaderDomain（缓存
+    // promise）转发 updateReaderPreferences，属性写入由同步变为装载后异步；
+    // 断言语义不变，仅补装载等待。
     checkbox.checked = false;
     checkbox.dispatchEvent(new Event("change", { bubbles: true }));
-    expect(railVisibilityAttrs().readingViewChapterVisibility).toBe("hide");
+    await vi.waitFor(() => {
+      expect(railVisibilityAttrs().readingViewChapterVisibility).toBe("hide");
+    });
     expect(railVisibilityAttrs().htmlChapterVisibility).toBe("hide");
     expect(railVisibilityAttrs().bodyChapterVisibility).toBe("hide");
 
     // 重新勾选 → auto（有章节时 CSS 显示 rail）
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event("change", { bubbles: true }));
-    expect(railVisibilityAttrs().readingViewChapterVisibility).toBe("auto");
+    await vi.waitFor(() => {
+      expect(railVisibilityAttrs().readingViewChapterVisibility).toBe("auto");
+    });
     expect(railVisibilityAttrs().htmlChapterVisibility).toBe("auto");
     expect(railVisibilityAttrs().bodyChapterVisibility).toBe("auto");
 

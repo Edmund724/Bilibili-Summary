@@ -155,7 +155,7 @@ describe("播放同步与高亮", () => {
     expect(video.__bocReadingSyncHandler).toBeUndefined();
   });
 
-  it("点击章节跳转：设置 video.currentTime 并高亮对应字幕", () => {
+  it("点击章节跳转：设置 video.currentTime 并高亮对应字幕", async () => {
     state.reader.readingViewOpen = true;
     state.reader.readingNativePageMode = true;
     shell.renderReadingView();
@@ -168,13 +168,17 @@ describe("播放同步与高亮", () => {
     const event = new MouseEvent("click", { bubbles: true, cancelable: true });
     secondChapter.dispatchEvent(event);
 
-    expect(video.currentTime).toBe(30);
+    // 候选02 分层惰性：章节点击回调经 ui-renderer 的 ensureReaderDomain（缓存
+    // promise）转发，跳转为装载后微任务。断言语义不变，仅补装载等待。
+    await vi.waitFor(() => {
+      expect(video.currentTime).toBe(30);
+    });
     const activeChapter = readingView.querySelector(".boc-reading-chapter.is-active");
     expect(activeChapter.dataset.index).toBe("1");
     expect(state.reader.readingActiveChapterIndex).toBe(1);
   });
 
-  it("点击字幕跳转：选择文本时忽略，空白选区时跳转", () => {
+  it("点击字幕跳转：选择文本时忽略，空白选区时跳转", async () => {
     state.reader.readingViewOpen = true;
     state.reader.readingNativePageMode = true;
     shell.renderReadingView();
@@ -185,19 +189,23 @@ describe("播放同步与高亮", () => {
     const readingView = document.getElementById(shell.ids.readingView);
     const target = readingView.querySelectorAll(".boc-reading-item")[2];
 
-    // 选中文本时不跳转
+    // 选中文本时不跳转：候选02 后点击经 ensure 异步转发，先等一拍确保处理器
+    // 已执行过——此刻仍不跳转才证明「选区拦截」语义成立。
     const selection = window.getSelection();
     const range = document.createRange();
     range.selectNodeContents(target);
     selection.removeAllRanges();
     selection.addRange(range);
     target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(video.currentTime).toBe(0);
 
     // 清空选区后点击跳转
     selection.removeAllRanges();
     target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    expect(video.currentTime).toBe(30);
+    await vi.waitFor(() => {
+      expect(video.currentTime).toBe(30);
+    });
     const activeTranscript = readingView.querySelector(".boc-reading-item.is-active");
     expect(activeTranscript.dataset.index).toBe("2");
   });

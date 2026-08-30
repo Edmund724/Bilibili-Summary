@@ -79,13 +79,18 @@ describe("replaceState 补丁与章节清空（5be8f39 嫌疑路径）", () => {
     expect(state.clip.title).toBe("测试视频");
   });
 
-  it("F2. 旧调用模式（red-capable 对照）：replaceState 前不更新签名，章节被清空", () => {
+  it("F2. 旧调用模式（red-capable 对照）：replaceState 前不更新签名，章节被清空", async () => {
     seedFetchedClip();
     messageHandler.bindUrlChangeHandler();
 
     // 5be8f39 之前的 replaceReaderModeUrl 等价于直接 replaceState
     history.replaceState(history.state, "", OTHER_VIDEO_READER_URL);
 
-    expect(state.clip.chapters.length).toBe(0);
+    // 候选02 分层惰性：handleUrlChange 的 resetClipState 改经 ensureSummarizeChain
+    // 装载总结链后执行（原本地动态 import，毫秒级），清空动作由同步变为装载后
+    // 微任务。断言语义不变（章节最终被清空），仅补装载等待。
+    await vi.waitFor(() => {
+      expect(state.clip.chapters.length).toBe(0);
+    });
   });
 });

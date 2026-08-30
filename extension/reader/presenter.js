@@ -30,6 +30,11 @@
 // callbacks need no arguments.
 
 import { logWarn } from "../shared/logging.js";
+// 候选02 分层惰性：总结链改为按需装载后，seam 里可能暂无 refreshClip handler
+// （注册时机与链装载绑定，见 subtitle/fetcher.js initSummarizeChain）。无
+// handler 时先经加载器装载总结链再重读 seam。本模块只 import 加载器本身
+//（常驻轻文件，动态边在其内部），不会把链拖回常驻。
+import { ensureSummarizeChain } from "../subtitle/lazy.js";
 
 const readers = [];
 
@@ -88,13 +93,32 @@ export function subscribeSubtitleRefresh(handler) {
 export function requestSubtitleRefresh() {
   const handler = subtitleRefreshHandlers[0];
   if (!handler) {
-    return Promise.resolve(undefined);
+    // 候选02 分层惰性：链未装载 ⇒ refreshClip 未注册。先装载总结链（其
+    // initSummarizeChain 会把 refreshClip 注册进 seam），再重读 handler 转发；
+    // 装载失败保持「must never throw」约定，静默 resolve(undefined)。
+    return ensureSummarizeChain()
+      .then(() => {
+        const loadedHandler = subtitleRefreshHandlers[0];
+        if (!loadedHandler) {
+          return undefined;
+        }
+        try {
+          return Promise.resolve(loadedHandler());
+        } catch (error) {
+          logWarn("[BOC] subtitle refresh handler failed", { error });
+          return undefined;
+        }
+      })
+      .catch((error) => {
+        logWarn("[BOC] subtitle refresh (summarize chain load) failed", { error });
+        return undefined;
+      });
   }
   try {
     return Promise.resolve(handler());
   } catch (error) {
     logWarn("[BOC] subtitle refresh handler failed", { error });
-    return Promise.resolve(undefined);
+    return undefined;
   }
 }
 

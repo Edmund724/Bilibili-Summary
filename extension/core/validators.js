@@ -16,6 +16,11 @@ export function toString(value) {
 }
 
 // ===== Reader normalizers =====
+// 候选02 备注：曾尝试把 normalizeReaderTheme/FontScale/LetterSpacing/LineHeight/
+// ContentWidth/TranscriptVisible 六个函数迁往 reader/presentation.js 以便让本
+// 模块退出 content 常驻——但 core/settings-store.js（后台设置归一化）静态依赖
+// 它们，迁移会破坏后台 bundle 与其测试，故留守本模块（content 常驻多 ~0.7KB，
+// 换取后台共享面不动）。
 export function normalizeReaderTheme(value) {
   return value === "dark" || value === "paper" ? value : "light";
 }

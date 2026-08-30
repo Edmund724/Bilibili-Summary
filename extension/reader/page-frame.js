@@ -12,15 +12,35 @@
 //
 // SYNC 域调用经 ./sync-adapter.js 反环叶子（callSync）；./sync.js 与
 // ./lifecycle.js 依赖本层，本文件不得反向 import 它们。
-import { state, uiState } from "../core/state.js";
+//
+// 候选02 分层惰性：页面状态守卫三件套（clearReaderModePageState /
+// enforceNormalPageStateIfNeeded / bindNormalPageStateGuard）、id 表、
+// isReaderViewOpen、applyInlineHostPresentation 已迁往常驻微模块
+//（./page-state.js、./ids.js、./view-state.js、./presentation.js）。本文件
+// 经 re-export 保持域内旧 import 路径与 facade 转发不变。
+import { state } from "../core/state.js";
 import { getReaderElement, isVisibleReaderControl } from "../shared/dom-utils.js";
 import { isReaderMode } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
-import * as pageContext from "./page-context.js";
 import { isProgrammaticScrolling } from "./scroll-state.js";
 // 跨域模块接口：播放器宿主状态与布局函数（player-host.js 导出）。
 import { getPlayerHost, layoutReaderPlayerHost, updateReadingTranscriptTailSpacer } from "./player-host.js";
 import { callSync } from "./sync-adapter.js";
+import { applyInlineHostPresentation } from "./presentation.js";
+// 候选02 分层惰性：id 表已迁往 ./ids.js（常驻微模块），本文件内部仍大量按 id
+// 读写 reader DOM，经该 import 取用（此前为本地 const 定义，迁移后补上）。
+import { ids } from "./ids.js";
+
+// ===== 常驻微模块 re-export（域内旧路径兼容 + facade 转发） =====
+
+export { ids } from "./ids.js";
+export { isReaderViewOpen } from "./view-state.js";
+export {
+  clearReaderModePageState,
+  enforceNormalPageStateIfNeeded,
+  bindNormalPageStateGuard
+} from "./page-state.js";
+export { applyInlineHostPresentation } from "./presentation.js";
 
 // ===== page-frame 域闭包状态（自 reader-impl.js 头部迁入） =====
 //
@@ -29,56 +49,13 @@ import { callSync } from "./sync-adapter.js";
 let mainOriginalParent = null;     // readingMainOriginalParent
 let mainOriginalNextSibling = null;// readingMainOriginalNextSibling
 
-// Reader-domain DOM id table (shared by the LAYOUT and LIFECYCLE modules; the
-// facade re-exports it for UI templates and a few external DOM operations).
-export const ids = {
-  root: "boc-root",
-  panel: "boc-panel",
-  status: "boc-status",
-  meta: "boc-meta",
-  subtitleSelect: "boc-subtitle-select",
-  preview: "boc-preview",
-  message: "boc-message",
-  copyBtn: "boc-copy-btn",
-  downloadBtn: "boc-download-btn",
-  refreshBtn: "boc-refresh-btn",
-  closeBtn: "boc-close-btn",
-  settingsBtn: "boc-settings-btn",
-  readingView: "boc-reading-view",
-  readingPlayerSlot: "boc-reading-player-slot",
-  readingStatus: "boc-reading-status",
-  readingCloseBtn: "boc-reading-close-btn",
-  readingRefreshBtn: "boc-reading-refresh-btn",
-  readingAutoScroll: "boc-reading-autoscroll",
-  readingTranscriptVisible: "boc-reading-transcript-visible",
-  readingThemeSelect: "boc-reading-theme-select",
-  readingSettingsBtn: "boc-reading-settings-btn",
-  readingSettingsPanel: "boc-reading-settings-panel",
-  readingFontScaleSelect: "boc-reading-font-scale-select",
-  readingLetterSpacingSelect: "boc-reading-letter-spacing-select",
-  readingLineHeightSelect: "boc-reading-line-height-select",
-  readingContentWidthSelect: "boc-reading-content-width-select",
-  readingChapterVisibilitySelect: "boc-reading-chapter-visibility-select",
-  readingChapterVisible: "boc-reading-chapter-visible",
-  readingSubtitleSelect: "boc-reading-subtitle-select",
-  readingInfoSummary: "boc-reading-info-summary",
-  readingInfoDescription: "boc-reading-info-description",
-  readingDescriptionBtn: "boc-reading-description-btn",
-  readingMeta: "boc-reading-meta",
-  readingChapterList: "boc-reading-chapters",
-  readingTranscriptList: "boc-reading-transcript",
-  readingTranscriptTailSpacer: "boc-reading-tail-spacer"
-};
-
+// Reader 私有 DOM id 表已迁往 ./ids.js（常驻微模块，供 UI 模板与总结链共享），
+// isReaderViewOpen 迁往 ./view-state.js，页面状态守卫迁往 ./page-state.js，
+// applyInlineHostPresentation 迁往 ./presentation.js——见文件头的 re-export。
 // getReaderElement / isVisibleReaderControl live in ../shared/dom-utils.js:
 // reading reader DOM ids is a reader-internal concern, and keeping that helper
 // out of core/runtime.js keeps the reader modules free of a static import back
 // through subtitle/fetcher.js (same rationale as the former local copy here).
-
-// 阅读视图开关状态查询（读 state.reader；供 facade 对外转发）。
-export function isReaderViewOpen() {
-  return state.reader.readingViewOpen;
-}
 
 // ===== page-frame.js (page frame helpers) =====
 //
@@ -107,63 +84,6 @@ function getReaderPagePaddingPx() {
 
 export function getReaderMainWidthLimit() {
   return Math.max(320, Math.min(getReaderContentMaxPx(), window.innerWidth - getReaderPagePaddingPx() * 2));
-}
-
-export function clearReaderModePageState() {
-  document.documentElement.removeAttribute("data-boc-reader-mode");
-  document.documentElement.removeAttribute("data-boc-reader-line-height");
-  document.documentElement.removeAttribute("data-boc-reader-theme");
-  document.documentElement.removeAttribute("data-boc-reader-font-scale");
-  document.documentElement.removeAttribute("data-boc-reader-letter-spacing");
-  document.documentElement.removeAttribute("data-boc-reader-content-width");
-  document.documentElement.removeAttribute("data-boc-reader-chapter-visibility");
-  document.documentElement.removeAttribute("data-boc-reader-has-chapters");
-  document.documentElement.removeAttribute("data-boc-reader-transcript-visible");
-  document.body.removeAttribute("data-boc-reader-mode");
-  document.body.removeAttribute("data-boc-reader-line-height");
-  document.body.removeAttribute("data-boc-reading-active");
-}
-
-function shouldForceNormalPageState(url = location.href) {
-  return !isReaderMode(url) && !state.reader.readingViewOpen;
-}
-
-export function enforceNormalPageStateIfNeeded(url = location.href) {
-  if (!shouldForceNormalPageState(url)) {
-    return;
-  }
-  clearReaderModePageState();
-}
-
-export function bindNormalPageStateGuard() {
-  if (state.ui.normalPageStateGuardBound) {
-    return;
-  }
-  uiState.setNormalPageStateGuardBound(true);
-
-  const observer = new MutationObserver(() => {
-    enforceNormalPageStateIfNeeded();
-  });
-  observer.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: [
-      "data-boc-reader-mode",
-      "data-boc-reader-line-height",
-      "data-boc-reader-theme",
-      "data-boc-reader-font-scale",
-      "data-boc-reader-letter-spacing",
-      "data-boc-reader-content-width",
-      "data-boc-reader-chapter-visibility",
-      "data-boc-reader-has-chapters",
-      "data-boc-reader-transcript-visible"
-    ]
-  });
-  observer.observe(document.body, {
-    attributes: true,
-    attributeFilter: ["data-boc-reader-mode", "data-boc-reader-line-height", "data-boc-reading-active"]
-  });
-  pageContext.setNormalPageStateObserver(observer);
-  enforceNormalPageStateIfNeeded();
 }
 
 export function cleanupReaderFloatingArtifacts(playerHostArg = getPlayerHost()) {
@@ -214,28 +134,6 @@ export function clearReaderPageFocus() {
   document.querySelectorAll("[data-boc-reader-hidden]").forEach((node) => {
     node.removeAttribute("data-boc-reader-hidden");
   });
-}
-
-export function applyInlineHostPresentation() {
-  const inlineHost = document.getElementById("boc-reading-inline-host");
-  if (!inlineHost) {
-    return;
-  }
-  const leftContainer = document.querySelector(".left-container");
-  const bgColor = leftContainer ? getComputedStyle(leftContainer).backgroundColor : "";
-  if (state.reader.readingTranscriptVisible) {
-    inlineHost.style.border = "";
-    inlineHost.style.background = "";
-    inlineHost.style.marginTop = "";
-    inlineHost.style.boxShadow = "";
-    inlineHost.style.borderRadius = "";
-  } else {
-    inlineHost.style.border = "none";
-    inlineHost.style.background = bgColor;
-    inlineHost.style.marginTop = "0";
-    inlineHost.style.boxShadow = "none";
-    inlineHost.style.borderRadius = "0";
-  }
 }
 
 export function moveReadingMainInline() {

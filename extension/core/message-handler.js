@@ -7,29 +7,32 @@ import {
   getErrorMessage,
   isStaleRunError
 } from "../shared/error-helpers.js";
-import {
-  getRuntimeVideoElement
-} from "../bilibili/video-probe.js";
 
-import { getPopupPayload } from "../subtitle/ui.js";
-import { refreshClip, loadSubtitle, resetClipState } from "../subtitle/fetcher.js";
-import { setStatus, renderSubtitleSelect, ensureUiReady } from "../ui/ui-renderer.js";
+// 候选02 分层惰性：video-probe（getRuntimeVideoElement/findReaderPlayerHost）
+// 原被本模块与 reader 域共享而提升为常驻静态 chunk；其常驻侧唯一消费点是
+// seek 联动处理器（异步），改为处理器内动态 import 后随 reader 域/总结链
+// 切进动态 chunk（详见 sidepanel-seek-video-time 处理器）。
+
+// 总结链（fetcher/ui + notes/render）经加载器按需引入（候选02 分层惰性）：
+// 链内符号一律 ensureSummarizeChain().then((chain) => chain.xxx())。一键总结
+// 热路径上的装载是本地 chunk 动态 import（~10ms），被消息往返掩盖。
+import { ensureSummarizeChain } from "../subtitle/lazy.js";
+import { setStatus, ensureUiReady } from "../ui/ui-renderer.js";
 
 // player-ai 经加载器按需引入（候选4 分包）：默认关闭的能力不再常驻。
 // 「未加载」时按钮不可能存在，remove/sync 均可安全跳过（幂等不变量见
 // lazy-player-ai.js 头注）。
 import { loadPlayerAi, isPlayerAiLoaded } from "./lazy-player-ai.js";
 
-import {
-  updateReaderFollowState,
-  syncReadingViewPlayback,
-  enterReaderMode,
-  closeReadingView,
-  isReaderViewOpen,
-  renderReadingStatus,
-  waitForVideoMetadata,
-  enforceNormalPageStateIfNeeded
-} from "../reader/index.js";
+// reader 域经加载器按需引入（候选02 分层惰性）：重符号（enterReaderMode 等）
+// 在处理器内 ensureReaderDomain() 后经命名空间取用；启动必需的轻符号直接从
+// 常驻微模块 import（isReaderViewOpen=纯 state 读、enforceNormalPageState-
+// IfNeeded=DOM 守卫、renderReadingStatus=状态栏文案写入、resetManualScrollPause
+// =共享叶子），不拖入 reader 重文件。
+import { ensureReaderDomain } from "./lazy-reader.js";
+import { isReaderViewOpen } from "../reader/view-state.js";
+import { enforceNormalPageStateIfNeeded } from "../reader/page-state.js";
+import { renderReadingStatus } from "../reader/presentation.js";
 // 滚动暂停重置位于 reader 域的共享叶子模块（不再经 reader/index.js 转发）
 import { resetManualScrollPause } from "../reader/scroll-state.js";
 // 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
@@ -40,11 +43,9 @@ import {
   computeCurrentClipSignature,
   stripReaderModeUrl
 } from "../bilibili/video-id-shared.js";
-
-import {
-  getCurrentAid,
-  fetchHotComments
-} from "../bilibili/gateway.js";
+// 候选02 分层惰性：gateway（getCurrentAid/fetchHotComments）原被本模块与总结
+// 链共享而提升为常驻静态 chunk；其常驻侧唯一消费点是热评消息处理器（异步），
+// 改为处理器内动态 import 后，gateway/bili-api-shared 随总结链切进动态 chunk。
 
 export function bindRuntimeEvents() {
   if (state.ui.runtimeEventsBound) {
@@ -58,17 +59,29 @@ export function bindRuntimeEvents() {
     }
 
     if (message.type === "popup-get-state") {
-      const payload = getPopupPayload();
-      sendResponse({ ok: true, payload });
-      return false;
+      // 候选02：getPopupPayload 属总结链层，经 ensure 装载后组装（热路径本地
+      // 动态 import ~10ms）。装载失败回错误（popup 对缺 payload 有兜底渲染）。
+      ensureSummarizeChain()
+        .then((chain) => sendResponse({ ok: true, payload: chain.getPopupPayload() }))
+        .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
+      return true;
     }
 
     if (message.type === "popup-refresh") {
-      refreshClip()
-        .then(() => sendResponse({ ok: true, payload: getPopupPayload() }))
-        .catch((error) =>
-          sendResponse({ ok: false, error: getErrorMessage(error), payload: getPopupPayload() })
-        );
+      ensureSummarizeChain()
+        .then((chain) =>
+          chain
+            .refreshClip()
+            .then(() => sendResponse({ ok: true, payload: chain.getPopupPayload() }))
+            .catch((error) =>
+              sendResponse({ ok: false, error: getErrorMessage(error), payload: chain.getPopupPayload() })
+            )
+        )
+        .catch((error) => {
+          // 链装载失败（清缓存重试后仍失败）：无法组装 payload，按错误口径回包
+          // （popup / context-resolver 均对缺 payload 容错，回落 sidepanel 快照）。
+          sendResponse({ ok: false, error: getErrorMessage(error) });
+        });
       return true;
     }
 
@@ -77,18 +90,30 @@ export function bindRuntimeEvents() {
       const lang = String(message.lang || "unknown");
       const subtitleId = String(message.subtitleId || "");
       if (!url) {
-        sendResponse({ ok: false, error: "Missing subtitle URL", payload: getPopupPayload() });
-        return false;
+        // 候选02：错误路径的 payload 同样取自链层，经 ensure 装载后回包。
+        ensureSummarizeChain()
+          .then((chain) =>
+            sendResponse({ ok: false, error: "Missing subtitle URL", payload: chain.getPopupPayload() })
+          )
+          .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
+        return true;
       }
-      loadSubtitle(url, lang, state.clip.fetchRunId, subtitleId)
-        .then(() => {
-          setStatus("字幕切换完成。");
-          renderSubtitleSelect();
-          sendResponse({ ok: true, payload: getPopupPayload() });
-        })
-        .catch((error) =>
-          sendResponse({ ok: false, error: getErrorMessage(error), payload: getPopupPayload() })
-        );
+      ensureSummarizeChain()
+        .then((chain) =>
+          chain
+            .loadSubtitle(url, lang, state.clip.fetchRunId, subtitleId)
+            .then(() => {
+              setStatus("字幕切换完成。");
+              // renderSubtitleSelect 已随总结链下放（候选02）：渲染「抓取结果」
+              // 的函数在链层，经同一 chain 门面调用。
+              chain.renderSubtitleSelect();
+              sendResponse({ ok: true, payload: chain.getPopupPayload() });
+            })
+            .catch((error) =>
+              sendResponse({ ok: false, error: getErrorMessage(error), payload: chain.getPopupPayload() })
+            )
+        )
+        .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
       return true;
     }
 
@@ -110,25 +135,39 @@ export function bindRuntimeEvents() {
         document.body.setAttribute("data-boc-reader-mode", "1");
       }
       if (!isReaderViewOpen()) {
-        enterReaderMode().catch((error) => {
-          logWarn("[BOC] reading mode trigger failed", error);
-        });
+        // 候选02：enterReaderMode 属 reader 重域，经 ensureReaderDomain 装载后
+        // 进入（点击路径的本地动态装载对用户无感）。
+        ensureReaderDomain()
+          .then((reader) => reader.enterReaderMode())
+          .catch((error) => {
+            logWarn("[BOC] reading mode trigger failed", error);
+          });
       }
       sendResponse({ ok: true });
       return true;
     }
 
     if (message.type === "popup-close-reading-view") {
+      // URL 改写保持同步（与旧行为一致地先收敛地址栏）；closeReadingView 属
+      // reader 重域，经 ensure 装载后执行（视图开着 ⇒ 域几乎必然已装载，此处
+      // 只是兜底直开路径）。
       try {
         if (isReaderMode()) {
           replaceReaderModeUrl(stripReaderModeUrl(location.href));
         }
-        closeReadingView();
-        sendResponse({ ok: true });
       } catch (error) {
         sendResponse({ ok: false, error: getErrorMessage(error) });
+        return false;
       }
-      return false;
+      ensureReaderDomain()
+        .then((reader) => {
+          reader.closeReadingView();
+          sendResponse({ ok: true });
+        })
+        .catch((error) => {
+          sendResponse({ ok: false, error: getErrorMessage(error) });
+        });
+      return true;
     }
 
     if (message.type === "sidepanel-get-context") {
@@ -154,16 +193,24 @@ export function bindRuntimeEvents() {
     }
 
     if (message.type === "sidepanel-get-hot-comments") {
-      if (!getCurrentAid()) {
-        clipState.setHotComments([]);
-        sendResponse({ ok: true, comments: [], note: "无法获取视频 aid" });
-        return false;
-      }
-
-      fetchHotComments(20)
-        .then((hotComments) => {
-          clipState.setHotComments(hotComments);
-          sendResponse({ ok: true, comments: hotComments });
+      // gateway 动态装载（候选02，见文件头 import 注）：本地 chunk 加载 ~10ms，
+      // 被热评网络往返掩盖。装载失败与「无法获取 aid」同型降级：空列表 + note。
+      import("../bilibili/gateway.js")
+        .then(({ getCurrentAid, fetchHotComments }) => {
+          if (!getCurrentAid()) {
+            clipState.setHotComments([]);
+            sendResponse({ ok: true, comments: [], note: "无法获取视频 aid" });
+            return;
+          }
+          return fetchHotComments(20)
+            .then((hotComments) => {
+              clipState.setHotComments(hotComments);
+              sendResponse({ ok: true, comments: hotComments });
+            })
+            .catch((error) => {
+              clipState.setHotComments([]);
+              sendResponse({ ok: true, comments: [], note: String(error?.message || error) });
+            });
         })
         .catch((error) => {
           clipState.setHotComments([]);
@@ -173,26 +220,42 @@ export function bindRuntimeEvents() {
     }
 
     if (message.type === "sidepanel-seek-video-time") {
-      const seconds = Number(message.seconds);
-      const video = getRuntimeVideoElement();
-      if (!video) {
-        sendResponse({ ok: false, error: "当前页面没有找到可联动的视频播放器。" });
-        return false;
-      }
-      const nextTime = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
-      const wasPaused = Boolean(video.paused);
-      video.currentTime = nextTime;
-      if (!wasPaused) {
-        video.play().catch(() => {});
-      }
-      if (isReaderViewOpen()) {
-        resetManualScrollPause();
-        state.reader.setNextScrollBehavior("auto");
-        updateReaderFollowState();
-        syncReadingViewPlayback(true);
-      }
-      sendResponse({ ok: true, currentTime: nextTime });
-      return false;
+      // video-probe 动态装载（候选02，见文件头 import 注）：本地 chunk ~10ms，
+      // 被用户点击到执行的时间差掩盖；响应形状与搬迁前一致（ok/currentTime）。
+      import("../bilibili/video-probe.js")
+        .then(({ getRuntimeVideoElement }) => {
+          const seconds = Number(message.seconds);
+          const video = getRuntimeVideoElement();
+          if (!video) {
+            sendResponse({ ok: false, error: "当前页面没有找到可联动的视频播放器。" });
+            return;
+          }
+          const nextTime = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+          const wasPaused = Boolean(video.paused);
+          video.currentTime = nextTime;
+          if (!wasPaused) {
+            video.play().catch(() => {});
+          }
+          if (isReaderViewOpen()) {
+            resetManualScrollPause();
+            state.reader.setNextScrollBehavior("auto");
+            // 候选02：跟随/同步属 reader 重域（视图开着 ⇒ 域几乎必然已装载，ensure
+            // 即命中缓存）；sendResponse 不等它，与旧行为一致地立即回当前时间。
+            ensureReaderDomain()
+              .then((reader) => {
+                reader.updateReaderFollowState();
+                reader.syncReadingViewPlayback(true);
+              })
+              .catch((error) => {
+                logWarn("[BOC] reader follow sync after seek failed", error);
+              });
+          }
+          sendResponse({ ok: true, currentTime: nextTime });
+        })
+        .catch((error) => {
+          sendResponse({ ok: false, error: getErrorMessage(error) });
+        });
+      return true;
     }
 
     return false;
@@ -299,7 +362,13 @@ export function bindUrlChangeHandler() {
     clipState.setCurrentClipSignature(nextSignature);
     enforceNormalPageStateIfNeeded(nextUrl);
     ensureUiReady();
-    resetClipState();
+    // 候选02：resetClipState 属总结链层，经 ensure 装载后执行。装载/执行失败
+    // 记日志不中断编排（后续 reader 分支与状态提示仍需走到）。
+    ensureSummarizeChain()
+      .then((chain) => chain.resetClipState())
+      .catch((error) => {
+        logWarn("[BOC] clip state reset after URL change failed", error);
+      });
     // player-ai 按钮同步（原为同步调用）：懒加载后「已加载/加载中才请求」，
     // 未加载（快捷开关关闭态）跳过——player-ai start 自带初始 sync，开启后
     // 的 URL 变化自会恢复同步，行为等价。
@@ -312,21 +381,38 @@ export function bindUrlChangeHandler() {
     if (!isReaderViewOpen() && shouldEnterReaderMode) {
       document.documentElement.setAttribute("data-boc-reader-mode", "1");
       document.body.setAttribute("data-boc-reader-mode", "1");
+      // renderReadingStatus 为常驻微模块（presentation.js）的轻函数，直接写
+      // 状态栏；enterReaderMode 属 reader 重域，经 ensureReaderDomain 装载后进入。
       renderReadingStatus("检测到阅读视图跳转，正在打开阅读模式...");
-      enterReaderMode().catch((error) => {
-        renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
-      });
+      ensureReaderDomain()
+        .then((reader) => reader.enterReaderMode())
+        .catch((error) => {
+          renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
+        });
       return;
     }
     if (isReaderViewOpen() || shouldEnterReaderMode) {
+      // 走到本分支的前提是视图已开或正要进入阅读模式：前者满足「视图开 ⇒ 域
+      // 已装载」不变式，后者已由上一分支发起装载，ensure 均命中同一 promise。
       renderReadingStatus("检测到视频变化，正在自动刷新字幕...");
-      waitForVideoMetadata().then(() => {
-        refreshClip().catch((error) => {
+      ensureReaderDomain()
+        .then((reader) => {
+          reader.waitForVideoMetadata().then(() => {
+            // 候选02：refreshClip 属总结链层，经 ensureSummarizeChain 装载后刷新。
+            ensureSummarizeChain()
+              .then((chain) => chain.refreshClip())
+              .catch((error) => {
+                if (!isStaleRunError(error)) {
+                  renderReadingStatus(`自动刷新失败：${getErrorMessage(error)}`);
+                }
+              });
+          });
+        })
+        .catch((error) => {
           if (!isStaleRunError(error)) {
             renderReadingStatus(`自动刷新失败：${getErrorMessage(error)}`);
           }
         });
-      });
       return;
     }
     setStatus("检测到页面变化，请点击“刷新抓取”加载当前视频字幕。");

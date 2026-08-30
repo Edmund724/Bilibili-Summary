@@ -165,13 +165,42 @@ function selfCheck() {
   return true;
 }
 
+// 候选02：解析主包的静态 chunk 依赖。esbuild splitting 产物里，被主包静态
+// import 的共享 chunk 以两种形式出现在 content-main.mjs 文本中：
+//   `import{...}from"./chunks/xxx.mjs"`（具名导入，minified 无空格）
+//   `import"./chunks/xxx.mjs"`（纯副作用导入）
+// 动态 chunk 只会以 import("./chunks/xxx.mjs") 调用形式出现——先把动态 import
+// 调用剔除，再按 "./chunks/*.mjs" 字面量收集，两种静态形式都能覆盖。
+// 常驻口径必须把这些静态 chunk 计入（主包首次加载必然连带拉起它们）。
+function collectStaticChunkNames() {
+  const mainText = fs.readFileSync(mainOutfile, "utf8");
+  const withoutDynamicImports = mainText.replace(/import\s*\(\s*"[^"]*"\s*\)/g, "");
+  const names = [];
+  const re = /"\.\/chunks\/([^"]+\.mjs)"/g;
+  let match;
+  while ((match = re.exec(withoutDynamicImports)) !== null) {
+    if (!names.includes(match[1])) {
+      names.push(match[1]);
+    }
+  }
+  return names;
+}
+
 function report() {
   const bootstrapSize = sizeInBytes(bootstrapOutfile);
   const mainSize = sizeInBytes(mainOutfile);
   const chunkFiles = fs.existsSync(chunksDir)
     ? fs.readdirSync(chunksDir).filter((f) => f.endsWith(".mjs")).sort()
     : [];
-  const chunkTotal = chunkFiles.reduce(
+  const staticChunkNames = collectStaticChunkNames();
+  // chunk 三分：主包静态 import 的（常驻）与其余（动态，按需下载）。
+  const staticChunkFiles = staticChunkNames.filter((name) => chunkFiles.includes(name));
+  const dynamicChunkFiles = chunkFiles.filter((f) => !staticChunkNames.includes(f));
+  const staticChunkTotal = staticChunkFiles.reduce(
+    (sum, f) => sum + sizeInBytes(path.join(chunksDir, f)),
+    0
+  );
+  const dynamicChunkTotal = dynamicChunkFiles.reduce(
     (sum, f) => sum + sizeInBytes(path.join(chunksDir, f)),
     0
   );
@@ -179,19 +208,33 @@ function report() {
   console.log(`Wrote ${bootstrapOutfile} (classic IIFE bootstrap, minified: ${minify}, ${bootstrapSize} bytes)`);
   console.log(`Wrote ${mainOutfile} (ESM main package, minified: ${minify}, ${mainSize} bytes)`);
   if (chunkFiles.length === 0) {
-    console.log("No dynamic chunks produced (0 dynamic import boundaries in the module graph).");
+    console.log("No chunks produced (no import boundaries in the module graph).");
   } else {
-    for (const chunkFile of chunkFiles) {
+    for (const chunkFile of staticChunkFiles) {
       console.log(
-        `Wrote ${path.join(chunksDir, chunkFile)} (dynamic chunk, ${sizeInBytes(path.join(chunksDir, chunkFile))} bytes)`
+        `Wrote ${path.join(chunksDir, chunkFile)} (static chunk, resident, ${sizeInBytes(path.join(chunksDir, chunkFile))} bytes)`
       );
     }
-    console.log(`Dynamic chunks total: ${chunkTotal} bytes across ${chunkFiles.length} file(s)`);
+    for (const chunkFile of dynamicChunkFiles) {
+      console.log(
+        `Wrote ${path.join(chunksDir, chunkFile)} (dynamic chunk, on-demand, ${sizeInBytes(path.join(chunksDir, chunkFile))} bytes)`
+      );
+    }
+    console.log(
+      `Static chunks (resident): ${staticChunkTotal} bytes across ${staticChunkFiles.length} file(s)`
+    );
+    console.log(
+      `Dynamic chunks (on-demand): ${dynamicChunkTotal} bytes across ${dynamicChunkFiles.length} file(s)`
+    );
   }
-  // 常驻口径：bootstrap（content_scripts 注入）+ 主包（首次加载必然整体拉起）
-  // + 静态 chunk。动态 chunk 只在对应边界被触发时才下载，不计入常驻。
-  const residentTotal = bootstrapSize + mainSize;
-  console.log(`Resident total (bootstrap + main): ${residentTotal} bytes`);
+  // 常驻口径（候选02 修正）：bootstrap（content_scripts 注入）+ 主包（首次
+  // 加载必然整体拉起）+ 主包静态 import 的全部 chunk（连带拉起）。动态 chunk
+  // 只在对应边界被触发时才下载，不计入常驻。此前口径只算 bootstrap+main，
+  // 漏掉静态 chunk，会低估常驻体量 90KB+。
+  const residentTotal = bootstrapSize + mainSize + staticChunkTotal;
+  console.log(
+    `Resident total (bootstrap + main + static chunks): ${residentTotal} bytes`
+  );
 }
 
 cleanPreviousOutput();

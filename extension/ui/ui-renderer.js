@@ -4,45 +4,30 @@ import { sendRuntimeMessage } from "../shared/messaging.js";
 import { getErrorMessage, toReadableText, isExtensionContextInvalidated } from "../shared/error-helpers.js";
 import { replaceReaderModeUrl } from "../bilibili/reader-url.js";
 import {
-  cleanVideoUrl,
   isReaderMode,
   stripReaderModeUrl
 } from "../bilibili/video-id-shared.js";
 import { escapeHtml } from "../shared/string-utils.js";
-import { READING_HEADER_ICONS } from "./icons.js";
-import { buildSubtitlePreview } from "../notes/render.js";
-import { isAiSubtitle } from "../subtitle/selection.js";
-import { DEFAULT_SETTINGS } from "../core/defaults.js";
+import { READING_HEADER_ICONS } from "./reading-header-icons.js";
+// 候选02 分层惰性：本模块保持常驻（ensureUiReady 启动建 UI 壳），静态 import
+// 只允许常驻叶子——reader 私有 id 表（./reader/ids.js）、轻呈现（./reader/
+// presentation.js）、状态 accessor（./reader/view-state.js）与共享滚动叶子
+//（./reader/scroll-state.js）。reader 重域（sync/lifecycle 的交互处理）与
+// 总结链（fetcher/subtitle-ui）一律在回调内经 ensure 动态装载后调用：注册
+// 监听是启动同步操作，监听体只有用户操作/视图交互时才执行。
+import { ids } from "../reader/ids.js";
 import {
-  ids,
   buildReaderStepperControl,
-  bindReaderStepperControl,
-  updateReaderPreferences,
-  renderReaderPanels,
-  renderReadingInfoPanel,
-  closeReadingView,
-  renderReadingView,
-  syncReadingViewPlayback,
-  updateReaderFollowState,
-  stopReadingViewSync,
-  noteManualReaderInteraction,
-  onReadingChapterClick,
-  onReadingTranscriptClick,
-  isReaderViewOpen
-} from "../reader/index.js";
+  bindReaderStepperControl
+} from "../reader/presentation.js";
+import { isReaderViewOpen } from "../reader/view-state.js";
 // 滚动暂停 / 程序化滚动状态位于 reader 域的共享叶子模块（不再经 reader/index.js 转发）
 import { resetManualScrollPause, isProgrammaticScrolling } from "../reader/scroll-state.js";
 // 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
 import { logWarn } from "../shared/logging.js";
-import {
-  refreshClip,
-  loadSubtitle
-} from "../subtitle/fetcher.js";
-import {
-  onSubtitleChange,
-  copyMarkdown,
-  downloadSubtitle
-} from "../subtitle/ui.js";
+// 总结链与 reader 域的按需加载器（常驻轻文件，动态边在其内部）。
+import { ensureSummarizeChain } from "../subtitle/lazy.js";
+import { ensureReaderDomain } from "../core/lazy-reader.js";
 
 // 打开设置页（原 core/runtime.js 提供；因 runtime 不得依赖 ui 域，且本模块是
 // 唯一使用方，搬到此处）。成功无提示；失败按扩展上下文是否失效给出对应文案。
@@ -219,54 +204,102 @@ export function bindUiEvents() {
   const transcriptList = byId(ids.readingTranscriptList);
 
   closeBtn.addEventListener("click", () => panel.classList.remove("open"));
-  refreshBtn.addEventListener("click", refreshClip);
-  select.addEventListener("change", onSubtitleChange);
-  copyBtn.addEventListener("click", copyMarkdown);
-  downloadBtn.addEventListener("click", downloadSubtitle);
+  // ===== 总结链按钮回调（候选02）：refreshClip/onSubtitleChange/copyMarkdown/
+  // downloadSubtitle 属链层，点击时经 ensureSummarizeChain 装载后调用（首次
+  // 点击多一次本地动态 import ~10ms；promise 缓存后为直取）。
+  refreshBtn.addEventListener("click", () => {
+    ensureSummarizeChain()
+      .then((chain) => chain.refreshClip())
+      .catch((error) => logWarn("[BOC] refresh clip failed", error));
+  });
+  select.addEventListener("change", (event) => {
+    ensureSummarizeChain()
+      .then((chain) => chain.onSubtitleChange(event))
+      .catch((error) => logWarn("[BOC] subtitle change failed", error));
+  });
+  copyBtn.addEventListener("click", () => {
+    ensureSummarizeChain()
+      .then((chain) => chain.copyMarkdown())
+      .catch((error) => logWarn("[BOC] copy markdown failed", error));
+  });
+  downloadBtn.addEventListener("click", () => {
+    ensureSummarizeChain()
+      .then((chain) => chain.downloadSubtitle())
+      .catch((error) => logWarn("[BOC] download subtitle failed", error));
+  });
   settingsBtn.addEventListener("click", requestOpenOptions);
+  // ===== 阅读视图交互回调（候选02）：closeReadingView/sync/click 等属 reader
+  // 重域，交互时经 ensureReaderDomain 装载后调用（视图开着 ⇒ 域几乎必然已装载
+  // ，ensure 命中缓存 promise）。
   readingCloseBtn.addEventListener("click", () => {
     if (isReaderMode()) {
       replaceReaderModeUrl(stripReaderModeUrl(location.href));
     }
-    closeReadingView();
+    ensureReaderDomain()
+      .then((reader) => reader.closeReadingView())
+      .catch((error) => logWarn("[BOC] close reading view failed", error));
   });
   readingAutoScroll.addEventListener("change", (event) => {
     state.reader.setAutoScroll(Boolean(event.target.checked));
     if (state.reader.readingAutoScroll) {
       resetManualScrollPause();
-      syncReadingViewPlayback(true);
     }
-    updateReaderFollowState();
+    ensureReaderDomain()
+      .then((reader) => {
+        if (state.reader.readingAutoScroll) {
+          reader.syncReadingViewPlayback(true);
+        }
+        reader.updateReaderFollowState();
+      })
+      .catch((error) => logWarn("[BOC] reader autoscroll sync failed", error));
   });
   readingTranscriptVisible.addEventListener("change", (event) => {
-    updateReaderPreferences({ readerTranscriptVisible: Boolean(event.target.checked) }, { persist: true });
-    const main = document.querySelector(".boc-reading-main");
-    if (main) {
-      main.style.display = event.target.checked ? "" : "none";
-    }
+    // 候选02：updateReaderPreferences 属 reader 动态 chunk（视图开着 ⇒ 已装载），
+    // 经 ensure 转发；手动兜底的 main 显隐写在偏好应用之后（与旧顺序一致）。
+    ensureReaderDomain()
+      .then((reader) => {
+        reader.updateReaderPreferences({ readerTranscriptVisible: Boolean(event.target.checked) }, { persist: true });
+        const main = document.querySelector(".boc-reading-main");
+        if (main) {
+          main.style.display = event.target.checked ? "" : "none";
+        }
+      })
+      .catch((error) => logWarn("[BOC] reader transcript visibility failed", error));
   });
   const readingChapterVisible = byId(ids.readingChapterVisible);
   if (readingChapterVisible) {
     readingChapterVisible.addEventListener("change", (event) => {
-      updateReaderPreferences({ readerChapterVisible: Boolean(event.target.checked) }, { persist: true });
+      ensureReaderDomain()
+        .then((reader) =>
+          reader.updateReaderPreferences({ readerChapterVisible: Boolean(event.target.checked) }, { persist: true })
+        )
+        .catch((error) => logWarn("[BOC] reader chapter visibility failed", error));
     });
   }
   readingThemeSelect.addEventListener("click", () => {
     const themes = ["light", "dark", "paper"];
     const current = state.reader.readingTheme || "light";
     const nextIndex = (themes.indexOf(current) + 1) % themes.length;
-    updateReaderPreferences({ readerTheme: themes[nextIndex] }, { persist: true });
-    readingThemeSelect.classList.add("is-active");
-    setTimeout(() => readingThemeSelect.classList.remove("is-active"), 300);
+    ensureReaderDomain()
+      .then((reader) => {
+        reader.updateReaderPreferences({ readerTheme: themes[nextIndex] }, { persist: true });
+        readingThemeSelect.classList.add("is-active");
+        setTimeout(() => readingThemeSelect.classList.remove("is-active"), 300);
+      })
+      .catch((error) => logWarn("[BOC] reader theme switch failed", error));
   });
   readingSettingsToggleBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     state.reader.setSettingsExpanded(!state.reader.readingSettingsExpanded);
-    renderReaderPanels();
+    ensureReaderDomain()
+      .then((reader) => reader.renderReaderPanels())
+      .catch((error) => logWarn("[BOC] reader panels render failed", error));
   });
   readingDescriptionBtn.addEventListener("click", () => {
     state.reader.setDescriptionExpanded(!state.reader.readingDescriptionExpanded);
-    renderReadingInfoPanel();
+    ensureReaderDomain()
+      .then((reader) => reader.renderReadingInfoPanel())
+      .catch((error) => logWarn("[BOC] reader info panel render failed", error));
   });
   bindReaderStepperControl(readingFontScaleSelect, "readerFontScale");
   bindReaderStepperControl(readingLetterSpacingSelect, "readerLetterSpacing");
@@ -278,10 +311,16 @@ export function bindUiEvents() {
     const option = event.target.options[event.target.selectedIndex];
     const url = String(option?.value || "");
     if (!url) return;
-    loadSubtitle(url, String(option.dataset.lang || "unknown"), state.clip.fetchRunId, String(option.dataset.id || ""))
-      .then(() => {
-        renderReadingView();
-        syncReadingViewPlayback(true);
+    // 候选02：loadSubtitle 属总结链、renderReadingView/sync 属 reader 域——
+    // 按层各自 ensure 后串联，顺序与搬迁前一致（先装载字幕，再重渲与同步）。
+    ensureSummarizeChain()
+      .then((chain) =>
+        chain.loadSubtitle(url, String(option.dataset.lang || "unknown"), state.clip.fetchRunId, String(option.dataset.id || ""))
+      )
+      .then(() => ensureReaderDomain())
+      .then((reader) => {
+        reader.renderReadingView();
+        reader.syncReadingViewPlayback(true);
       })
       .catch((error) => {
         logWarn("[BOC] failed to switch subtitle in reading view", error);
@@ -299,7 +338,9 @@ export function bindUiEvents() {
       }
       if (!settingsPanel.contains(e.target) && !settingsBtnEl.contains(e.target)) {
         state.reader.setSettingsExpanded(false);
-        renderReaderPanels();
+        ensureReaderDomain()
+          .then((reader) => reader.renderReaderPanels())
+          .catch(() => {});
       }
     });
     state.reader.readingDocumentClickBound = true;
@@ -309,18 +350,40 @@ export function bindUiEvents() {
     if (isProgrammaticScrolling()) {
       return;
     }
-    noteManualReaderInteraction();
+    // 高频路径：首次交互装载 reader 域，其后命中缓存 promise；装载失败静默
+    // （下次交互自然重试，避免滚动期间刷日志）。
+    ensureReaderDomain()
+      .then((reader) => reader.noteManualReaderInteraction())
+      .catch(() => {});
   };
   transcriptList.addEventListener("scroll", handleReaderManualScroll);
   transcriptList.addEventListener("wheel", handleReaderManualScroll, { passive: true });
   chapterList.addEventListener("wheel", handleReaderManualScroll, { passive: true });
-  chapterList.addEventListener("pointerdown", () => noteManualReaderInteraction(3500));
-  transcriptList.addEventListener("pointerdown", () => noteManualReaderInteraction(3500));
-  chapterList.addEventListener("click", onReadingChapterClick);
-  transcriptList.addEventListener("click", onReadingTranscriptClick);
+  chapterList.addEventListener("pointerdown", () => {
+    ensureReaderDomain()
+      .then((reader) => reader.noteManualReaderInteraction(3500))
+      .catch(() => {});
+  });
+  transcriptList.addEventListener("pointerdown", () => {
+    ensureReaderDomain()
+      .then((reader) => reader.noteManualReaderInteraction(3500))
+      .catch(() => {});
+  });
+  chapterList.addEventListener("click", (event) => {
+    ensureReaderDomain()
+      .then((reader) => reader.onReadingChapterClick(event))
+      .catch(() => {});
+  });
+  transcriptList.addEventListener("click", (event) => {
+    ensureReaderDomain()
+      .then((reader) => reader.onReadingTranscriptClick(event))
+      .catch(() => {});
+  });
   readingView.addEventListener("transitionend", () => {
     if (!isReaderViewOpen()) {
-      stopReadingViewSync();
+      ensureReaderDomain()
+        .then((reader) => reader.stopReadingViewSync())
+        .catch(() => {});
     }
   });
 }
@@ -347,53 +410,6 @@ export function ensureUiReady({ forceRecreate = false } = {}) {
   }
 }
 
-export function renderMeta() {
-  const meta = byId(ids.meta);
-  if (!state.clip.bvid) {
-    meta.innerHTML = '<div class="boc-meta-item">尚未抓取视频信息</div>';
-    return;
-  }
-
-  const subtitleCount = state.clip.subtitles.length;
-  meta.innerHTML = `
-    <div class="boc-meta-item"><strong>标题：</strong>${escapeHtml(state.clip.title)}</div>
-    <div class="boc-meta-item"><strong>URL：</strong>${escapeHtml(cleanVideoUrl())}</div>
-    <div class="boc-meta-item"><strong>作者：</strong>${escapeHtml(state.clip.author || "未知")}</div>
-    <div class="boc-meta-item"><strong>日期：</strong>${escapeHtml(state.clip.uploadDate || "未知")}</div>
-    <div class="boc-meta-item"><strong>字幕轨：</strong>${subtitleCount}</div>
-  `;
-}
-
-export function renderSubtitleSelect() {
-  const select = byId(ids.subtitleSelect);
-  const subtitles = state.clip.subtitles || [];
-
-  if (subtitles.length === 0) {
-    select.innerHTML = '<option value="">暂无字幕</option>';
-    select.disabled = true;
-    return;
-  }
-
-  select.innerHTML = subtitles
-    .map((item) => {
-      const selectedById =
-        state.clip.selectedSubtitleId && String(item.id) === String(state.clip.selectedSubtitleId);
-      const selectedByUrl = item.subtitleUrl === state.clip.selectedSubtitleUrl;
-      const selected = selectedById || selectedByUrl ? "selected" : "";
-      const label = item.lanDoc || item.lan || "unknown";
-      const isAi = isAiSubtitle(item);
-      const aiTag = isAi ? " [AI自动]" : "";
-      const optionLabel = `${label}${aiTag}`;
-      return `<option value="${escapeHtml(item.subtitleUrl)}" data-lang="${escapeHtml(
-        label
-      )}" data-id="${escapeHtml(String(item.id || ""))}" data-isai="${isAi}" ${selected}>${escapeHtml(
-        optionLabel
-      )}</option>`;
-    })
-    .join("");
-  select.disabled = false;
-}
-
 export function setBusyState(disabled) {
   byId(ids.copyBtn).disabled = disabled;
   byId(ids.downloadBtn).disabled = disabled;
@@ -401,6 +417,13 @@ export function setBusyState(disabled) {
   byId(ids.settingsBtn).disabled = disabled;
   byId(ids.subtitleSelect).disabled = disabled || state.clip.subtitles.length === 0;
 }
+
+// renderMeta / renderSubtitleSelect 已移往 subtitle/ui.js（候选02 分层惰性）：
+// 两者只渲染「抓取结果」（视频属性 + 字幕轨列表），唯一调用方是总结链
+//（fetcher 的抓取收尾/重置）与 message-handler 的 popup-select-subtitle
+//（该处理器本就经 ensureSummarizeChain 装载链后调用）。留在本模块会把
+// selection.js（isAiSubtitle）及其依赖 cache/cache-lru 拖回常驻。
+// setStatus/setMessage 保留：URL 变化编排与本模块自身的错误提示在启动期使用。
 
 export function setStatus(text) {
   uiState.setStatusText(String(text || ""));
