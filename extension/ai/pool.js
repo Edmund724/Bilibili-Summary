@@ -8,7 +8,7 @@
 
 // 并发上界：最多同时 3 个分段小结请求在飞。
 export const DEFAULT_MAP_CONCURRENCY = 3;
-// 单段小结失败重试次数（对齐 client.js MAX_STREAM_RETRIES=2：1 次初始 + 2 次重试，共至多 3 次尝试）。
+// 单段小结失败重试次数（对齐 ai/completion.js 流式重试默认 2：1 次初始 + 2 次重试，共至多 3 次尝试）。
 export const MAX_MAP_RETRIES = 2;
 
 /**

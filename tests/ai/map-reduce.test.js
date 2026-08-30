@@ -1,18 +1,17 @@
 // ai/map-reduce.js 编排测试（03 票）：
 // 覆盖切片→小结→成稿编排（进度序号与百分比、token/done 回吐）、中止、
-// 溢出兜底哨兵（streamChat）、进度纯函数，以及单次路径 plan 判定。
+// 进度纯函数，以及单次路径 plan 判定。
+// streamChat 的 port 协议测试已迁至 tests/ai/client.test.js。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState, makeSubtitleBody } from "../setup.js";
 
 let mod;
-let streamChatMod;
 
 async function importModules() {
   vi.resetModules();
   resetModuleState();
   mod = await import("../../extension/ai/map-reduce.js");
-  streamChatMod = await import("../../extension/ai/client.js");
 }
 
 beforeEach(async () => {
@@ -343,73 +342,6 @@ describe("orchestrateMapReduce 中止", () => {
     expect(postMessages.some((m) => m.type === "done")).toBe(false);
     expect(postMessages.some((m) => m.type === "token")).toBe(false);
     expect(postMessages.some((m) => m.type === "error")).toBe(false);
-  });
-});
-
-describe("streamChat 溢出兜底哨兵", () => {
-  it("HTTP 400 body 含 maximum context length → return 'overflow'，不再 post overflow/error", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({
-      ok: false,
-      status: 400,
-      text: async () => "This model's maximum context length is 8192 tokens, but you requested 12000 tokens.",
-      json: async () => ({})
-    })));
-    const port = makePort();
-
-    const result = await streamChatMod.streamChat({
-      provider: makeProvider(),
-      context: { title: "t", subtitleBody: [] },
-      userPrompt: "总结",
-      history: [],
-      port
-    });
-
-    expect(result).toBe("overflow");
-    expect(port.postMessage).not.toHaveBeenCalled();
-  });
-
-  it("超预算（>100k）→ 仍发 notice 提示 + return 'overflow' 哨兵", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({ choices: [{ message: { content: "" } }] }));
-    vi.stubGlobal("fetch", fetchMock);
-    const port = makePort();
-    const context = makeContext(); // 110k body
-
-    const result = await streamChatMod.streamChat({
-      provider: makeProvider(),
-      context,
-      userPrompt: "总结",
-      history: [],
-      port
-    });
-
-    expect(result).toBe("overflow");
-    const postMessages = port.postMessage.mock.calls.map((c) => c[0]);
-    expect(postMessages.some((m) => m.type === "notice")).toBe(true);
-    expect(postMessages.some((m) => m.type === "overflow")).toBe(false);
-    // 超预算直接返回，不发任何请求
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("普通错误仍走既有报错路径（return undefined + post error），不误判为 overflow", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({
-      ok: false,
-      status: 401,
-      text: async () => "Unauthorized",
-      json: async () => ({})
-    })));
-    const port = makePort();
-
-    const result = await streamChatMod.streamChat({
-      provider: makeProvider(),
-      context: { title: "t", subtitleBody: [] },
-      userPrompt: "总结",
-      history: [],
-      port
-    });
-
-    expect(result).not.toBe("overflow");
-    const postMessages = port.postMessage.mock.calls.map((c) => c[0]);
-    expect(postMessages.some((m) => m.type === "error")).toBe(true);
   });
 });
 

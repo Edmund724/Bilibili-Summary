@@ -3,6 +3,8 @@
 // 单次溢出转 Map-Reduce 重试一次。所有依赖经 deps 注入（含 postMessage
 // 所用的 port），便于在无 chrome 环境下逐分支注入 fake 做测试。
 // offscreen.js 只负责接线：abort controller、空闲超时、cost-guard Promise 簿记。
+// 溢出语义（候选 03 起）：streamChat 仅在 context-length 溢出时抛带
+// .overflow 标记的错误，本模块 catch 查标记分流；其余失败经 port error 回吐。
 import { streamChat as _streamChat } from "./client.js";
 import { buildBudgetPlan as _buildBudgetPlan } from "./budgeter.js";
 import { orchestrateMapReduce as _orchestrateMapReduce } from "./map-reduce.js";
@@ -53,18 +55,23 @@ export async function runLadderChat({ msg, provider, port, signal }, deps) {
     if (followupContext) {
       // 近 N 轮 verbatim 封顶：只带最近几轮历史，token 不随追问轮数增长。
       const trimmedHistory = trimRecentTurns(msg.history);
-      const followupResult = await streamChat({
-        provider,
-        context: followupContext,
-        userPrompt: msg.prompt || "",
-        history: trimmedHistory,
-        thinkingLevel: msg.thinkingLevel,
-        port,
-        signal,
-        onActivity
-      });
-      // 兜底：压缩摘要 + 检索注入仍意外溢出（HTTP context-length）时，绝不静默无输出。
-      if (followupResult === "overflow") {
+      try {
+        await streamChat({
+          provider,
+          context: followupContext,
+          userPrompt: msg.prompt || "",
+          history: trimmedHistory,
+          thinkingLevel: msg.thinkingLevel,
+          port,
+          signal,
+          onActivity
+        });
+      } catch (e) {
+        // 兜底：压缩摘要 + 检索注入仍意外溢出（HTTP context-length）时，绝不静默无输出。
+        // streamChat 仅在溢出时抛带 .overflow 标记的错误（其余失败经 port error 回吐）。
+        if (!e?.overflow) {
+          throw e;
+        }
         port.postMessage({ type: "error", error: "追问内容仍超出上下文预算，请换个更具体的问题重试" });
       }
       return;
@@ -102,20 +109,24 @@ export async function runLadderChat({ msg, provider, port, signal }, deps) {
     return;
   }
 
-  const result = await streamChat({
-    provider,
-    context: msg.context || {},
-    userPrompt: msg.prompt || "",
-    history: Array.isArray(msg.history) ? msg.history : [],
-    thinkingLevel: msg.thinkingLevel,
-    port,
-    signal,
-    onActivity
-  });
-
   // 单次路径 context-length 溢出 → 自动转 Map-Reduce 重试一次
   //（仅一次：map-reduce 各调用自身更短，再溢出就抛出错误；abort controller 复用，stop 仍可中止）。
-  if (result === "overflow") {
+  // streamChat 仅在溢出（预算内超限 / HTTP context-length）时抛带 .overflow 标记的错误。
+  try {
+    await streamChat({
+      provider,
+      context: msg.context || {},
+      userPrompt: msg.prompt || "",
+      history: Array.isArray(msg.history) ? msg.history : [],
+      thinkingLevel: msg.thinkingLevel,
+      port,
+      signal,
+      onActivity
+    });
+  } catch (e) {
+    if (!e?.overflow) {
+      throw e;
+    }
     await orchestrateMapReduce({
       provider,
       context: msg.context || {},

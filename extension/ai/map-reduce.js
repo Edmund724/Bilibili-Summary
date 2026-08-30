@@ -1,6 +1,9 @@
 // 「Map-Reduce 编排」模块：超预算视频（>100k token）端到端出成稿。
 // 阶梯：预算内单次（02 streamChat）；超出走本模块——按 01 的分段计划切段，
 // 逐段（串行）生成分段小结，再一次性交给成稿调用输出正文（clamp ≤16k）。
+// 模型调用统一经 ai/completion.js 接缝（非流式、默认无重试，保持现状）；
+// context-length 溢出按普通错误上抛（现状如此），错误对象携带 .overflow=true
+// 供未来消费（当前编排链路无兜底转写，信号不再丢失）。
 // 跑在 offscreen 文档，经 port 向侧边栏回吐进度 notice 与最终正文 token；
 // 全程可中止（复用 AbortController）；04 缓存命中可跳过 map 调用。
 // prompt 措辞对齐蓝本 .scratch/video-to-note/backend/llm_summarizer.py：
@@ -9,7 +12,7 @@
 import { formatCompactTimestamp } from "../shared/string-utils.js";
 import { makeAbortedError } from "../shared/error-helpers.js";
 import { buildBudgetPlan, FINAL_OUTPUT_CHARS, SEGMENT_SUMMARY_CHARS } from "./budgeter.js";
-import { normalizeThinkingLevel, isContextLengthOverflow } from "./client.js";
+import { chatCompletion } from "./completion.js";
 import { runMapBounded, DEFAULT_MAP_CONCURRENCY } from "./pool.js";
 import { shouldReduce, reduceSummaries } from "./reduce.js";
 import {
@@ -93,63 +96,6 @@ function buildMaterial(summaries) {
 }
 
 /**
- * 非流式 chat/completions 辅助（可注入 runCompletion 覆盖，默认用全局 fetch）。
- * 非 2xx 抛错；错误文案命中 context-length 溢出时标记 error.overflow = true（供外层兜底）。
- */
-async function runCompletion({ provider, messages, thinkingLevel, signal, fetchImpl = globalThis.fetch }) {
-  const baseUrl = String(provider?.baseUrl || "").trim().replace(/\/+$/, "");
-  const model = provider?.model;
-  const body = { model, messages, stream: false };
-  const level = normalizeThinkingLevel(thinkingLevel);
-  if (level !== "off") {
-    body.reasoning_effort = level;
-  }
-
-  const headers = { "Content-Type": "application/json" };
-  if (provider?.apiKey) {
-    headers["Authorization"] = `Bearer ${provider.apiKey}`;
-  }
-
-  let response;
-  try {
-    response = await fetchImpl(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      signal
-    });
-  } catch (e) {
-    // 中止（真实 signal 中止 / 注入实现抛出的中止标记 / AbortError）统一收束为 aborted 标记错误。
-    if (signal?.aborted || e?.aborted || e?.name === "AbortError") {
-      throw makeAbortedError();
-    }
-    throw new Error(`网络错误：${e?.message || e}`);
-  }
-
-  if (!response.ok) {
-    let detail = "";
-    try {
-      detail = (await response.text()).slice(0, 500);
-    } catch {}
-    const errorMsg = `HTTP ${response.status}${detail ? `: ${detail}` : ""}`;
-    const error = new Error(errorMsg);
-    if (isContextLengthOverflow(detail)) {
-      error.overflow = true;
-    }
-    throw error;
-  }
-
-  let json = null;
-  try {
-    json = await response.json();
-  } catch (e) {
-    throw new Error(`响应解析失败：${e?.message || e}`);
-  }
-  const content = json?.choices?.[0]?.message?.content;
-  return typeof content === "string" ? content : "";
-}
-
-/**
  * 单段小结：先查缓存命中直接复用（04 填空后生效），未命中则构造 prompt 调模型并落盘。
  * 返回小结字符串；中止（signal.aborted）时抛出标记 aborted 的错误，由上层统一收束。
  * 落盘经段缓存的 LRU 淘汰写入；淘汰后重试仍失败时经 notifyCacheWriteError 上浮
@@ -162,7 +108,7 @@ async function summarizeSegment({
   total,
   signal,
   thinkingLevel,
-  runCompletionImpl,
+  chatCompletionImpl,
   notifyCacheWriteError
 }) {
   const rawKey = buildRawSegmentCacheKey(context, segment.index);
@@ -191,7 +137,7 @@ async function summarizeSegment({
     total,
     items: segment.items || []
   });
-  const summary = await runCompletionImpl({
+  const summary = await chatCompletionImpl({
     provider,
     messages: [
       { role: "system", content: "你是视频笔记编辑。忠实理解语境与作者意图，允许结合上下文保守修正明显的口误、笔误和语音转写错误。" },
@@ -224,7 +170,7 @@ export async function orchestrateMapReduce({
   signal,
   thinkingLevel,
   onProgress,
-  runCompletion: runCompletionImpl = runCompletion
+  chatCompletion: chatCompletionImpl = chatCompletion
 }) {
   const ctx = context || {};
   const resolvedPlan =
@@ -277,7 +223,7 @@ export async function orchestrateMapReduce({
       total,
       signal,
       thinkingLevel,
-      runCompletionImpl: runCompletionImpl,
+      chatCompletionImpl: chatCompletionImpl,
       notifyCacheWriteError
     });
     return { segment, summary };
@@ -313,7 +259,7 @@ export async function orchestrateMapReduce({
       summaries: materialSummaries,
       title: ctx.title || "未知",
       runPrompts: async ({ prompt, messages }) => {
-        const text = await runCompletionImpl({
+        const text = await chatCompletionImpl({
           provider,
           messages: messages || [
             { role: "system", content: "你是视频笔记编辑。" },
@@ -339,7 +285,7 @@ export async function orchestrateMapReduce({
   let draft = "";
   try {
     draft = String(
-      await runCompletionImpl({
+      await chatCompletionImpl({
         provider,
         messages: [
           { role: "system", content: "你是视频笔记编辑。忠实理解语境与作者意图，允许结合上下文保守修正明显的口误、笔误和语音转写错误。" },

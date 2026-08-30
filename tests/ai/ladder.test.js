@@ -3,9 +3,11 @@
 // ① 预算内单次流式；② map-reduce 下追问压缩命中；③ 未命中 + 成本护栏
 // （确认走 Map-Reduce / 取消回 stopped）；④ 单次溢出转 Map-Reduce 重试一次；
 // ⑤ 追问压缩后仍溢出 → 追问溢出错误。
+// 溢出语义（候选 03 起）：fake streamChat 抛带 .overflow 标记的错误（旧返回哨兵已废）。
 
 import { describe, expect, it, vi } from "vitest";
 import { runLadderChat } from "../../extension/ai/ladder.js";
+import { makeOverflowError } from "../../extension/ai/completion.js";
 
 // 收集 postMessage 消息的 fake port
 function makePort() {
@@ -119,10 +121,12 @@ describe("runLadderChat 分派", () => {
     expect(port.messages).toEqual([{ type: "stopped", reason: "已取消" }]);
   });
 
-  it("④ 单次 streamChat 返回 overflow → orchestrateMapReduce 被调一次（仅一次）", async () => {
+  it("④ 单次 streamChat 抛 overflow 标记错误 → orchestrateMapReduce 被调一次（仅一次）", async () => {
     const port = makePort();
     const { deps, calls } = makeDeps({
-      streamChat: vi.fn(async () => "overflow")
+      streamChat: vi.fn(async () => {
+        throw makeOverflowError();
+      })
     });
 
     await runLadderChat({ msg: makeMsg(), provider: { id: "p" }, port, signal: "sig" }, deps);
@@ -132,12 +136,14 @@ describe("runLadderChat 分派", () => {
     expect(calls.mapReduce[0].plan).toEqual({ mode: "single" });
   });
 
-  it("⑤ 追问压缩后 streamChat 返回 overflow → postMessage 追问溢出错误，不转 Map-Reduce", async () => {
+  it("⑤ 追问压缩后 streamChat 抛 overflow 标记错误 → postMessage 追问溢出错误，不转 Map-Reduce", async () => {
     const port = makePort();
     const { deps, calls } = makeDeps({
       buildBudgetPlan: () => ({ mode: "map-reduce", estimatedCalls: 8 }),
       resolveFollowupContext: vi.fn(async () => ({ kind: "followup" })),
-      streamChat: vi.fn(async () => "overflow")
+      streamChat: vi.fn(async () => {
+        throw makeOverflowError();
+      })
     });
 
     await runLadderChat({ msg: makeMsg(), provider: { id: "p" }, port, signal: "sig" }, deps);

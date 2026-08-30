@@ -3,13 +3,12 @@
 // 判定（buildBudgetPlan），发送物由 ai/subtitle-prompt.js 的 buildSubtitlePrompt
 // 从同一份 body 现场渲染；body 缺失时退化为对实际发送物（空渲染 / 追问压缩摘要
 // compressedSummaryMarkdown）的 estimateTokens 判定。
-// 另覆盖 isContextLengthOverflow 对溢出文案与普通错误的识别。
+// isContextLengthOverflow 溢出识别已随协议接缝迁移至 tests/ai/completion.test.js。
 
 import { describe, expect, it } from "vitest";
 import { makeSubtitleBody } from "../setup.js";
 import {
   resolveSubtitleForContext,
-  isContextLengthOverflow,
   OVER_BUDGET_NOTICE
 } from "../../extension/ai/client.js";
 import { buildSubtitlePrompt } from "../../extension/ai/subtitle-prompt.js";
@@ -87,53 +86,5 @@ describe("resolveSubtitleForContext 追问压缩路径", () => {
     expect(result.mode).toBe("single");
     expect(result.markdown).toBe(compacted);
     expect(result.overflowMarked).toBe(false);
-  });
-});
-
-describe("isContextLengthOverflow 溢出识别", () => {
-  it("典型 context-length 溢出文案 → true", () => {
-    const overflowMessages = [
-      "context_length_exceeded",
-      "This model's maximum context length is 8192 tokens, but you requested 12000 tokens.",
-      "maximum context length exceeded",
-      "exceeds the maximum context window",
-      "too many tokens in request",
-      "max_tokens limit reached",
-      "token limit exceeded",
-      "max tokens exceeded",
-      "prompt is too long",
-      "input is too large",
-      "请求的上下文长度超出限制",
-      "上下文长度超过最大限制",
-      "请求 tokens 超出上下文上限"
-    ];
-    for (const message of overflowMessages) {
-      expect(isContextLengthOverflow(message), message).toBe(true);
-    }
-  });
-
-  it("Error 对象也按文案判定（String 强制转换）", () => {
-    expect(isContextLengthOverflow(new Error("maximum context length exceeded"))).toBe(true);
-    expect(isContextLengthOverflow(new Error("network down"))).toBe(false);
-  });
-
-  it("普通错误（401/404/500/网络/限流/空输入）→ false", () => {
-    const plainErrors = [
-      "401 Unauthorized",
-      "404 Not Found",
-      "500 Internal Server Error",
-      "invalid api key",
-      "model not found",
-      "connection reset by peer",
-      "rate limit exceeded",
-      "请求超时（90 秒未返回任何数据）已自动中断",
-      "",
-      undefined,
-      null,
-      123
-    ];
-    for (const message of plainErrors) {
-      expect(isContextLengthOverflow(message), String(message)).toBe(false);
-    }
   });
 });

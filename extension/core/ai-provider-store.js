@@ -5,7 +5,8 @@
 // 全局设置（reader/AI/ASR/下载域）的归一化与读写已拆到 settings-store.js，
 // 本模块只负责 AI 平台列表 CRUD 与探针。
 
-import { createProviderStore, formatProbeConnectionError, formatProbeHttpError } from "./provider-store.js";
+import { createProviderStore, formatProbeConnectionError } from "./provider-store.js";
+import { chatCompletion } from "../ai/completion.js";
 
 // ===== AI 模型平台存储 =====
 // 列表 CRUD（load/save/delete/Key 读写）委托给通用工厂 createProviderStore，
@@ -37,6 +38,23 @@ export const aiProviderStore = createProviderStore({
 });
 
 // ===== 连接测试 / 模型探测 =====
+// 探针经 ai/completion.js 的 probe 模式发请求（max_tokens:1 + messages ping，
+// 成功判定 = response.ok 且不读响应体），本模块只负责输入预检与错误形状包装：
+// 接缝抛错（类型化标记）转 { ok: false, error }，文案复用共享 helper 逐字对齐旧实现。
+
+// 把接缝抛出的类型化错误转成探针错误文案：
+// - HTTP 失败（err.status / err.overflow）：接缝 message 与 formatProbeHttpError 同型，直接透传；
+// - 连接失败（原始抛出物挂 err.cause）：复用「无法连接：…」文案（AI/ASR 逐字一致）；
+// - 其余（接缝 baseUrl/model 守卫等）：message 已是清晰文案，直接透传。
+function formatProbeSeamError(error) {
+  if (error?.status != null || error?.overflow) {
+    return error.message;
+  }
+  if (error?.cause) {
+    return formatProbeConnectionError(error.cause);
+  }
+  return error.message;
+}
 
 export async function testAiConnection({ baseUrl, apiKey, model }) {
   const normalizedBaseUrl = String(baseUrl || "").trim().replace(/\/+$/, "");
@@ -48,47 +66,32 @@ export async function testAiConnection({ baseUrl, apiKey, model }) {
     return { ok: false, error: "请填写模型名" };
   }
 
-  const headers = { Accept: "application/json" };
-  if (apiKey) {
-    headers["Authorization"] = `Bearer ${apiKey}`;
-  }
-
   return probeAiChatCompletion({
     baseUrl: normalizedBaseUrl,
     apiKey,
     model: normalizedModel,
-    headers
+    headers: { Accept: "application/json" }
   });
 }
 
 export async function probeAiChatCompletion({ baseUrl, apiKey, model, headers }) {
-  const requestHeaders = headers || { Accept: "application/json" };
+  const requestHeaders = { ...(headers || { Accept: "application/json" }) };
   if (apiKey && !requestHeaders.Authorization) {
     requestHeaders.Authorization = `Bearer ${apiKey}`;
   }
-  requestHeaders["Content-Type"] = "application/json";
 
-  let response;
   try {
-    response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
+    await chatCompletion({
+      provider: { baseUrl, apiKey, model },
+      messages: [{ role: "user", content: "ping" }],
+      probe: true,
       headers: requestHeaders,
-      body: JSON.stringify({
-        model,
-        stream: false,
-        max_tokens: 1,
-        messages: [{ role: "user", content: "ping" }]
-      })
+      retries: 0
     });
-  } catch (error) {
-    return { ok: false, error: formatProbeConnectionError(error) };
-  }
-
-  if (response.ok) {
     return { ok: true };
+  } catch (error) {
+    return { ok: false, error: formatProbeSeamError(error) };
   }
-
-  return { ok: false, error: await formatProbeHttpError(response) };
 }
 
 export async function handleAiProvidersModels({ baseUrl, apiKey, providerId }) {
