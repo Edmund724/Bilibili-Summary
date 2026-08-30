@@ -9,6 +9,12 @@
 // delegates persistence (conversation-store, injected via deps) and markdown
 // rendering (../ui/markdown.js, pulled in directly).
 //
+// 候选07：offscreen port 消息协议（reasoning/token/stream-reset/done/stopped/
+// error/notice/cost-guard）统一经 dispatchChatPortMessage 分派——真实 port
+// 监听器与公开的协议测试入口 handleChatPortMessage 共用；done/stopped/error
+// 三条终态路径的六步收尾时序收敛为唯一的 endStream 实现。返回面收窄为
+// 9 个 sidepanel 消费方法 + handleChatPortMessage，内部步骤全部私有化。
+//
 // Boundary: this module does NOT touch sidepanel module-level layout variables
 // or the surrounding chrome (header/popovers/context chip). Conversation state
 // (chatHistory / conversation meta / context / aiPrefs / thinking level) lives
@@ -73,22 +79,16 @@ const STREAM_SLOW_NOTICE_MS = 15000;
  *
  * @returns {object} method set (all closures; stream state only via the
  *   runtime's own closure variables — sidepanel queries it with isStreaming() /
- *   hasPendingUserPrompt(), never by reading runtime internals):
+ *   hasPendingUserPrompt(), never by reading runtime internals)。
+ *   候选07：接口面刻意收窄为 9 + 1——只暴露 sidepanel 实际消费的 9 个方法 +
+ *   1 个协议测试入口；内部渲染/收尾步骤（首 token、计时器、占位、token 追加、
+ *   三类终态收口、thinking 节点等）全部私有化，测试经 sendMessage + 假 port
+ *   或 handleChatPortMessage 以协议消息驱动，不直接戳内部步骤：
  *   {
  *     sendMessage,                 // () => Promise<void>
  *     stopActiveStream,            // () => void
- *     handleFirstStreamToken,      // () => void
- *     clearStreamRuntimeState,     // () => void
- *     startStreamSlowNoticeTimer,  // () => void
- *     appendAssistantPlaceholder,  // () => HTMLElement
- *     appendToken,                 // (node, token) => void
- *     finalizeAssistant,           // (node) => void
- *     handleAssistantStopped,      // (node, reason) => void
- *     showAssistantError,          // (node, error) => void
  *     renderAssistantMessage,      // (node, raw, { userPrompt }) => void
  *     appendUserMessage,           // (text, shouldScroll) => void
- *     createThinkingNode,          // (assistantNode) => HTMLElement|null
- *     appendThinkingText,          // (node, text) => void
  *     // ---- auto-scroll (flag owned by this closure; sidepanel writes via
  *     // these narrow entries, flush/finalize read it internally) ----
  *     setAutoScroll,               // (value) => void  (scroll listener / reset points)
@@ -97,6 +97,8 @@ const STREAM_SLOW_NOTICE_MS = 15000;
  *     isStreaming,                 // () => boolean   (activePort !== null)
  *     hasPendingUserPrompt,        // () => boolean   (activeUserPrompt !== "")
  *     resetStreamState,            // () => void  (clear + disconnect + null state)
+ *     // ---- 协议测试入口：offscreen port 消息对象进、UI/状态变化出 ----
+ *     handleChatPortMessage,       // (msg) => void  (与 port.onMessage 监听器同分派)
  *   }
  */
 export function createChatRuntime(deps) {
@@ -134,6 +136,53 @@ export function createChatRuntime(deps) {
       return;
     }
     deps.messages.scrollTop = deps.messages.scrollHeight;
+  }
+
+  // =========================================================================
+  // dispatchChatPortMessage — offscreen port 消息的协议分派（七分派 + 代际重置）
+  // =========================================================================
+  // sendMessage 内 port.onMessage 监听器的函数体与公开的 handleChatPortMessage
+  // （协议测试入口）共用同一份分派。port 参数仅用于 cost-guard 的确认回执：
+  // 真实监听器传当前 port；测试入口传 activePort。
+  function dispatchChatPortMessage(msg, port) {
+    if (!msg) return;
+    // 候选5：offscreen 每次回执都带 cachedContextKey（其单槽字幕体缓存当前
+    // 持有的 key）——推进 lastAcked，后续追问省略 subtitleBody。字幕体缺失
+    // 错误不带该字段，由下方 error 分支显式重置。
+    if (typeof msg.cachedContextKey === "string" && msg.cachedContextKey) {
+      lastAckedContextKey = msg.cachedContextKey;
+    }
+    if (msg.type === "reasoning") {
+      handleFirstStreamToken();
+      if (!thinkingNode) thinkingNode = createThinkingNode(activeAssistantNode);
+      appendThinkingText(thinkingNode, msg.data);
+    } else if (msg.type === "token") {
+      handleFirstStreamToken();
+      thinkingNode = null;
+      appendToken(activeAssistantNode, msg.data);
+    } else if (msg.type === "stream-reset") {
+      // 读流中断重试（offscreen 重新从头生成）：已吐 token 撤不回且新流不保证
+      // 前缀一致，清空本条消息缓冲整体重放，避免两代流拼接成重复文本。
+      resetAssistantStream(activeAssistantNode);
+    } else if (msg.type === "done") {
+      finalizeAssistant(activeAssistantNode);
+    } else if (msg.type === "stopped") {
+      handleAssistantStopped(activeAssistantNode, msg.reason || "已停止生成");
+    } else if (msg.type === "error") {
+      // 候选5：offscreen 单槽缓存缺失（文档被回收后重启 / 槽 key 不匹配）回
+      // 「字幕体缺失」→ 重置 lastAcked 让下一条消息重发全文。本条不自动重发，
+      // 避免失败风暴；用户重发时自然走全量。
+      if (msg.code === "subtitle-body-missing") {
+        lastAckedContextKey = null;
+      }
+      showAssistantError(activeAssistantNode, msg.error || "未知错误");
+    } else if (msg.type === "notice") {
+      deps.ui.showConversationContextNotice(msg.data, 4000);
+    } else if (msg.type === "cost-guard") {
+      // offscreen 发起 Map-Reduce 前弹成本护栏，等待确认后回执。
+      const ok = window.confirm(String(msg.data?.message || "预计会有多次调用，是否继续？"));
+      port.postMessage({ action: "cost-guard-confirm", ok });
+    }
   }
 
   // =========================================================================
@@ -185,44 +234,7 @@ export function createChatRuntime(deps) {
     activePort = port;
 
     port.onMessage.addListener((msg) => {
-      if (!msg) return;
-      // 候选5：offscreen 每次回执都带 cachedContextKey（其单槽字幕体缓存当前
-      // 持有的 key）——推进 lastAcked，后续追问省略 subtitleBody。字幕体缺失
-      // 错误不带该字段，由下方 error 分支显式重置。
-      if (typeof msg.cachedContextKey === "string" && msg.cachedContextKey) {
-        lastAckedContextKey = msg.cachedContextKey;
-      }
-      if (msg.type === "reasoning") {
-        handleFirstStreamToken();
-        if (!thinkingNode) thinkingNode = createThinkingNode(activeAssistantNode);
-        appendThinkingText(thinkingNode, msg.data);
-      } else if (msg.type === "token") {
-        handleFirstStreamToken();
-        thinkingNode = null;
-        appendToken(activeAssistantNode, msg.data);
-      } else if (msg.type === "stream-reset") {
-        // 读流中断重试（offscreen 重新从头生成）：已吐 token 撤不回且新流不保证
-        // 前缀一致，清空本条消息缓冲整体重放，避免两代流拼接成重复文本。
-        resetAssistantStream(activeAssistantNode);
-      } else if (msg.type === "done") {
-        finalizeAssistant(activeAssistantNode);
-      } else if (msg.type === "stopped") {
-        handleAssistantStopped(activeAssistantNode, msg.reason || "已停止生成");
-      } else if (msg.type === "error") {
-        // 候选5：offscreen 单槽缓存缺失（文档被回收后重启 / 槽 key 不匹配）回
-        // 「字幕体缺失」→ 重置 lastAcked 让下一条消息重发全文。本条不自动重发，
-        // 避免失败风暴；用户重发时自然走全量。
-        if (msg.code === "subtitle-body-missing") {
-          lastAckedContextKey = null;
-        }
-        showAssistantError(activeAssistantNode, msg.error || "未知错误");
-      } else if (msg.type === "notice") {
-        deps.ui.showConversationContextNotice(msg.data, 4000);
-      } else if (msg.type === "cost-guard") {
-        // offscreen 发起 Map-Reduce 前弹成本护栏，等待确认后回执。
-        const ok = window.confirm(String(msg.data?.message || "预计会有多次调用，是否继续？"));
-        port.postMessage({ action: "cost-guard-confirm", ok });
-      }
+      dispatchChatPortMessage(msg, port);
     });
 
     port.onDisconnect.addListener(() => {
@@ -397,7 +409,10 @@ export function createChatRuntime(deps) {
   // =========================================================================
   // offscreen 侧重试流从头生成，已吐 token 撤不回且新流不保证前缀一致（模型
   // 生成非确定性），清空本条消息的流式缓冲与已渲染内容，从头接收重试流：
-  // - 取消挂起的 flush 帧、重置 token 累加器（base/pending 清零）；
+  // - 取消挂起的 flush 帧、重置 token 累加器（base/pending 清零）——与
+  //   endStream 收口共享同一组原语（cancelTokenFlush / resetTokenStreamState，
+  //   后者亦用于占位初始化）；但不走收口六步：流并未终止（activePort 不断开、
+  //   流式 UI 不退出、慢响应计时器不关）；
   // - 移除已渲染的 stable/tail 容器与思考节点（光标先摘下来放回节点末尾，
   //   flush 时机随下一帧恢复）；思考节点随下一个 reasoning 事件重建。
   function resetAssistantStream(node) {
@@ -496,99 +511,92 @@ export function createChatRuntime(deps) {
   }
 
   // =========================================================================
-  // finalizeAssistant
+  // endStream — 流生命周期收口（done / stopped / error 三条终态路径唯一实现）
   // =========================================================================
-  function finalizeAssistant(node) {
-    if (!node) {
-      return;
-    }
+  // 六步时序只此一处（原 finalize/showError/stopped 三份抄写收口于此）：
+  //   ① cancelTokenFlush          取消挂起的流式渲染帧；
+  //   ② clearStreamRuntimeState   清慢响应计时器 / 首 token 标志 / 上下文 notice；
+  //   ③ renderStep(node)          终态各自的 DOM / 持久化收尾（见下方三分支）；
+  //   ④ 断开并清空 activePort；
+  //   ⑤ setStreamingUiState(false)；
+  //   ⑥ deps.input.focus() + scrollToBottom()。
+  // activeUserPrompt 在 ③ 之后统一清空（③ 内的写回判定还要读它）。
+  function endStream(node, renderStep) {
     cancelTokenFlush();
     clearStreamRuntimeState();
-    const raw = getStreamRaw(node);
-    renderAssistantMessage(node, raw, { userPrompt: activeUserPrompt });
-    // 身份校验：守卫判定收在 store（deps.store.isCurrent）。发送后当前会话已变
-    // （删除/清空/切换）→ 只更新 DOM，不写回 chatHistory、不持久化（防会话
-    // 复活 / 串话）。
+    if (renderStep) {
+      renderStep(node);
+    }
+    activeUserPrompt = "";
+    if (activePort) {
+      try { activePort.disconnect(); } catch {}
+      activePort = null;
+    }
+    setStreamingUiState(false);
+    deps.input.focus();
+    scrollToBottom();
+  }
+
+  // 在途一问一答写回（done / stopped 共享）：身份守卫判定收在 store
+  // （deps.store.isCurrent）。发送后当前会话已变（删除/清空/切换）→ 不写回
+  // chatHistory、不持久化（防会话复活 / 串话），DOM 仍由 renderStep 更新。
+  function commitAssistantTurn(raw) {
     if (activeUserPrompt && raw && deps.store.isCurrent(activeConversationId)) {
       sidepanelState.chatHistory.push({ role: "user", content: activeUserPrompt });
       sidepanelState.chatHistory.push({ role: "assistant", content: raw });
       void deps.store.persistCurrent();
     }
-    activeUserPrompt = "";
-    if (activePort) {
-      try { activePort.disconnect(); } catch {}
-      activePort = null;
-    }
-    setStreamingUiState(false);
-    deps.input.focus();
-    scrollToBottom();
   }
 
-  // =========================================================================
-  // showAssistantError
-  // =========================================================================
+  // -------------------------------------------------------------------------
+  // 三条终态分派分支：各自只保留"步骤③"的特有 DOM / 持久化收尾
+  // -------------------------------------------------------------------------
+
+  // done：全量重渲染 + 写回一问一答
+  function finalizeAssistant(node) {
+    if (!node) {
+      return;
+    }
+    endStream(node, (n) => {
+      const raw = getStreamRaw(n);
+      renderAssistantMessage(n, raw, { userPrompt: activeUserPrompt });
+      commitAssistantTurn(raw);
+    });
+  }
+
+  // error：错误占位（不渲染正文、不写回、不持久化）
   function showAssistantError(node, error) {
     if (!node) {
       return;
     }
-    cancelTokenFlush();
-    clearStreamRuntimeState();
-    node.innerHTML = "";
-    const err = document.createElement("div");
-    err.className = "sp-msg-error";
-    err.textContent = `错误：${error}`;
-    node.appendChild(err);
-    activeUserPrompt = "";
-    if (activePort) {
-      try { activePort.disconnect(); } catch {}
-      activePort = null;
-    }
-    setStreamingUiState(false);
-    deps.input.focus();
-    scrollToBottom();
+    endStream(node, (n) => {
+      n.innerHTML = "";
+      const err = document.createElement("div");
+      err.className = "sp-msg-error";
+      err.textContent = `错误：${error}`;
+      n.appendChild(err);
+    });
   }
 
-  // =========================================================================
-  // handleAssistantStopped
-  // =========================================================================
+  // stopped：有正文则渲染正文 + 停止徽标（并写回）；无正文则只放停止徽标
   function handleAssistantStopped(node, reason) {
     if (!node) {
       return;
     }
-    cancelTokenFlush();
-    clearStreamRuntimeState();
-    const raw = getStreamRaw(node);
-    if (raw.trim()) {
-      renderAssistantMessage(node, raw, { userPrompt: activeUserPrompt });
+    endStream(node, (n) => {
+      const raw = getStreamRaw(n);
       const stopped = document.createElement("div");
       stopped.className = "sp-msg-stopped";
       stopped.textContent = reason || "已停止生成";
-      node.appendChild(stopped);
-      if (activeUserPrompt) {
-        // 身份校验同 finalizeAssistant：守卫判定收在 store（isCurrent），
-        // 会话已变则不写回、不持久化
-        if (deps.store.isCurrent(activeConversationId)) {
-          sidepanelState.chatHistory.push({ role: "user", content: activeUserPrompt });
-          sidepanelState.chatHistory.push({ role: "assistant", content: raw });
-          void deps.store.persistCurrent();
-        }
-        activeUserPrompt = "";
+      if (raw.trim()) {
+        renderAssistantMessage(n, raw, { userPrompt: activeUserPrompt });
+        n.appendChild(stopped);
+        commitAssistantTurn(raw);
+      } else {
+        n.innerHTML = "";
+        n.appendChild(stopped);
       }
-    } else {
-      node.innerHTML = "";
-      const stopped = document.createElement("div");
-      stopped.className = "sp-msg-stopped";
-      stopped.textContent = reason || "已停止生成";
-      node.appendChild(stopped);
-      activeUserPrompt = "";
-    }
-    if (activePort) {
-      try { activePort.disconnect(); } catch {}
-      activePort = null;
-    }
-    setStreamingUiState(false);
-    deps.input.focus();
-    scrollToBottom();
+    });
   }
 
   // =========================================================================
@@ -728,25 +736,32 @@ export function createChatRuntime(deps) {
     thinkingNode = null;
   }
 
+  // =========================================================================
+  // handleChatPortMessage — 协议分派的公开测试入口
+  // =========================================================================
+  // 与 sendMessage 内注册的 port.onMessage 监听器走同一份
+  // dispatchChatPortMessage：协议消息对象进、DOM/状态变化出。测试以此喂
+  // reasoning / token / stream-reset / done / stopped / error / notice /
+  // cost-guard，无需触达任何内部渲染步骤函数。
+  function handleChatPortMessage(msg) {
+    dispatchChatPortMessage(msg, activePort);
+  }
+
+  // 返回面恰好 10 键（候选07）：9 个 sidepanel 消费方法 + 1 个协议测试入口。
+  // 内部步骤（handleFirstStreamToken / clearStreamRuntimeState /
+  // startStreamSlowNoticeTimer / appendAssistantPlaceholder / appendToken /
+  // finalizeAssistant / handleAssistantStopped / showAssistantError /
+  // createThinkingNode / appendThinkingText）不再外露。
   return {
     sendMessage,
     stopActiveStream,
-    handleFirstStreamToken,
-    clearStreamRuntimeState,
-    startStreamSlowNoticeTimer,
-    appendAssistantPlaceholder,
-    appendToken,
-    finalizeAssistant,
-    handleAssistantStopped,
-    showAssistantError,
     renderAssistantMessage,
     appendUserMessage,
-    createThinkingNode,
-    appendThinkingText,
     setAutoScroll,
     scrollToBottom,
     isStreaming,
     hasPendingUserPrompt,
-    resetStreamState
+    resetStreamState,
+    handleChatPortMessage
   };
 }
