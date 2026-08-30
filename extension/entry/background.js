@@ -6,8 +6,8 @@ import {
 import { PRESETS, ASR_PROVIDER_PRESETS } from "../core/presets.js";
 import { normalizePlayerAiQuickPrompt } from "../core/validators.js";
 import { isSupportedBilibiliPage } from "../bilibili/video-id-shared.js";
-import { sleep } from "../shared/utils.js";
 import { sendMessageToTab, waitForTabComplete } from "../shared/tab-utils.js";
+import { createBackgroundContentOrchestrator } from "./background-content-orchestration.js";
 import { getMergedSettings, normalizeSettings, saveSettings } from "../core/settings-store.js";
 import {
   aiProviderStore,
@@ -307,147 +307,55 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 });
 
 // ===== 内容脚本注入生命周期 =====
+//
+// 时序与错误分类编排在 entry/background-content-orchestration.js（行为契约由
+// tests/entry/background-orchestration.test.js 用假时钟锁定）；本节只把真实
+// chrome API 组装成编排所需的单发副作用并完成一次性接线。
 
-async function ensureReaderContentReady(tabId) {
-  if (!chrome.scripting || !tabId) {
-    return;
-  }
-
-  const loadedVersion = await probeContentScriptVersion(tabId);
-  if (loadedVersion === EXPECTED_CONTENT_SCRIPT_VERSION) {
-    return;
-  }
-
-  await injectReaderContent(tabId);
-  for (let attempt = 0; attempt < 5; attempt++) {
-    if (attempt > 0) {
-      await sleep(150);
-    }
-    const reinjectedVersion = await probeContentScriptVersion(tabId);
-    if (reinjectedVersion === EXPECTED_CONTENT_SCRIPT_VERSION) {
-      return;
-    }
-  }
-
-  if (loadedVersion && loadedVersion !== EXPECTED_CONTENT_SCRIPT_VERSION) {
-    await chrome.tabs.reload(tabId);
-    const ready = await waitForTabComplete(tabId, { polls: 40 });
-    if (!ready) {
-      throw new Error("扩展更新后页面未及时恢复，请刷新浏览器网页重试");
-    }
-    await sleep(120);
-    await injectReaderContent(tabId);
-    for (let attempt = 0; attempt < 5; attempt++) {
-      if (attempt > 0) {
-        await sleep(150);
-      }
-      const reloadedVersion = await probeContentScriptVersion(tabId);
-      if (reloadedVersion === EXPECTED_CONTENT_SCRIPT_VERSION) {
-        return;
-      }
-    }
-  }
-
-  throw new Error("扩展脚本未能和当前页面同步，请刷新浏览器网页重试");
+// 版本探针单发：读页面里 content 主包置的版本哨兵，空串 = 未读到；API 抛错
+// 交给编排层吞掉重试，单发自身不 try/catch。
+function probeContentScriptVersionOnce(tabId) {
+  return chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => globalThis.__BOC_CONTENT_SCRIPT_LOADED__ || ""
+  }).then((probe) => String(probe?.[0]?.result || ""));
 }
 
-async function probeContentScriptVersion(tabId) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const probe = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: () => globalThis.__BOC_CONTENT_SCRIPT_LOADED__ || ""
-      });
-      const version = String(probe?.[0]?.result || "");
-      if (version) {
-        return version;
-      }
-    } catch {
-      // ignore probe failures
-    }
-    if (attempt < 2) {
-      await sleep(100);
-    }
-  }
-  return "";
-}
-
-async function injectReaderContent(tabId) {
+async function injectReaderAssets(tabId) {
   await chrome.scripting.insertCSS({
     target: { tabId },
     files: ["entry/content.css"]
   });
 
-  try {
-    await chrome.scripting.executeScript({
-      // 候选4 分包后这里注入 classic bootstrap：它置版本哨兵后异步拉起 ESM
-      // 主包（manifest.content_scripts 指向同一文件，注入语义一致）。重复注入
-      // 由 bootstrap 的 __BOC_CONTENT_BOOTSTRAP_STARTED__ 标志挡住。
-      target: { tabId },
-      files: ["entry/content-bootstrap.iife.js"]
-    });
-  } catch (error) {
-    const message = String(error?.message || "");
-    if (!message.includes("Identifier 'DEFAULT_SETTINGS' has already been declared")) {
-      throw error;
-    }
-  }
+  await chrome.scripting.executeScript({
+    // 候选4 分包后这里注入 classic bootstrap：它置版本哨兵后异步拉起 ESM
+    // 主包（manifest.content_scripts 指向同一文件，注入语义一致）。重复注入
+    // 由 bootstrap 的 __BOC_CONTENT_BOOTSTRAP_STARTED__ 标志挡住；classic 重复
+    // 注入的词法冲突哨兵（见 shared/content-error-sentinels.js）由编排层吞掉。
+    target: { tabId },
+    files: ["entry/content-bootstrap.iife.js"]
+  });
 }
 
-async function triggerReaderModeInTab(tabId, readerUrl = "", retries = 12, delayMs = 300) {
-  for (let attempt = 0; attempt < retries; attempt += 1) {
-    if (attempt > 0) {
-      await sleep(delayMs);
-    }
-
-    try {
-      const response = await sendMessageToTab(tabId, {
-        type: "popup-trigger-reading-view",
-        readerUrl
-      });
-      if (response?.ok) {
-        return true;
-      }
-    } catch (error) {
-      const message = String(error?.message || "");
-      if (message.includes("Could not establish connection. Receiving end does not exist.")) {
-        try {
-          await ensureReaderContentReady(tabId);
-        } catch {
-          // keep retrying
-        }
-        continue;
-      }
-    }
-  }
-
-  return false;
-}
-
-async function triggerReaderModeCloseInTab(tabId, retries = 12, delayMs = 300) {
-  for (let attempt = 0; attempt < retries; attempt += 1) {
-    if (attempt > 0) {
-      await sleep(delayMs);
-    }
-
-    try {
-      const response = await sendMessageToTab(tabId, {
-        type: "popup-close-reading-view"
-      });
-      if (response?.ok) {
-        return true;
-      }
-    } catch (error) {
-      // 忽略瞬时失败（消息端口被提前关闭等），下方会通过 URL 二次确认。
-    }
-
-    if (await isTabReaderModeOff(tabId)) {
-      return true;
-    }
-  }
-
-  return false;
-}
+const {
+  ensureReaderContentReady,
+  probeContentScriptVersion,
+  injectReaderContent,
+  triggerReaderModeInTab,
+  triggerReaderModeCloseInTab
+} = createBackgroundContentOrchestrator({
+  // 单发副作用（chrome API 触点）
+  probeOnce: probeContentScriptVersionOnce,
+  injectAssets: injectReaderAssets,
+  reloadTab: (tabId) => chrome.tabs.reload(tabId),
+  waitForTabComplete,
+  sendMessageToTab,
+  isTabReaderModeOff,
+  // 前置守卫：无 scripting 能力或无 tabId 时，编排按「无事可做」直接返回
+  // （与抽离前 ensureReaderContentReady 开头的 `!chrome.scripting || !tabId` 等价）。
+  canInject: (tabId) => Boolean(chrome.scripting) && Boolean(tabId),
+  expectedVersion: EXPECTED_CONTENT_SCRIPT_VERSION
+});
 
 async function isTabReaderModeOff(tabId) {
   const tab = await chrome.tabs.get(tabId).catch(() => null);

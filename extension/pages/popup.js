@@ -3,6 +3,10 @@ import { normalizeAsrLanguage } from "../core/presets.js";
 import { normalizeDownloadFormat } from "../core/validators.js";
 import { isSupportedBilibiliPage } from "../bilibili/video-id-shared.js";
 import { formatLocalDate, sleep } from "../shared/utils.js";
+import {
+  DUPLICATE_CLASSIC_INJECTION_SENTINEL,
+  RECEIVING_END_MISSING_SENTINEL,
+} from "../shared/content-error-sentinels.js";
 import { escapeHtml, sanitizeFileName } from "../shared/string-utils.js";
 import { sendMessageToTab } from "../shared/tab-utils.js";
 
@@ -326,7 +330,7 @@ async function sendToContent(message) {
 
 function normalizeContentErrorMessage(error) {
   const message = String(error?.message || "").trim();
-  if (message.includes("Could not establish connection. Receiving end does not exist.")) {
+  if (message.includes(RECEIVING_END_MISSING_SENTINEL)) {
     return "请刷新浏览器网页重试，或当前网页不支持";
   }
   return message || "未知错误";
@@ -334,7 +338,7 @@ function normalizeContentErrorMessage(error) {
 
 function shouldRetryAfterInjection(error) {
   const message = String(error?.message || "");
-  return message.includes("Could not establish connection. Receiving end does not exist.");
+  return message.includes(RECEIVING_END_MISSING_SENTINEL);
 }
 
 
@@ -363,7 +367,7 @@ async function ensureContentScriptReady(tabId) {
     });
   } catch (error) {
     const message = String(error?.message || "");
-    if (!message.includes("Identifier 'DEFAULT_SETTINGS' has already been declared")) {
+    if (!message.includes(DUPLICATE_CLASSIC_INJECTION_SENTINEL)) {
       throw error;
     }
   }

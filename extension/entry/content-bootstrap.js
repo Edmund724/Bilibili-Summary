@@ -27,6 +27,12 @@ export function startContentBootstrap({ getExtensionUrl, importModule } = {}) {
   // 防重复注入：B 站是 SPA，扩展更新/重载时浏览器可能对同一文档再次执行
   // classic content script。主包 init 自带幂等守卫，这里挡的是重复的模块
   // 加载请求与重复的哨兵写入。
+  //
+  // 与 classic 重注入哨兵的对应关系：分包前的旧版 content.js 顶层声明了
+  // `const DEFAULT_SETTINGS`，同一文档被重复 classic 注入时该 SyntaxError
+  // 由浏览器抛出（非本扩展代码主动 throw）；background 的注入编排按
+  // shared/content-error-sentinels.js 的 DUPLICATE_CLASSIC_INJECTION_SENTINEL
+  // 将其视为「已注入」吞掉（本 bootstrap 为 IIFE、无顶层绑定，不触发该哨兵）。
   if (globalThis.__BOC_CONTENT_BOOTSTRAP_STARTED__) {
     return null;
   }
