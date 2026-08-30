@@ -15,6 +15,9 @@
 // ./sidepanel-player-ai-requests.js、预设提示词 CRUD + 双存储同步 →
 // ./sidepanel-presets.js、modelSelect 宽度度量 → ../ui/model-select-width.js
 //（本文件只做 import 与工厂组装/调用点适配）。
+// 候选08 再把 loadContextState 的四态分支判定抽到 ./sidepanel-context-policy.js
+//（纯函数「输入 → 动作」映射，可直测），loadContextState /
+// ensureCurrentContextForSend 只负责拉数据、按动作执行编排副作用。
 // 跨子模块共享的可变状态（上下文/会话/AI 偏好等 13 个字段）收拢在
 // ./sidepanel-state.js 的 sidepanelState，本文件与 conversation-store /
 // chat-runtime 直接 import 读写，deps 只剩回调与 DOM/storage。
@@ -62,6 +65,16 @@ import { sidepanelState } from "./sidepanel-state.js";
 import { createPlayerAiQuickActions } from "./sidepanel-player-ai-requests.js";
 import { createPresetPrompts } from "./sidepanel-presets.js";
 import { updateModelSelectWidth } from "../ui/model-select-width.js";
+// 上下文加载策略：no-tab / skip-unchanged / error / apply-pinned /
+// blocked-streaming / apply-live 的「输入 → 动作」映射与失败文案常量。
+import {
+  CONTEXT_READ_FAILED_MESSAGE,
+  LOAD_CONTEXT_ACTION,
+  isPinnedContextStrict,
+  isPinnedContextTruthy,
+  resolveLoadContextAction,
+  resolveNoTabPlan
+} from "./sidepanel-context-policy.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const THINKING_LEVEL_KEY = "boc_ai_thinking_level";
@@ -452,23 +465,27 @@ async function refreshProvidersAndPrefsAfterExternalChange() {
 
 // ============================================================
 // 上下文状态加载（侧面板编排核心：读标签页状态 → 应用上下文 → 恢复对话）
+// 分支判定收敛在 ./sidepanel-context-policy.js（纯函数），本函数只按动作执行。
 // ============================================================
 async function loadContextState({ forceRefresh = false, silent = false } = {}) {
-  const hasPinnedConversation = sidepanelState.currentConversationMeta?.pinnedContext === true;
+  const hasPinnedConversation = isPinnedContextStrict(sidepanelState.currentConversationMeta);
   const tab = await getActiveTab();
   if (!tab?.id) {
+    // 决策点一（消息往返之前）：无可用标签页，按计划做失败清理（文案/清上下文/
+    // 重置视图的取舍全部来自策略计划）。
+    const plan = resolveNoTabPlan({ hasPinnedConversation, silent });
     sidepanelState.liveContextData = null;
     sidepanelState.liveContextKey = "";
     sidepanelState.liveTabUrl = "";
-    if (!hasPinnedConversation) {
+    if (plan.clearContext) {
       sidepanelState.contextData = null;
       sidepanelState.currentContextKey = "";
     }
     updateContextChip();
-    if (!silent && !hasPinnedConversation) {
-      resetConversationView("找不到当前标签页。");
+    if (plan.resetView) {
+      resetConversationView(plan.message);
     }
-    return false;
+    return plan.returnValue;
   }
 
   const resp = await sendRuntimeMessage({
@@ -483,50 +500,63 @@ async function loadContextState({ forceRefresh = false, silent = false } = {}) {
   }).catch((error) => ({ ok: false, error: error.message }));
   sidepanelState.liveTabUrl = String(tab.url || "").trim();
 
+  // 决策点二（消息往返之后）：「输入 → 动作」映射全部交给策略模块。forceRefresh
+  // 只随消息透传给 content，不参与动作判定；isStreaming / hasPendingUserPrompt
+  // 是 chat-runtime 的纯闭包读取，此处取值时点不改变可观察行为。
+  const plan = resolveLoadContextAction({
+    response: resp,
+    hasPinnedConversation,
+    silent,
+    isStreaming: chatRuntime.isStreaming(),
+    hasPendingUserPrompt: chatRuntime.hasPendingUserPrompt()
+  });
+
   // 候选5：content 状态未变 → 保持现状不动（不 applyContextPayload、不重渲染、
   // 不刷新 live 快照、不转 spinner）。liveContextData 仍持有带 signature 的
   // 上次全量 payload：既是下一轮 ifSignature 的来源，也是等待轮询
   // （subtitle-wait）的判定数据源——返回 true 让轮询按旧快照继续判 pending，
   // ASR 完成时签名必然变化（subtitleFetchState/body.length），全量快照自然到位。
-  if (resp?.ok && resp?.payload?.unchanged === true) {
-    return true;
+  if (plan.action === LOAD_CONTEXT_ACTION.SKIP_UNCHANGED) {
+    return plan.returnValue;
   }
 
-  if (!resp?.ok || !resp.payload) {
+  if (plan.action === LOAD_CONTEXT_ACTION.ERROR) {
     sidepanelState.liveContextData = null;
     sidepanelState.liveContextKey = "";
-    if (!hasPinnedConversation) {
+    if (plan.clearContext) {
       sidepanelState.contextData = null;
       sidepanelState.currentContextKey = "";
     }
     updateContextChip();
-    if (!silent && !hasPinnedConversation) {
-      resetConversationView(resp?.error || "当前页面上下文读取失败。");
+    if (plan.resetView) {
+      resetConversationView(plan.message);
     }
-    return false;
+    return plan.returnValue;
   }
 
+  // 三个成功动作（pinned / 流式守卫 / live）的公共前缀：live 快照照常落地，
+  // 保证轮询与补水的数据源不断供。
   sidepanelState.liveContextData = resp.payload;
   sidepanelState.liveContextKey = buildContextKey(resp.payload);
-  if (hasPinnedConversation) {
+
+  // pinned 与流式守卫的执行体逐字节相同：只落地 live 快照，不进主上下文。
+  if (
+    plan.action === LOAD_CONTEXT_ACTION.APPLY_PINNED ||
+    plan.action === LOAD_CONTEXT_ACTION.BLOCKED_STREAMING
+  ) {
     renderHistoryList();
     updateContextChip();
-    return true;
+    return plan.returnValue;
   }
 
-  if (chatRuntime.isStreaming() || chatRuntime.hasPendingUserPrompt()) {
-    renderHistoryList();
-    updateContextChip();
-    return true;
-  }
-
+  // apply-live：正常路径，上下文变化时恢复最近对话并重渲染初始态。
   const contextChanged = applyContextPayload(resp.payload);
   renderHistoryList();
   if (contextChanged) {
     await conversationStore.restoreLatest();
     renderInitialState();
   }
-  return true;
+  return plan.returnValue;
 }
 
 function applyContextPayload(payload) {
@@ -955,25 +985,29 @@ function findPreviousUserPrompt(index) {
 // BLOCKED 类型化信号让 sendMessage 提前返回（不追加用户消息、不落
 // chatHistory、不发起 port），并按 noSubtitleReason 显示对应 notice。
 async function ensureCurrentContextForSend() {
-  if (sidepanelState.currentConversationMeta?.pinnedContext) {
+  // pinned 判定沿用本调用点的原始语义（真值判断，与 loadContextState 的严格
+  // 相等不同——见 sidepanel-context-policy.js 两个谓词的疑义记录）。
+  if (isPinnedContextTruthy(sidepanelState.currentConversationMeta)) {
     await loadContextState({ forceRefresh: false, silent: true }).catch(() => null);
     return conversationStore.hydratePinned();
   }
+  // 失败闸把「无标签页」与「读取失败」合并为同一文案（与策略模块的
+  // resolveNoTabPlan 语义不同：这里即使静默加载也会重置视图），保持原状。
   const ok = await loadContextState({ forceRefresh: false, silent: true });
   if (!ok || !sidepanelState.contextData) {
-    resetConversationView("当前页面上下文读取失败。");
+    resetConversationView(CONTEXT_READ_FAILED_MESSAGE);
     return false;
   }
   const ready = await subtitleWaiter.wait();
   if (!ready) {
-    resetConversationView("当前页面上下文读取失败。");
+    resetConversationView(CONTEXT_READ_FAILED_MESSAGE);
     return false;
   }
   // 等待期间 contextData 可能停在旧快照（守卫分支或就绪瞬间），放行前重取
   // 一次，确保发送出去的是转写完成后的完整字幕。
   await loadContextState({ forceRefresh: false, silent: true }).catch(() => null);
   if (!sidepanelState.contextData) {
-    resetConversationView("当前页面上下文读取失败。");
+    resetConversationView(CONTEXT_READ_FAILED_MESSAGE);
     return false;
   }
   if (isNoSubtitleEmptyContext(sidepanelState.contextData)) {
