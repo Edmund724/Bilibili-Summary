@@ -1,6 +1,14 @@
 import { state, uiState, playerAiState, clipState } from "./state.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
 
+// sidepanel-get-context 的 payload 形状 + 签名投影单源（纯模块）：字段清单、
+// 组装工厂与签名键/排除清单都在 sidepanel-payload.js，本文件只喂运行时输入
+// （state.clip / state.settings / location.href）并 re-export 签名函数。
+import {
+  createSidepanelContextPayload,
+  computeSidepanelStateSignature
+} from "./sidepanel-payload.js";
+
 import { startUrlWatcher, BOC_URL_CHANGE_EVENT } from "./url-watcher.js";
 import { replaceReaderModeUrl } from "../bilibili/reader-url.js";
 import {
@@ -268,78 +276,21 @@ export function bindRuntimeEvents() {
 // sidepanel-get-context：payload 组装 + 状态签名（候选5 上下文同步瘦身）
 // ============================================================
 
-// sidepanel-get-context 的全量 payload 组装（原处理器内联字面量原样抽出）：
-// 抽出的唯一原因是签名短路要先拿到 payload 才能算签名，字段与搬迁前逐字一致。
+// sidepanel-get-context 的全量 payload 组装：字段清单/组装/缺省口径全部单源在
+// core/sidepanel-payload.js（createSidepanelContextPayload），本壳只注入运行时
+// 输入。抽出成函数（而非处理器内联）的唯一原因是签名短路要先拿到 payload 才能
+// 算签名。
 function buildSidepanelContextPayload() {
-  const settings = state.settings || DEFAULT_SETTINGS;
-  const body = state.clip.subtitleBody || [];
-  return {
-    url: location.href,
-    title: state.clip.title || "",
-    author: state.clip.author || "",
-    uploadDate: state.clip.uploadDate || "",
-    bvid: state.clip.bvid || "",
-    cid: state.clip.cid || "",
-    aid: state.clip.aid || "",
-    pageIndex: Number(state.clip.pageIndex) > 0 ? Number(state.clip.pageIndex) : 1,
-    pageCount: Number(state.clip.pageCount) > 0 ? Number(state.clip.pageCount) : 0,
-    pageTitle: state.clip.pageTitle || "",
-    subtitleBody: body,
-    // 视频时长（fetcher 经 page-context seam 写入 state.clip.videoDuration）：
-    // offscreen 渲染 prompt 时用于 withHours（小时级时间戳）判定。
-    videoDuration: Number(state.clip.videoDuration || 0) || 0,
-    // 字幕时间戳开关透传：offscreen 渲染 prompt 时沿用同一设置；缺失按默认 true。
-    includeTimestampInBody: settings?.includeTimestampInBody !== false,
-    // idle/loading/ready/error：loading 且 subtitleBody 为空表示抓取
-    // （可能含小时级 ASR 转写）仍在进行，sidepanel 据此等待而非把
-    // 空字幕直接发给模型。
-    subtitleFetchState: state.clip.subtitleFetchState || "idle",
-    // empty 时的无字幕原因归类（null | "no-asr-config" | "asr-disabled" |
-    // "asr-failed" | "asr-empty"），sidepanel 拦截总结发送时按原因提示。
-    noSubtitleReason: state.clip.noSubtitleReason || null,
-    subtitleLang: state.clip.selectedSubtitleLang || "",
-    selectedSubtitleId: state.clip.selectedSubtitleId || "",
-    selectedSubtitleUrl: state.clip.selectedSubtitleUrl || "",
-    subtitleOptions: state.clip.subtitles || [],
-    // 章节透传（fetcher 写入 state.clip.chapters）：供侧边栏回传 offscreen
-    // 后做章节对齐切段（budgeter）与追问章节名检索（raw-retrieval）。
-    chapters: Array.isArray(state.clip.chapters) ? state.clip.chapters : [],
-    hotComments: []
-  };
+  return createSidepanelContextPayload({
+    clip: state.clip,
+    settings: state.settings || DEFAULT_SETTINGS,
+    url: location.href
+  });
 }
 
-// 候选5：SP 上下文同步瘦身的签名判定（纯函数，可测）。输入是
-// buildSidepanelContextPayload 产物（即 SP 持有快照的 shape），字段覆盖
-// SP 消费的全部可变状态；签名相同 ⇒ 重发全量对 SP 是纯冗余——
-// applyContextPayload 本就按 contextKey 去重不重渲染，但整份字幕体的
-// 消息传输与上层热评的网络拉取照跑。
-// 刻意不纳入 hotComments / url / title / noSubtitleReason：
-//   - hotComments 由 background 按需拉取（unchanged 时整体跳过）；
-//   - url/title 随视频切换必然带动 bvid/cid 变化，纳入只会制造假阳性刷新；
-//   - noSubtitleReason 与 subtitleFetchState 同源变化（empty 收尾时两者同时
-//     落定），跟随 fetchState 即可。
-// 索引型数组只取长度不取内容：同 id 字幕重拉产生的等长新数组视为未变，
-// 与 SP 侧 contextKey 的去重语义一致。
-export function computeSidepanelStateSignature(snapshot) {
-  const safe = snapshot && typeof snapshot === "object" ? snapshot : {};
-  const body = Array.isArray(safe.subtitleBody) ? safe.subtitleBody : [];
-  const options = Array.isArray(safe.subtitleOptions) ? safe.subtitleOptions : [];
-  const chapters = Array.isArray(safe.chapters) ? safe.chapters : [];
-  // cid 为空回退 aid：无 cid 的场景（老数据/异常页）仍有稳定键
-  const cid = String(safe.cid || "").trim() || String(safe.aid || "").trim();
-  return [
-    String(safe.bvid || "").trim(),
-    cid,
-    Number(safe.pageIndex) > 0 ? Number(safe.pageIndex) : 1,
-    String(safe.subtitleFetchState || "idle"),
-    body.length,
-    String(safe.selectedSubtitleId || "").trim(),
-    options.length,
-    chapters.length,
-    safe.includeTimestampInBody !== false ? "1" : "0",
-    String(safe.subtitleLang || "").trim()
-  ].join("|");
-}
+// 签名实现与「哪些字段参与/排除失效判定」的知识单源在 sidepanel-payload.js
+// （签名从 payload 字段清单的投影表派生）；此处 re-export 维持既有导入面。
+export { computeSidepanelStateSignature };
 
 // URL 变化编排（自 core/runtime.js 搬入）：core/url-watcher.js 只负责给 history
 // 打补丁并广播 boc:urlchange（纯机制），本组合根监听 popstate/hashchange/
