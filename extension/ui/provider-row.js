@@ -4,7 +4,8 @@
 // 以下骨架完全一致，由工厂统一持有：
 // - 行骨架：预设下拉 / baseUrl / API Key / 测试 / 删除（确认 + 后台消息）/ 行内状态 <p>；
 // - 预设切换的 baseUrl 跟随规则：未改过 baseUrl（空或仍是上一预设默认值）才跟随新预设；
-// - 测试连接流程：校验 → 探针消息 → 成功后回调保存 → 重查行显示"连接成功"；
+// - 测试连接流程：校验 → 探针（注入 runTestProbe 直调，或经运行时消息）→
+//   成功后回调保存 → 重查行显示"连接成功"；
 // - 成功状态：禁用行内 input/button 并在 successMinMs 后恢复（错误状态不自动恢复）；
 // - 空态切换与 id 生成（仅前缀不同）。
 // 真实差异通过参数注入：字段构成（headerFields / modelField / tailFields）、
@@ -47,6 +48,7 @@ export function createProviderRow({
   onPresetChange,
   wireRowExtras,
   buildTestPayload,
+  runTestProbe,
   buildDeleteMessage
 }) {
   // 测试成功 / 删除后的回调，由调用页注入，避免行构建器耦合保存流程
@@ -146,7 +148,12 @@ export function createProviderRow({
         return;
       }
       showStatus(statusNode, "正在测试...");
-      const resp = await sendRuntimeMessage(buildTestPayload({ row, presets, baseUrl, apiKey, model }));
+      // 探针执行可注入：AI 平台行直调 ai/provider-test.js（options 页本地
+      // 执行，免一次 SW 消息往返，见候选 04 拆链）；未注入时回退运行时消息
+      // （ASR 家族探针仍收口在 SW）。
+      const resp = runTestProbe
+        ? await runTestProbe({ row, presets, baseUrl, apiKey, model })
+        : await sendRuntimeMessage(buildTestPayload({ row, presets, baseUrl, apiKey, model }));
       if (resp?.ok) {
         const providerId = row.dataset.providerId || "";
         try {

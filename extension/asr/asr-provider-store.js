@@ -17,7 +17,9 @@ import {
   formatProbeHttpError
 } from "../core/provider-store.js";
 import { getMergedSettings } from "../core/settings-store.js";
-import { encodeWavBytes } from "./chunker.js";
+// 只 import WAV 编码微模块（探针只需要静音 WAV 字节），不引整个 chunker.js：
+// 切片/解码校验那部分不需要进 SW 图（ADR-0003 拆静态边）。
+import { encodeWavBytes } from "./wav-encode.js";
 
 // ===== ASR 平台列表存储 =====
 
@@ -33,7 +35,7 @@ export const asrProviderStore = createProviderStore({
 // ===== 静音 WAV 生成（探针用） =====
 
 // 构造 1 秒 16kHz 单声道 16bit PCM 静音 WAV（全零采样）。
-// WAV header 复用 asr/chunker.js 的 encodeWavBytes：静音即全零 Float32 采样
+// WAV header 复用 asr/wav-encode.js 的 encodeWavBytes：静音即全零 Float32 采样
 // （量化后仍为 0x0000，data 段全零）。用于 openai-transcriptions 探针。
 // 1 秒 16k 单声道 16bit = 16000 采样 * 2 字节 = 32000 字节 PCM。
 export function buildSilentWavBytes(durationSec = 1, sampleRate = 16000) {

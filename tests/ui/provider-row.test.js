@@ -4,22 +4,28 @@
 // 本文件守住行构建器重构后的关键不变量：
 // - 行结构渲染（含 ASR 复用 AI 类名 ai-provider-remove / ai-provider-status 的既有耦合）；
 // - 预设切换的 baseUrl 跟随规则（未改过 baseUrl 才跟随）；
-// - 测试连接报文形状（AI 平铺 / ASR provider 包裹且仅重输 Key 时携带）与
-//   成功状态的禁用输入 + 定时恢复；
+// - 测试连接：AI 行直调探针（ai/provider-test.js，候选 04 拆链后不走消息）、
+//   ASR 行走 provider 包裹报文（仅重输 Key 时携带）与成功状态的禁用输入 +
+//   定时恢复；
 // - 删除接线（AI 仅后台消息 / ASR 额外触发注入的 onDelete）。
 // shared/messaging.js（sendRuntimeMessage，原 core/runtime.js）被整体 mock，
-// 避免拖入 content script 依赖图。
+// 避免拖入 content script 依赖图；AI 探针模块同理 mock，隔离 fetch。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 import { TRASH_ICON_PATHS } from "../../extension/ui/provider-row.js";
 
-const { sendRuntimeMessageMock } = vi.hoisted(() => ({
-  sendRuntimeMessageMock: vi.fn()
+const { sendRuntimeMessageMock, testAiProviderConnectionMock } = vi.hoisted(() => ({
+  sendRuntimeMessageMock: vi.fn(),
+  testAiProviderConnectionMock: vi.fn()
 }));
 
 vi.mock("../../extension/shared/messaging.js", () => ({
   sendRuntimeMessage: sendRuntimeMessageMock
+}));
+
+vi.mock("../../extension/ai/provider-test.js", () => ({
+  testAiProviderConnection: testAiProviderConnectionMock
 }));
 
 const AI_PRESETS = [
@@ -88,6 +94,8 @@ beforeEach(() => {
   document.body.innerHTML = "";
   sendRuntimeMessageMock.mockReset();
   sendRuntimeMessageMock.mockImplementation(async () => ({ ok: true }));
+  testAiProviderConnectionMock.mockReset();
+  testAiProviderConnectionMock.mockImplementation(async () => ({ ok: true }));
   confirmMock = vi.fn(() => true);
   vi.stubGlobal("confirm", confirmMock);
 });
@@ -188,7 +196,7 @@ describe("createProviderRow：AI 平台行（options-rows.js 配置）", () => {
     expect(baseUrlInput.value).toBe("http://localhost:11434/v1");
   });
 
-  it("测试连接：平铺报文 + 成功回调重渲染后，新行禁用输入并在 2 秒后恢复", async () => {
+  it("测试连接：直调探针（平铺入参带 providerId）+ 成功回调重渲染后，新行禁用输入并在 2 秒后恢复", async () => {
     vi.useFakeTimers();
     const rows = await loadAiRows();
     const { listNode, emptyNode } = makeContainer();
@@ -204,14 +212,15 @@ describe("createProviderRow：AI 平台行（options-rows.js 配置）", () => {
     fireClick(row.querySelector(".ai-provider-test"));
     await flushMicrotasks();
 
-    expect(sendRuntimeMessageMock).toHaveBeenCalledTimes(1);
-    expect(sendRuntimeMessageMock.mock.calls[0][0]).toEqual({
-      type: "ai-providers-test",
+    // 候选 04 拆链：探针直调（options 页本地执行），不再发 ai-providers-test 消息
+    expect(testAiProviderConnectionMock).toHaveBeenCalledTimes(1);
+    expect(testAiProviderConnectionMock.mock.calls[0][0]).toEqual({
       providerId: "p1",
       baseUrl: "https://api.openai.com/v1",
       apiKey: "sk-test",
       model: "gpt-4o-mini"
     });
+    expect(sendRuntimeMessageMock).not.toHaveBeenCalled();
     expect(onTestSuccess).toHaveBeenCalledWith("p1");
 
     // 保存回调重渲染后，按 providerId 重查到的新行显示"连接成功"并禁用输入
@@ -230,7 +239,7 @@ describe("createProviderRow：AI 平台行（options-rows.js 配置）", () => {
     expect(Array.from(newRow.querySelectorAll("input, button")).every((el) => !el.disabled)).toBe(true);
   });
 
-  it("测试连接：缺 baseUrl / 缺模型名直接提示且不发消息；探针失败显示错误，禁用持续到恢复定时器", async () => {
+  it("测试连接：缺 baseUrl / 缺模型名直接提示且不调探针；探针失败显示错误，禁用持续到恢复定时器", async () => {
     vi.useFakeTimers();
     const rows = await loadAiRows();
     const { listNode, emptyNode } = makeContainer();
@@ -243,17 +252,18 @@ describe("createProviderRow：AI 平台行（options-rows.js 配置）", () => {
     expect(status.hidden).toBe(false);
     expect(status.textContent).toBe("请填写 baseUrl");
     expect(status.dataset.error).toBe("true");
+    expect(testAiProviderConnectionMock).not.toHaveBeenCalled();
     expect(sendRuntimeMessageMock).not.toHaveBeenCalled();
 
     row.querySelector(".ai-provider-baseurl").value = "https://api.openai.com/v1";
     row.querySelector(".ai-provider-model").value = "";
     fireClick(row.querySelector(".ai-provider-test"));
     expect(status.textContent).toBe("请填写模型名");
-    expect(sendRuntimeMessageMock).not.toHaveBeenCalled();
+    expect(testAiProviderConnectionMock).not.toHaveBeenCalled();
 
     // "正在测试..."（非 error）会禁用行内输入防止重复提交；探针失败后
     // 状态行显示错误但不禁用/恢复，输入保持禁用直至恢复定时器触发
-    sendRuntimeMessageMock.mockImplementation(async () => ({ ok: false, error: "quota exceeded" }));
+    testAiProviderConnectionMock.mockImplementation(async () => ({ ok: false, error: "quota exceeded" }));
     row.querySelector(".ai-provider-model").value = "gpt-4o-mini";
     fireClick(row.querySelector(".ai-provider-test"));
     await flushMicrotasks();

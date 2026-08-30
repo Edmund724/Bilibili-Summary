@@ -1,4 +1,4 @@
-// core/ai-provider-store.js 探针测试（候选 03：探针入 ai/completion.js 接缝）。
+// AI 连通性探针测试（候选 04：探针移至 ai/provider-test.js，options 页直调）。
 // 覆盖 testAiConnection / probeAiChatCompletion 的 { ok, error } 形状契约：
 // 输入预检、probe 请求负载（max_tokens:1 + ping）、成功判定 = response.ok、
 // HTTP / 连接 / 溢出错误的文案包装（复用共享 helper，AI/ASR 逐字一致）。
@@ -10,7 +10,7 @@ import { resetModuleState } from "../setup.js";
 let fetchMock;
 
 async function loadModule() {
-  return import("../../extension/core/ai-provider-store.js");
+  return import("../../extension/ai/provider-test.js");
 }
 
 beforeEach(async () => {
@@ -134,5 +134,80 @@ describe("probeAiChatCompletion { ok, error } 形状", () => {
 
     expect(resp).toEqual({ ok: false, error: "模型未配置" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// testAiProviderConnection = options 页「测试」按钮入口，契约继承原 SW 侧
+// ai-providers-test 处理器的输入装配（provider-handlers.js pickFlatTestProvider）：
+// 直输 Key 优先，否则按 providerId 从 chrome.storage.local 代查，都没有为空串。
+describe("testAiProviderConnection Key 代查", () => {
+  const storageGet = () => globalThis.chrome.storage.local.get;
+
+  async function loadEntry() {
+    const mod = await loadModule();
+    return mod.testAiProviderConnection;
+  }
+
+  it("直输 Key 优先：不读已存 Key 存储，Authorization 用重输值", async () => {
+    storageGet().mockReset();
+    fetchMock.mockResolvedValue(jsonResponse(200, {}));
+    const entry = await loadEntry();
+
+    const resp = await entry({
+      providerId: "p1",
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-direct",
+      model: "gpt"
+    });
+
+    expect(resp).toEqual({ ok: true });
+    expect(storageGet()).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer sk-direct");
+  });
+
+  it("未重输 Key → 按 providerId 代查已存 Key", async () => {
+    storageGet().mockReset();
+    storageGet().mockResolvedValue({ aiProviderKeys: { p1: "sk-saved" } });
+    fetchMock.mockResolvedValue(jsonResponse(200, {}));
+    const entry = await loadEntry();
+
+    const resp = await entry({
+      providerId: "p1",
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "",
+      model: "gpt"
+    });
+
+    expect(resp).toEqual({ ok: true });
+    expect(storageGet()).toHaveBeenCalledWith(["aiProviderKeys"]);
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer sk-saved");
+  });
+
+  it("未重输 Key 且无 providerId → 空 Key 探针（无 Authorization 头）", async () => {
+    storageGet().mockReset();
+    fetchMock.mockResolvedValue(jsonResponse(200, {}));
+    const entry = await loadEntry();
+
+    await entry({ providerId: "", baseUrl: "https://x", apiKey: "  ", model: "m" });
+
+    expect(storageGet()).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
+  });
+
+  it("已存 Key 读取失败 → 容错按空 Key 继续探针（不吞探针结果）", async () => {
+    storageGet().mockReset();
+    storageGet().mockRejectedValue(new Error("storage down"));
+    fetchMock.mockResolvedValue(jsonResponse(200, {}));
+    const entry = await loadEntry();
+
+    const resp = await entry({
+      providerId: "p1",
+      baseUrl: "https://x",
+      apiKey: "",
+      model: "m"
+    });
+
+    expect(resp).toEqual({ ok: true });
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
   });
 });

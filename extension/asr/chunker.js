@@ -1,65 +1,18 @@
 // extension/asr/chunker.js
-// WAV 编码（16bit PCM / 16kHz / 单声道）+ 切片。
+// WAV 切片（16bit PCM / 16kHz / 单声道）。
+// WAV 字节编码本体已拆到 asr/wav-encode.js（asr-provider-store 探针只需编码
+// 不需切片，拆静态边让 chunker 其余部分退 offscreen/SW 图，见 ADR-0003），
+// 本模块 import 它并保留 Blob 包装；切片、解码结果校验在本模块。
 // Service Worker 没有 AudioContext：解码与重采样由 offscreen 文档宿主完成
-// （见 asr/protocol.js，接 entry/offscreen-asr.js 基建），本模块只负责
-// 编码、切片计划与解码结果校验；offscreen 文档侧用 buildWavChunks 把
-// 解码结果切成 WAV 块，在本 context 内直接交给转写引擎，不跨 context。
-// 核心模块不直接碰 AudioContext，Node/vitest 下可独立测试。WAV header 手写，不引依赖。
+// （见 asr/protocol.js，接 entry/offscreen-asr.js 基建），offscreen 文档侧用
+// buildWavChunks 把解码结果切成 WAV 块，在本 context 内直接交给转写引擎，
+// 不跨 context。核心模块不直接碰 AudioContext，Node/vitest 下可独立测试。
 
-// ===== WAV 编码 =====
-
-// Float32 单声道采样（[-1,1]）→ 16bit PCM WAV 字节（Uint8Array）。
-// 44 字节 RIFF/WAVE header + PCM little-endian。16k 单声道 ≈ 1.9MB/分钟。
-export function encodeWavBytes(monoFloat32, sampleRate = 16000) {
-  const numChannels = 1;
-  const bitsPerSample = 16;
-  const blockAlign = (numChannels * bitsPerSample) / 8;
-  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
-  const sampleCount = monoFloat32.length;
-  const dataSize = sampleCount * blockAlign;
-
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-
-  // RIFF chunk（12 字节）
-  writeAscii(view, 0, "RIFF");
-  view.setUint32(4, 36 + dataSize, true); // chunk size
-  writeAscii(view, 8, "WAVE");
-
-  // fmt subchunk（16 字节，PCM）
-  writeAscii(view, 12, "fmt ");
-  view.setUint32(16, 16, true);            // subchunk size
-  view.setUint16(20, 1, true);             // audio format = PCM
-  view.setUint16(22, numChannels, true);   // 声道数
-  view.setUint32(24, sampleRate, true);    // 采样率
-  view.setUint32(28, byteRate, true);      // 每秒字节数
-  view.setUint16(32, blockAlign, true);    // 每采样帧字节数
-  view.setUint16(34, bitsPerSample, true); // 位深
-
-  // data subchunk 头（8 字节）
-  writeAscii(view, 36, "data");
-  view.setUint32(40, dataSize, true);
-
-  // Float32 → Int16：Math.round 舍入，量化后 clamp 到 [-32768, 32767]（1.0 → 32767）
-  const pcmView = new DataView(buffer, 44, dataSize);
-  for (let i = 0; i < sampleCount; i++) {
-    const q = Math.round(monoFloat32[i] * 32768);
-    pcmView.setInt16(i * 2, q > 32767 ? 32767 : q < -32768 ? -32768 : q, true);
-  }
-
-  return new Uint8Array(buffer);
-}
+import { encodeWavBytes } from "./wav-encode.js";
 
 // encodeWavBytes 的 Blob 包装（转写上传用 Blob 形态）。
 export function encodeWav(monoFloat32, sampleRate = 16000) {
   return new Blob([encodeWavBytes(monoFloat32, sampleRate)], { type: "audio/wav" });
-}
-
-// 写入 ASCII 字符串（RIFF/WAVE/fmt /data 标识）
-function writeAscii(view, offset, str) {
-  for (let i = 0; i < str.length; i++) {
-    view.setUint8(offset + i, str.charCodeAt(i));
-  }
 }
 
 // ===== 切片 =====

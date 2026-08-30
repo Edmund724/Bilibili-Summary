@@ -1,7 +1,8 @@
 // extension/ui/options-rows.js
 // 选项页三类行构建器（固定属性 / 笔记段落 / AI 平台）与纯验证逻辑。
 // AI 平台行的构建本体由 ui/provider-row.js 的 createProviderRow 承担（与 ASR 行共用），
-// 本文件只提供 AI 侧真实差异：模型字段形态、模型下拉拉取、报文形状与既有导出签名。
+// 本文件只提供 AI 侧真实差异：模型字段形态、模型下拉拉取、报文形状（连通性
+// 测试已改直调 ai/provider-test.js）与既有导出签名。
 // 行构建器只依赖参数与回调，不直接访问 DOM 全局；验证函数不触碰 DOM。
 
 import { PRESETS } from "../core/presets.js";
@@ -16,6 +17,7 @@ import {
 } from "../core/validators.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
+import { testAiProviderConnection } from "../ai/provider-test.js";
 import { createProviderRow, TRASH_ICON_PATHS } from "./provider-row.js";
 
 const MAX_NOTE_PLACEHOLDER_SECTIONS = 5;
@@ -340,7 +342,7 @@ function closeAllFixedPropertyMenus(listNode) {
 // ===== AI 模型平台 =====
 // 行构建本体由 ui/provider-row.js 的 createProviderRow 承担（与 ASR 行共用），
 // 此处只提供 AI 侧差异：模型字段固定为文本输入 + 下拉拉取按钮、Key 占位符
-// 随 requiresKey 变化、报文走 ai-providers-*。导出签名保持不变。
+// 随 requiresKey 变化、CRUD 报文走 ai-providers-*（连通性测试直调探针模块）。导出签名保持不变。
 
 const aiProviderRow = createProviderRow({
   rowClass: "ai-provider-row",
@@ -380,13 +382,16 @@ const aiProviderRow = createProviderRow({
       : (next.requiresKey ? "API Key" : "API Key（可选）");
   },
   wireRowExtras: wireAiModelControls,
-  buildTestPayload: ({ row, baseUrl, apiKey, model }) => ({
-    type: "ai-providers-test",
-    providerId: row.dataset.providerId || "",
-    baseUrl,
-    apiKey,
-    model
-  }),
+  // 连通性测试直调 ai/provider-test.js（不再走 ai-providers-test 消息往返）：
+  // options 页同属扩展 context，host_permissions 生效，跨域 fetch 无需 SW 中转；
+  // Key 代查（重输优先、否则按 providerId 读已存 Key）收口在探针入口内。
+  runTestProbe: ({ row, baseUrl, apiKey, model }) =>
+    testAiProviderConnection({
+      providerId: row.dataset.providerId || "",
+      baseUrl,
+      apiKey,
+      model
+    }),
   buildDeleteMessage: (providerId) => ({ type: "ai-providers-delete", providerId })
 });
 

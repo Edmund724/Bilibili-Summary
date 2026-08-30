@@ -11,7 +11,6 @@ import { sendMessageToTab, waitForTabComplete } from "../shared/tab-utils.js";
 import { getMergedSettings, normalizeSettings, saveSettings } from "../core/settings-store.js";
 import {
   aiProviderStore,
-  testAiConnection,
   handleAiProvidersModels as fetchAiProviderModels
 } from "../core/ai-provider-store.js";
 import { asrProviderStore, testAsrConnection } from "../asr/asr-provider-store.js";
@@ -148,17 +147,17 @@ function handleFetchJson(message, sender, sendResponse) {
   return true;
 }
 
-// Provider CRUD + 连通性测试消息：AI / ASR 两个家族形状相同，统一由
+// Provider CRUD 消息：AI / ASR 两个家族形状相同，统一由
 // core/provider-handlers.js 的工厂装配。响应负载与消息名保持不变，
-// 路由表只换处理器指向。AI 的 test 消息是平铺字段（Key 可由处理器按
-// providerId 代查），用工厂缺省的探针输入装配。
+// 路由表只换处理器指向。AI 的连通性测试（ai-providers-test）已移出 SW：
+// options 页直调 ai/provider-test.js（host_permissions 对扩展页面同样生效），
+// 探针的 completion 链不再进 SW 图（候选 04 拆链），故本工厂不再注入 probe。
 const aiProviderHandlers = createProviderMessageHandlers({
   loadProviders: aiProviderStore.loadProviders,
   saveProviders: aiProviderStore.saveProviders,
   deleteProvider: aiProviderStore.deleteProvider,
   loadKeys: aiProviderStore.loadKeys,
-  saveKey: aiProviderStore.saveKey,
-  probe: testAiConnection
+  saveKey: aiProviderStore.saveKey
 });
 
 function handleAiPresetsList(message, sender, sendResponse) {
@@ -274,7 +273,6 @@ const messageHandlers = new Map([
   ["ai-providers-save", aiProviderHandlers.save],
   ["ai-provider-set-key", aiProviderHandlers.setKey],
   ["ai-providers-delete", aiProviderHandlers.remove],
-  ["ai-providers-test", aiProviderHandlers.test],
   ["ai-providers-models", handleAiProvidersModels],
   ["asr-presets-list", handleAsrPresetsList],
   ["asr-providers-list", asrProviderHandlers.list],

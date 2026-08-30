@@ -1,12 +1,13 @@
 // extension/core/ai-provider-store.js
-// AI 平台 Provider/Key 的存储 + 连接测试/模型探测。
-// 从 extension/entry/background.js 提取的深模块：只与 chrome.storage / fetch 交互，
+// AI 平台 Provider/Key 的存储（列表 CRUD + 归一化）。
+// 从 extension/entry/background.js 提取的深模块：只与 chrome.storage 交互，
 // 不涉及消息路由。所有函数返回 Promise，由 background.js 的消息处理函数调用。
 // 全局设置（reader/AI/ASR/下载域）的归一化与读写已拆到 settings-store.js，
-// 本模块只负责 AI 平台列表 CRUD 与探针。
+// 本模块只负责 AI 平台列表 CRUD。连通性测试/探针已移至 ai/provider-test.js
+// （候选 04 拆链：探针依赖 ai/completion.js，留在本文件会把整条 completion 链
+// 拖进 SW 静态图；options 页直调 provider-test，本模块回归纯存储）。
 
-import { createProviderStore, formatProbeConnectionError } from "./provider-store.js";
-import { chatCompletion } from "../ai/completion.js";
+import { createProviderStore } from "./provider-store.js";
 
 // ===== AI 模型平台存储 =====
 // 列表 CRUD（load/save/delete/Key 读写）委托给通用工厂 createProviderStore，
@@ -37,63 +38,9 @@ export const aiProviderStore = createProviderStore({
   normalizeProvider: normalizeAiProvider
 });
 
-// ===== 连接测试 / 模型探测 =====
-// 探针经 ai/completion.js 的 probe 模式发请求（max_tokens:1 + messages ping，
-// 成功判定 = response.ok 且不读响应体），本模块只负责输入预检与错误形状包装：
-// 接缝抛错（类型化标记）转 { ok: false, error }，文案复用共享 helper 逐字对齐旧实现。
-
-// 把接缝抛出的类型化错误转成探针错误文案：
-// - HTTP 失败（err.status / err.overflow）：接缝 message 与 formatProbeHttpError 同型，直接透传；
-// - 连接失败（原始抛出物挂 err.cause）：复用「无法连接：…」文案（AI/ASR 逐字一致）；
-// - 其余（接缝 baseUrl/model 守卫等）：message 已是清晰文案，直接透传。
-function formatProbeSeamError(error) {
-  if (error?.status != null || error?.overflow) {
-    return error.message;
-  }
-  if (error?.cause) {
-    return formatProbeConnectionError(error.cause);
-  }
-  return error.message;
-}
-
-export async function testAiConnection({ baseUrl, apiKey, model }) {
-  const normalizedBaseUrl = String(baseUrl || "").trim().replace(/\/+$/, "");
-  const normalizedModel = String(model || "").trim();
-  if (!normalizedBaseUrl) {
-    return { ok: false, error: "请填写 baseUrl" };
-  }
-  if (!normalizedModel) {
-    return { ok: false, error: "请填写模型名" };
-  }
-
-  return probeAiChatCompletion({
-    baseUrl: normalizedBaseUrl,
-    apiKey,
-    model: normalizedModel,
-    headers: { Accept: "application/json" }
-  });
-}
-
-export async function probeAiChatCompletion({ baseUrl, apiKey, model, headers }) {
-  const requestHeaders = { ...(headers || { Accept: "application/json" }) };
-  if (apiKey && !requestHeaders.Authorization) {
-    requestHeaders.Authorization = `Bearer ${apiKey}`;
-  }
-
-  try {
-    await chatCompletion({
-      provider: { baseUrl, apiKey, model },
-      messages: [{ role: "user", content: "ping" }],
-      probe: true,
-      headers: requestHeaders,
-      retries: 0
-    });
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error: formatProbeSeamError(error) };
-  }
-}
-
+// ===== 模型列表探测 =====
+// 经 SW 消息（ai-providers-models）从 options 页模型下拉调用：直连
+// `${baseUrl}/v1/models`（纯 GET fetch，不依赖 completion 链），故留在本模块。
 export async function handleAiProvidersModels({ baseUrl, apiKey, providerId }) {
   const normalizedBaseUrl = String(baseUrl || "").trim().replace(/\/+$/, "").replace(/\/v1$/i, "");
   const headers = { Accept: "application/json" };
