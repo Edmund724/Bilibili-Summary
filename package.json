@@ -6,7 +6,7 @@
     "doc": "docs"
   },
   "scripts": {
-    "build": "npm run build:content",
+    "build": "node scripts/build.js",
     "build:content": "node scripts/build-content.js",
     "build:release": "python3 scripts/build_release.py",
     "test": "vitest run",

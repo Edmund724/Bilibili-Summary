@@ -466,11 +466,8 @@ async function isTabReaderModeOff(tabId) {
 // ===== AI 侧边栏编排（打开面板 + 快速请求）=====
 
 async function openAiSidepanelForTab(tabId) {
-  if (globalThis.browser?.sidebarAction?.open) {
-    await Promise.resolve(globalThis.browser.sidebarAction.open());
-    return;
-  }
-
+  // 仅支持 Chrome（ADR-0002）：侧边栏统一走 chrome.sidePanel，Firefox 的
+  // sidebarAction fallback 已随 Firefox 兼容一并删除。
   if (chrome.sidePanel?.open) {
     await chrome.sidePanel.open({ tabId });
     return;

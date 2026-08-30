@@ -174,12 +174,8 @@ function bindEvents() {
 
   el.aiBtn?.addEventListener("click", async () => {
     try {
-      if (globalThis.browser?.sidebarAction?.open) {
-        globalThis.browser.sidebarAction.open();
-        window.setTimeout(() => window.close(), 80);
-        return;
-      }
-
+      // 仅支持 Chrome（ADR-0002）：走 chrome.sidePanel，Firefox 的
+      // sidebarAction fallback 已删除。
       const tab = await getActiveTab();
       if (!tab?.id) {
         setStatus("找不到当前标签页。", true);
