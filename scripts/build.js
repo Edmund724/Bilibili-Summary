@@ -4,8 +4,10 @@
 //   1. content 部分沿用 build-content.js（bootstrap IIFE + ESM 主包 + 动态
 //      chunk），产物先落在 extension/entry/（dev load unpacked 直接用），
 //      本脚本再把它们按源相对路径拷进 dist/。
-//   2. 其余入口（SW / offscreen / 三个扩展页面）bundle 成单文件 + minify，
-//      无 code splitting：SW 不做运行时惰性（ADR-0003），全静态图。
+//   2. 其余入口（SW / 三个扩展页面）bundle 成单文件 + minify，无 code
+//      splitting：SW 不做运行时惰性（ADR-0003），全静态图。offscreen 例外
+//      （见 buildOffscreenEntry）：AI / ASR 两族任务链动态 import 后开
+//      splitting，常驻接线与动态 chunk 分文件落盘。
 //   3. CSS 三件套 minify 到 dist 同相对路径；popup.css 不在 minify 清单，
 //      作为静态资源原样拷入。
 //   4. 静态资源（manifest.json / html / icons）原样拷入；产物路径与源路径
@@ -13,11 +15,13 @@
 //   5. 校验：dist/manifest.json 合法 JSON 且引用路径全部存在；html 本地
 //      引用存在；JS 产物按 ESM 语法自检。
 //   6. 报表：content 常驻/按需沿用 build-content.js 口径（子进程直接打印）；
-//      新增入口打印 raw（模块图源文件字节合计）-> minified 产物字节对比。
+//      新增入口打印 raw（模块图源文件字节合计）-> minified 产物字节对比；
+//      offscreen 额外按「常驻 wiring / 动态 chunk」两行口径输出拆分字节。
 //
 // 产物清单（dist/，整体 gitignore；只服务发布，日常开发不变）：
 //   entry/background.js              SW 单文件 bundle
-//   entry/offscreen.js               offscreen 单文件 bundle
+//   entry/offscreen.js               offscreen 常驻接线（splitting 主入口）
+//   entry/offscreen-chunks/*.js      offscreen 动态 chunk（AI / ASR 两族按需）
 //   entry/content.css                minified
 //   entry/content-bootstrap.iife.js  拷贝自 build-content.js 产物
 //   entry/content-main.mjs           拷贝自 build-content.js 产物
@@ -44,9 +48,9 @@ const extensionRoot = path.join(root, "extension");
 const distDir = path.join(root, "dist");
 
 // JS 入口：bundle + minify，单文件（无 splitting），产物路径 = 源相对路径。
+// offscreen 入口不在此列——它开 splitting 拆动态 chunk（见 buildOffscreenEntry）。
 const jsEntries = [
   "entry/background.js",
-  "entry/offscreen.js",
   "pages/sidepanel.js",
   "pages/options.js",
   "pages/popup.js",
@@ -152,7 +156,7 @@ function copyDirRecursive(src, dest) {
 // JS 入口统一 bundle：format esm（源即 ESM，manifest background.type=module、
 // 页面 script type=module，产物路径与源一致 → 零改写）；不 splitting，动态
 // import 的本地模块会被内联进同一文件（SW 全静态图，ADR-0003 的预期形态）。
-async function buildJsEntries() {
+async function buildRestJsEntries() {
   return build({
     entryPoints: jsEntries.map((rel) => path.join(extensionRoot, rel)),
     outbase: extensionRoot,
@@ -160,6 +164,30 @@ async function buildJsEntries() {
     bundle: true,
     splitting: false,
     format: "esm",
+    platform: "browser",
+    minify: true,
+    metafile: true,
+    logLevel: "warning",
+    plugins: [localImportGuard],
+  });
+}
+
+// offscreen 入口：开 splitting（format esm）。源里 AI 族（../ai/ladder.js）
+// 与 ASR 族（./offscreen-asr.js）两条任务链是动态 import()，esbuild 把它们
+// 拆成独立 chunk，dist/entry/offscreen.js 只剩常驻接线，首次用到某族时才
+// 加载对应 chunk（offscreen 是页面环境，动态 import 合法；ADR-0003 只约束
+// SW，background 仍走上方无 splitting 构建）。chunkNames 用
+// entry/offscreen-chunks/ 与 content 产物的 entry/chunks/ 区分（两者同在
+// dist/entry/ 下，避免混淆）；chunk 由 esbuild 直接写进 dist，无需拷贝。
+async function buildOffscreenEntry() {
+  return build({
+    entryPoints: [path.join(extensionRoot, "entry/offscreen.js")],
+    outbase: extensionRoot,
+    outdir: distDir,
+    bundle: true,
+    splitting: true,
+    format: "esm",
+    chunkNames: "entry/offscreen-chunks/[name]-[hash]",
     platform: "browser",
     minify: true,
     metafile: true,
@@ -284,6 +312,14 @@ function formatBytes(n) {
   return `${String(n).padStart(7)} B`;
 }
 
+// 单个 output 的 raw：其模块图 inputs 的源文件字节合计。
+function sumRawBytes(meta) {
+  return Object.keys(meta.inputs).reduce(
+    (sum, input) => sum + fs.statSync(path.resolve(root, input)).size,
+    0
+  );
+}
+
 function printEntryReport(result, label) {
   const outputs = Object.entries(result.metafile.outputs)
     .filter(([file]) => !file.endsWith(".map"));
@@ -291,10 +327,7 @@ function printEntryReport(result, label) {
   let totalRaw = 0;
   let totalMin = 0;
   for (const [outfile, meta] of outputs) {
-    const raw = Object.keys(meta.inputs).reduce(
-      (sum, input) => sum + fs.statSync(path.resolve(root, input)).size,
-      0
-    );
+    const raw = sumRawBytes(meta);
     const min = meta.bytes;
     const ratio = raw > 0 ? `-${((1 - min / raw) * 100).toFixed(1)}%` : "n/a";
     const relOut = path.relative(root, path.resolve(root, outfile));
@@ -309,6 +342,40 @@ function printEntryReport(result, label) {
     `${"subtotal".padEnd(34)} raw ${formatBytes(totalRaw).padEnd(12)} -> min ${formatBytes(totalMin).padEnd(12)} (${ratio})`
   );
   return { totalRaw, totalMin };
+}
+
+// offscreen 拆分报表：产物分「常驻 wiring」（entry/offscreen.js）与「动态
+// chunk」（entry/offscreen-chunks/*，AI / ASR 两族按需装载）两个口径各一行，
+// 列格式与上方入口报表对齐。esbuild splitting 后每个 output 的 inputs 互不
+// 重叠（共享模块归入共享 chunk），两行 raw 相加即 offscreen 全量源图字节。
+function printOffscreenSplitReport(result) {
+  const outputs = Object.entries(result.metafile.outputs)
+    .filter(([file]) => !file.endsWith(".map"));
+  let entryRaw = 0;
+  let entryMin = 0;
+  let chunkRaw = 0;
+  let chunkMin = 0;
+  let chunkCount = 0;
+  for (const [outfile, meta] of outputs) {
+    const raw = sumRawBytes(meta);
+    const min = meta.bytes;
+    if (path.basename(outfile) === "offscreen.js") {
+      entryRaw = raw;
+      entryMin = min;
+    } else {
+      chunkRaw += raw;
+      chunkMin += min;
+      chunkCount += 1;
+    }
+  }
+  console.log("== offscreen 拆分（dist/entry，splitting） ==");
+  console.log(
+    `${"  entry/offscreen.js（常驻 wiring）".padEnd(38)} raw ${formatBytes(entryRaw).padEnd(12)} -> min ${formatBytes(entryMin).padEnd(12)}`
+  );
+  console.log(
+    `${`  entry/offscreen-chunks/*（动态 x${chunkCount}）`.padEnd(38)} raw ${formatBytes(chunkRaw).padEnd(12)} -> min ${formatBytes(chunkMin).padEnd(12)}`
+  );
+  return { entryRaw, entryMin, chunkRaw, chunkMin, chunkCount };
 }
 
 function printDistSummary() {
@@ -330,18 +397,39 @@ async function main() {
   runContentBuild();
   copyStaticAssets();
 
-  const [jsResult, cssResult] = await Promise.all([buildJsEntries(), buildCssEntries()]);
+  const [jsResult, offscreenResult, cssResult] = await Promise.all([
+    buildRestJsEntries(),
+    buildOffscreenEntry(),
+    buildCssEntries()
+  ]);
 
-  // 自检：JS 产物按 ESM 语法过一遍；manifest 与 html 引用闭合。
-  const outputs = Object.keys(jsResult.metafile.outputs).filter((f) => f.endsWith(".js"));
+  // 自检：JS 产物按 ESM 语法过一遍（offscreen 动态 chunk 也是 ESM 产物，
+  // 一并检查）；manifest 与 html 引用闭合。
+  const outputs = [jsResult, offscreenResult]
+    .flatMap((result) => Object.keys(result.metafile.outputs))
+    .filter((f) => f.endsWith(".js"));
   for (const outfile of outputs) {
     syntaxCheckEsm(path.resolve(root, outfile));
   }
   assertManifestReferences();
   assertHtmlReferences();
 
+  // offscreen 拆分守卫：常驻文件必须仍含动态 import( 且至少产出一个动态
+  // chunk——防止未来依赖变化把动态图又内联回单文件而无人察觉。
+  const offscreenDist = fs.readFileSync(path.join(distDir, "entry", "offscreen.js"), "utf8");
+  if (!offscreenDist.includes("import(")) {
+    console.error("build.js: dist/entry/offscreen.js 不含动态 import(，offscreen splitting 失效");
+    process.exit(1);
+  }
+
   console.log("");
   printEntryReport(jsResult, "多入口 bundle（dist/，单文件、无 splitting）");
+  console.log("");
+  const offscreenSplit = printOffscreenSplitReport(offscreenResult);
+  if (offscreenSplit.chunkCount === 0) {
+    console.error("build.js: offscreen splitting 未产出任何动态 chunk");
+    process.exit(1);
+  }
   console.log("");
   printEntryReport(cssResult, "CSS minify（dist/）");
   console.log("");
