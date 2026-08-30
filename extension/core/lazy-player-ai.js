@@ -16,22 +16,21 @@
 // 「未加载」的语义约定（消费方依赖它做等价性判断）：模块未加载 ⇒ 快捷按钮
 // 从未挂上 ⇒ 一切「移除按钮 / 同步按钮」的请求都是 no-op，消费方据此跳过
 // 调用即可（stop/remove/sync 的幂等性由该不变量保证）。
+//
+// 加载器本体收拢于 shared/lazy-import.js 的 createLazyLoader（与
+// core/lazy-reader.js、subtitle/lazy.js、subtitle/fetcher.js 的 ASR 回退装载
+// 同款），本模块保留仓库既有导出名。
+import { createLazyLoader } from "../shared/lazy-import.js";
 
-let modulePromise = null;
+const loader = createLazyLoader(() => import("../ai/player-ai.js"));
 
 // 按需加载 ai/player-ai.js，同一文档内重复调用共享同一 promise。
 export function loadPlayerAi() {
-  if (!modulePromise) {
-    modulePromise = import("../ai/player-ai.js").catch((error) => {
-      modulePromise = null;
-      throw error;
-    });
-  }
-  return modulePromise;
+  return loader.load();
 }
 
 // 模块是否已存在加载请求（含仍在加载中）。消费方用它区分「未加载可跳过」
 // 与「已加载/加载中需继续走异步路径」。
 export function isPlayerAiLoaded() {
-  return modulePromise !== null;
+  return loader.isLoaded();
 }

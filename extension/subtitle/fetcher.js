@@ -8,6 +8,7 @@ import { sendRuntimeMessage } from "../shared/messaging.js";
 import { byId } from "../shared/dom-utils.js";
 import { ensureRunActive, isStaleRunError, getErrorMessage, toReadableText, isRetryableNetworkError, retryAsync } from "../shared/error-helpers.js";
 import { logInfo, logWarn } from "../shared/logging.js";
+import { createLazyLoader } from "../shared/lazy-import.js";
 // isReaderViewOpen 位于常驻微模块（候选02 分层惰性）：纯 state 读取，不再经
 // reader/index.js facade 静态转发（否则整条 reader 域会被拖进本链闭包）。
 import { isReaderViewOpen } from "../reader/view-state.js";
@@ -534,34 +535,29 @@ async function loadAsrProviderList() {
 //
 // 懒加载边界 c：工厂实例（asrFallback 单例）原为模块顶层创建，分包后顶层
 // 静态 import 会把整个 ASR 域拖回常驻 chunk，因此改为首次调用时动态 import
-// 再创建，Promise 缓存保证单例（与原模块级单例语义一致）；加载失败清空
-// 缓存允许重试。
-let asrFallbackPromise = null;
+// 再创建，promise 缓存（shared/lazy-import.js 的 createLazyLoader，与
+// lazy-player-ai/lazy-reader/summarize-chain 加载器同款）保证单例（与原模块
+// 级单例语义一致）；加载失败清空缓存允许重试。
+const asrFallbackLoader = createLazyLoader(() =>
+  Promise.all([
+    import("../asr/pipeline.js"),
+    import("../asr/fallback.js")
+  ]).then(([{ runAsrPipeline }, { createAsrFallback }]) =>
+    createAsrFallback({
+      getSettings,
+      loadProviders: loadAsrProviderList,
+      setStatus,
+      setMessage,
+      acceptSubtitle,
+      commitNoSubtitle,
+      runAsrPipeline,
+      broadcastSubtitleStatus
+    })
+  )
+);
 
 function loadAsrFallback() {
-  if (!asrFallbackPromise) {
-    asrFallbackPromise = Promise.all([
-      import("../asr/pipeline.js"),
-      import("../asr/fallback.js")
-    ])
-      .then(([{ runAsrPipeline }, { createAsrFallback }]) =>
-        createAsrFallback({
-          getSettings,
-          loadProviders: loadAsrProviderList,
-          setStatus,
-          setMessage,
-          acceptSubtitle,
-          commitNoSubtitle,
-          runAsrPipeline,
-          broadcastSubtitleStatus
-        })
-      )
-      .catch((error) => {
-        asrFallbackPromise = null;
-        throw error;
-      });
-  }
-  return asrFallbackPromise;
+  return asrFallbackLoader.load();
 }
 
 // ASR 回退入口见 asr/fallback.js（createAsrFallback 工厂，本模块经

@@ -8,9 +8,10 @@
 // ensureSummarizeChain() 时才下载。一键总结热路径（点击 AI 键 → popup-refresh）
 // 上的装载是本地 chunk 动态 import（~10ms），被两轮消息往返完全掩盖。
 //
-// 写法与 core/lazy-player-ai.js、core/lazy-reader.js 同款（手写 promise 缓存 +
-// 失败清缓存可重试），保持仓库现有加载器风格一致。双入口（fetcher + ui）用
-// Promise.all 并行装载，与 fetcher.js 的 loadAsrFallback 同款。
+// 写法与 core/lazy-player-ai.js、core/lazy-reader.js 同款：加载器本体收拢于
+// shared/lazy-import.js 的 createLazyLoader（手写 promise 缓存 + 失败清缓存
+// 可重试的共享工厂）。双入口（fetcher + ui）用 Promise.all 并行装载，与
+// fetcher.js 的 ASR 回退装载同款。
 //
 // 为什么直接写相对路径：本模块身处 ESM 主包模块图内，动态 import() 的相对
 // 路径按扩展自身 URL 解析（bootstrap 已用 chrome.runtime.getURL 的绝对路径
@@ -25,7 +26,7 @@
 // handler 时也会先 ensure 本链再转发——链装载成功路径上的 initSummarizeChain
 // 会把 refreshClip 注册进 seam，闭环成立。
 
-let chainPromise = null;
+import { createLazyLoader } from "../shared/lazy-import.js";
 
 async function loadSummarizeChain() {
   // fetcher（抓取编排 + resetClipState）与 ui（popup payload / 复制下载回调）
@@ -41,13 +42,9 @@ async function loadSummarizeChain() {
   return { ...fetcher, ...chainUi };
 }
 
+const chainLoader = createLazyLoader(loadSummarizeChain);
+
 // 按需装载总结链，同一文档内重复调用共享同一 promise。
 export function ensureSummarizeChain() {
-  if (!chainPromise) {
-    chainPromise = loadSummarizeChain().catch((error) => {
-      chainPromise = null;
-      throw error;
-    });
-  }
-  return chainPromise;
+  return chainLoader.load();
 }
