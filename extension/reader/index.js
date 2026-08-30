@@ -54,8 +54,9 @@ export {
 // 后转发到这里）
 export { handleReaderPresenterNotification } from "./lifecycle.js";
 // 阅读模式调试快照真身（候选02：全局函数注册在 ./init-essentials.js，
-// 经 ensureReaderDomain 装载本域后转发到这里）
-export { createReaderDebugSnapshot } from "./lifecycle.js";
+// 经 ensureReaderDomain 装载本域后转发到这里；候选09：真身迁往
+// ./debug-snapshot.js，按新家转发）
+export { createReaderDebugSnapshot } from "./debug-snapshot.js";
 
 // ===== 常驻微模块转发（候选02 拆出；facade 对外接口不变） =====
 

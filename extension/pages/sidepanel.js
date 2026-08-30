@@ -8,9 +8,13 @@
 // 本文件只剩四类东西：
 //   1. init / bindEvents（启动编排、事件绑定）
 //   2. 上下文 chip、各列表（历史/建议/预设）与消息区渲染
-//   3. 滚动与布局更新、popover toggle、autosizeInput、modelSelect 宽度、通知显示
-//   4. 对 02-07 模块的编排调用（loadContextState、player AI 快捷动作、上下文
-//      同步调度、新对话/刷新等页面级流程）
+//   3. 滚动与布局更新、popover toggle、autosizeInput、通知显示
+//   4. 对 02-07 模块的编排调用（loadContextState、上下文同步调度、新对话/
+//      刷新等页面级流程）
+// 候选09 又自本文件迁出三块：player AI 快捷动作消费 →
+// ./sidepanel-player-ai-requests.js、预设提示词 CRUD + 双存储同步 →
+// ./sidepanel-presets.js、modelSelect 宽度度量 → ../ui/model-select-width.js
+//（本文件只做 import 与工厂组装/调用点适配）。
 // 跨子模块共享的可变状态（上下文/会话/AI 偏好等 13 个字段）收拢在
 // ./sidepanel-state.js 的 sidepanelState，本文件与 conversation-store /
 // chat-runtime 直接 import 读写，deps 只剩回调与 DOM/storage。
@@ -53,6 +57,11 @@ import {
 import { createConversationStore } from "./sidepanel-conversation-store.js";
 import { ensureChatOffscreenDocument } from "./sidepanel-offscreen-ensure.js";
 import { sidepanelState } from "./sidepanel-state.js";
+// 候选09：player AI 快捷动作消费 / 预设提示词 CRUD / modelSelect 宽度度量
+// 三块实现迁出，本文件只组装 deps 与调用。
+import { createPlayerAiQuickActions } from "./sidepanel-player-ai-requests.js";
+import { createPresetPrompts } from "./sidepanel-presets.js";
+import { updateModelSelectWidth } from "../ui/model-select-width.js";
 
 const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const THINKING_LEVEL_KEY = "boc_ai_thinking_level";
@@ -141,7 +150,6 @@ let suggestionsNode = null;
 let contextNoticeTimer = 0;
 let liveContextSyncTimer = 0;
 let liveContextSyncForceRefresh = false;
-let modelSelectMeasureCanvas = null;
 let initCompleted = false;
 
 // 会话状态（会话列表/当前会话/上下文）已收拢至 sidepanelState，store 直接
@@ -207,6 +215,20 @@ const chatRuntime = createChatRuntime({
   }
 });
 
+// 候选09：player AI 快捷动作消费与预设提示词 CRUD 的组装（deps 注入本文件的
+// 编排回调与 DOM 引用；sendMessage 经惰性箭头取 chatRuntime，回调执行时才读）。
+const playerAiQuickActions = createPlayerAiQuickActions({
+  getActiveTab,
+  startNewConversation,
+  sendMessage: () => chatRuntime.sendMessage(),
+  input: els.input,
+  autosizeInput
+});
+const presets = createPresetPrompts({
+  presetInput: els.presetInput,
+  renderPresetPrompts
+});
+
 init().catch((err) => {
   resetConversationView(`初始化失败：${escapeHtml(err?.message || err)}`);
 });
@@ -231,7 +253,7 @@ async function init() {
   renderInitialState();
   autosizeInput();
   initCompleted = true;
-  await consumePendingPlayerAiQuickAction();
+  await playerAiQuickActions.consumePendingPlayerAiQuickAction();
 }
 
 function bindEvents() {
@@ -261,11 +283,11 @@ function bindEvents() {
   els.stopBtn?.addEventListener("click", () => {
     chatRuntime.stopActiveStream();
   });
-  els.presetAddBtn.addEventListener("click", addPresetPrompt);
+  els.presetAddBtn.addEventListener("click", () => presets.addPresetPrompt());
   els.presetInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
-      addPresetPrompt();
+      presets.addPresetPrompt();
     }
   });
   els.modelSelect.addEventListener("change", () => {
@@ -278,14 +300,14 @@ function bindEvents() {
       sidepanelState.aiPrefs.defaultModel = "";
       chrome.storage.sync.set({ defaultModel: "" }).catch(() => {});
     }
-    updateModelSelectWidth();
+    updateModelSelectWidth(els);
   });
   els.thinkingBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
       void setThinkingLevel(btn.dataset.level || "off");
     });
   });
-  window.addEventListener("resize", updateModelSelectWidth);
+  window.addEventListener("resize", () => updateModelSelectWidth(els));
   document.addEventListener("click", handleDocumentClick);
   // 候选5：可见性/聚焦/切签恢复这三类高频同步一律 forceRefresh=false——
   // 全网络重拉（content 侧 popup-refresh → refreshClip 全量重抓字幕）不是
@@ -324,7 +346,7 @@ function bindEvents() {
       void refreshProvidersAndPrefsAfterExternalChange();
     }
     if (areaName === "local" && changes[PLAYER_AI_QUICK_ACTION_STORAGE_KEY] && initCompleted) {
-      void handlePlayerAiQuickActionRequest(changes[PLAYER_AI_QUICK_ACTION_STORAGE_KEY].newValue);
+      void playerAiQuickActions.handlePlayerAiQuickActionRequest(changes[PLAYER_AI_QUICK_ACTION_STORAGE_KEY].newValue);
     }
   });
 }
@@ -367,7 +389,7 @@ async function loadProvidersAndPrefs({ preferredProviderId = "" } = {}) {
   );
   if (!sidepanelState.aiPrefs.aiPresetPrompts.length) {
     sidepanelState.aiPrefs.aiPresetPrompts = DEFAULT_PRESET_PROMPTS.slice();
-    void persistAiPresetPrompts();
+    void presets.persistAiPresetPrompts();
   }
   renderModelSelect(preferredProviderId);
   renderThinkingLevel();
@@ -393,7 +415,7 @@ function renderModelSelect(preferredProviderId = "") {
   const matchedProvider = sidepanelState.providers.find((item) => item.id === savedProviderId) || sidepanelState.providers[0];
   els.modelSelect.value = matchedProvider?.id || "";
   els.modelSelect.disabled = false;
-  updateModelSelectWidth();
+  updateModelSelectWidth(els);
 }
 
 // ============================================================
@@ -423,122 +445,10 @@ async function refreshProvidersAndPrefsAfterExternalChange() {
   renderInitialState();
 }
 
-async function consumePendingPlayerAiQuickAction() {
-  const data = await chrome.storage.local.get([PLAYER_AI_QUICK_ACTION_STORAGE_KEY]).catch(() => ({}));
-  const request = normalizePlayerAiQuickActionRequest(data?.[PLAYER_AI_QUICK_ACTION_STORAGE_KEY]);
-  if (!request) {
-    return false;
-  }
-  return handlePlayerAiQuickActionRequest(request, { fromStorageChange: false });
-}
-
-function normalizePlayerAiQuickActionRequest(value) {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const id = String(value.id || "").trim();
-  const prompt = String(value.prompt || "").trim();
-  const tabId = Number(value.tabId || 0) || 0;
-  if (!id || !tabId) {
-    return null;
-  }
-  return {
-    id,
-    prompt,
-    tabId,
-    createdAt: Number(value.createdAt) || Date.now()
-  };
-}
-
-async function handlePlayerAiQuickActionRequest(value, { fromStorageChange = true } = {}) {
-  const request = normalizePlayerAiQuickActionRequest(value);
-  if (!request) {
-    return false;
-  }
-
-  const activeTab = await getActiveTab().catch(() => null);
-  if (activeTab?.id && request.tabId !== activeTab.id) {
-    return false;
-  }
-
-  if (fromStorageChange) {
-    await chrome.storage.local.remove(PLAYER_AI_QUICK_ACTION_STORAGE_KEY).catch(() => null);
-  } else {
-    const latest = await chrome.storage.local.get([PLAYER_AI_QUICK_ACTION_STORAGE_KEY]).catch(() => ({}));
-    const latestId = String(latest?.[PLAYER_AI_QUICK_ACTION_STORAGE_KEY]?.id || "").trim();
-    if (latestId && latestId !== request.id) {
-      return false;
-    }
-    await chrome.storage.local.remove(PLAYER_AI_QUICK_ACTION_STORAGE_KEY).catch(() => null);
-  }
-
-  await runPlayerAiQuickActionPrompt(request.prompt);
-  return true;
-}
-
-async function runPlayerAiQuickActionPrompt(prompt) {
-  const text = String(prompt || "").trim();
-  if (!text) {
-    autosizeInput();
-    els.input?.focus?.();
-    return;
-  }
-  await startNewConversation();
-  els.input.value = text;
-  autosizeInput();
-  await chatRuntime.sendMessage();
-}
-
-// ============================================================
-// modelSelect 宽度（canvas 测量 + toolbar 布局计算，纯 UI 杂项）
-// ============================================================
-function updateModelSelectWidth() {
-  if (!els.modelSelect) {
-    return;
-  }
-  const selectedOption = els.modelSelect.options[els.modelSelect.selectedIndex];
-  const text = String(selectedOption?.textContent || "").trim() || "未配置平台";
-  const computedStyle = window.getComputedStyle(els.modelSelect);
-  const measuredTextWidth = measureTextWidth(text, computedStyle);
-  const extraCharsWidth = measureTextWidth("000", computedStyle);
-  const desiredWidth = Math.ceil(measuredTextWidth + extraCharsWidth + 36);
-  const minWidth = 92;
-  const maxWidth = getModelSelectMaxWidth();
-  const nextWidth = Math.max(minWidth, Math.min(desiredWidth, maxWidth));
-  els.modelSelect.style.width = `${nextWidth}px`;
-}
-
-function measureTextWidth(text, style) {
-  if (!modelSelectMeasureCanvas) {
-    modelSelectMeasureCanvas = document.createElement("canvas");
-  }
-  const ctx = modelSelectMeasureCanvas.getContext("2d");
-  if (!ctx) {
-    return text.length * 8;
-  }
-  const fontStyle = style?.fontStyle || "normal";
-  const fontVariant = style?.fontVariant || "normal";
-  const fontWeight = style?.fontWeight || "400";
-  const fontSize = style?.fontSize || "11px";
-  const fontFamily = style?.fontFamily || "sans-serif";
-  ctx.font = `${fontStyle} ${fontVariant} ${fontWeight} ${fontSize} ${fontFamily}`;
-  return ctx.measureText(text).width;
-}
-
-function getModelSelectMaxWidth() {
-  const toolbar = els.toolbar;
-  if (!toolbar || !els.thinkingToggle || !els.presetBtn) {
-    return 232;
-  }
-  const style = window.getComputedStyle(toolbar);
-  const gap = Number.parseFloat(style.columnGap || style.gap || "0") || 0;
-  const paddingLeft = Number.parseFloat(style.paddingLeft || "0") || 0;
-  const paddingRight = Number.parseFloat(style.paddingRight || "0") || 0;
-  const contentWidth = toolbar.clientWidth - paddingLeft - paddingRight;
-  const siblingWidth =
-    els.thinkingToggle.offsetWidth + els.presetBtn.offsetWidth + gap * 2;
-  return Math.max(92, Math.floor(contentWidth - siblingWidth));
-}
+// 候选09：player AI 快捷动作消费（consumePendingPlayerAiQuickAction /
+// normalizePlayerAiQuickActionRequest / handlePlayerAiQuickActionRequest /
+// runPlayerAiQuickActionPrompt）迁往 ./sidepanel-player-ai-requests.js，实例
+// playerAiQuickActions 在文件头组装。
 
 // ============================================================
 // 上下文状态加载（侧面板编排核心：读标签页状态 → 应用上下文 → 恢复对话）
@@ -780,7 +690,7 @@ function renderPresetPrompts() {
   els.presetList.querySelectorAll(".sp-preset-remove").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const index = Number(btn.getAttribute("data-index") || -1);
-      await removePresetPrompt(index);
+      await presets.removePresetPrompt(index);
     });
   });
 }
@@ -933,41 +843,8 @@ async function syncLiveContextState(forceRefresh = false) {
   renderSuggestions();
 }
 
-async function addPresetPrompt() {
-  const text = String(els.presetInput.value || "").trim();
-  if (!text) {
-    return;
-  }
-  const nextPrompts = [...(sidepanelState.aiPrefs.aiPresetPrompts || [])];
-  if (!nextPrompts.includes(text)) {
-    nextPrompts.push(text);
-  }
-  sidepanelState.aiPrefs.aiPresetPrompts = nextPrompts.slice(0, 12);
-  await persistAiPresetPrompts();
-  els.presetInput.value = "";
-  renderPresetPrompts();
-}
-
-async function removePresetPrompt(index) {
-  if (index < 0) {
-    return;
-  }
-  sidepanelState.aiPrefs.aiPresetPrompts = (sidepanelState.aiPrefs.aiPresetPrompts || []).filter((_, itemIndex) => itemIndex !== index);
-  await persistAiPresetPrompts();
-  renderPresetPrompts();
-}
-
-async function persistAiPresetPrompts() {
-  const settingsResp = await sendRuntimeMessage({ type: "get-settings" }).catch(() => ({ ok: false }));
-  if (!settingsResp?.ok || !settingsResp.settings) {
-    return;
-  }
-  const nextSettings = {
-    ...settingsResp.settings,
-    aiPresetPrompts: (sidepanelState.aiPrefs.aiPresetPrompts || []).slice(0, 12)
-  };
-  await sendRuntimeMessage({ type: "save-settings", settings: nextSettings }).catch(() => null);
-}
+// 候选09：预设提示词 CRUD + 双存储同步（addPresetPrompt / removePresetPrompt /
+// persistAiPresetPrompts）迁往 ./sidepanel-presets.js，实例 presets 在文件头组装。
 
 function updateSidepanelLayoutState() {
   const useCompactInput = Boolean(

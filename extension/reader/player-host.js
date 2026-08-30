@@ -1,27 +1,35 @@
 // Reader LAYOUT 层 · player-host 域（自 reader-impl.js 机械拆分）。
 //
 // 本文件拥有播放器宿主生命周期：挂载（ensureReaderPlayerMounted）/布局
-// （layoutReaderPlayerHost）/控制条恢复与悬停/小窗关闭调度/观察器，以及闭包
-// 访问器（getPlayerHost/setVideoEventsBound/clearLayoutTimersForSyncStop）与
-// 宿主停止清理（closeReaderCleanup）。分节函数体逐字节搬自原 reader-impl.js
-// 的 player-host 分节（原 :680-1486），行为零变化。页面框架（DOM 焦点/剪枝/
-// 内联宿主/转写尾部留白）在 ./page-frame.js；状态栏文案在 ./presentation.js。
+// （layoutReaderPlayerHost，含候选10 批1 的 rAF 合帧与脏检查快照）/小窗关闭
+// 调度/观察器，以及闭包访问器（getPlayerHost/setVideoEventsBound/
+// clearLayoutTimersForSyncStop）与宿主停止清理（closeReaderCleanup）。分节
+// 函数体逐字节搬自原 reader-impl.js 的 player-host 分节（原 :680-1486），
+// 行为零变化。页面框架（DOM 焦点/剪枝/内联宿主/转写尾部留白）在
+// ./page-frame.js；状态栏文案在 ./presentation.js。
 //
 // 候选06 端口半边：原寄居本文件的「只为破环」符号已各归其位——
 // flushReadingTranscriptToIndex/setReadingTranscriptFlush 槽迁入 ./ports.js
 // 显式端口（实现由 lifecycle.js 单点注册）；renderReadingStatus 转发删除
 // （消费方直接 import ./presentation.js）；updateReadingTranscriptTailSpacer
 // 迁往 ./page-frame.js（内联宿主的滚动留白属页面框架）。closeReaderCleanup 与
-// clearLayoutTimersForSyncStop 留在本文件：它们清的是本域闭包定时器/瞬态
-//（属主在此），sync.js 经合法 SYNC→LAYOUT 静态边调用，并非反环 seam。
+// clearLayoutTimersForSyncStop 留在本文件（sync.js 经合法 SYNC→LAYOUT 静态边
+// 调用，并非反环 seam），其中控制条 chrome 的定时器清理转发到 ./hover-chrome.js。
 // SYNC 域回调经 ./ports.js 显式端口（缺失即抛错）；./sync.js 与 ./lifecycle.js
 // 依赖本层，本文件不得反向 import 它们。
 // playerRetryTimer 闭包变量整体迁入 ./lifecycle.js（属主启动/清除都在那），
 // clearLayoutTimersForSyncStop 因此不再清它（closeReadingView 原本就在
 // stopReadingViewSync 之前自清；presenter reset 路径由 lifecycle 补齐清除）。
+//
+// 候选09：控制条自动隐藏/可见性/自愈恢复与头部悬停 chrome（两组 timer/observer）
+// 整体迁往 ./hover-chrome.js；本文件在挂载/布局/清理路径经 import 调用其导出，
+// 并按原导出转发 unbindReaderPlayerControlsHover（sync.js 的 import 路径不变）。
+// 该拆分固有的双向耦合（chrome 恢复强制可见后须调 layoutReaderPlayerHost 重算
+// 布局，而布局/挂载流程须驱动 chrome）全部是调用期引用，无模块求值期依赖，
+// 与既有 player-host ↔ page-frame 的调用期环同构，详见 hover-chrome.js 头注。
 import { state } from "../core/state.js";
-import { logInfo, logWarn } from "../shared/logging.js";
-import { getReaderElement, isVisibleReaderControl } from "../shared/dom-utils.js";
+import { logWarn } from "../shared/logging.js";
+import { getReaderElement } from "../shared/dom-utils.js";
 import { sleep } from "../shared/utils.js";
 import { isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
@@ -35,6 +43,22 @@ import {
 } from "./page-frame.js";
 // 候选06：SYNC 域回调经 reader 域唯一显式端口（ports.js 叶子，缺失即抛错）。
 import { readerPorts } from "./ports.js";
+// 候选09：控制条自动隐藏/恢复与头部悬停 chrome（属主迁往 ./hover-chrome.js）；
+// 调用点在本文件的挂载/布局/清理路径。
+import {
+  setReaderPlayerControlsVisible,
+  ensureReaderPlayerControlsRecovered,
+  queueEnsureReaderPlayerControlsRecovered,
+  bindReaderPlayerControlsHover,
+  unbindReaderPlayerControlsHover,
+  unbindReaderHeaderActionsHover,
+  clearReaderControlsHideTimer,
+  cancelReaderControlsRecovery
+} from "./hover-chrome.js";
+
+// 候选09：sync.js 的 SYNC→LAYOUT 静态边仍从本文件取该导出——按原导出转发
+//（本文件 cleanupReaderPlayerHost 也经上方 import 直接调用它）。
+export { unbindReaderPlayerControlsHover };
 
 // ===== reader-domain private bookkeeping (module-level closure state) =====
 //
@@ -57,13 +81,6 @@ let playerAdjustedNodes = [];      // readingPlayerAdjustedNodes
 let playerObserver = null;         // readingPlayerObserver
 let playerMountTimer = 0;          // readingPlayerMountTimer
 let miniDismissTimer = 0;          // readingMiniDismissTimer
-let controlsHideTimer = 0;         // readingControlsHideTimer
-let controlsRecoveryTimer = 0;     // readingControlsRecoveryTimer
-let controlsRecoveryInFlight = false; // readingControlsRecoveryInFlight
-let controlsLastRecoverAt = 0;     // readingControlsLastRecoverAt
-let controlsHoverHost = null;      // readingControlsHoverHost
-let headerHoverHost = null;        // readingHeaderHoverHost
-let headerHideTimer = 0;           // readingHeaderHideTimer
 let videoEventsBound = false;      // readingVideoEventsBound
 let layoutBound = false;           // readingLayoutBound
 
@@ -132,7 +149,8 @@ export function setVideoEventsBound(bound) {
 
 // Timer/flag accessors used by sync.js's stopReadingViewSync to clear the
 // remaining layout timers it owns the lifecycle of. playerRetryTimer 分支已随
-// 变量迁入 ./lifecycle.js（属主清除），不再在此清理。
+// 变量迁入 ./lifecycle.js（属主清除），不再在此清理；controlsHideTimer 分支随
+// chrome 迁入 ./hover-chrome.js（属主清除），经其导出转发。
 export function clearLayoutTimersForSyncStop() {
   // 挂起的合帧布局同属 stop 路径要清理的“布局定时器”：取消后关闭阅读视图
   // 不会再补跑一帧 layout（即便补跑也会被 layoutReaderPlayerHost 的
@@ -142,10 +160,7 @@ export function clearLayoutTimersForSyncStop() {
     window.clearTimeout(miniDismissTimer);
     miniDismissTimer = 0;
   }
-  if (controlsHideTimer) {
-    window.clearTimeout(controlsHideTimer);
-    controlsHideTimer = 0;
-  }
+  clearReaderControlsHideTimer();
   if (playerMountTimer) {
     window.clearTimeout(playerMountTimer);
     playerMountTimer = 0;
@@ -153,80 +168,19 @@ export function clearLayoutTimersForSyncStop() {
 }
 
 
-// 停止路径清理（LAYOUT 自有服务，非反环 seam）：closeReaderCleanup 清本域的
-// 控制条恢复定时器/在途标志，stopReadingViewSync（sync.js，合法 SYNC→LAYOUT
-// 静态边）与 cleanupReaderPlayerHost（本域）在停止/清理时调用。
+// 停止路径清理（LAYOUT 自有服务，非反环 seam）：closeReaderCleanup 清控制条
+// 恢复定时器/在途标志（候选09 起属主在 ./hover-chrome.js，经其导出转发），
+// stopReadingViewSync（sync.js，合法 SYNC→LAYOUT 静态边）与
+// cleanupReaderPlayerHost（本域）在停止/清理时调用。
 // 候选06 起 player-host 不再寄居任何「仅为破环」的符号——逆依赖回调一律走
 // ./ports.js 显式端口，本文件只保留播放器宿主自身的状态与清理。
 export function closeReaderCleanup() {
-  if (controlsRecoveryTimer) {
-    window.clearTimeout(controlsRecoveryTimer);
-    controlsRecoveryTimer = 0;
-  }
-  controlsRecoveryInFlight = false;
+  cancelReaderControlsRecovery();
 }
 
 // renderReadingStatus 已迁往 ./presentation.js（消费方直接 import，本文件不再
 // 转发）；updateReadingTranscriptTailSpacer 已迁往 ./page-frame.js（内联宿主
 // 的滚动留白属页面框架域，本文件经 import 取用）。
-
-async function ensureReaderPlayerControlsRecovered(
-  playerHostArg = playerHost,
-  { reason = "unknown", retryDelayMs = 90 } = {}
-) {
-  if (!state.reader.readingNativePageMode || !playerHostArg || isWatchlaterPage()) {
-    return false;
-  }
-
-  const before = getReaderPlayerControlsState(playerHostArg);
-  logInfo("[BOC] reader controls check", {
-    reason,
-    hostClassName: typeof playerHostArg.className === "string" ? playerHostArg.className : "",
-    hostHasNoCursor: before.hostHasNoCursor,
-    controlRootFound: before.controlRootFound,
-    controls: before.nodes
-  });
-
-  if (!hasReaderPlayerControlsIssue(playerHostArg)) {
-    return false;
-  }
-
-  logInfo("[BOC] recovering normal reader controls", {
-    reason,
-    hostClassName: typeof playerHostArg.className === "string" ? playerHostArg.className : ""
-  });
-  setReaderPlayerControlsVisible(true, playerHostArg);
-  layoutReaderPlayerHost();
-
-  let after = getReaderPlayerControlsState(playerHostArg);
-  logInfo("[BOC] reader controls after recovery", {
-    reason,
-    hostClassName: typeof playerHostArg.className === "string" ? playerHostArg.className : "",
-    hostHasNoCursor: after.hostHasNoCursor,
-    controls: after.nodes,
-    retried: false
-  });
-  if (!hasReaderPlayerControlsIssue(playerHostArg)) {
-    return true;
-  }
-
-  await sleep(retryDelayMs);
-  logInfo("[BOC] retrying normal reader controls recovery", {
-    reason,
-    hostClassName: typeof playerHostArg.className === "string" ? playerHostArg.className : ""
-  });
-  setReaderPlayerControlsVisible(true, playerHostArg);
-  layoutReaderPlayerHost();
-  after = getReaderPlayerControlsState(playerHostArg);
-  logInfo("[BOC] reader controls after retry", {
-    reason,
-    hostClassName: typeof playerHostArg.className === "string" ? playerHostArg.className : "",
-    hostHasNoCursor: after.hostHasNoCursor,
-    controls: after.nodes,
-    retried: true
-  });
-  return !hasReaderPlayerControlsIssue(playerHostArg);
-}
 
 
 // ===== player-host.js (player host lifecycle) =====
@@ -727,288 +681,6 @@ export function scheduleReaderMiniPlayerDismiss(maxAttempts = 12, delayMs = 180)
   };
 
   miniDismissTimer = window.setTimeout(run, 40);
-}
-
-function getReaderControlsRoot(playerHostArg = playerHost) {
-  return (
-    playerHostArg?.closest?.("#playerWrap") ||
-    playerHostArg?.closest?.("#bilibili-player") ||
-    playerHostArg ||
-    document.getElementById("playerWrap") ||
-    document.getElementById("bilibili-player")
-  );
-}
-
-function getReaderPlayerControlsState(playerHostArg = playerHost) {
-  const controlRoot = getReaderControlsRoot(playerHostArg);
-  const nodes = [".bpx-player-control-wrap", ".bpx-player-control-mask", ".bpx-player-control-entity"].map(
-    (selector) => {
-      const node = controlRoot?.querySelector(selector) || null;
-      return {
-        selector,
-        exists: Boolean(node),
-        visible: isVisibleReaderControl(node)
-      };
-    }
-  );
-
-  return {
-    controlRootFound: Boolean(controlRoot),
-    hostHasNoCursor: Boolean(playerHostArg?.classList.contains("bpx-state-no-cursor")),
-    anyPresent: nodes.some((item) => item.exists),
-    anyHidden: nodes.some((item) => item.exists && !item.visible),
-    nodes
-  };
-}
-
-function hasReaderPlayerControlsIssue(playerHostArg = playerHost) {
-  if (!state.reader.readingNativePageMode || !playerHostArg || isWatchlaterPage()) {
-    return false;
-  }
-
-  const snapshot = getReaderPlayerControlsState(playerHostArg);
-  return snapshot.hostHasNoCursor || (snapshot.anyPresent && snapshot.anyHidden);
-}
-
-function queueEnsureReaderPlayerControlsRecovered({
-  reason = "unknown",
-  delayMs = 120,
-  minIntervalMs = 480
-} = {}) {
-  if (!state.reader.readingViewOpen || !state.reader.readingNativePageMode || isWatchlaterPage()) {
-    return;
-  }
-  const playerHostNode = playerHost;
-  if (!playerHostNode?.isConnected || controlsRecoveryInFlight) {
-    return;
-  }
-
-  const now = Date.now();
-  if (controlsRecoveryTimer) {
-    return;
-  }
-  if (now - controlsLastRecoverAt < minIntervalMs) {
-    return;
-  }
-
-  controlsRecoveryTimer = window.setTimeout(() => {
-    controlsRecoveryTimer = 0;
-    if (!state.reader.readingViewOpen || !state.reader.readingNativePageMode || isWatchlaterPage()) {
-      return;
-    }
-    const activeHost = playerHost;
-    if (!activeHost?.isConnected || !hasReaderPlayerControlsIssue(activeHost)) {
-      return;
-    }
-
-    controlsRecoveryInFlight = true;
-    controlsLastRecoverAt = Date.now();
-    ensureReaderPlayerControlsRecovered(activeHost, {
-      reason,
-      retryDelayMs: 120
-    })
-      .catch((error) => {
-        logWarn("[BOC] queued reader controls recovery failed", { reason, error });
-      })
-      .finally(() => {
-        controlsRecoveryInFlight = false;
-      });
-  }, delayMs);
-}
-
-function setReaderPlayerControlsVisible(visible, playerHostArg = playerHost) {
-  if (!state.reader.readingNativePageMode || !playerHostArg) {
-    return;
-  }
-
-  const controlRoot = getReaderControlsRoot(playerHostArg);
-  if (!controlRoot) {
-    return;
-  }
-
-  const displayMap = new Map([
-    [".bpx-player-control-wrap", "block"],
-    [".bpx-player-control-mask", "block"],
-    [".bpx-player-control-entity", "block"]
-  ]);
-
-  displayMap.forEach((displayValue, selector) => {
-    const node = controlRoot.querySelector(selector);
-    if (!node) {
-      return;
-    }
-
-    if (visible) {
-      node.style.setProperty("display", displayValue, "important");
-      node.setAttribute("data-boc-reader-controls-forced", "1");
-      return;
-    }
-
-    if (node.getAttribute("data-boc-reader-controls-forced") === "1") {
-      node.style.removeProperty("display");
-      node.removeAttribute("data-boc-reader-controls-forced");
-    }
-  });
-
-  if (visible) {
-    if (playerHostArg.classList.contains("bpx-state-no-cursor")) {
-      playerHostArg.classList.remove("bpx-state-no-cursor");
-      playerHostArg.setAttribute("data-boc-reader-no-cursor-cleared", "1");
-    }
-    return;
-  }
-
-  if (playerHostArg.getAttribute("data-boc-reader-no-cursor-cleared") === "1") {
-    playerHostArg.classList.add("bpx-state-no-cursor");
-    playerHostArg.removeAttribute("data-boc-reader-no-cursor-cleared");
-  }
-}
-
-function scheduleReaderPlayerControlsHide(playerHostArg = controlsHoverHost || playerHost) {
-  if (controlsHideTimer) {
-    window.clearTimeout(controlsHideTimer);
-  }
-  controlsHideTimer = window.setTimeout(() => {
-    controlsHideTimer = 0;
-    if (!state.reader.readingViewOpen) {
-      return;
-    }
-    setReaderPlayerControlsVisible(false, playerHostArg);
-  }, 1200);
-}
-
-function bindReaderPlayerControlsHover(playerHostArg = playerHost) {
-  if (!state.reader.readingNativePageMode || !isWatchlaterPage() || !playerHostArg) {
-    return;
-  }
-
-  if (controlsHoverHost && controlsHoverHost !== playerHostArg) {
-    unbindReaderPlayerControlsHover();
-  }
-  if (playerHostArg.__bocReaderControlsHoverBound) {
-    controlsHoverHost = playerHostArg;
-    return;
-  }
-
-  const showControls = () => {
-    if (!state.reader.readingViewOpen) {
-      return;
-    }
-    setReaderPlayerControlsVisible(true, playerHostArg);
-    scheduleReaderPlayerControlsHide(playerHostArg);
-  };
-  const hideControls = () => {
-    if (controlsHideTimer) {
-      window.clearTimeout(controlsHideTimer);
-      controlsHideTimer = 0;
-    }
-    setReaderPlayerControlsVisible(false, playerHostArg);
-  };
-
-  playerHostArg.addEventListener("mouseenter", showControls, { capture: true, passive: true });
-  playerHostArg.addEventListener("mousemove", showControls, { capture: true, passive: true });
-  playerHostArg.addEventListener("mouseleave", hideControls, { capture: true, passive: true });
-  playerHostArg.__bocReaderControlsHoverBound = { showControls, hideControls };
-  controlsHoverHost = playerHostArg;
-}
-
-export function unbindReaderPlayerControlsHover() {
-  const playerHostNode = controlsHoverHost;
-  if (controlsHideTimer) {
-    window.clearTimeout(controlsHideTimer);
-    controlsHideTimer = 0;
-  }
-  if (!playerHostNode?.__bocReaderControlsHoverBound) {
-    controlsHoverHost = null;
-    return;
-  }
-
-  const { showControls, hideControls } = playerHostNode.__bocReaderControlsHoverBound;
-  playerHostNode.removeEventListener("mouseenter", showControls, true);
-  playerHostNode.removeEventListener("mousemove", showControls, true);
-  playerHostNode.removeEventListener("mouseleave", hideControls, true);
-  delete playerHostNode.__bocReaderControlsHoverBound;
-  setReaderPlayerControlsVisible(false, playerHostNode);
-  controlsHoverHost = null;
-}
-
-function setReaderHeaderActionsVisible(visible) {
-  const actions = document.querySelector(".boc-reading-actions");
-  if (!actions) {
-    return;
-  }
-  if (visible) {
-    actions.removeAttribute("data-boc-icon-hidden");
-    return;
-  }
-  actions.setAttribute("data-boc-icon-hidden", "1");
-}
-
-function scheduleReaderHeaderActionsHide(delayMs = 10000) {
-  if (headerHideTimer) {
-    window.clearTimeout(headerHideTimer);
-    headerHideTimer = 0;
-  }
-  headerHideTimer = window.setTimeout(() => {
-    headerHideTimer = 0;
-    if (!state.reader.readingViewOpen) {
-      return;
-    }
-    setReaderHeaderActionsVisible(false);
-  }, delayMs);
-}
-
-export function bindReaderHeaderActionsHover() {
-  if (!state.reader.readingViewOpen) {
-    return;
-  }
-  const header = document.querySelector(".boc-reading-header");
-  if (!header || header.__bocReaderHeaderHoverBound) {
-    headerHoverHost = header || null;
-    return;
-  }
-
-  const showActions = () => {
-    if (!state.reader.readingViewOpen) {
-      return;
-    }
-    if (headerHideTimer) {
-      window.clearTimeout(headerHideTimer);
-      headerHideTimer = 0;
-    }
-    setReaderHeaderActionsVisible(true);
-  };
-  const hideActionsLater = () => {
-    if (!state.reader.readingViewOpen) {
-      return;
-    }
-    scheduleReaderHeaderActionsHide();
-  };
-
-  header.addEventListener("mouseenter", showActions, true);
-  header.addEventListener("mouseleave", hideActionsLater, true);
-  header.__bocReaderHeaderHoverBound = { showActions, hideActionsLater };
-  headerHoverHost = header;
-  setReaderHeaderActionsVisible(true);
-  scheduleReaderHeaderActionsHide();
-}
-
-function unbindReaderHeaderActionsHover() {
-  const header = headerHoverHost;
-  if (headerHideTimer) {
-    window.clearTimeout(headerHideTimer);
-    headerHideTimer = 0;
-  }
-  if (!header?.__bocReaderHeaderHoverBound) {
-    headerHoverHost = null;
-    return;
-  }
-  const { showActions, hideActionsLater } = header.__bocReaderHeaderHoverBound;
-  header.removeEventListener("mouseenter", showActions, true);
-  header.removeEventListener("mouseleave", hideActionsLater, true);
-  delete header.__bocReaderHeaderHoverBound;
-  headerHoverHost = null;
-  setReaderHeaderActionsVisible(true);
 }
 
 function normalizeReaderPlayerContainer(playerHostArg = playerHost) {

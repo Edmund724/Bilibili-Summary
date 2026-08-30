@@ -2,14 +2,14 @@
 // formerly the shell.js segment, issue 06+).
 //
 // Deep module owning the reader view lifecycle (enter/close), the settings
-// rendering/steppers, the page-state guards and the debug snapshot. It depends
-// on the base LAYOUT layer (page-frame.js + player-host.js) and on ./sync.js;
-// neither may import it, so the dependency graph stays acyclic:
+// rendering/steppers and the page-state guards. It depends
+// on the base LAYOUT layer (page-frame.js + player-host.js + hover-chrome.js)
+// and on ./sync.js; neither may import it, so the dependency graph stays acyclic:
 //
-//   ports.js   显式回调端口叶子（本模块在文件尾单点注册全部端口实现）
-//   LAYOUT     page-frame.js + player-host.js    → ports
-//   SYNC       sync.js                           → LAYOUT + ports
-//   LIFECYCLE  lifecycle.js（本文件）            → SYNC + LAYOUT + ports
+//   ports.js        显式回调端口叶子（本模块在文件尾单点注册全部端口实现）
+//   LAYOUT          page-frame.js + player-host.js + hover-chrome.js → ports
+//   SYNC            sync.js                           → LAYOUT + ports
+//   LIFECYCLE       lifecycle.js（本文件）            → SYNC + LAYOUT + ports
 //
 // The player-host layout closure is read here through the exported accessors
 // (getPlayerHost/...); playerRetryTimer's variable itself moved into this
@@ -27,7 +27,7 @@ import {
   normalizeReaderContentWidth,
   normalizeReaderTranscriptVisible
 } from "../core/validators.js";
-import { isReaderMode, cleanVideoUrl } from "../bilibili/video-id-shared.js";
+import { isReaderMode } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
 import {
@@ -51,8 +51,9 @@ import { requestSubtitleRefresh, persistReaderSettingsThroughSeam } from "./pres
 // 的交互呈现（updateReaderPreferences/renderReaderPanels/renderReadingInfoPanel
 // /renderReaderStepperState/applyReaderStepperPreference）属本域重活，自
 // presentation.js 移回此处（原 lifecycle.js 分节回归）。本文件只保留 reader 域
-// 的重活：进入/退出生命周期、阅读视图渲染、偏好/面板呈现、调试快照与
-// presenter 通知处理体。
+// 的重活：进入/退出生命周期、阅读视图渲染、偏好/面板呈现与 presenter 通知
+// 处理体（候选09 迁出：字幕分批渲染状态机 → ./batched-render.js，调试快照 →
+// ./debug-snapshot.js，控制条/头部悬停 chrome → ./hover-chrome.js）。
 import {
   renderReadingStatus,
   hydrateReaderStateFromSettings,
@@ -76,153 +77,35 @@ import {
 // LAYOUT (player-host) functions this module drives:
 import {
   getPlayerHost,
-  getReaderPlayerWrapNode,
-  hasNativeReaderPlayerLayoutIssue,
   isReaderPresentationStable,
   layoutReaderPlayerHost,
   startReaderPlayerObserver,
   stopReaderPlayerObserver,
   ensureReaderPlayerMounted,
   scheduleReaderMiniPlayerDismiss,
-  bindReaderHeaderActionsHover,
   cleanupReaderPlayerHost,
   unbindReaderLayout
 } from "./player-host.js";
+// 候选09：控制条自动隐藏/恢复与头部悬停 chrome 迁往 ./hover-chrome.js；本文件
+// 经该模块驱动头部悬停接线（finishEnterReaderMode）。
+import { bindReaderHeaderActionsHover } from "./hover-chrome.js";
 import { resetManualScrollPause, setProgrammaticScrollUntil } from "./scroll-state.js";
 // 候选06 端口半边：reader 域唯一显式端口的单点注册入口（见文件尾注册区）。
 import { registerReaderPorts } from "./ports.js";
+// 候选09：字幕分批渲染状态机（rAF 任务/游标/spacer 收敛）迁往 ./batched-render.js；
+// flush 端口实现与首屏批/取消/任务启动入口经下方 import 取用。
+import {
+  TRANSCRIPT_FIRST_BATCH,
+  buildReadingTranscriptItemHtml,
+  cancelReadingTranscriptAppend,
+  ensureReadingTranscriptRenderedUpTo,
+  startReadingTranscriptAppendTask
+} from "./batched-render.js";
 
 // playerRetryTimer（readingPlayerRetryTimer）自 reader-impl.js 闭包迁入：属主启动
 //（scheduleReaderPlayerRetry）与清除（closeReadingView、presenter reset）都在本
 // 模块，直读局部变量，不再经 get/setPlayerRetryTimer 访问器。
 let playerRetryTimer = 0;
-
-// ===== 候选10 批2：字幕列表分批渲染 =====
-//
-// 长视频字幕可达 1500+ 条，renderReadingView 原先整段模板字符串 join 后一次性
-// innerHTML，主线程被 DOM 解析卡死数百毫秒（且随后立即读 scrollHeight /
-// clientHeight 强制布局）。现改为首屏只渲染前 TRANSCRIPT_FIRST_BATCH 条，其余
-// 经 rAF 每帧追加 TRANSCRIPT_APPEND_BATCH 条：
-//   - 事件委托在容器层（ui-renderer 绑定 + sync.js closest 委托），追加的节点
-//     天然可交互，无需逐条重绑；
-//   - 每批追加后调 updateReadingTranscriptTailSpacer 廉价收敛 spacer（其内部
-//     带脏检查），全部渲染完成后的最终布局与整段重建等价；
-//   - 跳转/跟随目标未上屏时经 ensureReadingTranscriptRenderedUpTo 同步补渲染
-//     （实现由本文件尾部的 registerReaderPorts 单点注册进显式端口，供 sync.js
-//     经 readerPorts.flushReadingTranscriptToIndex 回调）；
-//   - 渲染期间再次 renderReadingView（切轨/重进阅读模式）先取消上一轮任务。
-// 章节列表量小（几十条），保持整段渲染不变。
-const TRANSCRIPT_FIRST_BATCH = 120;
-const TRANSCRIPT_APPEND_BATCH = 200;
-
-// 进行中的追加任务：{ listEl, items, cursor, withHours }。listEl 持有列表容器
-// 引用（innerHTML 重建不更换容器元素，容器身份稳定；再次 renderReadingView 会
-// 先 cancel 旧任务，不存在旧任务写新列表的窗口）。
-let transcriptAppendTask = null;
-let transcriptAppendRafId = 0;
-
-function buildReadingTranscriptItemHtml(item, withHours) {
-  return `
-    <button
-      type="button"
-      class="boc-reading-item"
-      data-index="${item.index}"
-      data-seconds="${item.from}"
-    >
-      <span class="boc-reading-time">${escapeHtml(
-        formatCompactTimestamp(item.from, withHours)
-      )}</span>
-      <span class="boc-reading-text">${escapeHtml(item.content)}</span>
-    </button>
-  `;
-}
-
-// 把 items[from, to) 追加进列表。tail spacer 必须始终是列表最后一个子节点
-// （滚动定位的尾部留白依赖它），因此插入点固定在 spacer 之前。
-function insertReadingTranscriptRange(listEl, items, from, to, withHours) {
-  if (to <= from) {
-    return;
-  }
-  let html = "";
-  for (let i = from; i < to; i += 1) {
-    html += buildReadingTranscriptItemHtml(items[i], withHours);
-  }
-  const spacer = document.getElementById(ids.readingTranscriptTailSpacer);
-  if (spacer && spacer.parentElement === listEl) {
-    spacer.insertAdjacentHTML("beforebegin", html);
-  } else {
-    // spacer 缺失（异常形态）时退化为尾部追加，不影响条目可用性
-    listEl.insertAdjacentHTML("beforeend", html);
-  }
-}
-
-function cancelReadingTranscriptAppend() {
-  if (transcriptAppendRafId) {
-    window.cancelAnimationFrame(transcriptAppendRafId);
-    transcriptAppendRafId = 0;
-  }
-  transcriptAppendTask = null;
-}
-
-function scheduleReadingTranscriptAppend() {
-  if (transcriptAppendRafId) {
-    return;
-  }
-  transcriptAppendRafId = window.requestAnimationFrame(appendReadingTranscriptBatch);
-}
-
-function appendReadingTranscriptBatch() {
-  transcriptAppendRafId = 0;
-  const task = transcriptAppendTask;
-  if (!task) {
-    return;
-  }
-  // 列表容器已脱离文档（阅读视图整体被移除/测试 teardown）：任务作废，
-  // 等下一次 renderReadingView 重建。
-  if (!task.listEl?.isConnected) {
-    transcriptAppendTask = null;
-    return;
-  }
-  const end = Math.min(task.items.length, task.cursor + TRANSCRIPT_APPEND_BATCH);
-  insertReadingTranscriptRange(task.listEl, task.items, task.cursor, end, task.withHours);
-  task.cursor = end;
-  // 每批追加后廉价收敛 spacer 高度（内部脏检查：高度没变只多一次 clientHeight 读）
-  updateReadingTranscriptTailSpacer();
-  if (task.cursor < task.items.length) {
-    scheduleReadingTranscriptAppend();
-  } else {
-    transcriptAppendTask = null;
-  }
-}
-
-// 跳转/跟随定位的同步补渲染：把 [cursor, targetIndex] 一次性上屏后返回 true，
-// 剩余条目继续走 rAF 分批。目标已在屏内（或无进行中任务）时原样返回 true，
-// 调用方（sync.js）随后照常 querySelector。
-function ensureReadingTranscriptRenderedUpTo(targetIndex) {
-  const task = transcriptAppendTask;
-  if (!task) {
-    // 无任务：要么列表为空（无目标可渲染，调用方 querySelector 落空等同旧行为），
-    // 要么已全部上屏
-    return true;
-  }
-  if (!task.listEl?.isConnected) {
-    transcriptAppendTask = null;
-    return true;
-  }
-  if (targetIndex < task.cursor) {
-    return true;
-  }
-  const end = Math.min(task.items.length, targetIndex + 1);
-  insertReadingTranscriptRange(task.listEl, task.items, task.cursor, end, task.withHours);
-  task.cursor = end;
-  updateReadingTranscriptTailSpacer();
-  if (task.cursor >= task.items.length) {
-    transcriptAppendTask = null;
-  } else {
-    scheduleReadingTranscriptAppend();
-  }
-  return true;
-}
 
 // ===== 候选06 端口半边：reader 域唯一显式端口的单点注册 =====
 //
@@ -231,9 +114,10 @@ function ensureReadingTranscriptRenderedUpTo(targetIndex) {
 //   - syncReadingViewPlayback / noteManualReaderInteraction：SYNC 域实现
 //    （LAYOUT 两域经端口回调，替代已删除的 sync-adapter.js 注册槽）；
 //   - flushReadingTranscriptToIndex → ensureReadingTranscriptRenderedUpTo：
-//     本域的分批补渲染实现（SYNC 经端口回调，替代已删除的 player-host
-//     setReadingTranscriptFlush 基座槽——旧槽无实现时静默返回 true，现缺失
-//     即抛错）。SYNC → LIFECYCLE 是依赖图禁止的边，经端口叶子反转。
+//     本域的分批补渲染实现（实现在 ./batched-render.js，由本模块单点注册；
+//     SYNC 经端口回调，替代已删除的 player-host setReadingTranscriptFlush
+//     基座槽——旧槽无实现时静默返回 true，现缺失即抛错）。SYNC → LIFECYCLE
+//     是依赖图禁止的边，经端口叶子反转。
 // 函数声明有提升，模块求值时表已完整；重复注册由端口侧报错拦截。
 registerReaderPorts({
   syncReadingViewPlayback,
@@ -551,7 +435,7 @@ export function renderReadingView() {
     )}</div>`;
   } else {
     // 候选10 批2：首屏只渲染前 TRANSCRIPT_FIRST_BATCH 条，其余走 rAF 分批追加
-    //（appendReadingTranscriptBatch）。首屏 HTML 形态与整段重建逐字一致。
+    //（./batched-render.js 的 rAF 状态机）。首屏 HTML 形态与整段重建逐字一致。
     const firstEnd = Math.min(transcriptItems.length, TRANSCRIPT_FIRST_BATCH);
     let firstHtml = "";
     for (let i = 0; i < firstEnd; i += 1) {
@@ -563,13 +447,12 @@ export function renderReadingView() {
       `<div id="${ids.readingTranscriptTailSpacer}" class="boc-reading-tail-spacer" aria-hidden="true"></div>`
     );
     if (firstEnd < transcriptItems.length) {
-      transcriptAppendTask = {
+      startReadingTranscriptAppendTask({
         listEl: transcriptList,
         items: transcriptItems,
         cursor: firstEnd,
         withHours
-      };
-      scheduleReadingTranscriptAppend();
+      });
     }
   }
 
@@ -769,131 +652,4 @@ function setReadingViewReady(ready) {
   readingView.setAttribute("aria-busy", state.reader.readingViewReady ? "false" : "true");
 }
 
-// 调试快照真身（常驻侧 __BOC_READER_DEBUG_SNAPSHOT__ 经 ensureReaderDomain
-// 转发到这里）。注册在 ./init-essentials.js，本函数只在 reader 域装载后可达。
-export function createReaderDebugSnapshot(label = "manual") {
-  const pickNodeSnapshot = (selector) => {
-    const node = document.querySelector(selector);
-    if (!node) {
-      return null;
-    }
-    const rect = node.getBoundingClientRect();
-    const style = window.getComputedStyle(node);
-    return {
-      selector,
-      tag: node.tagName,
-      id: node.id || "",
-      className: typeof node.className === "string" ? node.className : "",
-      rect: {
-        x: Math.round(rect.x),
-        y: Math.round(rect.y),
-        w: Math.round(rect.width),
-        h: Math.round(rect.height)
-      },
-      style: {
-        display: style.display,
-        position: style.position,
-        width: style.width,
-        height: style.height,
-        maxWidth: style.maxWidth,
-        maxHeight: style.maxHeight,
-        top: style.top,
-        left: style.left,
-        transform: style.transform,
-        overflow: style.overflow,
-        zIndex: style.zIndex
-      },
-      attrs: {
-        readerKeep: node.getAttribute("data-boc-reader-keep"),
-        readerHidden: node.getAttribute("data-boc-reader-hidden"),
-        readerReset: node.getAttribute("data-boc-reader-player-reset")
-      }
-    };
-  };
-
-  const playerHostNode = getPlayerHost() || findReaderPlayerHost(getRuntimeVideoElement());
-  const wrapNode = getReaderPlayerWrapNode(playerHostNode);
-  const video = state.reader.readingVideoEl || getRuntimeVideoElement();
-  const hostChain = [];
-  let current = playerHostNode;
-  let depth = 0;
-  while (current && depth < 8) {
-    const rect = current.getBoundingClientRect();
-    const style = window.getComputedStyle(current);
-    hostChain.push({
-      tag: current.tagName,
-      id: current.id || "",
-      className: typeof current.className === "string" ? current.className : "",
-      rect: {
-        x: Math.round(rect.x),
-        y: Math.round(rect.y),
-        w: Math.round(rect.width),
-        h: Math.round(rect.height)
-      },
-      style: {
-        position: style.position,
-        width: style.width,
-        height: style.height,
-        top: style.top,
-        left: style.left,
-        transform: style.transform,
-        overflow: style.overflow,
-        zIndex: style.zIndex
-      },
-      readerReset: current.getAttribute("data-boc-reader-player-reset")
-    });
-    current = current.parentElement;
-    depth += 1;
-  }
-
-  return {
-    label: String(label || "manual"),
-    url: cleanVideoUrl(),
-    readerMode: document.documentElement.getAttribute("data-boc-reader-mode"),
-    readingActive: document.body.getAttribute("data-boc-reading-active"),
-    readingViewOpen: state.reader.readingViewOpen,
-    readingNativePageMode: state.reader.readingNativePageMode,
-    readingViewReady: state.reader.readingViewReady,
-    readyStable: isReaderPresentationStable(playerHostNode),
-    hasLayoutIssue: hasNativeReaderPlayerLayoutIssue(playerHostNode),
-    hasRoot: Boolean(document.getElementById(ids.root)),
-    hasReadingView: Boolean(document.getElementById(ids.readingView)),
-    playerHost: playerHostNode
-      ? {
-          tag: playerHostNode.tagName,
-          id: playerHostNode.id || "",
-          className: typeof playerHostNode.className === "string" ? playerHostNode.className : ""
-        }
-      : null,
-    wrapNode: wrapNode
-      ? {
-          tag: wrapNode.tagName,
-          id: wrapNode.id || "",
-          className: typeof wrapNode.className === "string" ? wrapNode.className : ""
-        }
-      : null,
-    video: video
-      ? {
-          currentTime: Number(video.currentTime || 0) || 0,
-          paused: Boolean(video.paused),
-          videoWidth: Number(video.videoWidth || 0) || 0,
-          videoHeight: Number(video.videoHeight || 0) || 0
-        }
-      : null,
-    nodes: [
-      "#app",
-      "#playerWrap",
-      ".player-wrap",
-      "#bilibili-player",
-      ".bpx-player-container",
-      ".bpx-player-video-area",
-      ".bpx-player-primary-area",
-      "#boc-reading-inline-host",
-      "#boc-reading-view"
-    ]
-      .map((selector) => pickNodeSnapshot(selector))
-      .filter(Boolean),
-    hostChain
-  };
-}
 
