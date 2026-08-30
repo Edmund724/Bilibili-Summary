@@ -297,3 +297,81 @@ describe("sendMessage 无字幕拦截的提前返回", () => {
     expect(port.postMessage).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("stream-reset 代际重置（读流中断重试：整体重放）", () => {
+  it("收到 stream-reset → 清空已渲染内容与累加器；第二代流从头渲染，finalize 不含第一代残留", async () => {
+    const deps = makeDeps();
+    deps.input.value = "帮我写个标题";
+    const messageListeners = [];
+    const port = {
+      onMessage: { addListener: (fn) => messageListeners.push(fn) },
+      onDisconnect: { addListener: () => {} },
+      postMessage: vi.fn(),
+      disconnect: vi.fn()
+    };
+    deps.connectPort = vi.fn(async () => port);
+    const runtime = createChatRuntime(deps);
+
+    await runtime.sendMessage();
+    const onMessage = messageListeners[0];
+    const node = deps.messages.querySelector(".sp-msg-assistant");
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+
+    // 第一代流：渲染出一部分内容（flush 落进 stable/tail 与累加器 base）
+    onMessage({ type: "token", data: "# 第一代开头\n\n第一代正文" });
+    raf.mock.calls[0][0]();
+    expect(node.querySelector(".sp-stream-stable")).toBeTruthy();
+    expect(node.querySelector("h3")?.textContent).toContain("第一代");
+
+    // 读流中断重试：offscreen 发代际重置信号
+    onMessage({ type: "stream-reset" });
+
+    // 已渲染容器全部清掉，光标保留在节点末尾（下一帧 flush 重新接上）
+    expect(node.querySelector(".sp-stream-stable")).toBeNull();
+    expect(node.querySelector(".sp-stream-tail")).toBeNull();
+    expect(node.querySelector(".sp-msg-cursor")).toBeTruthy();
+    // 累加器清零：第一代 token 不再出现在后续 finalize 里
+
+    // 第二代流（重试从头生成，内容与前缀都不同）
+    onMessage({ type: "token", data: "## 第二代重写\n\n全新的正文" });
+    raf.mock.calls[1][0]();
+    expect(node.textContent).toContain("第二代重写");
+
+    onMessage({ type: "done" });
+
+    // finalize 全量 = 第二代流全文，无第一代拼接残留
+    const expected = "## 第二代重写\n\n全新的正文";
+    expect(sidepanelState.chatHistory[1]).toEqual({ role: "assistant", content: expected });
+    expect(node.querySelector(".sp-msg-assistant-body").innerHTML).toBe(renderMarkdown(expected));
+    expect(node.textContent).not.toContain("第一代");
+  });
+
+  it("stream-reset 时已渲染的思考节点一并清掉，后续 reasoning 事件重建", async () => {
+    const deps = makeDeps();
+    deps.input.value = "问题";
+    const messageListeners = [];
+    const port = {
+      onMessage: { addListener: (fn) => messageListeners.push(fn) },
+      onDisconnect: { addListener: () => {} },
+      postMessage: vi.fn(),
+      disconnect: vi.fn()
+    };
+    deps.connectPort = vi.fn(async () => port);
+    const runtime = createChatRuntime(deps);
+
+    await runtime.sendMessage();
+    const onMessage = messageListeners[0];
+    const node = deps.messages.querySelector(".sp-msg-assistant");
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+
+    onMessage({ type: "reasoning", data: "第一代思考" });
+    expect(node.querySelector(".sp-thinking")?.textContent).toContain("第一代思考");
+
+    onMessage({ type: "stream-reset" });
+    expect(node.querySelector(".sp-thinking")).toBeNull();
+
+    // 第二代思考从头累积（不是接在第一代后面）
+    onMessage({ type: "reasoning", data: "第二代思考" });
+    expect(node.querySelector(".sp-thinking-text")?.textContent).toBe("第二代思考");
+  });
+});

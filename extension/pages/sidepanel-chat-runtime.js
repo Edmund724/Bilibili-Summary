@@ -200,6 +200,10 @@ export function createChatRuntime(deps) {
         handleFirstStreamToken();
         thinkingNode = null;
         appendToken(activeAssistantNode, msg.data);
+      } else if (msg.type === "stream-reset") {
+        // 读流中断重试（offscreen 重新从头生成）：已吐 token 撤不回且新流不保证
+        // 前缀一致，清空本条消息缓冲整体重放，避免两代流拼接成重复文本。
+        resetAssistantStream(activeAssistantNode);
       } else if (msg.type === "done") {
         finalizeAssistant(activeAssistantNode);
       } else if (msg.type === "stopped") {
@@ -386,6 +390,28 @@ export function createChatRuntime(deps) {
       tokenStreamStates.set(node, state);
     }
     return state;
+  }
+
+  // =========================================================================
+  // resetAssistantStream — 流式代际重置（读流中断重试：整体重放）
+  // =========================================================================
+  // offscreen 侧重试流从头生成，已吐 token 撤不回且新流不保证前缀一致（模型
+  // 生成非确定性），清空本条消息的流式缓冲与已渲染内容，从头接收重试流：
+  // - 取消挂起的 flush 帧、重置 token 累加器（base/pending 清零）；
+  // - 移除已渲染的 stable/tail 容器与思考节点（光标先摘下来放回节点末尾，
+  //   flush 时机随下一帧恢复）；思考节点随下一个 reasoning 事件重建。
+  function resetAssistantStream(node) {
+    if (!node) {
+      return;
+    }
+    cancelTokenFlush();
+    resetTokenStreamState(node);
+    const cursor = node.querySelector(".sp-msg-cursor");
+    node.querySelectorAll(".sp-stream-stable, .sp-stream-tail, .sp-thinking").forEach((el) => el.remove());
+    if (cursor) {
+      node.appendChild(cursor);
+    }
+    thinkingNode = null;
   }
 
   // 流式双容器懒创建（首帧 flush 时挂上；finalize / stopped 的整体重渲染会

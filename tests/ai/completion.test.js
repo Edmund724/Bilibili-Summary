@@ -700,3 +700,126 @@ describe("fetchImpl 注入", () => {
     expect(globalFetch).not.toHaveBeenCalled();
   });
 });
+
+describe("onStreamReset：读流中断重试的代际重置信号", () => {
+  it("kind=stream 重试 → onStreamReset 在新流任何事件前调用恰一次", async () => {
+    const brokenReader = () => ({
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          return {
+            read: async () => {
+              throw new Error("stream closed");
+            }
+          };
+        }
+      }
+    });
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => brokenReader())
+      .mockResolvedValueOnce(sseResponse([sseData({ content: "二代正文" })]));
+    const events = [];
+    const resets = [];
+
+    await chatCompletion({
+      provider: PROVIDER,
+      messages: [],
+      stream: true,
+      retryDelayMs: 0,
+      fetchImpl: fetchMock,
+      onRetry: () => {},
+      onStreamReset: () => resets.push("reset"),
+      onEvent: (e) => events.push(e)
+    });
+
+    expect(resets).toEqual(["reset"]);
+    // reset 先于新流事件（渲染层必须先清缓冲再收新 token）
+    expect(events).toEqual([{ type: "token", data: "二代正文" }]);
+  });
+
+  it("fetch / http 阶段失败重试不触发 onStreamReset（未吐过任何事件）", async () => {
+    // fetch 抛错（kind=fetch）
+    const fetchFail = vi.fn()
+      .mockRejectedValueOnce(new Error("connection reset"))
+      .mockResolvedValueOnce(sseResponse([sseData({ content: "ok" })]));
+    const resetsFetch = [];
+    await chatCompletion({
+      provider: PROVIDER,
+      messages: [],
+      stream: true,
+      retryDelayMs: 0,
+      fetchImpl: fetchFail,
+      onRetry: () => {},
+      onStreamReset: () => resetsFetch.push(1),
+      onEvent: () => {}
+    });
+    expect(resetsFetch).toEqual([]);
+
+    // HTTP 500（kind=http）
+    const httpFail = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 500, text: async () => "server error" })
+      .mockResolvedValueOnce(sseResponse([sseData({ content: "ok" })]));
+    const resetsHttp = [];
+    await chatCompletion({
+      provider: PROVIDER,
+      messages: [],
+      stream: true,
+      retryDelayMs: 0,
+      fetchImpl: httpFail,
+      onRetry: () => {},
+      onStreamReset: () => resetsHttp.push(1),
+      onEvent: () => {}
+    });
+    expect(resetsHttp).toEqual([]);
+  });
+
+  it("连续两次读流中断（重试耗尽前）→ 每代流开始前各一次 reset；非流式不触发", async () => {
+    const brokenReader = () => ({
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          return {
+            read: async () => {
+              throw new Error("stream closed");
+            }
+          };
+        }
+      }
+    });
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => brokenReader())
+      .mockImplementationOnce(async () => brokenReader())
+      .mockResolvedValueOnce(sseResponse([sseData({ content: "三代正文" })]));
+    const resets = [];
+    await chatCompletion({
+      provider: PROVIDER,
+      messages: [],
+      stream: true,
+      retryDelayMs: 0,
+      fetchImpl: fetchMock,
+      onRetry: () => {},
+      onStreamReset: () => resets.push(1),
+      onEvent: () => {}
+    });
+    expect(resets).toEqual([1, 1]);
+
+    // 非流式：读流中断概念不存在，即便重试也不触发
+    const nonStreamFetch = vi.fn()
+      .mockRejectedValueOnce(new Error("connection reset"))
+      .mockResolvedValueOnce(jsonResponse({ choices: [{ message: { content: "ok" } }] }));
+    const resetsNonStream = [];
+    await chatCompletion({
+      provider: PROVIDER,
+      messages: [],
+      stream: false,
+      retries: 1, // 非流式默认 0，显式开重试才能到达「重试不触发 reset」的断言
+      retryDelayMs: 0,
+      fetchImpl: nonStreamFetch,
+      onRetry: () => {},
+      onStreamReset: () => resetsNonStream.push(1)
+    });
+    expect(resetsNonStream).toEqual([]);
+  });
+});

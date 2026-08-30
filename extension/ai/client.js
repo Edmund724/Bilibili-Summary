@@ -57,6 +57,8 @@ export function resolveSubtitleForContext(context) {
  * 流式 port 适配器：对外签名不变（ladder 消费点最小改动），内部经
  * ai/completion.js 接缝发请求。port 协议不变：
  * - 流式事件（token/reasoning）原样回吐，每个事件重挂空闲超时（onActivity）；
+ * - 读流中断重试：新流事件前回吐一条 stream-reset（代际重置信号，渲染层
+ *   清空本条消息缓冲整体重放，避免两代流拼接成重复文本）；
  * - 重试提示经 notice（读流中断重试保持旧现状：不打扰用户）；
  * - 成功回吐 done；中止回吐 stopped；其余失败回吐 error；
  * - 仅 context-length 溢出（含预算内超限）以带 .overflow 标记的错误上抛，
@@ -104,6 +106,11 @@ export async function streamChat({ provider, context, userPrompt, history, port,
         // 流式活动：重挂空闲超时 + port 回吐（事件对象与 port 消息同型，直接透传）。
         onActivity?.();
         port.postMessage(event);
+      },
+      onStreamReset: () => {
+        // 读流中断重试：通知渲染层清空本条消息缓冲，从头接收重试流。
+        onActivity?.();
+        port.postMessage({ type: "stream-reset" });
       },
       onRetry: ({ attempt, maxRetries, kind, error }) => {
         if (kind === "stream") {

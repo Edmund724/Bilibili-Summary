@@ -271,3 +271,63 @@ describe("resolveSubtitleForContext / OVER_BUDGET_NOTICE（预算策略留在 cl
     expect(error.message).toBe("字幕过长，已切换为分段整理模式");
   });
 });
+
+describe("streamChat 读流中断重试：stream-reset 代际重置信号", () => {
+  it("读流中断重试 → port 收到 stream-reset（在新流 token 之前）+ 恢复后 done", async () => {
+    const brokenReader = () => ({
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          return {
+            read: async () => {
+              throw new Error("stream closed");
+            }
+          };
+        }
+      }
+    });
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => brokenReader())
+      .mockResolvedValueOnce(sseResponse([sseData({ content: "二代正文" }), "data: [DONE]\n\n"]));
+    vi.stubGlobal("fetch", fetchMock);
+    const port = makePort();
+
+    const result = await streamChat({
+      provider: PROVIDER,
+      context: { title: "t", subtitleBody: [{ from: 0, to: 5, content: "字幕" }] },
+      userPrompt: "总结",
+      history: [],
+      port
+    });
+
+    expect(result).toEqual({ done: true });
+    // reset 恰一条且先于重试流 token（渲染层先清缓冲再收新流）
+    const resetIdx = port.messages.findIndex((m) => m.type === "stream-reset");
+    const tokenIdx = port.messages.findIndex((m) => m.type === "token");
+    expect(resetIdx).toBeGreaterThanOrEqual(0);
+    expect(port.messages.filter((m) => m.type === "stream-reset")).toHaveLength(1);
+    expect(resetIdx).toBeLessThan(tokenIdx);
+    expect(port.messages.at(-1)).toEqual({ type: "done" });
+  });
+
+  it("fetch/http 阶段重试不发 stream-reset（未吐过事件）", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, text: async () => "Unauthorized" })
+      .mockResolvedValueOnce({ ok: false, status: 401, text: async () => "Unauthorized" })
+      .mockResolvedValueOnce({ ok: false, status: 401, text: async () => "Unauthorized" });
+    vi.stubGlobal("fetch", fetchMock);
+    const port = makePort();
+
+    await streamChat({
+      provider: PROVIDER,
+      context: { title: "t", subtitleBody: [{ from: 0, to: 5, content: "字幕" }] },
+      userPrompt: "总结",
+      history: [],
+      port
+    });
+
+    expect(port.messages.some((m) => m.type === "stream-reset")).toBe(false);
+    expect(port.messages.at(-1)?.type).toBe("error");
+  });
+});

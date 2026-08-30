@@ -172,6 +172,10 @@ async function drainSseStream({ response, signal, onEvent }) {
  * - retries: 重试次数，默认流式 2 / 非流式 0；退避线性 retryDelayMs × attempt。
  *   溢出/中止不重试；重试前的用户可见提示经 onRetry({ attempt, maxRetries, kind, error })，
  *   kind: "fetch"（网络抛错）| "http"（非溢出 !response.ok）| "stream"（读流中断）。
+ * - onStreamReset: 流式专用——读流中断（kind=stream）重试时，在新流任何事件吐出
+ *   前调用一次。重试从头生成、已吐事件无法撤回且新流不保证前缀一致，渲染层
+ *   收到该信号应清空本条消息的流式缓冲整体重放（避免两代流拼接成重复文本）。
+ *   fetch/http 阶段的失败未吐过任何事件，不触发。
  * - headers: 额外请求头（探针的 Accept 等）；Content-Type 固定 JSON，
  *   Authorization 已存在时不重复注入。
  * - thinkingLevel / maxTokens / signal / fetchImpl（默认 globalThis.fetch）。
@@ -189,6 +193,7 @@ export async function chatCompletion({
   headers: extraHeaders,
   onEvent,
   onRetry,
+  onStreamReset,
   retryDelayMs = 800,
   fetchImpl = globalThis.fetch
 }) {
@@ -221,6 +226,11 @@ export async function chatCompletion({
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (lastFailure) {
       onRetry?.({ attempt, maxRetries, kind: lastFailure.kind, error: lastFailure.error });
+      // 读流中断后的重试流从头生成：在新流任何事件吐出前发代际重置信号，
+      // 渲染层据此清空缓冲整体重放（fetch/http 失败未吐过事件，无需重置）。
+      if (stream && lastFailure.kind === "stream") {
+        onStreamReset?.();
+      }
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
       lastFailure = null;
     }
