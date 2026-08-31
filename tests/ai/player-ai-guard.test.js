@@ -7,6 +7,12 @@
 // chrome stub 采用内存实现（参照 tests/setup.js / tests/reader 模式）：
 // runtime.sendMessage 回调同步返回 get-settings 结果，
 // storage.onChanged 收集 listener 由 emitStorageChange 手动派发。
+// 定时器全文件 fake：player-ai 的 sync/retry 定时器与 observer 是跨用例活体
+// （resetModules 每用例换注册表，jsdom document 与真实时钟却按文件共享），
+// 真实时钟下上一用例的残留定时器会在下一用例的时间窗开火，以旧注册表的
+// settings 对当前 DOM mount/remove（偶发 button-null、重复绑、环境销毁后
+// ReferenceError 三形态同一根因）；fake 后未触发的残留随 afterEach 的
+// useRealTimers 一并丢弃，时间由各用例显式推进。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState, setLocationUrl, NORMAL_PAGE_URL } from "../setup.js";
@@ -95,10 +101,14 @@ async function loadContentScript(settings) {
   // 挂载用的 runtime.getURL 引用与断言无关。
   stubChrome(settings);
   await import("../../extension/entry/content.js");
-  // 预热懒加载的 player-ai 模块（loadPlayerAi 返回缓存的同一 promise）；
-  // 模块加载本身不挂 observer/监听，不影响「设置关闭」用例的断言。
-  const { loadPlayerAi } = await import("../../extension/core/lazy-player-ai.js");
-  await loadPlayerAi();
+  // 仅在开关开启时预热懒加载的 player-ai 模块（loadPlayerAi 返回缓存的同一
+  // promise）：「关闭 ⇒ 未加载」是生产不变量（subscribePlayerAiSync seam 与
+  // stopLazy 据此跳过），无条件预热会让关闭用例的注册表带出能开火的 sync
+  // 定时器。模块加载本身不挂 observer/监听，不影响「设置关闭」用例的断言。
+  if (settings.enablePlayerAiQuickAction) {
+    const { loadPlayerAi } = await import("../../extension/core/lazy-player-ai.js");
+    await loadPlayerAi();
+  }
   await flushMicrotasks();
   return (await import("../../extension/core/state.js")).state;
 }
@@ -114,6 +124,8 @@ function makePlayerDom() {
 beforeEach(() => {
   storageChangeListeners.clear();
   resetModuleState();
+  // resetModuleState 内部的 useRealTimers 复位后，本文件统一挂 fake 时钟
+  vi.useFakeTimers();
 });
 
 afterEach(() => {
@@ -170,7 +182,8 @@ describe("player-ai 启停守卫", () => {
     const { schedulePlayerAiQuickActionSync, stopPlayerAiQuickAction } = await import("../../extension/ai/player-ai.js");
 
     schedulePlayerAiQuickActionSync(0);
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // fake 时钟显式推进：跑掉 0ms sync 定时器，等价旧真实 10ms 等待但确定
+    await vi.advanceTimersByTimeAsync(10);
 
     const button = document.getElementById("boc-player-ai-quick-action");
     expect(button).not.toBeNull();
@@ -202,12 +215,14 @@ describe("player-ai 启停守卫", () => {
     const { schedulePlayerAiQuickActionSync } = await import("../../extension/ai/player-ai.js");
 
     schedulePlayerAiQuickActionSync(0);
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // fake 时钟显式推进：跑掉 0ms sync 定时器，等价旧真实 10ms 等待但确定
+    await vi.advanceTimersByTimeAsync(10);
     expect(document.getElementById("boc-player-ai-quick-action")).not.toBeNull();
 
     // 再次 sync（按钮已挂载路径）：不应重复绑游标监听
     schedulePlayerAiQuickActionSync(0);
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // fake 时钟显式推进：跑掉 0ms sync 定时器，等价旧真实 10ms 等待但确定
+    await vi.advanceTimersByTimeAsync(10);
 
     const mousemoveBinds = hostAddSpy.mock.calls.filter(([type]) => type === "mousemove");
     expect(mousemoveBinds.length).toBe(1);
@@ -215,7 +230,6 @@ describe("player-ai 启停守卫", () => {
   });
 
   it("stop → retry 定时器清理，stop 后不再触发挂载", async () => {
-    vi.useFakeTimers();
     // 只有容器、无字幕控件 → sync 挂载失败进入 retry 退避
     document.body.innerHTML = `<div class="bpx-player-container"></div>`;
     const state = await loadContentScript({ enablePlayerAiQuickAction: true });
@@ -242,14 +256,18 @@ describe("player-ai 启停守卫", () => {
     const windowAddSpy = vi.spyOn(window, "addEventListener");
     const windowRemoveSpy = vi.spyOn(window, "removeEventListener");
     const state = await loadContentScript({ enablePlayerAiQuickAction: false });
+    // 关闭态未预热：首次开启会触发真实动态 import，用例内要显式等加载完成
+    const { loadPlayerAi } = await import("../../extension/core/lazy-player-ai.js");
 
     // 初始关闭：已 stop
     expect(state.playerAi.playerAiQuickActionObserver).toBeNull();
     expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(false);
 
     // false → true：启动 observer 与监听，并同步 state.settings
-    // （懒加载接线：start 经 loadPlayerAi().then 异步执行，先穿透微任务再断言）
+    // （懒加载接线：start 经 loadPlayerAi().then 异步执行，先等模块在位、
+    // 再穿透微任务让 start 回调落地后断言）
     emitStorageChange("enablePlayerAiQuickAction", true);
+    await loadPlayerAi();
     await flushMicrotasks();
     expect(state.settings.enablePlayerAiQuickAction).toBe(true);
     expect(state.playerAi.playerAiQuickActionObserver).not.toBeNull();
