@@ -53,7 +53,7 @@ const distDir = path.join(root, "dist");
 // JS 入口：bundle + minify，单文件（无 splitting），产物路径 = 源相对路径。
 // offscreen 入口不在此列——它开 splitting 拆动态 chunk（见 buildOffscreenEntry）。
 const jsEntries = [
-  "entry/background.js",
+  "entry/background.ts",
   "pages/sidepanel.js",
   "pages/options.js",
   "pages/popup.js",
@@ -190,7 +190,7 @@ async function buildRestJsEntries() {
 // dist/entry/ 下，避免混淆）；chunk 由 esbuild 直接写进 dist，无需拷贝。
 async function buildOffscreenEntry() {
   return build({
-    entryPoints: [path.join(extensionRoot, "entry/offscreen.js")],
+    entryPoints: [path.join(extensionRoot, "entry/offscreen.ts")],
     outbase: extensionRoot,
     outdir: distDir,
     bundle: true,

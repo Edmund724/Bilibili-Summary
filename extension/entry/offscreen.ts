@@ -30,10 +30,16 @@ import { ASR_DECODE_PORT_NAME, ASR_DECODE_ACTION, ASR_MSG_ERROR } from "../asr/p
 import { createSubtitleBodySlot } from "./offscreen-subtitle-slot.js";
 // 候选04：ASR / AI 两族任务链的懒加载器工厂（promise 缓存、失败可重试）。
 import { createLazyLoader } from "../shared/lazy-import.js";
+import type {
+  OffscreenAsrPortMessage,
+  OffscreenChatPortMessage,
+  OffscreenRuntimeRequest
+} from "../shared/messaging-protocol.js";
+import type { ChatMsg } from "../ai/ladder.js";
 
-let activeAbortController = null;
-let pendingCostGuard = null;
-let idleTimeoutId = null;
+let activeAbortController: AbortController | null = null;
+let pendingCostGuard: { resolve: (value: boolean) => void } | null = null;
+let idleTimeoutId: ReturnType<typeof setTimeout> | null = null;
 var STREAM_IDLE_TIMEOUT_MS = 90000;
 
 // 候选5：聊天字幕体单槽缓存。SP 侧只在 lastAckedContextKey 变化时随消息携带
@@ -47,7 +53,7 @@ const subtitleSlot = createSubtitleBodySlot();
 // 注册时序依赖。asr-decode 任务终态后由 maybeCloseSelfAfterAsr 据此决定
 // 是否自关文档（判定纯函数在 ./offscreen-lifecycle.js）。
 let currentChatCount = 0;
-const activeAsrPorts = new Set();
+const activeAsrPorts = new Set<chrome.runtime.Port>();
 
 // ASR 族懒加载：load() 返回「已注入 onTaskTerminal 的任务执行器」——动态
 // import 与工厂装配都在 loadFn 内，工厂只执行一次。任务终态（断连取消 /
@@ -64,7 +70,11 @@ const ladderLoader = createLazyLoader(async () => {
   return runLadderChat;
 });
 
-function armIdleTimeout(abortController, port) {
+interface PostMessagePort {
+  postMessage(message: unknown): void;
+}
+
+function armIdleTimeout(abortController: AbortController, port: PostMessagePort) {
   clearIdleTimeout();
   idleTimeoutId = setTimeout(function () {
     if (abortController && !abortController.signal.aborted) {
@@ -90,7 +100,8 @@ chrome.runtime.onConnect.addListener((port) => {
     port.onDisconnect.addListener(() => {
       activeAsrPorts.delete(port);
     });
-    port.onMessage.addListener((msg) => {
+    port.onMessage.addListener((rawMsg) => {
+      const msg = rawMsg as OffscreenAsrPortMessage;
       if (!msg || msg.action !== ASR_DECODE_ACTION) return;
       dispatchAsrDecodeTask(msg.task || {}, port);
     });
@@ -102,7 +113,8 @@ chrome.runtime.onConnect.addListener((port) => {
   // 聊天通道计数：asr-decode 终态自关判定的输入（见 maybeCloseSelfAfterAsr）
   currentChatCount += 1;
 
-  port.onMessage.addListener(async (msg) => {
+  port.onMessage.addListener(async (rawMsg) => {
+    const msg = rawMsg as OffscreenChatPortMessage;
     if (!msg) return;
     if (msg.action === "stop") {
       abortActiveRequest();
@@ -131,7 +143,7 @@ chrome.runtime.onConnect.addListener((port) => {
     // 推进 lastAckedContextKey，后续追问省略 subtitleBody。包装只劫持
     // postMessage，端口事件监听不受影响；下游 ladder/streamChat/map-reduce
     // 只经 port.postMessage 回吐，包装对它们透明。
-    const ackedPort = withCachedContextKey(port, settled.contextKey);
+    const ackedPort = withCachedContextKey(port, settled.contextKey!);
 
     try {
       abortActiveRequest();
@@ -158,19 +170,19 @@ chrome.runtime.onConnect.addListener((port) => {
       // 空闲超时与 cost-guard 的 Promise 簿记仍留在本文件。
       await runLadderChat(
         {
-          msg,
+          msg: msg as ChatMsg,
           provider: { ...provider, apiKey },
           port: ackedPort,
           signal: activeAbortController.signal
         },
         {
           askCostGuard,
-          onActivity: function () { armIdleTimeout(activeAbortController, ackedPort); },
+          onActivity: function () { armIdleTimeout(activeAbortController!, ackedPort); },
           pauseIdleTimeout: clearIdleTimeout
         }
       );
     } catch (e) {
-      ackedPort.postMessage({ type: "error", error: String(e?.message || e) });
+      ackedPort.postMessage({ type: "error", error: String((e as Error | undefined)?.message || e) });
     } finally {
       clearIdleTimeout();
       clearActiveRequestState();
@@ -195,7 +207,7 @@ chrome.runtime.onConnect.addListener((port) => {
 // 终态」语义交回自关判定——与 handler 内部 catch 的收尾一致（终态消息发完
 // 才判定；port 已断开时 postMessage 抛错被吞、判定照走，Set.delete 幂等，
 // 两种时序都正确）。
-async function dispatchAsrDecodeTask(task, port) {
+async function dispatchAsrDecodeTask(task: unknown, port: chrome.runtime.Port) {
   let handleAsrDecodeTask;
   try {
     handleAsrDecodeTask = await asrHandlerLoader.load();
@@ -230,7 +242,7 @@ function abortActiveRequest() {
 // 时终态消息必须已 postMessage 发完——文档关闭后无法再 postMessage。
 // 装载中的分支不会触发本判定（装载由端口消息触发、端口已入集），纯 ASR /
 // 纯聊天 / 混合会话的关闭行为与拆分前一致。
-function maybeCloseSelfAfterAsr(port) {
+function maybeCloseSelfAfterAsr(port: chrome.runtime.Port) {
   // 排除本次终态任务的端口：done/error 时它还连着（页面收到终态后才
   // 断连收尾），断连取消时可能已被断连监听移出——Set.delete 幂等，
   // 两种时序都正确。
@@ -261,7 +273,7 @@ function clearActiveRequestState() {
 
 // 向侧边栏弹成本护栏确认，等待其回复 { action: "cost-guard-confirm", ok: boolean }。
 // 断连时 resolve(false)（视为取消）。
-function askCostGuard(port, message) {
+function askCostGuard(port: PostMessagePort, message: string) {
   return new Promise((resolve) => {
     pendingCostGuard = { resolve };
     port.postMessage({ type: "cost-guard", data: { message } });
@@ -272,24 +284,36 @@ function askCostGuard(port, message) {
 // 持有的字幕体 key）。SP 从任意一条 chat 回执读它推进 lastAckedContextKey，
 // 后续追问省略 subtitleBody。只包装 postMessage 一个入口；事件监听器仍挂
 // 在原 port 上（本包装只作为下游回吐的发送通道）。
-function withCachedContextKey(port, contextKey) {
+function withCachedContextKey(port: PostMessagePort, contextKey: string) {
   return {
-    postMessage: (data) => port.postMessage({ ...data, cachedContextKey: contextKey })
+    postMessage: (data: Record<string, unknown>) =>
+      port.postMessage({ ...data, cachedContextKey: contextKey })
   };
+}
+
+interface AiProviderSummary {
+  id: string;
+  enabled: boolean;
+  requiresKey?: boolean;
 }
 
 // 取「选中的平台 + 其 API Key」：provider 来自 ai-providers-list，key 来自 get-ai-provider-key。
 // 任一缺失（平台不存在 / key 读取失败 / 需要 key 但未配置）返回带 error 的对象；成功返回 { provider, apiKey }。
-async function resolveProviderWithKey(port, providerId) {
-  const providersResp = await chrome.runtime.sendMessage({ type: "ai-providers-list" });
-  const list = (providersResp?.providers || []).filter(p => p.enabled);
-  const provider = list.find(p => p.id === providerId) || null;
+async function resolveProviderWithKey(port: PostMessagePort, providerId: string | undefined) {
+  const providersResp = (await chrome.runtime.sendMessage({
+    type: "ai-providers-list"
+  } as OffscreenRuntimeRequest)) as { providers?: unknown[] };
+  const list = ((providersResp?.providers || []) as AiProviderSummary[]).filter((p) => p.enabled);
+  const provider = list.find((p) => p.id === providerId) || null;
   if (!provider) {
     port.postMessage({ type: "error", error: "未找到选中的平台" });
     return { error: true };
   }
 
-  const keysResp = await chrome.runtime.sendMessage({ type: "get-ai-provider-key", providerId });
+  const keysResp = (await chrome.runtime.sendMessage({
+    type: "get-ai-provider-key",
+    providerId
+  } as OffscreenRuntimeRequest)) as { ok?: boolean; error?: string; apiKey?: string };
   if (!keysResp?.ok) {
     port.postMessage({ type: "error", error: keysResp?.error || "读取 API Key 失败" });
     return { error: true };

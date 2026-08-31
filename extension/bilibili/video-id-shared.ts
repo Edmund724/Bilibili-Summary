@@ -3,7 +3,7 @@
 // These functions are pure, deterministic computations over a URL string.
 // They must NOT contain any transport logic, Chrome APIs, DOM, or `state`.
 
-export function isReaderMode(url = location.href) {
+export function isReaderMode(url: string = location.href): boolean {
   try {
     return new URL(url).searchParams.get("boc_reader") === "1";
   } catch {
@@ -11,7 +11,7 @@ export function isReaderMode(url = location.href) {
   }
 }
 
-export function stripReaderModeUrl(url = location.href) {
+export function stripReaderModeUrl(url: string = location.href): string {
   try {
     const parsed = new URL(url);
     parsed.searchParams.delete("boc_reader");
@@ -21,7 +21,7 @@ export function stripReaderModeUrl(url = location.href) {
   }
 }
 
-export function isWatchlaterPage(url = location.href) {
+export function isWatchlaterPage(url: string = location.href): boolean {
   try {
     return new URL(url).pathname.replace(/\/+$/, "") === "/list/watchlater";
   } catch {
@@ -29,7 +29,7 @@ export function isWatchlaterPage(url = location.href) {
   }
 }
 
-export function computeCurrentClipSignature(url = location.href) {
+export function computeCurrentClipSignature(url: string = location.href): string {
   const bvid = extractBvid(url);
   const page = extractPageIndex(url);
   return [bvid, page].map((item) => String(item || "").trim()).join("|");
@@ -39,7 +39,7 @@ export function computeCurrentClipSignature(url = location.href) {
 // extractBvid / extractPageIndex / cleanVideoUrl were re-exported verbatim by
 // url-utils.js before that shallow module was merged into this one.
 
-export function extractBvid(url) {
+export function extractBvid(url: string): string {
   const match = url.match(/\/video\/(BV[0-9A-Za-z]+)/);
   if (match?.[1]) {
     return match[1];
@@ -58,7 +58,7 @@ export function extractBvid(url) {
   return "";
 }
 
-export function cleanVideoUrl(href = location.href) {
+export function cleanVideoUrl(href: string = location.href): string {
   try {
     const parsed = new URL(href);
     if (parsed.hostname !== "www.bilibili.com") {
@@ -85,13 +85,13 @@ export function cleanVideoUrl(href = location.href) {
   }
 }
 
-export function extractPageIndex(url) {
+export function extractPageIndex(url: string): number {
   return extractPageIndexFromUrl(url);
 }
 
 // ===== from extension/background.js =====
 
-export function extractPageIndexFromUrl(url) {
+export function extractPageIndexFromUrl(url: string): number {
   try {
     const page = Number(new URL(String(url || "")).searchParams.get("p") || "1");
     return Number.isFinite(page) && page > 0 ? page : 1;
@@ -100,7 +100,7 @@ export function extractPageIndexFromUrl(url) {
   }
 }
 
-export function buildCanonicalVideoUrl(bvid, pageIndex = 1) {
+export function buildCanonicalVideoUrl(bvid: string, pageIndex: number | string = 1): string {
   const safeBvid = String(bvid || "").trim();
   if (!safeBvid) {
     return "";
@@ -123,7 +123,7 @@ export function buildCanonicalVideoUrl(bvid, pageIndex = 1) {
 //        || extractBvid(currentMetaContextUrl)
 //   if bvid -> "https://www.bilibili.com/video/${bvid}/"
 //   else      -> context?.url || currentMetaContextUrl  (stringified + trimmed)
-export function isSupportedBilibiliPage(url) {
+export function isSupportedBilibiliPage(url: unknown): boolean {
   try {
     const parsed = new URL(String(url || ""));
     if (parsed.hostname !== "www.bilibili.com") {

@@ -1,6 +1,6 @@
 import { state } from "../core/state.js";
 
-export function findReaderPlayerHost(video) {
+export function findReaderPlayerHost(video: Element | null | undefined): Element | null {
   if (!video) {
     return null;
   }
@@ -13,7 +13,7 @@ export function findReaderPlayerHost(video) {
   );
 }
 
-function isIgnoredReaderVideoCandidate(video) {
+function isIgnoredReaderVideoCandidate(video: Element | null | undefined): boolean {
   if (!video) {
     return true;
   }
@@ -39,9 +39,9 @@ function isIgnoredReaderVideoCandidate(video) {
 
 // 上次命中的视频元素的 WeakRef 快速缓存：getRuntimeVideoElement 在同步周期
 // 内会被调用 20+ 次，缓存命中可跳过整次 querySelectorAll("video")。
-let cachedVideoRef = null;
+let cachedVideoRef: WeakRef<HTMLVideoElement> | null = null;
 
-export function getRuntimeVideoElement() {
+export function getRuntimeVideoElement(): HTMLVideoElement | null {
   if (cachedVideoRef) {
     const cached = cachedVideoRef.deref();
     if (cached?.isConnected && !isIgnoredReaderVideoCandidate(cached)) {
@@ -49,17 +49,18 @@ export function getRuntimeVideoElement() {
     }
   }
 
-  if (state.reader.readingVideoEl?.isConnected) {
-    const currentHost = findReaderPlayerHost(state.reader.readingVideoEl);
-    const currentRect = state.reader.readingVideoEl.getBoundingClientRect();
+  const readingVideoEl = state.reader.readingVideoEl as HTMLVideoElement | null | undefined;
+  if (readingVideoEl?.isConnected) {
+    const currentHost = findReaderPlayerHost(readingVideoEl);
+    const currentRect = readingVideoEl.getBoundingClientRect();
     if (
       currentHost?.isConnected &&
       currentRect.width > 120 &&
       currentRect.height > 68 &&
-      !isIgnoredReaderVideoCandidate(state.reader.readingVideoEl)
+      !isIgnoredReaderVideoCandidate(readingVideoEl)
     ) {
-      cachedVideoRef = new WeakRef(state.reader.readingVideoEl);
-      return state.reader.readingVideoEl;
+      cachedVideoRef = new WeakRef(readingVideoEl);
+      return readingVideoEl;
     }
   }
 
@@ -86,7 +87,7 @@ export function getRuntimeVideoElement() {
         (!item.paused ? 20000 : 0) +
         Number(item.readyState || 0) * 2000 +
         (item.currentSrc ? 10000 : 0) +
-        (item === state.reader.readingVideoEl ? 500 : 0);
+        (item === readingVideoEl ? 500 : 0);
       return { item, rect, score };
     })
     .filter(({ rect }) => rect.width > 240 && rect.height > 120)

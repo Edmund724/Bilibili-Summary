@@ -9,13 +9,13 @@
 
 // offscreen 文档 URL（相对扩展根）：background 创建/探测与 sidepanel
 // getContexts 查询共用同一取值。
-export const OFFSCREEN_URL = "entry/offscreen.html";
+export const OFFSCREEN_URL: string = "entry/offscreen.html";
 
 // 创建 reason 统一取 BLOBS：文档实际承载 ASR 解码 + 转写（WAV Blob 仅在本
 // context 内经 FormData 上传）与聊天 SSE 流式拉取。不能用 AUDIO_PLAYBACK——
 // Chrome 对无真实播放的 AUDIO_PLAYBACK 文档 30 秒强制关闭，长视频解码会被
 // 打断（详见 asr/offscreen-bridge.bg.js ensureAsrOffscreenDocument 注释）。
-export const OFFSCREEN_CREATE_REASON = "BLOBS";
+export const OFFSCREEN_CREATE_REASON: string = "BLOBS";
 
 // ASR 转写并发上限：offscreen ASR_ADAPTERS 与 asr/engine.js 调度默认共用。
-export const ASR_CONCURRENCY = 5;
+export const ASR_CONCURRENCY: number = 5;

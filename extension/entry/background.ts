@@ -26,35 +26,45 @@ import {
 import { bgFetchJson } from "../bilibili/gateway.js";
 import { handleAsrDecodePrepare, handleAsrDecodeCleanup } from "../asr/offscreen-bridge.bg.js";
 import { ASR_TASK_PREPARE, ASR_TASK_CLEANUP } from "../asr/protocol.js";
+import type {
+  BackgroundMessage,
+  BackgroundMessageType,
+  MessageHandler,
+  MessageSender,
+  SendResponse
+} from "../shared/messaging-protocol.js";
 
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 
 // ===== 消息路由表 =====
 
-function handleGetSettings(message, sender, sendResponse) {
+type BackgroundHandler = MessageHandler<BackgroundMessage>;
+type Msg<T extends BackgroundMessageType> = Extract<BackgroundMessage, { type: T }>;
+
+function handleGetSettings(_message: Msg<"get-settings">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   getMergedSettings()
     .then((settings) => sendResponse({ ok: true, settings }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
+    .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
   return true;
 }
 
-function handleSaveSettings(message, sender, sendResponse) {
+function handleSaveSettings(message: Msg<"save-settings">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   saveSettings(message.settings || {})
     .then(() => sendResponse({ ok: true }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
+    .catch((error) => sendResponse({ ok: false, error: (error as Error).message }));
   return true;
 }
 
-function handleOpenOptions(message, sender, sendResponse) {
+function handleOpenOptions(_message: Msg<"open-options">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   chrome.tabs
     .create({ url: chrome.runtime.getURL("pages/options.html") })
     .then(() => sendResponse({ ok: true }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
+    .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
   return true;
 }
 
-function handlePlayerAiQuickAction(message, sender, sendResponse) {
-  const tabId = Number(message.tabId || sender?.tab?.id || 0) || 0;
+function handlePlayerAiQuickAction(message: Msg<"player-ai-quick-action">, sender: MessageSender, sendResponse: SendResponse): boolean {
+  const tabId = Number(message.tabId || sender.tab?.id || 0) || 0;
   if (!tabId) {
     sendResponse({ ok: false, error: "找不到当前标签页。" });
     return false;
@@ -71,11 +81,11 @@ function handlePlayerAiQuickAction(message, sender, sendResponse) {
       await chrome.storage.local.set({ [PLAYER_AI_QUICK_ACTION_STORAGE_KEY]: request });
       sendResponse({ ok: true });
     })
-    .catch((error) => sendResponse({ ok: false, error: error.message || "打开 AI 侧边栏失败" }));
+    .catch((error: Error) => sendResponse({ ok: false, error: error.message || "打开 AI 侧边栏失败" }));
   return true;
 }
 
-function handleOpenReadingViewTab(message, sender, sendResponse) {
+function handleOpenReadingViewTab(message: Msg<"open-reading-view-tab">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   const url = String(message.url || "").trim();
   const tabId = Number(message.tabId || 0) || 0;
   if (!url) {
@@ -96,7 +106,7 @@ function handleOpenReadingViewTab(message, sender, sendResponse) {
     parsed.searchParams.set("boc_reader", "1");
     readerUrl = parsed.toString();
   } catch (error) {
-    sendResponse({ ok: false, error: error.message || "阅读视图地址无效" });
+    sendResponse({ ok: false, error: (error as Error).message || "阅读视图地址无效" });
     return false;
   }
 
@@ -108,11 +118,11 @@ function handleOpenReadingViewTab(message, sender, sendResponse) {
       }
       sendResponse({ ok: true });
     })
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
+    .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
   return true;
 }
 
-function handleCloseReadingViewTab(message, sender, sendResponse) {
+function handleCloseReadingViewTab(message: Msg<"close-reading-view-tab">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   const tabId = Number(message.tabId || 0) || 0;
   if (!tabId) {
     sendResponse({ ok: false, error: "缺少标签页信息" });
@@ -126,11 +136,11 @@ function handleCloseReadingViewTab(message, sender, sendResponse) {
       }
       sendResponse({ ok: true });
     })
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
+    .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
   return true;
 }
 
-function handleFetchJson(message, sender, sendResponse) {
+function handleFetchJson(message: Msg<"fetch-json">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   const url = typeof message.url === "string" ? message.url : "";
   if (!url) {
     sendResponse({ ok: false, error: "Missing subtitle URL" });
@@ -141,7 +151,7 @@ function handleFetchJson(message, sender, sendResponse) {
     .then((data) => sendResponse({ ok: true, data }))
     .catch((error) => {
       // JSON 解析失败（200 但非 JSON 响应）时给用户稳定的可读文案，而非引擎原生 SyntaxError。
-      const message = error instanceof SyntaxError ? "Invalid JSON response" : error.message;
+      const message = error instanceof SyntaxError ? "Invalid JSON response" : (error as Error).message;
       sendResponse({ ok: false, error: message });
     });
   return true;
@@ -152,6 +162,7 @@ function handleFetchJson(message, sender, sendResponse) {
 // 路由表只换处理器指向。AI 的连通性测试（ai-providers-test）已移出 SW：
 // options 页直调 ai/provider-test.js（host_permissions 对扩展页面同样生效），
 // 探针的 completion 链不再进 SW 图（候选 04 拆链），故本工厂不再注入 probe。
+// @ts-expect-error AI 家族不使用 test 处理器，probe 仅由 ASR 家族注入。
 const aiProviderHandlers = createProviderMessageHandlers({
   loadProviders: aiProviderStore.loadProviders,
   saveProviders: aiProviderStore.saveProviders,
@@ -160,12 +171,12 @@ const aiProviderHandlers = createProviderMessageHandlers({
   saveKey: aiProviderStore.saveKey
 });
 
-function handleAiPresetsList(message, sender, sendResponse) {
+function handleAiPresetsList(_message: Msg<"ai-presets-list">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   sendResponse({ ok: true, presets: PRESETS.slice() });
   return false;
 }
 
-function handleAiProvidersModels(message, sender, sendResponse) {
+function handleAiProvidersModels(message: Msg<"ai-providers-models">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   const baseUrl = String(message.baseUrl || "").trim();
   if (!baseUrl) {
     sendResponse({ ok: false, error: "请填写 baseUrl" });
@@ -177,13 +188,13 @@ function handleAiProvidersModels(message, sender, sendResponse) {
     providerId: String(message.providerId || "").trim()
   })
     .then((payload) => sendResponse(payload))
-    .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+    .catch((error) => sendResponse({ ok: false, error: (error as Error | undefined)?.message || String(error) }));
   return true;
 }
 
 // ===== ASR 平台消息处理 =====
 
-function handleAsrPresetsList(message, sender, sendResponse) {
+function handleAsrPresetsList(_message: Msg<"asr-presets-list">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   sendResponse({ ok: true, presets: ASR_PROVIDER_PRESETS.slice() });
   return false;
 }
@@ -213,23 +224,23 @@ const handleGetAsrRuntimeConfig = createAsrRuntimeConfigHandler({
 // 把任务转发给"临时创建的 offscreen 文档"执行：asr-decode-prepare 建文档 +
 // 加防盗链规则（页面侧随后直连 offscreen 的 asr-decode 端口传下载解码任务），
 // asr-decode-cleanup 清规则。消息类型分发给对应执行函数。
-const offloadTaskHandlers = new Map([
+const offloadTaskHandlers = new Map<string, (message: unknown, sender: MessageSender, sendResponse: SendResponse) => void>([
   [ASR_TASK_PREPARE, handleAsrDecodePrepare],
   [ASR_TASK_CLEANUP, handleAsrDecodeCleanup]
 ]);
 
-function handleOffloadTask(message, sender, sendResponse) {
+function handleOffloadTask(message: Msg<"offload-task">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   const taskType = String(message.taskType || "").trim();
   const handler = offloadTaskHandlers.get(taskType);
   if (!handler) {
     sendResponse({ ok: false, error: "不支持的 offscreen 任务类型：" + taskType });
     return false;
   }
-  handler(message, sender, sendResponse);
+  handler(message, _sender, sendResponse);
   return true;
 }
 
-function handleAiSidepanelGetState(message, sender, sendResponse) {
+function handleAiSidepanelGetState(message: Msg<"ai-sidepanel-get-state">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   const tabId = Number(message.tabId || 0) || 0;
   const forceRefresh = message.forceRefresh === true;
   // 候选5：透传 SP 上次全量快照的签名给 content 判短路（不可信输入按空串
@@ -241,50 +252,50 @@ function handleAiSidepanelGetState(message, sender, sendResponse) {
     sendMessageToTab
   })
     .then((payload) => sendResponse({ ok: true, payload }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
+    .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
   return true;
 }
 
-function handleAiSidepanelResolveContext(message, sender, sendResponse) {
+function handleAiSidepanelResolveContext(message: Msg<"ai-sidepanel-resolve-context">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   resolveAiSidepanelContext(message.contextRef || {})
     .then((payload) => sendResponse({ ok: true, payload }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
+    .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
   return true;
 }
 
-function handleAiSidepanelResolvePageRef(message, sender, sendResponse) {
+function handleAiSidepanelResolvePageRef(message: Msg<"ai-sidepanel-resolve-page-ref">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   resolveAiSidepanelPageRef(message.contextRef || {})
     .then((payload) => sendResponse({ ok: true, payload }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
+    .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
   return true;
 }
 
-const messageHandlers = new Map([
-  ["get-settings", handleGetSettings],
-  ["save-settings", handleSaveSettings],
-  ["open-options", handleOpenOptions],
-  ["player-ai-quick-action", handlePlayerAiQuickAction],
-  ["open-reading-view-tab", handleOpenReadingViewTab],
-  ["close-reading-view-tab", handleCloseReadingViewTab],
-  ["fetch-json", handleFetchJson],
-  ["ai-providers-list", aiProviderHandlers.list],
-  ["ai-presets-list", handleAiPresetsList],
-  ["get-ai-provider-key", aiProviderHandlers.get],
-  ["ai-providers-save", aiProviderHandlers.save],
-  ["ai-provider-set-key", aiProviderHandlers.setKey],
-  ["ai-providers-delete", aiProviderHandlers.remove],
-  ["ai-providers-models", handleAiProvidersModels],
-  ["asr-presets-list", handleAsrPresetsList],
-  ["asr-providers-list", asrProviderHandlers.list],
-  ["asr-providers-save", asrProviderHandlers.save],
-  ["asr-providers-delete", asrProviderHandlers.remove],
-  ["get-asr-provider-key", asrProviderHandlers.get],
-  ["asr-providers-test", asrProviderHandlers.test],
-  ["get-asr-runtime-config", handleGetAsrRuntimeConfig],
-  ["offload-task", handleOffloadTask],
-  ["ai-sidepanel-get-state", handleAiSidepanelGetState],
-  ["ai-sidepanel-resolve-context", handleAiSidepanelResolveContext],
-  ["ai-sidepanel-resolve-page-ref", handleAiSidepanelResolvePageRef]
+const messageHandlers = new Map<BackgroundMessageType, BackgroundHandler>([
+  ["get-settings", handleGetSettings as BackgroundHandler],
+  ["save-settings", handleSaveSettings as BackgroundHandler],
+  ["open-options", handleOpenOptions as BackgroundHandler],
+  ["player-ai-quick-action", handlePlayerAiQuickAction as BackgroundHandler],
+  ["open-reading-view-tab", handleOpenReadingViewTab as BackgroundHandler],
+  ["close-reading-view-tab", handleCloseReadingViewTab as BackgroundHandler],
+  ["fetch-json", handleFetchJson as BackgroundHandler],
+  ["ai-providers-list", aiProviderHandlers.list as BackgroundHandler],
+  ["ai-presets-list", handleAiPresetsList as BackgroundHandler],
+  ["get-ai-provider-key", aiProviderHandlers.get as BackgroundHandler],
+  ["ai-providers-save", aiProviderHandlers.save as BackgroundHandler],
+  ["ai-provider-set-key", aiProviderHandlers.setKey! as BackgroundHandler],
+  ["ai-providers-delete", aiProviderHandlers.remove as BackgroundHandler],
+  ["ai-providers-models", handleAiProvidersModels as BackgroundHandler],
+  ["asr-presets-list", handleAsrPresetsList as BackgroundHandler],
+  ["asr-providers-list", asrProviderHandlers.list as BackgroundHandler],
+  ["asr-providers-save", asrProviderHandlers.save as BackgroundHandler],
+  ["asr-providers-delete", asrProviderHandlers.remove as BackgroundHandler],
+  ["get-asr-provider-key", asrProviderHandlers.get as BackgroundHandler],
+  ["asr-providers-test", asrProviderHandlers.test as BackgroundHandler],
+  ["get-asr-runtime-config", handleGetAsrRuntimeConfig as BackgroundHandler],
+  ["offload-task", handleOffloadTask as BackgroundHandler],
+  ["ai-sidepanel-get-state", handleAiSidepanelGetState as BackgroundHandler],
+  ["ai-sidepanel-resolve-context", handleAiSidepanelResolveContext as BackgroundHandler],
+  ["ai-sidepanel-resolve-page-ref", handleAiSidepanelResolvePageRef as BackgroundHandler]
 ]);
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -314,14 +325,14 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 // 版本探针单发：读页面里 content 主包置的版本哨兵，空串 = 未读到；API 抛错
 // 交给编排层吞掉重试，单发自身不 try/catch。
-function probeContentScriptVersionOnce(tabId) {
+function probeContentScriptVersionOnce(tabId: number) {
   return chrome.scripting.executeScript({
     target: { tabId },
-    func: () => globalThis.__BOC_CONTENT_SCRIPT_LOADED__ || ""
+    func: () => (globalThis as Record<string, unknown>).__BOC_CONTENT_SCRIPT_LOADED__ || ""
   }).then((probe) => String(probe?.[0]?.result || ""));
 }
 
-async function injectReaderAssets(tabId) {
+async function injectReaderAssets(tabId: number) {
   // S3 分层：修复注入语义是「补齐整页样式」（页面可能被 manifest 注入路径
   // 遗漏，阅读模式可能正处于开启状态），因此常驻表 + 阅读表全量注入；播放器
   // AI 表不需要——它只随 ai/player-ai.js 模块装载挂载，与内容脚本注入无关。
@@ -350,17 +361,17 @@ const {
   // 单发副作用（chrome API 触点）
   probeOnce: probeContentScriptVersionOnce,
   injectAssets: injectReaderAssets,
-  reloadTab: (tabId) => chrome.tabs.reload(tabId),
+  reloadTab: (tabId: number) => chrome.tabs.reload(tabId),
   waitForTabComplete,
   sendMessageToTab,
   isTabReaderModeOff,
   // 前置守卫：无 scripting 能力或无 tabId 时，编排按「无事可做」直接返回
   // （与抽离前 ensureReaderContentReady 开头的 `!chrome.scripting || !tabId` 等价）。
-  canInject: (tabId) => Boolean(chrome.scripting) && Boolean(tabId),
+  canInject: (tabId: number) => Boolean(chrome.scripting) && Boolean(tabId),
   expectedVersion: EXPECTED_CONTENT_SCRIPT_VERSION
 });
 
-async function isTabReaderModeOff(tabId) {
+async function isTabReaderModeOff(tabId: number) {
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   if (!tab?.url) {
     return false;
@@ -374,7 +385,7 @@ async function isTabReaderModeOff(tabId) {
 
 // ===== AI 侧边栏编排（打开面板 + 快速请求）=====
 
-async function openAiSidepanelForTab(tabId) {
+async function openAiSidepanelForTab(tabId: number) {
   // 仅支持 Chrome（ADR-0002）：侧边栏统一走 chrome.sidePanel，Firefox 的
   // sidebarAction fallback 已随 Firefox 兼容一并删除。
   if (chrome.sidePanel?.open) {
@@ -385,7 +396,7 @@ async function openAiSidepanelForTab(tabId) {
   throw new Error("当前浏览器不支持扩展侧边栏");
 }
 
-function buildPlayerAiQuickActionRequest(tabId, prompt) {
+function buildPlayerAiQuickActionRequest(tabId: number, prompt: string) {
   const createdAt = Date.now();
   return {
     id: `player-ai-${createdAt}-${Math.random().toString(36).slice(2, 8)}`,
@@ -397,11 +408,13 @@ function buildPlayerAiQuickActionRequest(tabId, prompt) {
 
 // ===== 入口监听 =====
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message || typeof message !== "object") {
+chrome.runtime.onMessage.addListener((rawMessage, rawSender, sendResponse: SendResponse) => {
+  if (!rawMessage || typeof rawMessage !== "object") {
     return false;
   }
 
+  const message = rawMessage as BackgroundMessage;
+  const sender = rawSender as MessageSender;
   const handler = messageHandlers.get(message.type);
   if (!handler) {
     return false;

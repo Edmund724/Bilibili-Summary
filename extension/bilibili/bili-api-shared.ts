@@ -1,4 +1,4 @@
-// extension/bili-api-shared.js
+// extension/bili-api-shared.ts
 // Pure B站 (Bilibili) API primitives shared between the content-script side
 // and the background service worker. This module centralizes reusable request
 // builders, response mappers, and error helpers so both sides reuse the same
@@ -10,28 +10,45 @@
 
 import { toReadableText } from "../shared/error-helpers.js";
 
+export interface HotComment {
+  uname: string;
+  like: number;
+  message: string;
+}
 
-export function normalizeHotComments(comments, limit = 20) {
+export function normalizeHotComments(comments: unknown, limit = 20): HotComment[] {
   if (!Array.isArray(comments)) {
     return [];
   }
 
   return comments
     .map((item) => ({
-      uname: String(item?.uname || "匿名").trim() || "匿名",
-      like: Number(item?.like || 0) || 0,
-      message: String(item?.message || "").trim().slice(0, 500)
+      uname: String((item as { uname?: unknown })?.uname || "匿名").trim() || "匿名",
+      like: Number((item as { like?: unknown })?.like || 0) || 0,
+      message: String((item as { message?: unknown })?.message || "").trim().slice(0, 500)
     }))
     .filter((item) => item.message)
     .slice(0, limit);
 }
 
+export interface SubtitleInfoRequest {
+  source: string;
+  url: string;
+}
 
-export function buildSubtitleInfoRequests({ bvid, cid, aid }) {
+export function buildSubtitleInfoRequests({
+  bvid,
+  cid,
+  aid
+}: {
+  bvid?: string | number;
+  cid?: string | number;
+  aid?: string | number;
+}): SubtitleInfoRequest[] {
   const safeBvid = encodeURIComponent(String(bvid || ""));
   const safeCid = encodeURIComponent(String(cid || ""));
   const safeAid = encodeURIComponent(String(aid || ""));
-  const requests = [];
+  const requests: SubtitleInfoRequest[] = [];
 
   // 参考 SubBatch：优先用 aid+cid 的 wbi 接口作为主来源。
   if (aid) {
@@ -58,19 +75,22 @@ export function buildSubtitleInfoRequests({ bvid, cid, aid }) {
   return requests;
 }
 
+export interface BiliApiError extends Error {
+  code?: number | string;
+  retryable?: boolean;
+}
 
-export function buildBiliApiError(payload, fallbackMessage) {
-  const msg = toReadableText(payload?.message, fallbackMessage);
-  const error = new Error(msg);
-  error.code = payload?.code;
-  error.retryable = isRetryableError(payload?.code);
+export function buildBiliApiError(payload: unknown, fallbackMessage: string): BiliApiError {
+  const msg = toReadableText((payload as { message?: unknown })?.message, fallbackMessage);
+  const error = new Error(msg) as BiliApiError;
+  error.code = (payload as { code?: number | string })?.code;
+  error.retryable = isRetryableError(error.code);
   return error;
 }
 
-
-function isRetryableError(code) {
+function isRetryableError(code: number | string | undefined): boolean {
   // -509: 请求过于频繁
   // -3: 参数错误（可能是临时性的）
   // 其他负数错误码也可能是临时性的
-  return code === -509 || code === -3 || code < 0;
+  return code === -509 || code === -3 || (typeof code === "number" && code < 0);
 }

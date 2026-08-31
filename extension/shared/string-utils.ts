@@ -1,4 +1,4 @@
-export function escapeHtml(value) {
+export function escapeHtml(value: unknown): string {
   return String(value)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -8,12 +8,12 @@ export function escapeHtml(value) {
 }
 
 
-export function escapeYaml(value) {
+export function escapeYaml(value: unknown): string {
   return String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
 
-export function formatCompactTimestamp(seconds, withHours) {
+export function formatCompactTimestamp(seconds: number | string, withHours?: boolean): string {
   const safe = Math.max(0, Math.floor(Number(seconds) || 0));
   const hour = Math.floor(safe / 3600);
   const minute = Math.floor((safe % 3600) / 60);
@@ -30,7 +30,7 @@ export function formatCompactTimestamp(seconds, withHours) {
 }
 
 
-export function formatTimestamp(seconds, forSrt = false) {
+export function formatTimestamp(seconds: number | string, forSrt = false): string {
   const safe = Number(seconds) || 0;
   const msTotal = Math.max(0, Math.floor(safe * 1000));
   const hour = Math.floor(msTotal / 3600000);
@@ -49,16 +49,19 @@ export function formatTimestamp(seconds, forSrt = false) {
 }
 
 
-export function pushOptionalLines(targetLines, extraLines) {
+export function pushOptionalLines(targetLines: string[], extraLines: unknown): void {
   if (!Array.isArray(extraLines) || !extraLines.length) {
     return;
   }
-  targetLines.push(...extraLines);
+  targetLines.push(...(extraLines as string[]));
 }
 
 
-export function resolveFrontmatterTemplateValue(value, templateContext = {}) {
-  return String(value || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, rawKey) => {
+export function resolveFrontmatterTemplateValue(
+  value: unknown,
+  templateContext: Record<string, unknown> = {}
+): string {
+  return String(value || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, rawKey: string) => {
     const key = String(rawKey || "").trim().toLowerCase();
     if (!key) {
       return "";
@@ -69,7 +72,7 @@ export function resolveFrontmatterTemplateValue(value, templateContext = {}) {
 }
 
 
-export function parseFrontmatterArrayItems(value) {
+export function parseFrontmatterArrayItems(value: unknown): string[] {
   return String(value || "")
     .split(/[，,]/)
     .map((item) => item.trim())
@@ -77,12 +80,12 @@ export function parseFrontmatterArrayItems(value) {
 }
 
 
-export function sanitizeFileName(value) {
+export function sanitizeFileName(value: string): string {
   return value.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
 
-export function truncate(value, max) {
+export function truncate(value: unknown, max: number): string {
   const s = String(value || "");
   return s.length > max ? s.slice(0, max) + "..." : s;
 }

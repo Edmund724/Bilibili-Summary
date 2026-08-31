@@ -52,6 +52,10 @@ import {
   computeCurrentClipSignature,
   stripReaderModeUrl
 } from "../bilibili/video-id-shared.js";
+import type {
+  ContentScriptMessage,
+  SendResponse
+} from "../shared/messaging-protocol.js";
 // 候选02 分层惰性：gateway（getCurrentAid/fetchHotComments）原被本模块与总结
 // 链共享而提升为常驻静态 chunk；其常驻侧唯一消费点是热评消息处理器（异步），
 // 改为处理器内动态 import 后，gateway/bili-api-shared 随总结链切进动态 chunk。
@@ -62,10 +66,11 @@ export function bindRuntimeEvents() {
   }
   uiState.setRuntimeEventsBound(true);
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (!message || typeof message !== "object") {
+  chrome.runtime.onMessage.addListener((rawMessage, _sender, sendResponse: SendResponse) => {
+    if (!rawMessage || typeof rawMessage !== "object") {
       return false;
     }
+    const message = rawMessage as ContentScriptMessage;
 
     if (message.type === "popup-get-state") {
       // 候选02：getPopupPayload 属总结链层，经 ensure 装载后组装（热路径本地

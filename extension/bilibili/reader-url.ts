@@ -1,4 +1,4 @@
-// extension/bilibili/reader-url.js
+// extension/bilibili/reader-url.ts
 // clip 域行为：阅读模式 URL 更新（replaceReaderModeUrl）与 clip 签名时序
 // 不变式——clip 签名必须先于 replaceState 更新（补丁后的 replaceState 会同步
 // 派发 boc:urlchange 触发 handleUrlChange，签名未先更新会被误判为真实 URL
@@ -9,7 +9,7 @@ import { clipState } from "../core/state.js";
 import { computeCurrentClipSignature } from "./video-id-shared.js";
 import { shouldDebugLog } from "../shared/logging.js";
 
-export function replaceReaderModeUrl(nextUrl) {
+export function replaceReaderModeUrl(nextUrl: unknown): void {
   const targetUrl = String(nextUrl || "").trim();
   if (!targetUrl || targetUrl === location.href) {
     return;

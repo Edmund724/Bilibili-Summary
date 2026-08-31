@@ -15,37 +15,37 @@
 // 从 Map 删除。移除不是「卸载语义」——数据留在浏览器样式缓存，重挂几乎零
 // 成本（这正是「关→开」二进宫无闪变的关键：样式数据已在内存，重挂即生效）。
 
-const mounted = new Map();
+const mounted = new Map<string, HTMLLinkElement>();
 
-function getReaderStylePaths() {
+function getReaderStylePaths(): string[] {
   return ["entry/styles/reader.css", "entry/styles/reader-gate.css"];
 }
 
-export function isReaderStylesMounted() {
+export function isReaderStylesMounted(): boolean {
   return getReaderStylePaths().every((path) => mounted.has(path));
 }
 
-export function ensureReaderStyles() {
+export function ensureReaderStyles(): void {
   getReaderStylePaths().forEach((path) => mountStyleLink(path));
 }
 
-export function removeReaderStyles() {
+export function removeReaderStyles(): void {
   getReaderStylePaths().forEach((path) => unmountStyleLink(path));
 }
 
-export function isPlayerAiStylesMounted() {
+export function isPlayerAiStylesMounted(): boolean {
   return mounted.has("entry/styles/player-ai.css");
 }
 
-export function ensurePlayerAiStyles() {
+export function ensurePlayerAiStyles(): void {
   mountStyleLink("entry/styles/player-ai.css");
 }
 
-export function removePlayerAiStyles() {
+export function removePlayerAiStyles(): void {
   unmountStyleLink("entry/styles/player-ai.css");
 }
 
-function mountStyleLink(path) {
+function mountStyleLink(path: string): void {
   if (mounted.has(path)) {
     return;
   }
@@ -57,7 +57,7 @@ function mountStyleLink(path) {
   mounted.set(path, link);
 }
 
-function unmountStyleLink(path) {
+function unmountStyleLink(path: string): void {
   const link = mounted.get(path);
   if (!link) {
     return;

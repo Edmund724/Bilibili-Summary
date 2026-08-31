@@ -17,8 +17,10 @@
   "include": [
     "extension/**/*.js",
     "extension/**/*.ts",
+    "extension/**/*.d.ts",
     "tests/**/*.js",
-    "tests/**/*.ts"
+    "tests/**/*.ts",
+    "tests/**/*.d.ts"
   ],
   "exclude": ["node_modules", "dist", "extension/entry/content-classic.js"]
 }

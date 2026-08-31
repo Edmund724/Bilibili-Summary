@@ -29,28 +29,63 @@
 // ===== port 与任务消息 =====
 
 // 页面 ↔ offscreen 文档直连的 port 名
-export const ASR_DECODE_PORT_NAME = "asr-decode";
+export const ASR_DECODE_PORT_NAME = "asr-decode" as const;
 // 页面经 port 首条消息派发任务的 action 字段取值（与 port 名同串、语义不同）
-export const ASR_DECODE_ACTION = "asr-decode";
+export const ASR_DECODE_ACTION = "asr-decode" as const;
 
 // offload 任务类型：background 的 offload-task 通道按 taskType 分发
 // （prepare 建文档 + 加规则，cleanup 删规则）
-export const ASR_TASK_PREPARE = "asr-decode-prepare";
-export const ASR_TASK_CLEANUP = "asr-decode-cleanup";
+export const ASR_TASK_PREPARE = "asr-decode-prepare" as const;
+export const ASR_TASK_CLEANUP = "asr-decode-cleanup" as const;
+
+export type AsrTaskType = typeof ASR_TASK_PREPARE | typeof ASR_TASK_CLEANUP;
 
 // ===== port 消息 type（offscreen handler → 页面） =====
 
 // 引擎产出的进度文本（语音识别中 N 片…），页面原样中继 onProgress
-export const ASR_MSG_PROGRESS = "progress";
+export const ASR_MSG_PROGRESS = "progress" as const;
 // 单片转写结果 { index, startSec, durationSec, result }，result 为适配器
 // 单片结果 { text, segments?, _asrDiag? }，原样透传（纯 JSON 文本）
-export const ASR_MSG_CHUNK_RESULT = "chunk-result";
+export const ASR_MSG_CHUNK_RESULT = "chunk-result" as const;
 // 终态汇总 { totalChunks, skippedSegments, failedChunks }
-export const ASR_MSG_DONE = "done";
+export const ASR_MSG_DONE = "done" as const;
 // 终态错误 { error, code?, reason? }：code（如 "asr-skip"）与结构化 reason
 // （asr-skip 的 "asr-disabled" / "no-asr-config"）随错误对象透传，最终落
 // clipState.noSubtitleReason（asr/fallback.js）
-export const ASR_MSG_ERROR = "error";
+export const ASR_MSG_ERROR = "error" as const;
+
+export type AsrPortMessageType =
+  | typeof ASR_MSG_PROGRESS
+  | typeof ASR_MSG_CHUNK_RESULT
+  | typeof ASR_MSG_DONE
+  | typeof ASR_MSG_ERROR;
+
+export type AsrProgressMessage = { type: typeof ASR_MSG_PROGRESS; data: string };
+export type AsrChunkResultMessage = {
+  type: typeof ASR_MSG_CHUNK_RESULT;
+  index: number;
+  startSec: number;
+  durationSec: number;
+  result: unknown;
+};
+export type AsrDoneMessage = {
+  type: typeof ASR_MSG_DONE;
+  totalChunks: number;
+  skippedSegments: number;
+  failedChunks: number;
+};
+export type AsrErrorMessage = {
+  type: typeof ASR_MSG_ERROR;
+  error: string;
+  code?: string;
+  reason?: string;
+};
+
+export type AsrPortMessage =
+  | AsrProgressMessage
+  | AsrChunkResultMessage
+  | AsrDoneMessage
+  | AsrErrorMessage;
 
 // ===== 页面侧任务结果形状（createOffscreenChunkHost 的 resolve 值） =====
 //   { results, totalChunks, skippedSegments, failedChunks }

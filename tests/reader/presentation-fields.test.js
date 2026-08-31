@@ -243,9 +243,9 @@ describe("D. 源码扫描：data-boc-* 属性字面量必须登记在案", () =>
     "extension/reader/page-state.js",
     "extension/reader/init-essentials.js",
     "extension/entry/content.js",
-    "extension/core/message-handler.js",
+    "extension/core/message-handler.ts",
     "extension/ui/ui-renderer.js",
-    "extension/bilibili/video-probe.js",
+    "extension/bilibili/video-probe.ts",
     "extension/entry/styles/reader-gate.css"
   ];
   const ATTR_PATTERN = /data-boc-(?:reader|reading)-[a-z-]+/g;

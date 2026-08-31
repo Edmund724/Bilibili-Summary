@@ -1,18 +1,3 @@
-// extension/bilibili/gateway.js
-// One deep B站 (Bilibili) fetch+map gateway, shared by the content script and the
-// background service worker. It centralizes the request/response orchestration that
-// previously lived in both subtitle-fetch.js and background.js, behind a transport seam.
-//
-// The orchestration layer is pure. Transports and runtime-facing adapters live here
-// too, split by side:
-//   - bgFetchJson: direct fetch with B站 headers (background service worker)
-//   - contentFetchJson: routes B站 requests through sendRuntimeMessage "fetch-json"
-//     so they carry the B站 headers in the background and bypass page CORS
-// The caller injects a `transport(url) -> Promise<json>` into the orchestration
-// functions, so both sides share one implementation and avoid behavior drift.
-// Content-side adapters (getCurrentAid / readRuntimeVideoDuration / fetchSubtitleBody /
-// fetchHotComments) are thin wrappers over the pure orchestration + contentFetchJson.
-
 import { formatLocalDate } from "../shared/utils.js";
 import { toReadableText, isExtensionContextInvalidated } from "../shared/error-helpers.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
@@ -22,16 +7,26 @@ import { logInfo } from "../shared/logging.js";
 import {
   buildSubtitleInfoRequests,
   buildBiliApiError,
-  normalizeHotComments
+  normalizeHotComments,
+  type HotComment,
+  type SubtitleInfoRequest
 } from "./bili-api-shared.js";
 import {
   mapChaptersFromPlayerData,
   mapSubtitleTracks
 } from "../subtitle/selection.js";
 
+declare global {
+  interface Window {
+    __INITIAL_STATE__?: { aid?: unknown };
+  }
+}
+
+export type JsonTransport = (url: string) => Promise<unknown>;
+
 // True for B站 request hosts (API + subtitle/CDN) that need the B站 request headers
 // and should be routed through the background fetch handler. Shared by the transports.
-export function isBiliUrl(url) {
+export function isBiliUrl(url: unknown): boolean {
   try {
     const parsed = new URL(String(url || ""));
     const host = parsed.hostname;
@@ -43,7 +38,7 @@ export function isBiliUrl(url) {
 
 // ===== transports =====
 
-export async function bgFetchJson(url) {
+export async function bgFetchJson<T = unknown>(url: string): Promise<T> {
   const headers = new Headers();
   const isBiliRequest = isBiliUrl(url);
   if (isBiliRequest) {
@@ -53,12 +48,12 @@ export async function bgFetchJson(url) {
     headers.set("Pragma", "no-cache");
   }
 
-  const options = {
+  const options: RequestInit = {
     method: "GET",
     credentials: "include",
     cache: "no-store"
   };
-  if (headers.size > 0) {
+  if ((headers as unknown as { size: number }).size > 0) {
     options.headers = headers;
   }
   if (isBiliRequest) {
@@ -70,12 +65,12 @@ export async function bgFetchJson(url) {
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }
-  return response.json();
+  return response.json() as Promise<T>;
 }
 
-async function fetchJson(url) {
+async function fetchJson<T = unknown>(url: string): Promise<T> {
   if (isBiliUrl(url)) {
-    return fetchJsonInBackground(url);
+    return fetchJsonInBackground<T>(url);
   }
 
   const response = await fetch(url, {
@@ -87,20 +82,21 @@ async function fetchJson(url) {
     throw new Error(`请求失败：${response.status}`);
   }
 
-  return response.json();
+  return response.json() as Promise<T>;
 }
 
-export async function contentFetchJson(url) {
-  return fetchJson(url);
+export async function contentFetchJson<T = unknown>(url: string): Promise<T> {
+  return fetchJson<T>(url);
 }
 
-async function fetchJsonInBackground(url) {
+async function fetchJsonInBackground<T = unknown>(url: string): Promise<T> {
   try {
     const resp = await sendRuntimeMessage({ type: "fetch-json", url });
-    if (!resp?.ok) {
-      throw new Error(toReadableText(resp?.error, "Background fetch failed"));
+    const respLike = resp as { ok?: unknown; error?: unknown; data?: unknown };
+    if (!respLike?.ok) {
+      throw new Error(toReadableText(respLike?.error, "Background fetch failed"));
     }
-    return resp.data;
+    return respLike.data as T;
   } catch (error) {
     if (isExtensionContextInvalidated(error)) {
       throw new Error("扩展刚刚更新，请刷新当前页面后重试。");
@@ -111,17 +107,17 @@ async function fetchJsonInBackground(url) {
 
 // ===== content-side adapters =====
 
-export function getCurrentAid() {
+export function getCurrentAid(): number {
   let aid = Number(state.clip.aid) || 0;
   if (!aid && typeof window !== "undefined") {
     try {
-      aid = Number(window?.__INITIAL_STATE__?.aid) || 0;
+      aid = Number(window.__INITIAL_STATE__?.aid) || 0;
     } catch {}
   }
   return aid;
 }
 
-export function readRuntimeVideoDuration() {
+export function readRuntimeVideoDuration(): number {
   const video = getRuntimeVideoElement();
   const duration = Number(video?.duration);
   if (Number.isFinite(duration) && duration > 0) {
@@ -130,13 +126,13 @@ export function readRuntimeVideoDuration() {
   return 0;
 }
 
-export async function fetchSubtitleBody(url) {
+export async function fetchSubtitleBody<T = unknown>(url: string): Promise<{ body: T[] }> {
   logInfo("[BOC] fetch subtitle body", { url });
-  const body = await fetchSubtitleBodyJson(contentFetchJson, url);
+  const body = await fetchSubtitleBodyJson<T>(contentFetchJson, url);
   return { body };
 }
 
-export async function fetchHotComments(count = 20) {
+export async function fetchHotComments(count = 20): Promise<HotComment[]> {
   const safeCount = Math.max(0, Number(count) || 0);
   if (!safeCount) {
     return [];
@@ -152,14 +148,32 @@ export async function fetchHotComments(count = 20) {
 
 // ===== gateway orchestration =====
 
-export async function fetchVideoMeta(transport, bvid) {
+export interface VideoPage {
+  cid: string;
+  page: number;
+  part: string;
+  duration: number;
+}
+
+export interface VideoMeta {
+  aid: string;
+  title: string;
+  author: string;
+  description: string;
+  uploadDate: string;
+  defaultCid: string;
+  defaultDuration: number;
+  pages: VideoPage[];
+}
+
+export async function fetchVideoMeta(transport: JsonTransport, bvid: string): Promise<VideoMeta> {
   const url = `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`;
   const payload = await transport(url);
-  if (payload?.code !== 0) {
-    throw new Error(toReadableText(payload?.message, "无法获取视频信息"));
+  if ((payload as { code?: unknown })?.code !== 0) {
+    throw new Error(toReadableText((payload as { message?: unknown })?.message, "无法获取视频信息"));
   }
 
-  const data = payload.data || {};
+  const data = (payload as { data?: Record<string, unknown> }).data || {};
   const pubdate = Number(data.pubdate || 0);
   const uploadDate = pubdate > 0 ? formatLocalDate(pubdate * 1000) : "";
   const pages = Array.isArray(data.pages) ? data.pages : [];
@@ -167,30 +181,52 @@ export async function fetchVideoMeta(transport, bvid) {
   return {
     aid: String(data.aid || ""),
     title: String(data.title || ""),
-    author: String(data.owner?.name || ""),
+    author: String((data.owner as { name?: unknown })?.name || ""),
     description: String(data.desc || ""),
     uploadDate,
     defaultCid: data.cid ? String(data.cid) : "",
     defaultDuration: Number(data.duration || 0) || 0,
     pages: pages.map((item) => ({
-      cid: String(item.cid || ""),
-      page: Number(item.page || 0) || 0,
-      part: String(item.part || "").trim(),
-      duration: Number(item.duration || 0) || 0
+      cid: String((item as { cid?: unknown })?.cid || ""),
+      page: Number((item as { page?: unknown })?.page || 0) || 0,
+      part: String((item as { part?: unknown })?.part || "").trim(),
+      duration: Number((item as { duration?: unknown })?.duration || 0) || 0
     }))
   };
 }
 
-export async function fetchSubtitleBundle(transport, { bvid, cid, aid }) {
-  const requests = buildSubtitleInfoRequests({ bvid, cid, aid });
-  const fetchByRequest = async (request) => {
+export interface SubtitleTrack {
+  id: string;
+  lan: string;
+  lanDoc: string;
+  subtitleUrl: string;
+  source: string;
+}
+
+export interface Chapter {
+  title: string;
+  from: number;
+  to: number;
+  source: string;
+}
+
+export async function fetchSubtitleBundle(
+  transport: JsonTransport,
+  { bvid, cid, aid }: { bvid?: string | number; cid?: string | number; aid?: string | number }
+): Promise<{ tracks: SubtitleTrack[]; chapters: Chapter[] }> {
+  const requests: SubtitleInfoRequest[] = buildSubtitleInfoRequests({ bvid, cid, aid });
+
+  const fetchByRequest = async (request: SubtitleInfoRequest) => {
     const payload = await transport(request.url);
-    if (payload?.code !== 0) {
+    if ((payload as { code?: unknown })?.code !== 0) {
       throw buildBiliApiError(payload, "无法获取字幕列表");
     }
 
-    const chapters = mapChaptersFromPlayerData(payload.data);
-    const subtitles = mapSubtitleTracks(payload.data?.subtitle?.subtitles || [], request.source);
+    const chapters = mapChaptersFromPlayerData((payload as { data?: unknown }).data) as Chapter[];
+    const subtitles = mapSubtitleTracks(
+      ((payload as { data?: { subtitle?: { subtitles?: unknown } } }).data?.subtitle?.subtitles || []) as unknown[],
+      request.source
+    ) as SubtitleTrack[];
     const withUrl = subtitles.filter((item) => item.subtitleUrl);
     return { source: request.source, chapters, withUrl };
   };
@@ -226,12 +262,16 @@ export async function fetchSubtitleBundle(transport, { bvid, cid, aid }) {
   }
 }
 
-async function fetchSubtitleBodyJson(transport, url) {
+async function fetchSubtitleBodyJson<T>(transport: JsonTransport, url: string): Promise<T[]> {
   const payload = await transport(url);
-  return Array.isArray(payload?.body) ? payload.body : [];
+  return Array.isArray((payload as { body?: unknown })?.body) ? (payload as { body: T[] }).body : [];
 }
 
-async function fetchHotCommentsJson(transport, aid, count = 18) {
+async function fetchHotCommentsJson(
+  transport: JsonTransport,
+  aid: number | string,
+  count = 18
+): Promise<HotComment[]> {
   const safeAid = Number(aid || 0) || 0;
   const safeCount = Math.max(0, Number(count) || 0);
   if (!safeAid || !safeCount) {
@@ -240,12 +280,16 @@ async function fetchHotCommentsJson(transport, aid, count = 18) {
 
   const url = `https://api.bilibili.com/x/v2/reply/main?type=1&oid=${safeAid}&mode=3&ps=${safeCount}&pn=1`;
   const payload = await transport(url).catch(() => null);
-  const replies = Array.isArray(payload?.data?.replies) ? payload.data.replies : [];
+  const replies = Array.isArray(
+    (payload as { data?: { replies?: unknown } })?.data?.replies
+  )
+    ? (payload as { data: { replies: unknown[] } }).data.replies
+    : [];
   return normalizeHotComments(
     replies.map((item) => ({
-      uname: item?.member?.uname || "匿名",
-      like: item?.like || 0,
-      message: item?.content?.message || ""
+      uname: (item as { member?: { uname?: unknown } })?.member?.uname || "匿名",
+      like: (item as { like?: unknown })?.like || 0,
+      message: (item as { content?: { message?: unknown } })?.content?.message || ""
     })),
     safeCount
   );
