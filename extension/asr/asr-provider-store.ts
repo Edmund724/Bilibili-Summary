@@ -1,4 +1,4 @@
-// extension/asr/asr-provider-store.js
+// extension/asr/asr-provider-store.ts
 // ASR（语音转写）平台 Provider/Key 的设置存储 + 连通性探针。
 // 列表 CRUD 委托给 extension/core/provider-store.js 的 createProviderStore
 // （与 AI 平台存储共用同一工厂）：provider 列表持久化在 chrome.storage.sync，
@@ -25,15 +25,31 @@ import { getMergedSettings } from "../core/settings-store.js";
 // 切片/解码校验那部分不需要进 SW 图（ADR-0003 拆静态边）。
 import { encodeWavBytes } from "./wav-encode.js";
 
+export type AsrProviderType = "openai-transcriptions";
+
+export interface AsrProvider {
+  id: string;
+  presetId: string;
+  name: string;
+  type: AsrProviderType;
+  baseUrl: string;
+  model: string;
+  supportsTimestamps: boolean;
+  enabled: boolean;
+  hasSavedKey?: boolean;
+  apiKey?: string;
+  language?: string;
+}
+
 // ===== ASR 平台列表存储 =====
 
 const ASR_PROVIDER_KEYS_STORAGE = "asrProviderKeys";
 const ASR_PROVIDERS_STORAGE = "asrProviders";
 
-export const asrProviderStore = createProviderStore({
+export const asrProviderStore = createProviderStore<AsrProvider>({
   listStorageKey: ASR_PROVIDERS_STORAGE,
   keysStorageKey: ASR_PROVIDER_KEYS_STORAGE,
-  normalizeProvider: normalizeAsrProvider
+  normalizeProvider: normalizeAsrProvider as (item: unknown) => AsrProvider | null
 });
 
 // ===== 静音 WAV 生成（探针用） =====
@@ -42,9 +58,18 @@ export const asrProviderStore = createProviderStore({
 // WAV header 复用 asr/wav-encode.js 的 encodeWavBytes：静音即全零 Float32 采样
 // （量化后仍为 0x0000，data 段全零）。用于 openai-transcriptions 探针。
 // 1 秒 16k 单声道 16bit = 16000 采样 * 2 字节 = 32000 字节 PCM。
-export function buildSilentWavBytes(durationSec = 1, sampleRate = 16000) {
+export function buildSilentWavBytes(durationSec = 1, sampleRate = 16000): Uint8Array {
   const sampleCount = Math.max(1, Math.floor(Number(durationSec) * sampleRate));
   return encodeWavBytes(new Float32Array(sampleCount), sampleRate);
+}
+
+export interface AsrProbeOptions {
+  transport?: (url: string, init: RequestInit) => Promise<Response>;
+}
+
+export interface AsrProbeResult {
+  ok: boolean;
+  error?: string;
 }
 
 // ===== 连通性探针 =====
@@ -54,7 +79,10 @@ export function buildSilentWavBytes(durationSec = 1, sampleRate = 16000) {
 // 可选第二参 options.transport：注入传输函数（测试用 fake transport），
 // 缺省在调用时取全局 fetch（而非模块加载时绑定）。
 // 返回 { ok: boolean, error?: string }。
-export async function testAsrConnection(provider, { transport } = {}) {
+export async function testAsrConnection(
+  provider: unknown,
+  { transport }: AsrProbeOptions = {}
+): Promise<AsrProbeResult> {
   const normalized = normalizeAsrProvider(provider);
   if (!normalized) {
     return { ok: false, error: "平台配置不完整或 type 非法" };
@@ -69,7 +97,7 @@ export async function testAsrConnection(provider, { transport } = {}) {
   }
 
   // 解析 apiKey：优先 provider.apiKey，否则按 id 读已存 Key
-  let apiKey = String(provider?.apiKey || "").trim();
+  let apiKey = String((provider as { apiKey?: string }).apiKey || "").trim();
   if (!apiKey && normalized.id) {
     apiKey = await asrProviderStore.getKey(normalized.id);
   }
@@ -81,7 +109,7 @@ export async function testAsrConnection(provider, { transport } = {}) {
     let language = "";
     try {
       const settings = await getMergedSettings();
-      language = settings?.asrLanguage || "";
+      language = (settings?.asrLanguage as string) || "";
     } catch {
       // 设置读取失败不阻塞探针：按 auto 处理（不附语言参数）
     }
@@ -97,13 +125,27 @@ export async function testAsrConnection(provider, { transport } = {}) {
   return { ok: false, error: "未知的 ASR 平台类型：" + normalized.type };
 }
 
+interface OpenAiTranscriptionsProbeParams {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  language: string;
+  transport?: AsrProbeOptions["transport"];
+}
+
 // openai-transcriptions 探针：构造 1 秒 16kHz 静音 WAV POST 到
 // `${baseUrl}/audio/transcriptions`，HTTP 200 即通过。
 // 适用于 SiliconFlow / 本地 Whisper / 自定义。
 // 语言档位（provider.language）以查询参数附带：选 zh/en 时同时验证该语言的
 // 请求链路（SiliconFlow 辰星只有 ?language=english 才启用英文识别，静音探针
 // 的 200 即证明该参数被接受）。
-async function probeOpenAiTranscriptions({ baseUrl, apiKey, model, language, transport }) {
+async function probeOpenAiTranscriptions({
+  baseUrl,
+  apiKey,
+  model,
+  language,
+  transport
+}: OpenAiTranscriptionsProbeParams): Promise<AsrProbeResult> {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
   if (!normalizedBaseUrl) {
     return { ok: false, error: "请填写 baseUrl" };
@@ -113,9 +155,9 @@ async function probeOpenAiTranscriptions({ baseUrl, apiKey, model, language, tra
   }
 
   const wavBytes = buildSilentWavBytes(1, 16000);
-  const headers = {};
+  const headers: Record<string, string> = {};
   if (apiKey) {
-    headers["Authorization"] = `Bearer ${apiKey}`;
+    headers.Authorization = `Bearer ${apiKey}`;
   }
 
   // 语言档位转查询参数（与适配器 buildTranscriptionUrl 同规则）：
@@ -126,16 +168,16 @@ async function probeOpenAiTranscriptions({ baseUrl, apiKey, model, language, tra
     : "";
 
   const form = new FormData();
-  form.append("file", new Blob([wavBytes], { type: "audio/wav" }), "probe.wav");
+  form.append("file", new Blob([wavBytes as BlobPart], { type: "audio/wav" }), "probe.wav");
   form.append("model", model);
   form.append("response_format", "verbose_json");
   // 不把 language 放 multipart 字段（SiliconFlow 只认查询参数）
   // 千万不要手动设 Content-Type，浏览器自动带 boundary
 
   // 传输层可注入（测试用 fake transport）；默认在调用时取全局 fetch。
-  const doFetch = transport || ((...args) => fetch(...args));
+  const doFetch = transport || ((...args: [string, RequestInit]) => fetch(...args));
 
-  let response;
+  let response: Response;
   try {
     response = await doFetch(`${normalizedBaseUrl}/audio/transcriptions${query}`, {
       method: "POST",

@@ -1,4 +1,4 @@
-// ladder.js — 聊天「阶梯」分派策略（ADR-0001）的深模块：
+// ladder.ts — 聊天「阶梯」分派策略（ADR-0001）的深模块：
 // 预算内单次流式 → 超预算 Map-Reduce 分段编排（含追问压缩、成本护栏）→
 // 单次溢出转 Map-Reduce 重试一次。所有依赖经 deps 注入（含 postMessage
 // 所用的 port），便于在无 chrome 环境下逐分支注入 fake 做测试。
@@ -11,6 +11,105 @@ import { orchestrateMapReduce as _orchestrateMapReduce } from "./map-reduce.js";
 import { resolveFollowupContext as _resolveFollowupContext } from "./followup-router.js";
 import { trimRecentTurns as _trimRecentTurns } from "./followup-context.js";
 import { buildCostGuardNotice as _buildCostGuardNotice } from "./cost-guard.js";
+
+export interface ChatMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
+export interface ChatContext {
+  subtitleBody?: unknown[];
+  chapters?: unknown[];
+  [key: string]: unknown;
+}
+
+export interface ChatMsg {
+  context?: ChatContext;
+  history?: ChatMessage[];
+  prompt?: string;
+  thinkingLevel?: string;
+  [key: string]: unknown;
+}
+
+export interface ChatProvider {
+  id?: string;
+  apiKey?: string;
+  [key: string]: unknown;
+}
+
+export interface ChatPort {
+  postMessage(message: unknown): void;
+}
+
+export interface BudgetPlan {
+  mode: "single" | "map-reduce";
+  estimatedCalls?: number;
+  estimatedTokens?: number;
+}
+
+export interface StreamChatArgs {
+  provider: ChatProvider;
+  context: ChatContext;
+  userPrompt: string;
+  history: ChatMessage[];
+  thinkingLevel?: string;
+  port: ChatPort;
+  signal: AbortSignal | string | null;
+  onActivity?: () => void;
+}
+
+export type StreamChatFn = (args: StreamChatArgs) => Promise<unknown>;
+
+export interface OrchestrateMapReduceArgs {
+  provider: ChatProvider;
+  context: ChatContext;
+  plan: BudgetPlan;
+  port: ChatPort;
+  signal: AbortSignal | string | null;
+  thinkingLevel?: string;
+  onProgress: (notice: string) => void;
+}
+
+export type OrchestrateMapReduceFn = (args: OrchestrateMapReduceArgs) => Promise<unknown>;
+
+export interface ResolveFollowupContextArgs {
+  context: ChatContext;
+  plan: BudgetPlan;
+  history: ChatMessage[];
+  userPrompt: string;
+}
+
+export type ResolveFollowupContextFn = (args: ResolveFollowupContextArgs) => Promise<ChatContext | null>;
+
+export type BuildBudgetPlanFn = (args: { body: unknown[]; chapters: unknown[] }) => BudgetPlan;
+
+export interface CostGuardNotice {
+  shouldPrompt: boolean;
+  message: string;
+}
+
+export type BuildCostGuardNoticeFn = (args: { estimatedCalls?: number; estimatedTokens?: number }) => CostGuardNotice;
+
+export type TrimRecentTurnsFn = (history?: ChatMessage[]) => ChatMessage[];
+
+export interface RunLadderChatArgs {
+  msg: ChatMsg;
+  provider: ChatProvider;
+  port: ChatPort;
+  signal: AbortSignal | string | null;
+}
+
+export interface RunLadderChatDeps {
+  streamChat?: StreamChatFn;
+  orchestrateMapReduce?: OrchestrateMapReduceFn;
+  resolveFollowupContext?: ResolveFollowupContextFn;
+  buildBudgetPlan?: BuildBudgetPlanFn;
+  buildCostGuardNotice?: BuildCostGuardNoticeFn;
+  trimRecentTurns?: TrimRecentTurnsFn;
+  askCostGuard: (port: ChatPort, message: string) => Promise<unknown>;
+  onActivity?: () => void;
+  pauseIdleTimeout?: () => void;
+}
 
 /**
  * 执行阶梯分派。args：
@@ -25,18 +124,17 @@ import { buildCostGuardNotice as _buildCostGuardNotice } from "./cost-guard.js";
  * 全部可注入（默认用真实模块），便于在无 chrome 环境下逐分支注入 fake 做测试；
  * askCostGuard 依赖 offscreen 的 Promise 簿记，必须由 offscreen 注入。
  */
-export async function runLadderChat({ msg, provider, port, signal }, deps) {
-  const {
-    streamChat = _streamChat,
-    orchestrateMapReduce = _orchestrateMapReduce,
-    resolveFollowupContext = _resolveFollowupContext,
-    buildBudgetPlan = _buildBudgetPlan,
-    buildCostGuardNotice = _buildCostGuardNotice,
-    trimRecentTurns = _trimRecentTurns,
-    askCostGuard,
-    onActivity,
-    pauseIdleTimeout
-  } = deps;
+export async function runLadderChat(
+  { msg, provider, port, signal }: RunLadderChatArgs,
+  deps: RunLadderChatDeps
+): Promise<void> {
+  const streamChat: StreamChatFn = deps.streamChat ?? (_streamChat as unknown as StreamChatFn);
+  const orchestrateMapReduce: OrchestrateMapReduceFn = deps.orchestrateMapReduce ?? (_orchestrateMapReduce as unknown as OrchestrateMapReduceFn);
+  const resolveFollowupContext: ResolveFollowupContextFn = deps.resolveFollowupContext ?? (_resolveFollowupContext as unknown as ResolveFollowupContextFn);
+  const buildBudgetPlan: BuildBudgetPlanFn = deps.buildBudgetPlan ?? (_buildBudgetPlan as unknown as BuildBudgetPlanFn);
+  const buildCostGuardNotice: BuildCostGuardNoticeFn = deps.buildCostGuardNotice ?? (_buildCostGuardNotice as unknown as BuildCostGuardNoticeFn);
+  const trimRecentTurns: TrimRecentTurnsFn = deps.trimRecentTurns ?? (_trimRecentTurns as unknown as TrimRecentTurnsFn);
+  const { askCostGuard, onActivity, pauseIdleTimeout } = deps;
 
   // 阶梯分派：预算内（≤100k token）走单次流式；超预算走 Map-Reduce 分段编排。
   const plan = buildBudgetPlan({
@@ -69,7 +167,7 @@ export async function runLadderChat({ msg, provider, port, signal }, deps) {
       } catch (e) {
         // 兜底：压缩摘要 + 检索注入仍意外溢出（HTTP context-length）时，绝不静默无输出。
         // streamChat 仅在溢出时抛带 .overflow 标记的错误（其余失败经 port error 回吐）。
-        if (!e?.overflow) {
+        if (!(e as { overflow?: boolean }).overflow) {
           throw e;
         }
         port.postMessage({ type: "error", error: "追问内容仍超出上下文预算，请换个更具体的问题重试" });
@@ -84,13 +182,13 @@ export async function runLadderChat({ msg, provider, port, signal }, deps) {
     });
     if (guard.shouldPrompt) {
       // 等待用户确认期间暂停空闲超时计时，确认后重新武装。
-      pauseIdleTimeout();
-      const confirmed = await askCostGuard(port, guard.message);
+      pauseIdleTimeout?.();
+      const confirmed = Boolean(await askCostGuard(port, guard.message));
       if (!confirmed) {
         port.postMessage({ type: "stopped", reason: "已取消" });
         return;
       }
-      onActivity();
+      onActivity?.();
     }
 
     await orchestrateMapReduce({
@@ -100,10 +198,10 @@ export async function runLadderChat({ msg, provider, port, signal }, deps) {
       port,
       signal,
       thinkingLevel: msg.thinkingLevel,
-      onProgress: function (notice) {
+      onProgress: function (notice: string) {
         // 进度回吐 + 每段完成重挂空闲超时（覆盖下一段模型调用）
         port.postMessage({ type: "notice", data: notice });
-        onActivity();
+        onActivity?.();
       }
     });
     return;
@@ -124,7 +222,7 @@ export async function runLadderChat({ msg, provider, port, signal }, deps) {
       onActivity
     });
   } catch (e) {
-    if (!e?.overflow) {
+    if (!(e as { overflow?: boolean }).overflow) {
       throw e;
     }
     await orchestrateMapReduce({
@@ -134,10 +232,10 @@ export async function runLadderChat({ msg, provider, port, signal }, deps) {
       port,
       signal,
       thinkingLevel: msg.thinkingLevel,
-      onProgress: function (notice) {
+      onProgress: function (notice: string) {
         // 进度回吐 + 每段完成重挂空闲超时（覆盖下一段模型调用）
         port.postMessage({ type: "notice", data: notice });
-        onActivity();
+        onActivity?.();
       }
     });
   }

@@ -1,4 +1,4 @@
-// extension/core/provider-handlers.js
+// extension/core/provider-handlers.ts
 // Provider 消息处理器的通用工厂。
 // extension/entry/background.js 里 AI 平台与 ASR 平台各有一组形状相同的
 // 消息处理器（列表 / 读取 Key / 保存列表 / 写单个 Key / 删除 / 连通性测试），
@@ -16,6 +16,36 @@
 //   并返回 false
 // - 所有 Promise 路径返回 true（异步回包）
 
+export interface ProviderHandlersMessage {
+  providerId?: string | number;
+  providers?: unknown[];
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  provider?: unknown;
+}
+
+export type SendResponse = (response: unknown) => void;
+
+export interface ProviderMessageHandlersDeps {
+  loadProviders: () => Promise<unknown[]>;
+  saveProviders: (items: unknown[]) => Promise<unknown[]>;
+  deleteProvider: (providerId: string) => Promise<unknown[]>;
+  loadKeys: () => Promise<Record<string, string>>;
+  saveKey?: (providerId: string, apiKey: string) => Promise<unknown>;
+  probe: (provider: unknown) => Promise<unknown>;
+  pickTestProvider?: (message: ProviderHandlersMessage) => { provider: unknown } | { error: string };
+}
+
+export interface ProviderMessageHandlers {
+  list: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
+  get: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
+  save: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
+  remove: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
+  test: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
+  setKey?: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
+}
+
 export function createProviderMessageHandlers({
   loadProviders,
   saveProviders,
@@ -24,12 +54,12 @@ export function createProviderMessageHandlers({
   saveKey,
   probe,
   pickTestProvider
-}) {
+}: ProviderMessageHandlersDeps): ProviderMessageHandlers {
   // 缺省探针输入装配：平铺字段消息（ai-providers-test 的契约）。
   // baseUrl 缺失属于同步失败：回包 { ok: false, error: "请填写 baseUrl" }
   // 并让处理器返回 false；Key 解析是异步的：优先消息直带的 apiKey（用户
   // 重输的场景），否则按 providerId 从已存 Key 代查，都没有则为空串。
-  function pickFlatTestProvider(message) {
+  function pickFlatTestProvider(message: ProviderHandlersMessage): { provider: Promise<unknown> } | { error: string } {
     const baseUrl = String(message.baseUrl || "").trim();
     const providerId = String(message.providerId || "").trim();
     const model = String(message.model || "").trim();
@@ -55,15 +85,16 @@ export function createProviderMessageHandlers({
 
   const pickProbeProvider = pickTestProvider || pickFlatTestProvider;
 
-  function list(message, sender, sendResponse) {
+  function list(_message: unknown, _sender: unknown, sendResponse: SendResponse): boolean {
     loadProviders()
       .then((items) => sendResponse({ ok: true, providers: items }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
+      .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
 
-  function get(message, sender, sendResponse) {
-    const providerId = String(message.providerId || "").trim();
+  function get(message: unknown, _sender: unknown, sendResponse: SendResponse): boolean {
+    const msg = message as ProviderHandlersMessage;
+    const providerId = String(msg.providerId || "").trim();
     if (!providerId) {
       sendResponse({ ok: false, error: "缺少 providerId" });
       return false;
@@ -73,34 +104,37 @@ export function createProviderMessageHandlers({
         const apiKey = String(keys[providerId] || "").trim();
         sendResponse({ ok: true, apiKey });
       })
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
+      .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
 
-  function save(message, sender, sendResponse) {
-    saveProviders(message.providers || [])
+  function save(message: unknown, _sender: unknown, sendResponse: SendResponse): boolean {
+    const msg = message as ProviderHandlersMessage;
+    saveProviders(msg.providers || [])
       .then((items) => sendResponse({ ok: true, providers: items }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
+      .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
 
-  function remove(message, sender, sendResponse) {
-    deleteProvider(String(message.providerId || ""))
+  function remove(message: unknown, _sender: unknown, sendResponse: SendResponse): boolean {
+    const msg = message as ProviderHandlersMessage;
+    deleteProvider(String(msg.providerId || ""))
       .then((items) => sendResponse({ ok: true, providers: items }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
+      .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
 
-  function setKey(message, sender, sendResponse) {
-    saveKey(String(message.providerId || ""), String(message.apiKey || ""))
+  function setKey(message: unknown, _sender: unknown, sendResponse: SendResponse): boolean {
+    const msg = message as ProviderHandlersMessage;
+    saveKey!(String(msg.providerId || ""), String(msg.apiKey || ""))
       .then(() => sendResponse({ ok: true }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
+      .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
 
-  function test(message, sender, sendResponse) {
-    const picked = pickProbeProvider(message);
-    if (picked && picked.error) {
+  function test(message: unknown, _sender: unknown, sendResponse: SendResponse): boolean {
+    const picked = pickProbeProvider(message as ProviderHandlersMessage);
+    if ("error" in picked) {
       sendResponse({ ok: false, error: picked.error });
       return false;
     }
@@ -109,11 +143,11 @@ export function createProviderMessageHandlers({
       .then((resp) => sendResponse(resp))
       // 探针本身不抛错（失败以 { ok: false } 负载返回），能到这里的基本是
       // Key 存储读取失败；沿用转发探针负载的处理器的容错写法。
-      .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+      .catch((error: Error) => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   }
 
-  const handlers = { list, get, save, remove, test };
+  const handlers: ProviderMessageHandlers = { list, get, save, remove, test };
   // ASR 平台没有“写单个 Key”的消息（Key 随 saveProviders 收割进 local），
   // 只有注入了 saveKey 的家族才带 setKey 处理器。
   if (saveKey) {
@@ -124,18 +158,28 @@ export function createProviderMessageHandlers({
 
 // ===== ASR 回退运行时配置处理器 =====
 
-// 内容脚本（无字幕轨时的 ASR 转写回退，subtitle/fetcher.js）的运行时配置
-// 消息处理器工厂。provider-store 存储层由此收口在 background 侧，内容
-// bundle 不再打包 chrome.storage provider 存储。一次 getMergedSettings() 取
-// 归一化设置（标量项；asrProviders 已摘出 settings，列表经注入的
-// loadProviders 直读 provider-store），再按激活平台 id 单查已存 Key，
-// 回包一致快照：
-//   { ok, providers, activeAsrProviderId, activeKey, asrLanguage, asrAutoFallback }
-// providers 为 provider-store 归一化列表（Key 不明文回传）；activeKey 是激活
-// 平台的已存 Key——响应中唯一的 Key 材料，暴露面与旧内容侧直读存储（只持有
-// 激活平台的 Key）一致。存储读取失败 → { ok: false, error }，由调用方决定降级。
-export function createAsrRuntimeConfigHandler({ getMergedSettings, loadProviders, getAsrProviderKey }) {
-  return function handleGetAsrRuntimeConfig(message, sender, sendResponse) {
+export interface AsrRuntimeConfigSettings {
+  activeAsrProviderId?: string;
+  asrLanguage?: string;
+  asrAutoFallback?: boolean;
+}
+
+export interface AsrRuntimeConfigHandlerDeps {
+  getMergedSettings: () => Promise<AsrRuntimeConfigSettings>;
+  loadProviders: () => Promise<unknown[]>;
+  getAsrProviderKey: (providerId: string) => Promise<string>;
+}
+
+export function createAsrRuntimeConfigHandler({
+  getMergedSettings,
+  loadProviders,
+  getAsrProviderKey
+}: AsrRuntimeConfigHandlerDeps) {
+  return function handleGetAsrRuntimeConfig(
+    _message: unknown,
+    _sender: unknown,
+    sendResponse: SendResponse
+  ): boolean {
     getMergedSettings()
       .then(async (settings) => {
         const activeId = String(settings.activeAsrProviderId || "").trim();
@@ -152,7 +196,7 @@ export function createAsrRuntimeConfigHandler({ getMergedSettings, loadProviders
           asrAutoFallback: settings.asrAutoFallback === true
         });
       })
-      .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+      .catch((error: Error) => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   };
 }

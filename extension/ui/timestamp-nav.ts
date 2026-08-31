@@ -1,10 +1,9 @@
-// timestamp-nav.js — "assistant answer timestamp → clickable seek button" concern,
+// timestamp-nav.ts — "assistant answer timestamp → clickable seek button" concern,
 // extracted out of extension/pages/sidepanel.js (ticket 04 of sidepanel-split).
 //
 // Domain: ui (same dir as markdown.js / ui-renderer.js). Pure of sidepanel
 // module-level state: every sidepanel dependency arrives via the injected deps
-// object `{ contextUrl, notice, getActiveTab, matchContextUrl, sendMessageToActiveTab }`
-// — no direct reads of sidepanel globals, no chrome/window imports here.
+// object — no direct reads of sidepanel globals, no chrome/window imports here.
 //
 // NOTE (ticket 08): the seek flow reuses the sidepanel's own retrying
 // `sendMessageToActiveTab` via the injected deps field (it is NOT reimplemented
@@ -18,16 +17,20 @@
 //   - unwrapTimestampInlineCode(text)           pure; strips backticks around timestamp-only inline code
 //   - linkifyAssistantTimestamps(root, deps)    DOM walker; swaps timestamp text nodes for seek buttons
 //   - jumpToAssistantTimestamp(seconds, label, deps)  async seek; deps injected at call time
-//
-// Internal seek flow lives here (jumpToAssistantTimestamp owns the whole seek
-// flow). isTimestampOnlyInlineCode comes from ./markdown.js (its home after
-// ticket 03). sendMessageToActiveTab is NOT reimplemented here — the
-// retry-wrapped send is injected as a dep (sidepanel provides it).
+
 import { formatCompactTimestamp } from "../shared/string-utils.js";
 import { waitForTabComplete } from "../shared/tab-utils.js";
 import { isTimestampOnlyInlineCode, TIMESTAMP_PATTERN } from "./markdown.js";
 
-function parseTimestampToSeconds(value) {
+export interface TimestampNavDeps {
+  contextUrl?: string;
+  notice?: (message: string, autoHideMs?: number) => void;
+  getActiveTab?: () => Promise<{ id?: number; url?: string } | null>;
+  matchContextUrl?: (tabUrl: string, targetUrl: string) => boolean;
+  sendMessageToActiveTab?: (tabId: number, message: unknown) => Promise<{ ok?: boolean; error?: string } | null>;
+}
+
+function parseTimestampToSeconds(value: unknown): number {
   const parts = String(value || "")
     .trim()
     .split(":")
@@ -44,18 +47,18 @@ function parseTimestampToSeconds(value) {
   return 0;
 }
 
-export function unwrapTimestampInlineCode(text) {
-  return String(text || "").replace(/`([^`\n]+)`/g, (_, content) =>
+export function unwrapTimestampInlineCode(text: unknown): string {
+  return String(text || "").replace(/`([^`\n]+)`/g, (_, content: string) =>
     isTimestampOnlyInlineCode(content) ? content : `\`${content}\``
   );
 }
 
-export function linkifyAssistantTimestamps(root, deps) {
+export function linkifyAssistantTimestamps(root: Node | null | undefined, deps: TimestampNavDeps): void {
   if (!root) {
     return;
   }
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const textNodes = [];
+  const textNodes: Text[] = [];
   while (walker.nextNode()) {
     const current = walker.currentNode;
     if (!(current instanceof Text)) {
@@ -78,7 +81,7 @@ export function linkifyAssistantTimestamps(root, deps) {
     let lastIndex = 0;
     let hasMatch = false;
     TIMESTAMP_PATTERN.lastIndex = 0;
-    let match;
+    let match: RegExpExecArray | null;
     while ((match = TIMESTAMP_PATTERN.exec(text))) {
       hasMatch = true;
       if (match.index > lastIndex) {
@@ -107,7 +110,11 @@ export function linkifyAssistantTimestamps(root, deps) {
   });
 }
 
-async function jumpToAssistantTimestamp(seconds, label = "", deps = {}) {
+async function jumpToAssistantTimestamp(
+  seconds: number,
+  label = "",
+  deps: TimestampNavDeps = {}
+): Promise<void> {
   const safeSeconds = Math.max(0, Number(seconds || 0) || 0);
   const targetUrl = String(deps.contextUrl || "").trim();
   if (!targetUrl) {
@@ -129,7 +136,7 @@ async function jumpToAssistantTimestamp(seconds, label = "", deps = {}) {
       await chrome.tabs.update(tab.id, { url: targetUrl });
       await waitForTabComplete(tab.id);
     }
-    const response = await deps.sendMessageToActiveTab(tab.id, {
+    const response = await deps.sendMessageToActiveTab?.(tab.id, {
       type: "sidepanel-seek-video-time",
       seconds: safeSeconds
     });
@@ -137,6 +144,6 @@ async function jumpToAssistantTimestamp(seconds, label = "", deps = {}) {
       throw new Error(response?.error || "视频时间跳转失败");
     }
   } catch (error) {
-    deps.notice?.(`时间跳转失败：${error?.message || error}`, 2600);
+    deps.notice?.(`时间跳转失败：${(error as Error)?.message || error}`, 2600);
   }
 }

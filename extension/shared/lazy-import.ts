@@ -8,12 +8,15 @@
 // isLoaded 的语义约定（消费方依赖它区分「未加载可跳过」与「已加载/加载中需
 // 继续走异步路径」）：已存在加载请求（含仍在加载中）⇒ true；失败清缓存后
 // 回落 false。
-export function createLazyLoader(loadFn) {
-  let promise = null;
+export function createLazyLoader<T>(loadFn: () => Promise<T>): {
+  load(): Promise<T>;
+  isLoaded(): boolean;
+} {
+  let promise: Promise<T> | null = null;
   return {
     load() {
       if (!promise) {
-        promise = loadFn().catch((error) => {
+        promise = loadFn().catch((error: unknown) => {
           promise = null;
           throw error;
         });
