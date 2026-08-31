@@ -3,8 +3,9 @@
 //
 // 预设提示词有两份真相，本模块负责两份的同步写：
 //   1. sidepanelState.aiPrefs.aiPresetPrompts（内存镜像，渲染层直接读）；
-//   2. sync settings 的 aiPresetPrompts 字段（经 get-settings → save-settings
-//      全量回写，避免并发覆盖同窗口期的其他设置键）；
+//   2. sync settings 的 aiPresetPrompts 字段（只写 aiPresetPrompts 单键：
+//      background 的 saveSettings 按 key 合并写，不读全量，杜绝与其它写方
+//      ——content reader 设置、选项页——交错时的丢写）；
 // 12 条上限的截断在 add（slice(0, 12)）与 persist（slice(0, 12)）两侧各自生效，
 // 语义与迁出前一致。
 //
@@ -40,15 +41,10 @@ export function createPresetPrompts({ presetInput, renderPresetPrompts }) {
   }
 
   async function persistAiPresetPrompts() {
-    const settingsResp = await sendRuntimeMessage({ type: "get-settings" }).catch(() => ({ ok: false }));
-    if (!settingsResp?.ok || !settingsResp.settings) {
-      return;
-    }
-    const nextSettings = {
-      ...settingsResp.settings,
-      aiPresetPrompts: (sidepanelState.aiPrefs.aiPresetPrompts || []).slice(0, 12)
-    };
-    await sendRuntimeMessage({ type: "save-settings", settings: nextSettings }).catch(() => null);
+    await sendRuntimeMessage({
+      type: "save-settings",
+      settings: { aiPresetPrompts: (sidepanelState.aiPrefs.aiPresetPrompts || []).slice(0, 12) }
+    }).catch(() => null);
   }
 
   return { addPresetPrompt, removePresetPrompt, persistAiPresetPrompts };
