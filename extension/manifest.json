@@ -52,7 +52,8 @@
     {
       "resources": [
         "entry/content-main.mjs",
-        "entry/chunks/*"
+        "entry/chunks/*",
+        "entry/styles/*"
       ],
       "matches": ["https://www.bilibili.com/*"]
     }

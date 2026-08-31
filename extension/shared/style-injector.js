@@ -2,10 +2,9 @@
 // 与播放器 AI 表（styles/player-ai.css）不再经 manifest 常驻注入，改由本模块
 // 在对应能力启用时挂载。
 //
-// 挂载机制：<link rel="stylesheet" href="chrome.runtime.getURL(...)">。扩展包内
-// 静态文件直接可用，无需 web_accessible_resources（manifest WAR 只约束页面
-// 侧 fetch/script 对扩展资源的访问，样式表由浏览器渲染管线加载，不受 WAR 管
-// 辖——Chrome MV3 扩展页内 link 引用自身打包文件无需列 WAR）。
+// 挂载机制：<link rel="stylesheet" href="chrome.runtime.getURL(...)">。link
+// 挂进页面 DOM 后由页面渲染管线加载，属页面侧资源访问——三份样式表依赖
+// manifest WAR 里的 "entry/styles/*" 放行（matches 限 www.bilibili.com）。
 //
 // 为什么不用 fetch + textContent/adoptedStyleSheets：内容脚本建 link 的样式
 // 参与级联顺序与原 manifest css 注入一致（同为文档级样式表，晚挂则靠后），
