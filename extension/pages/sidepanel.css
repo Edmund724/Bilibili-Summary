@@ -573,6 +573,7 @@ body {
 }
 
 .sp-input-row {
+  position: relative;
   display: flex;
   align-items: stretch;
   gap: 8px;
@@ -858,9 +859,12 @@ body {
   box-shadow: 0 0 0 2px rgba(207, 216, 227, 0.32);
 }
 
+/* 停止按钮定位在输入框内部的右下角：流式期间输入框已清空且禁用，不会压住文字 */
 .sp-stop-btn {
-  flex: 0 0 auto;
-  align-self: flex-end;
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 1;
   height: 36px;
   padding: 0 12px;
   border: 1px solid #e3e8ef;
