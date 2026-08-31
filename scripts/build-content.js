@@ -53,7 +53,6 @@ if (!versionJsVersion || versionJsVersion !== manifestVersion) {
   process.exit(1);
 }
 
-const minify = process.env.BOC_MINIFY !== "0";
 const REQUIRED_MARKER = "__BOC_CONTENT_SCRIPT_LOADED__";
 const MAIN_MODULE_BASENAME = "content-main.mjs";
 
@@ -115,7 +114,8 @@ async function buildMainPackage() {
     splitting: true,
     format: "esm",
     platform: "browser",
-    minify,
+    minify: true,
+    target: "chrome120",
     plugins: [localImportGuard],
   });
 }
@@ -127,7 +127,8 @@ async function buildBootstrap() {
     bundle: true,
     format: "iife",
     platform: "browser",
-    minify,
+    minify: true,
+    target: "chrome120",
     plugins: [localImportGuard],
   });
 }
@@ -205,8 +206,8 @@ function report() {
     0
   );
 
-  console.log(`Wrote ${bootstrapOutfile} (classic IIFE bootstrap, minified: ${minify}, ${bootstrapSize} bytes)`);
-  console.log(`Wrote ${mainOutfile} (ESM main package, minified: ${minify}, ${mainSize} bytes)`);
+  console.log(`Wrote ${bootstrapOutfile} (classic IIFE bootstrap, minified: true, ${bootstrapSize} bytes)`);
+  console.log(`Wrote ${mainOutfile} (ESM main package, minified: true, ${mainSize} bytes)`);
   if (chunkFiles.length === 0) {
     console.log("No chunks produced (no import boundaries in the module graph).");
   } else {
