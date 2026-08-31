@@ -158,7 +158,7 @@ function selfCheck() {
   syntaxCheck(mainOutfile);
   if (fs.existsSync(chunksDir)) {
     for (const chunkFile of fs.readdirSync(chunksDir)) {
-      if (chunkFile.endsWith(".mjs")) {
+      if (chunkFile.endsWith(".mjs") || chunkFile.endsWith(".ts")) {
         syntaxCheck(path.join(chunksDir, chunkFile));
       }
     }

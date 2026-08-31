@@ -432,7 +432,7 @@ async function main() {
   // 一并检查）；manifest 与 html 引用闭合。
   const outputs = [jsResult, offscreenResult]
     .flatMap((result) => Object.keys(result.metafile.outputs))
-    .filter((f) => f.endsWith(".js"));
+    .filter((f) => f.endsWith(".js") || f.endsWith(".ts"));
   for (const outfile of outputs) {
     syntaxCheckEsm(path.resolve(root, outfile));
   }

@@ -9,6 +9,7 @@
     "build": "node scripts/build.js",
     "build:content": "node scripts/build-content.js",
     "build:release": "python3 scripts/build_release.py",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -29,6 +30,7 @@
     "@vitest/coverage-v8": "^4.1.11",
     "esbuild": "^0.28.2",
     "jsdom": "^30.0.1",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.11"
   }
 }
