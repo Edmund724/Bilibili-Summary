@@ -113,9 +113,31 @@ export function createChatRuntime(deps) {
   // 流式中删除当前会话导致会话"复活"的竞态兜底（第一道防线是 store reset 路
   // 径注入的 stopActiveChat）。
   let activeConversationId = "";
+  // 思考节点生命周期三态，thinkingNode 只表示「本代际思考节点是否存在」：
+  // null = 本代际尚未创建思考节点（reasoning 首事件到达时创建）；节点引用 =
+  // 本代际思考进行中；thinkingEnded = true 表示「本代际思考已收尾」——token
+  // 首帧渲染移除了思考节点（thinkingNode 归 null），其后到达的 reasoning 事件
+  //（某些实现的收尾 reasoning 事件）不能重新附着到已移除的旧节点，必须为
+  // 下一条消息在 activeAssistantNode 上新建。两语义（未创建 vs 已结束）此前
+  // 都折叠进 thinkingNode === null，导致跨消息 reasoning 串进游离节点。
   let thinkingNode = null;
+  let thinkingEnded = false;
   let streamSlowNoticeTimer = 0;
+  // 慢响应计时器与首 token 标志的分离（见 startStreamSlowNoticeTimer /
+  // handleFirstStreamToken / clearStreamRuntimeState）：
+  // - streamSlowNoticeTimer 只表达「慢响应计时器挂起中」；clearStreamRuntimeState
+  //   清它（每代际一次，done/stopped/error/断连/流重置时）；
+  // - streamFirstTokenReceived 是「本代际已收到首 token」的一代际语义标志，
+  //   由发送时置 false、首 token 置 true，slow 计时器与「首 token 后不再重弹」
+  //   都读它。它不能被 clearStreamRuntimeState 复位——clear 也会在收尾时被调，
+  //   一旦复位，收尾后到达的下一带 reasoning/token 事件会再次触发
+  //   handleFirstStreamToken 的清理副作用（计时器其实已清、无可见后果，但
+  //   reasoning 收尾事件可能误清下一条消息的提示状态）——见 handleFirstStreamToken。
   let streamFirstTokenReceived = false;
+  // 双发竞态闸：「发送中」标志（区别于 activePort——connectPort await 窗口内
+  // 端口未建立，但发送流程已在进行）。sendMessage 入口置位、发送完成/失败/
+  // 中断后复位；重复进入 sendMessage 直接忽略。
+  let sendInFlight = false;
   // 自动滚动标志（原 sidepanel 模块级 shouldAutoScrollMessages，归位到本闭包）：
   // scroll 监听与恢复点经 setAutoScroll 写入，token flush / finalize /
   // error / stopped 的非强制滚动在此读取。
@@ -154,11 +176,18 @@ export function createChatRuntime(deps) {
     }
     if (msg.type === "reasoning") {
       handleFirstStreamToken();
+      // 本代际思考已收尾（token 首帧渲染移除思考节点）后仍到达的 reasoning
+      // 收尾事件：为下一条消息新建思考节点（附着当前活动 assistant 节点——
+      // 跨消息时 activeAssistantNode 可能已换到新回合），不再写进游离旧节点。
+      if (!thinkingNode && thinkingEnded) {
+        thinkingEnded = false;
+      }
       if (!thinkingNode) thinkingNode = createThinkingNode(activeAssistantNode);
       appendThinkingText(thinkingNode, msg.data);
     } else if (msg.type === "token") {
       handleFirstStreamToken();
       thinkingNode = null;
+      thinkingEnded = true;
       appendToken(activeAssistantNode, msg.data);
     } else if (msg.type === "stream-reset") {
       // 读流中断重试（offscreen 重新从头生成）：已吐 token 撤不回且新流不保证
@@ -190,86 +219,119 @@ export function createChatRuntime(deps) {
   // =========================================================================
   async function sendMessage() {
     const text = deps.input.value.trim();
-    if (!text || activePort) {
+    // 双发竞态闸：activePort 已建（流式进行中）或发送流程已在进行
+    //（ensureCurrentContextForSend / connectPort 的 await 窗口内端口未建、
+    // 但 UI 已进流式态）都直接忽略——否则窗口内第二次 sendMessage 会开出
+    // 第二条流（第一、二条回执交错到两个 assistant 节点）。返回契约不变：
+    // 调用方（sidepanel.js keydown / 快捷动作 / 预设 chip）不读返回值。
+    if (!text || activePort || sendInFlight) {
       return;
     }
-    deps.ui.hidePresetPopover();
-    deps.ui.hideHistoryPopover();
+    sendInFlight = true;
+    try {
+      deps.ui.hidePresetPopover();
+      deps.ui.hideHistoryPopover();
 
-    const providerId = deps.getProviderId();
-    if (!providerId) {
-      deps.ui.resetConversationView("请先在设置页配置并启用一个 AI 平台。");
+      const providerId = deps.getProviderId();
+      if (!providerId) {
+        deps.ui.resetConversationView("请先在设置页配置并启用一个 AI 平台。");
+        return;
+      }
+
+      const hasContext = await deps.ensureCurrentContextForSend();
+      // 严格判 true：false（上下文读取失败）与 NO_SUBTITLE_SEND_BLOCKED（无字幕
+      // 拦截，notice 已由 ensure 侧显示）都在此提前返回——不追加用户消息、
+      // 不落 chatHistory、不发起 port。
+      if (hasContext !== true) {
+        return;
+      }
+      const currentMeta = sidepanelState.currentConversationMeta;
+      if (!currentMeta?.pinnedContext && currentMeta?.contextKey && currentMeta.contextKey !== sidepanelState.currentContextKey) {
+        sidepanelState.currentConversationId = "";
+        sidepanelState.currentConversationMeta = null;
+      }
+
+      deps.ui.removeCenteredState();
+      deps.ui.removeSuggestions();
+
+      appendUserMessage(text);
+      deps.input.value = "";
+      deps.ui.autosizeInput();
+      setStreamingUiState(true);
+      activeUserPrompt = text;
+      activeConversationId = sidepanelState.currentConversationId;
+      activeAssistantNode = appendAssistantPlaceholder();
+      startStreamSlowNoticeTimer();
+      streamFirstTokenReceived = false;
+      // 新代际：思考状态复位——thinkingNode 可能还持着上一代残留的孤儿引用
+      //（收尾 reasoning 在已渲染节点上新建的节点，被终态重渲染打成脱离 DOM
+      // 的孤儿），不清理的话本代际 reasoning 会写进游离节点；thinkingEnded
+      // 复位为「思考未创建/未结束」。
+      thinkingNode = null;
+      thinkingEnded = false;
+
+      // connectPort 现为 async（发送前先 ensure offscreen 文档，文档死亡后
+      // 自愈重建）；await 兼容旧的同步返回 Port 的 deps 实现。
+      const port = await deps.connectPort();
+      activePort = port;
+
+      port.onMessage.addListener((msg) => {
+        dispatchChatPortMessage(msg, port);
+      });
+
+      port.onDisconnect.addListener(() => {
+        activePort = null;
+        // 候选5：断连意味着 offscreen 文档可能已被回收，其单槽字幕体缓存随文档
+        // 消失——重置 lastAcked，下一条消息重发全文（宁多传不错发）。
+        lastAckedContextKey = null;
+        clearStreamRuntimeState();
+        setStreamingUiState(false);
+      });
+
+      // 候选5：字幕体省略传输——offscreen 已确认缓存当前上下文的字幕体
+      //（lastAckedContextKey === contextKey）时本条消息不再重传整份 subtitleBody；
+      // contextKey 始终携带，offscreen 据此校验单槽匹配并在缺失时报错触发重置。
+      // 其余元数据/history/aiSystemPrompt 保持全量（体积小且每条都可能变）。
+      const context = {
+        ...sidepanelState.contextData,
+        aiSystemPrompt: sidepanelState.aiPrefs.aiSystemPrompt
+      };
+      const contextKey = String(sidepanelState.currentContextKey || "").trim();
+      if (contextKey && lastAckedContextKey === contextKey) {
+        delete context.subtitleBody;
+      }
+
+      port.postMessage({
+        action: "chat",
+        providerId,
+        thinkingLevel: sidepanelState.aiThinkingLevel,
+        context,
+        contextKey,
+        prompt: text,
+        // 历史只走顶层 history（offscreen/ai 侧统一读 msg.history）；
+        // 不再向 context 里塞 chatHistory 副本（无任何读取方的死负载）。
+        history: sidepanelState.chatHistory
+      });
+    } catch (err) {
+      // connectPort 失败（ensure offscreen 文档/建连抛错）无回退：UI 卡流式
+      // 态而 isStreaming() 为 false（activePort 从未置位，但 setStreamingUiState
+      // (true) 已调用）。这里恢复全部半置位流状态并走用户可见错误路径——
+      // 与 showAssistantError 同款机制（endStream 收口六步 + .sp-msg-error 占位）。
+      console.error("[chat-runtime] sendMessage 失败：", err);
+      sendInFlight = false;
+      thinkingEnded = false;
+      const node = activeAssistantNode;
+      if (node) {
+        showAssistantError(node, err?.message || String(err));
+      } else {
+        // 失败发生在占位建立前（ensure/上下文阶段）：只复位流式 UI 与计时器。
+        clearStreamRuntimeState();
+        setStreamingUiState(false);
+      }
+      activeAssistantNode = null;
       return;
     }
-
-    const hasContext = await deps.ensureCurrentContextForSend();
-    // 严格判 true：false（上下文读取失败）与 NO_SUBTITLE_SEND_BLOCKED（无字幕
-    // 拦截，notice 已由 ensure 侧显示）都在此提前返回——不追加用户消息、
-    // 不落 chatHistory、不发起 port。
-    if (hasContext !== true) {
-      return;
-    }
-    const currentMeta = sidepanelState.currentConversationMeta;
-    if (!currentMeta?.pinnedContext && currentMeta?.contextKey && currentMeta.contextKey !== sidepanelState.currentContextKey) {
-      sidepanelState.currentConversationId = "";
-      sidepanelState.currentConversationMeta = null;
-    }
-
-    deps.ui.removeCenteredState();
-    deps.ui.removeSuggestions();
-
-    appendUserMessage(text);
-    deps.input.value = "";
-    deps.ui.autosizeInput();
-    setStreamingUiState(true);
-    activeUserPrompt = text;
-    activeConversationId = sidepanelState.currentConversationId;
-    activeAssistantNode = appendAssistantPlaceholder();
-    startStreamSlowNoticeTimer();
-    streamFirstTokenReceived = false;
-
-    // connectPort 现为 async（发送前先 ensure offscreen 文档，文档死亡后
-    // 自愈重建）；await 兼容旧的同步返回 Port 的 deps 实现。
-    const port = await deps.connectPort();
-    activePort = port;
-
-    port.onMessage.addListener((msg) => {
-      dispatchChatPortMessage(msg, port);
-    });
-
-    port.onDisconnect.addListener(() => {
-      activePort = null;
-      // 候选5：断连意味着 offscreen 文档可能已被回收，其单槽字幕体缓存随文档
-      // 消失——重置 lastAcked，下一条消息重发全文（宁多传不错发）。
-      lastAckedContextKey = null;
-      clearStreamRuntimeState();
-      setStreamingUiState(false);
-    });
-
-    // 候选5：字幕体省略传输——offscreen 已确认缓存当前上下文的字幕体
-    //（lastAckedContextKey === contextKey）时本条消息不再重传整份 subtitleBody；
-    // contextKey 始终携带，offscreen 据此校验单槽匹配并在缺失时报错触发重置。
-    // 其余元数据/history/aiSystemPrompt 保持全量（体积小且每条都可能变）。
-    const context = {
-      ...sidepanelState.contextData,
-      aiSystemPrompt: sidepanelState.aiPrefs.aiSystemPrompt
-    };
-    const contextKey = String(sidepanelState.currentContextKey || "").trim();
-    if (contextKey && lastAckedContextKey === contextKey) {
-      delete context.subtitleBody;
-    }
-
-    port.postMessage({
-      action: "chat",
-      providerId,
-      thinkingLevel: sidepanelState.aiThinkingLevel,
-      context,
-      contextKey,
-      prompt: text,
-      // 历史只走顶层 history（offscreen/ai 侧统一读 msg.history）；
-      // 不再向 context 里塞 chatHistory 副本（无任何读取方的死负载）。
-      history: sidepanelState.chatHistory
-    });
+    sendInFlight = false;
   }
 
   // =========================================================================
@@ -427,6 +489,7 @@ export function createChatRuntime(deps) {
       node.appendChild(cursor);
     }
     thinkingNode = null;
+    thinkingEnded = false;
   }
 
   // 流式双容器懒创建（首帧 flush 时挂上；finalize / stopped 的整体重渲染会
@@ -623,7 +686,6 @@ export function createChatRuntime(deps) {
   // =========================================================================
   function startStreamSlowNoticeTimer() {
     clearStreamRuntimeState();
-    streamFirstTokenReceived = false;
     streamSlowNoticeTimer = window.setTimeout(() => {
       if (!activePort || streamFirstTokenReceived) {
         return;
@@ -635,6 +697,11 @@ export function createChatRuntime(deps) {
   // =========================================================================
   // handleFirstStreamToken
   // =========================================================================
+  // 首 token 语义：本代际首个流事件（token 或 reasoning——两者都算"模型开始
+  // 输出"）到达时撤下慢响应提示（每代际一次）。一代际只清一次：
+  // streamFirstTokenReceived 置 true 后不再重复执行；clearStreamRuntimeState
+  // 不复位它（见下方注释），下一代的重新武装由 sendMessage 在发送前显式
+  // streamFirstTokenReceived = false 完成。
   function handleFirstStreamToken() {
     if (streamFirstTokenReceived) {
       return;
@@ -646,12 +713,21 @@ export function createChatRuntime(deps) {
   // =========================================================================
   // clearStreamRuntimeState
   // =========================================================================
+  // 「本代际收尾」的清理原语：清慢响应计时器、撤上下文 notice。endStream /
+  // port 断连 / resetStreamState 都调它。
+  //
+  // 注意：不复位 streamFirstTokenReceived——它是一代际标志，不是"计时器挂起"
+  // 标志。此前在 clear 里复位造成两个错位：
+  // 1. 「只清一次」失效——done/stopped/error 收尾后（clear 被调、标志被复位），
+  //    同一节点上到达的收尾 reasoning/token 事件（竞态）会让
+  //    handleFirstStreamToken 再次执行、撤下下一条消息的上下文 notice；
+  // 2. 慢响应提示的重新武装职责归位到 sendMessage（发送前置 false），
+  //    clear 只管"当前代际内"的清计时器语义。
   function clearStreamRuntimeState() {
     if (streamSlowNoticeTimer) {
       window.clearTimeout(streamSlowNoticeTimer);
       streamSlowNoticeTimer = 0;
     }
-    streamFirstTokenReceived = false;
     deps.ui.removeConversationContextNotice();
   }
 
@@ -726,6 +802,9 @@ export function createChatRuntime(deps) {
   }
 
   function resetStreamState() {
+    // 挂起的流式渲染帧（rAF flush）必须先取消：flush 闭包捕获的是节点引用，
+    // 不清的话会向已脱离的旧节点渲染（首帧还会把新消息的思考节点当旧的移除）。
+    cancelTokenFlush();
     clearStreamRuntimeState();
     if (activePort) {
       try { activePort.disconnect(); } catch {}
@@ -734,6 +813,11 @@ export function createChatRuntime(deps) {
     activeAssistantNode = null;
     activeUserPrompt = "";
     thinkingNode = null;
+    thinkingEnded = false;
+    // 复位在途发送标志：resetStreamState 可能在 connectPort await 窗口内被调
+    //（store reset / restartChat 路径）。sendMessage 恢复后仍会继续完成发送
+    //（与旧行为一致），但标志若不清，此后用户的新发送会被永久拦下。
+    sendInFlight = false;
   }
 
   // =========================================================================

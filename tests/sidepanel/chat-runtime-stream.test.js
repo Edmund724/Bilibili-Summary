@@ -171,6 +171,37 @@ describe("sendMessage 建流与协议入口", () => {
     expect(deps.messages.querySelectorAll(".sp-msg-user")).toHaveLength(1);
     expect(deps.input.value).toBe("第二条");
   });
+
+  // 双发竞态：ensureCurrentContextForSend 的 await 窗口内（port 尚未建立、
+  // activePort 仍为 null）第二次 sendMessage 必须被拒绝——否则开出第二条流，
+  // 两条流的回执交错到两个 assistant 节点。
+  it("发送中（ensure 窗口内）重复 sendMessage 被拒：不发起第二条 port、不开第二条流", async () => {
+    const deps = makeDeps();
+    deps.input.value = "第一条";
+    let releaseEnsure;
+    deps.ensureCurrentContextForSend = vi.fn(() => new Promise((resolve) => { releaseEnsure = resolve; }));
+
+    const runtime = createChatRuntime(deps);
+    const send1 = runtime.sendMessage();
+    // 窗口内：端口未建、无 assistant 占位，但发送流程已在进行
+    expect(runtime.isStreaming()).toBe(false);
+    expect(deps.messages.querySelector(".sp-msg-assistant")).toBeNull();
+
+    // 第二次 sendMessage（用户又按了一次回车）：必须被闸住
+    deps.input.value = "第二条";
+    await runtime.sendMessage();
+    expect(deps.ports).toHaveLength(0);
+    expect(deps.messages.querySelectorAll(".sp-msg-user")).toHaveLength(0);
+    expect(deps.input.value).toBe("第二条");
+    expect(deps.ui.setStreamingUiState).not.toHaveBeenCalledWith(true, expect.anything());
+
+    // 释放第一个发送，流正常建立
+    releaseEnsure(true);
+    await send1;
+    expect(deps.ports).toHaveLength(1);
+    expect(deps.messages.querySelectorAll(".sp-msg-user")).toHaveLength(1);
+    expect(deps.input.value).toBe("");
+  });
 });
 
 // ==========================================================================
@@ -352,6 +383,65 @@ describe("reasoning / thinking 展示", () => {
     const node2 = deps.messages.querySelectorAll(".sp-msg-assistant")[1];
     feed(runtime, { type: "reasoning", data: "第二条思考" });
     expect(node2.querySelector(".sp-thinking-text")?.textContent).toBe("第二条思考");
+  });
+
+  // 回归：上一代收尾后到达的 reasoning 事件（某些实现以空 data 的 reasoning
+  // 收尾）不能再次附着到已移除的旧思考节点——必须在新消息的 activeAssistantNode
+  // 上新建节点，否则文本写进游离节点、屏幕上永远不显示。
+  it("跨消息 reasoning 收尾事件：在新回合的 assistant 节点上新建思考节点，不串进游离旧节点", async () => {
+    const { deps, runtime } = await makeRuntime("问题一");
+    const raf = holdRaf();
+
+    // 第一条：reasoning → token（思考节点随首帧渲染移除）→ 收尾 reasoning
+    //（真实时序：模型吐完思考后以空 data 的 reasoning 收尾，紧随 done 到达）
+    // → done（终态重渲染）
+    feed(runtime, { type: "reasoning", data: "第一轮思考" });
+    feed(runtime, { type: "token", data: "第一轮正文" });
+    raf.mock.calls[0][0]();
+    feed(runtime, { type: "reasoning", data: null });
+    feed(runtime, { type: "done" });
+    const node1 = deps.messages.querySelectorAll(".sp-msg-assistant")[0];
+    expect(node1.querySelector(".sp-thinking")).toBeNull();
+
+    // 第二条消息：reasoning 必须新建节点，且附着在第二条的占位上——
+    // 旧实现把「未创建」与「已结束」都折叠为 thinkingNode === null，
+    // 会把新回合的思考写进已脱离的旧节点
+    deps.input.value = "问题二";
+    await runtime.sendMessage();
+    const node2 = deps.messages.querySelectorAll(".sp-msg-assistant")[1];
+    feed(runtime, { type: "reasoning", data: null });
+    const node2Thinking = node2.querySelector(".sp-thinking");
+    expect(node2Thinking).toBeTruthy();
+    expect(node2Thinking.querySelector(".sp-thinking-text")?.textContent).toBe("");
+    // 旧节点不再被触碰（也没有游离新节点）
+    expect(node1.querySelector(".sp-thinking")).toBeNull();
+    expect(deps.messages.querySelectorAll(".sp-thinking")).toHaveLength(1);
+
+    // 后续 reasoning 增量正常流进新节点
+    feed(runtime, { type: "reasoning", data: "第二轮思考" });
+    expect(node2.querySelector(".sp-thinking-text")?.textContent).toBe("第二轮思考");
+  });
+
+  // 回归：跨消息时若上一代「已结束思考、且 token 首帧已渲染」，新回合的
+  // reasoning 必须新建思考节点（旧实现把「未创建」与「已结束」都折叠为
+  // thinkingNode === null，会把新回合的思考写进已脱离的旧节点）。
+  it("跨消息思考重建：首帧 flush 前的 reasoning 在新回合新建节点（不依赖 thinkingNode 残留）", async () => {
+    const { deps, runtime } = await makeRuntime("问题一");
+    const raf = holdRaf();
+
+    // 第一条：token 首帧渲染（思考节点被移除）后 done——thinkingNode 已归 null
+    feed(runtime, { type: "reasoning", data: "第一轮思考" });
+    feed(runtime, { type: "token", data: "第一轮正文" });
+    raf.mock.calls[0][0]();
+    feed(runtime, { type: "done" });
+
+    // 第二条消息：首帧 flush 前 reasoning 到达（同帧 token 尚未渲染）——
+    // 节点必须建在第二条占位内
+    deps.input.value = "问题二";
+    await runtime.sendMessage();
+    const node2 = deps.messages.querySelectorAll(".sp-msg-assistant")[1];
+    feed(runtime, { type: "reasoning", data: "第二轮思考" });
+    expect(node2.querySelector(".sp-thinking-text")?.textContent).toBe("第二轮思考");
   });
 });
 
@@ -544,6 +634,39 @@ describe("慢响应提示计时器（fake timers）", () => {
     expect(deps.ui.showConversationContextNotice).not.toHaveBeenCalled();
     expect(session.port.disconnect).toHaveBeenCalled();
   });
+
+  // 回归（首 token 标志复位错位）：终态收尾（clearStreamRuntimeState）不能
+  // 复位「本代际已收首 token」标志——否则收尾后到达的 reasoning 收尾事件会
+  // 再次触发"首 token 清理"，撤下（下一条消息的）慢响应提示。
+  it("终态收尾不重置首 token 标志：收尾后迟到的 reasoning 不再触发清理、下一条消息慢响应提示照常", async () => {
+    vi.useFakeTimers();
+    const { deps, runtime } = await makeRuntime("问题一");
+    const removeSpy = deps.ui.removeConversationContextNotice;
+
+    // 第一条：reasoning → done。sendMessage 的计时器武装、首 token 清理、
+    // done 收尾各调一次 clear（3 次 remove）
+    feed(runtime, { type: "reasoning", data: "思考" });
+    feed(runtime, { type: "done" });
+    expect(removeSpy).toHaveBeenCalledTimes(3);
+
+    // 迟到的收尾 reasoning 事件（真实时序中与 done 交错）——首 token 标志
+    // 若被 done 的 clear 复位（旧实现），这里会再次触发 handleFirstStreamToken
+    // 的清理副作用（remove 变 4 次）
+    feed(runtime, { type: "reasoning", data: null });
+    expect(removeSpy).toHaveBeenCalledTimes(3);
+
+    // 第二条消息：慢响应提示必须照常重新武装并弹出
+    deps.input.value = "问题二";
+    await runtime.sendMessage();
+    vi.advanceTimersByTime(15000);
+    expect(deps.ui.showConversationContextNotice).toHaveBeenCalledWith(SLOW_NOTICE_TEXT, 0);
+
+    // 第二条的首 token 到达后撤下、不再重弹
+    feed(runtime, { type: "token", data: "回答" });
+    expect(removeSpy.mock.calls.length).toBeGreaterThan(3);
+    vi.advanceTimersByTime(60000);
+    expect(deps.ui.showConversationContextNotice).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ==========================================================================
@@ -646,5 +769,99 @@ describe("sendMessage 无字幕拦截的提前返回", () => {
     expect(deps.messages.querySelector(".sp-msg-user")?.textContent).toBe("总结一下这个视频");
     expect(deps.input.value).toBe("");
     expect(deps.ports[0].port.postMessage).toHaveBeenCalledTimes(1);
+  });
+
+  // connectPort 失败（ensure offscreen 文档/建连抛错）必须回退：恢复流式 UI、
+  // 清理半置位状态、向用户可见的错误路径回报（.sp-msg-error 占位）。
+  it("connectPort 失败：退出流式 UI、isStreaming() 为 false、assistant 占位变错误占位、port 未建", async () => {
+    const deps = makeDeps();
+    deps.input.value = "总结一下这个视频";
+    deps.connectPort = vi.fn(async () => {
+      throw new Error("offscreen 文档创建失败");
+    });
+    const runtime = createChatRuntime(deps);
+
+    await runtime.sendMessage();
+
+    // 用户可见错误：占位节点变为错误占位（同 error 终态机制）
+    const node = assistantNode(deps);
+    expect(node.querySelector(".sp-msg-error")?.textContent).toBe("错误：offscreen 文档创建失败");
+
+    // 状态回退：不卡流式态、无在途问答、无计时器残留（慢响应 notice 不弹）
+    expect(runtime.isStreaming()).toBe(false);
+    expect(runtime.hasPendingUserPrompt()).toBe(false);
+    expect(deps.ui.setStreamingUiState).toHaveBeenLastCalledWith(false, expect.anything());
+    expect(deps.ui.removeConversationContextNotice).toHaveBeenCalled();
+
+    // 不再发起后续 port（无幽灵流）
+    expect(deps.ports).toHaveLength(0);
+    expect(deps.connectPort).toHaveBeenCalledTimes(1);
+
+    // 重发可用（发送中标志已复位）
+    deps.connectPort.mockImplementation(async () => {
+      const session = makePort();
+      deps.ports.push(session);
+      return session.port;
+    });
+    deps.input.value = "重试发送";
+    await runtime.sendMessage();
+    expect(deps.connectPort).toHaveBeenCalledTimes(2);
+    expect(deps.messages.querySelectorAll(".sp-msg-assistant")).toHaveLength(2);
+  });
+});
+
+// ==========================================================================
+// resetStreamState 对挂起流式渲染帧的清理
+// ==========================================================================
+describe("resetStreamState 对挂起流式渲染帧的清理", () => {
+  it("resetStreamState 取消挂起帧后：新消息的 token 重新调度 flush（旧帧 id 不再占位）", async () => {
+    const { deps, runtime } = await makeRuntime("问题一");
+    const raf = holdRaf();
+
+    // 流式中：token 入缓冲、flush 帧已调度但未执行
+    feed(runtime, { type: "token", data: "旧流内容" });
+    expect(raf).toHaveBeenCalledTimes(1);
+
+    // store reset / restartChat 路径：清流状态 + 清消息区（后者在 sidepanel
+    // restartChat / stopActiveChat 中由 resetConversationView 完成）
+    runtime.resetStreamState();
+    expect(runtime.isStreaming()).toBe(false);
+    deps.messages.innerHTML = "";
+
+    // 新消息开始流式：token 必须能重新调度 flush 帧——旧实现里
+    // tokenFlushFrame 仍持有旧帧 id，appendToken 直接跳过调度，新流
+    // 永不渲染（直到旧帧被浏览器执行，若旧帧已被取消则永久卡住）
+    deps.input.value = "问题二";
+    await runtime.sendMessage();
+    feed(runtime, { type: "token", data: "新流正文" });
+    expect(raf).toHaveBeenCalledTimes(2);
+
+    // 新帧渲染新节点
+    raf.mock.calls[1][0]();
+    const node2 = deps.messages.querySelector(".sp-msg-assistant");
+    expect(node2.querySelector(".sp-stream-tail").textContent).toContain("新流正文");
+
+    // 旧帧执行：只渲染已脱离的旧节点，不污染消息区、不影响新节点
+    raf.mock.calls[0][0]();
+    expect(deps.messages.querySelectorAll(".sp-msg-assistant")).toHaveLength(1);
+    expect(node2.querySelector(".sp-stream-tail").textContent).toContain("新流正文");
+  });
+
+  it("resetStreamState 后执行旧帧：消息区不被旧流残留渲染污染", async () => {
+    const { deps, runtime } = await makeRuntime();
+    const raf = holdRaf();
+
+    feed(runtime, { type: "token", data: "旧流内容" });
+    expect(raf).toHaveBeenCalledTimes(1);
+
+    runtime.resetStreamState();
+    deps.messages.innerHTML = ""; // sidepanel 在 resetStreamState 后清消息区
+
+    // 旧帧回调被执行（jsdom 手动驱动）：不得向消息区重建任何流式渲染
+    raf.mock.calls[0][0]();
+    expect(deps.messages.querySelectorAll(".sp-msg-assistant")).toHaveLength(0);
+    expect(deps.messages.querySelectorAll(".sp-stream-stable")).toHaveLength(0);
+    expect(deps.messages.querySelectorAll(".sp-stream-tail")).toHaveLength(0);
+    expect(deps.messages.querySelectorAll(".sp-msg-cursor")).toHaveLength(0);
   });
 });
