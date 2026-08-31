@@ -22,7 +22,10 @@
 //   entry/background.js              SW 单文件 bundle
 //   entry/offscreen.js               offscreen 常驻接线（splitting 主入口）
 //   entry/offscreen-chunks/*.js      offscreen 动态 chunk（AI / ASR 两族按需）
-//   entry/content.css                minified
+//   entry/styles/panel.css            常驻表（manifest content_scripts 注入）
+//   entry/styles/reader.css           阅读表（运行时挂载，随阅读模式）
+//   entry/styles/reader-gate.css      阅读表门控段（同上）
+//   entry/styles/player-ai.css        播放器 AI 表（随 ai/player-ai.js chunk）
 //   entry/content-bootstrap.iife.js  拷贝自 build-content.js 产物
 //   entry/content-main.mjs           拷贝自 build-content.js 产物
 //   entry/chunks/*.mjs               拷贝自 build-content.js 产物
@@ -56,9 +59,14 @@ const jsEntries = [
   "pages/popup.js",
 ];
 
-// CSS minify 入口（popup.css 是纯静态拷贝，见下）。
+// CSS minify 入口（popup.css 是纯静态拷贝，见下）。S3 分层：content 样式拆为
+// 常驻表（entry/styles/panel.css，manifest 注入）与按需表（reader/player-ai，
+// 运行时 link 挂载），按需表也走 minify 保证 dist 无未压缩 CSS。
 const cssEntries = [
-  "entry/content.css",
+  "entry/styles/panel.css",
+  "entry/styles/reader.css",
+  "entry/styles/reader-gate.css",
+  "entry/styles/player-ai.css",
   "pages/options.css",
   "pages/sidepanel.css",
 ];

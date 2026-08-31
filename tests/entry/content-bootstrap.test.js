@@ -10,10 +10,14 @@
 //
 // 动态 import 无法直接 stub，生产实现的 importModule 默认参数是真实 import()；
 // 测试经工厂依赖注入 fake getExtensionUrl / importModule 代替。源模块顶层的
-// 自动启动由 chrome?.runtime?.getURL 守卫挡住（setup.js 的 chrome stub 未提供
-// getURL），不会在测试导入时真的加载主包。
+// 自动启动由 chrome?.runtime?.getURL 守卫控制——S3 分层后 setup.js 的通用
+// chrome stub 提供 getURL（样式挂载用），守卫恒真，因此 beforeEach 里
+// resetModuleState() 重置模块纪元，保证本文件的静态 import 发生在「通用 stub
+// 已安装、守卫为真」之前（首次导入的模块求值顺序：setup.js 先于本文件，
+// 顶层守卫在模块求值时即触发自动启动——见 beforeEach 注释）。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetModuleState } from "../setup.js";
 
 import {
   CONTENT_MAIN_MODULE_PATH,
@@ -28,6 +32,15 @@ function cleanGlobals() {
 }
 
 beforeEach(() => {
+  // S3 分层：setup.js 的通用 chrome stub 现含 runtime.getURL（样式挂载用），
+  // bootstrap 顶层自动启动守卫恒真——本文件静态 import 该模块时（文件加载
+  // 阶段，先于任何 beforeEach）顶层启动已触发过一次。resetModuleState 重置
+  // 模块纪元后，用例内的 import 才是干净求值；STARTED/哨兵在重置前已被置位
+  // 也无妨（cleanGlobals 清除），且每次 beforeEach 的重置让「顶层只跑一次」
+  // 的旧语义不再成立，改为：守卫真 → 每次文件加载时顶层自动启动一次（其
+  // loadContentMain 的 import 失败被 bootstrap 自身 catch 并 console.error，
+  // 断言不受影响），用例只测工厂注入路径。
+  resetModuleState();
   cleanGlobals();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });

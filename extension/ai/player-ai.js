@@ -17,6 +17,23 @@ import { isVisibleReaderControl } from "../shared/dom-utils.js";
 // reader/index.js facade 静态转发，会把整个 reader 域拖进本模块的动态 chunk
 // 闭包，并经 esbuild 提升为常驻静态共享 chunk——分层后改走微模块。
 import { isReaderViewOpen } from "../reader/view-state.js";
+// S3 分层：播放器 AI 样式随本动态 chunk 挂载（节点创建前就绪，见文件尾注释）
+import { ensurePlayerAiStyles, removePlayerAiStyles } from "../shared/style-injector.js";
+
+// ===== S3 分层：样式挂载（模块求值即挂，幂等） =====
+//
+// 为什么在模块级挂：样式必须「节点创建前就绪」——startPlayerAiQuickAction 的
+// schedulePlayerAiQuickActionSync() 会创建 #boc-player-ai-quick-action，若样式
+// 尚未注入，首次 sync 创建出的节点会以无样式状态挂到播放器上，直到下一个
+// sync（resize/滚动/观察器回调）才带样式，形成闪变。模块一旦装载（本文件
+// 求值）即挂表，start 与创建节点之间无需等待样式就绪——节点创建前样式已注入。
+// link 是异步加载，但样式数据会被浏览器缓存：后续每次 start（设置关→开）
+// 重挂即同步生效，不闪变。
+//
+// 为什么 remove 在 stop：stopPlayerAiQuickAction 会移除按钮，随模块关闭把
+// 样式一并摘掉；下次 start 重挂。幂等：模块未装载时本文件不会执行，mounted
+// Map 防重复挂。
+ensurePlayerAiStyles();
 
 let playerAiQuickActionRetryCount = 0;
 
@@ -45,6 +62,9 @@ export function startPlayerAiQuickAction() {
 // 显式停止入口：断开 observer、摘除全部本模块监听（含挂在宿主元素上的游标
 // 监听，修复移除→重建时的泄漏）、清理 retry 定时器与计数并移除按钮。
 export function stopPlayerAiQuickAction() {
+  // S3：先摘样式再移除按钮——按钮在样式摘除的瞬间仍按旧规则渲染，摘除后
+  // 节点立即被移除，无可见中间态；下次 start 重挂（mounted Map 幂等）。
+  removePlayerAiStyles();
   if (state.playerAi.playerAiQuickActionObserver) {
     // 容器 observer 与 body 回退 observer 共用同一 state 槽位，统一断开
     state.playerAi.playerAiQuickActionObserver.disconnect();

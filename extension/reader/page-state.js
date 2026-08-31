@@ -22,7 +22,7 @@ import { READER_GUARD_CLEAR_ATTRS, READER_GUARD_FILTER } from "./presentation-fi
 
 export function clearReaderModePageState() {
   // 修正走样：旧手抄的 body 清单只有 mode/line-height/reading-active 三项，
-  // 与 html 全集不对称且无 CSS 依据（content.css 里 body 与 html 的选择器面
+  // 与 html 全集不对称且无 CSS 依据（阅读表里 body 与 html 的选择器面
   // 完全一致），残留属脏状态；按正确超集对齐全集（见 presentation-fields.js
   // 头注的清单漂移考古）。
   for (const attr of READER_GUARD_CLEAR_ATTRS.html) {

@@ -81,6 +81,8 @@ describe("replaceState 补丁与章节清空（5be8f39 嫌疑路径）", () => {
 
   it("F2. 旧调用模式（red-capable 对照）：replaceState 前不更新签名，章节被清空", async () => {
     seedFetchedClip();
+    // S3 分层：进入阅读模式路径挂阅读表（handleUrlChange 内 ensureReaderStyles），
+    // 挂载用的 getURL 由 tests/setup.js 的通用 chrome stub 提供
     messageHandler.bindUrlChangeHandler();
 
     // 5be8f39 之前的 replaceReaderModeUrl 等价于直接 replaceState

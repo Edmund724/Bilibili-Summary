@@ -17,31 +17,33 @@ const storageChangeListeners = new Set();
 // 当前用例的内存设置引用：stubChrome 写入，emitStorageChange 更新并派发。
 let activeSettingsRef = null;
 
-// settings 为本用例期望的"当前设置"（与 DEFAULT_SETTINGS 合并后由
+// 本用例期望的"当前设置"（与 DEFAULT_SETTINGS 合并后由
 // get-settings 回读返回，模拟 background 的 normalizeSettings 兜底）。
+// runtime.getURL 已由 setup.js 的通用 chrome stub 提供（S3 分层样式挂载用），
+// 这里沿用；startPlayerAiQuickAction 会触发 ensurePlayerAiStyles 挂 link。
 function stubChrome(settings) {
   activeSettingsRef = { current: { ...settings } };
-  vi.stubGlobal("chrome", {
-    runtime: {
-      lastError: null,
-      sendMessage: vi.fn((message, callback) => {
-        if (message?.type === "get-settings") {
-          callback?.({
-            ok: true,
-            settings: { ...DEFAULT_SETTINGS, ...activeSettingsRef.current }
-          });
-        } else {
-          callback?.({ ok: true });
-        }
-        return undefined;
-      }),
-      onMessage: {
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        hasListener: vi.fn(() => false)
+  const runtime = {
+    getURL: vi.fn((path) => `chrome-extension://test/${path}`),
+    lastError: null,
+    sendMessage: vi.fn((message, callback) => {
+      if (message?.type === "get-settings") {
+        callback?.({
+          ok: true,
+          settings: { ...DEFAULT_SETTINGS, ...activeSettingsRef.current }
+        });
+      } else {
+        callback?.({ ok: true });
       }
-    },
-    storage: {
+      return undefined;
+    }),
+    onMessage: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      hasListener: vi.fn(() => false)
+    }
+  };
+  vi.stubGlobal("chrome", { runtime, storage: {
       sync: {
         get: vi.fn(async () => ({ ...activeSettingsRef.current })),
         set: vi.fn(async () => {}),
@@ -62,6 +64,7 @@ function stubChrome(settings) {
       }
     }
   });
+  return { runtime };
 }
 
 // 派发 storage 变更并同步内存中的"当前设置"，模拟真实 sync storage 的读写一致
@@ -88,6 +91,8 @@ async function flushMicrotasks(times = 20) {
 
 async function loadContentScript(settings) {
   setLocationUrl(NORMAL_PAGE_URL);
+  // S3 分层：player-ai 模块顶层即挂样式 link（ensurePlayerAiStyles），
+  // 挂载用的 runtime.getURL 引用与断言无关。
   stubChrome(settings);
   await import("../../extension/entry/content.js");
   // 预热懒加载的 player-ai 模块（loadPlayerAi 返回缓存的同一 promise）；
@@ -142,11 +147,14 @@ describe("player-ai 启停守卫", () => {
 
   it("start 幂等：重复调用不重复绑 observer 与监听", async () => {
     const state = await loadContentScript({ enablePlayerAiQuickAction: true });
-    const playerAi = await import("../../extension/ai/player-ai.js");
+    // loadContentScript 的 preload 与这里的 import 为同一模块实例；vitest 对
+    // 已加载模块的重复 import 返回缓存（诊断实测），此处拿真实命名空间（非
+    // doMock 产物，后者的依赖图会被 doMock 的 import 拦截带偏）
+    const { startPlayerAiQuickAction } = await import("../../extension/ai/player-ai.js");
     const observerBefore = state.playerAi.playerAiQuickActionObserver;
     const windowAddSpy = vi.spyOn(window, "addEventListener");
 
-    playerAi.startPlayerAiQuickAction();
+    startPlayerAiQuickAction();
 
     expect(state.playerAi.playerAiQuickActionObserver).toBe(observerBefore);
     expect(windowAddSpy.mock.calls.some(([type]) => type === "resize")).toBe(false);
@@ -159,9 +167,9 @@ describe("player-ai 启停守卫", () => {
     const hostAddSpy = vi.spyOn(host, "addEventListener");
     const hostRemoveSpy = vi.spyOn(host, "removeEventListener");
     const state = await loadContentScript({ enablePlayerAiQuickAction: true });
-    const playerAi = await import("../../extension/ai/player-ai.js");
+    const { schedulePlayerAiQuickActionSync, stopPlayerAiQuickAction } = await import("../../extension/ai/player-ai.js");
 
-    playerAi.schedulePlayerAiQuickActionSync(0);
+    schedulePlayerAiQuickActionSync(0);
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     const button = document.getElementById("boc-player-ai-quick-action");
@@ -175,7 +183,7 @@ describe("player-ai 启停守卫", () => {
     const cursorBinds = hostAddSpy.mock.calls.filter(([type]) => cursorTypes.includes(type));
     expect(cursorBinds.length).toBe(4);
 
-    playerAi.stopPlayerAiQuickAction();
+    stopPlayerAiQuickAction();
 
     expect(document.getElementById("boc-player-ai-quick-action")).toBeNull();
     expect(document.querySelector(".boc-player-ai-wrap")).toBeNull();
@@ -191,14 +199,14 @@ describe("player-ai 启停守卫", () => {
     const host = makePlayerDom();
     const hostAddSpy = vi.spyOn(host, "addEventListener");
     const state = await loadContentScript({ enablePlayerAiQuickAction: true });
-    const playerAi = await import("../../extension/ai/player-ai.js");
+    const { schedulePlayerAiQuickActionSync } = await import("../../extension/ai/player-ai.js");
 
-    playerAi.schedulePlayerAiQuickActionSync(0);
+    schedulePlayerAiQuickActionSync(0);
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(document.getElementById("boc-player-ai-quick-action")).not.toBeNull();
 
     // 再次 sync（按钮已挂载路径）：不应重复绑游标监听
-    playerAi.schedulePlayerAiQuickActionSync(0);
+    schedulePlayerAiQuickActionSync(0);
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     const mousemoveBinds = hostAddSpy.mock.calls.filter(([type]) => type === "mousemove");
@@ -211,17 +219,17 @@ describe("player-ai 启停守卫", () => {
     // 只有容器、无字幕控件 → sync 挂载失败进入 retry 退避
     document.body.innerHTML = `<div class="bpx-player-container"></div>`;
     const state = await loadContentScript({ enablePlayerAiQuickAction: true });
-    const playerAi = await import("../../extension/ai/player-ai.js");
+    const { schedulePlayerAiQuickActionSync, stopPlayerAiQuickAction } = await import("../../extension/ai/player-ai.js");
 
     // 手动 sync 会 clear 掉 start 的初始 120ms 定时器并立即执行一次 sync
-    playerAi.schedulePlayerAiQuickActionSync(0);
+    schedulePlayerAiQuickActionSync(0);
     await vi.advanceTimersByTimeAsync(1);
 
     // 挂载失败已进入 retry：sync 定时器为 260ms 退避定时器
     expect(document.getElementById("boc-player-ai-quick-action")).toBeNull();
     expect(state.playerAi.playerAiQuickActionSyncTimer).not.toBe(0);
 
-    playerAi.stopPlayerAiQuickAction();
+    stopPlayerAiQuickAction();
     expect(state.playerAi.playerAiQuickActionSyncTimer).toBe(0);
 
     // 推进 3 秒：retry 定时器已清，不会再触发挂载

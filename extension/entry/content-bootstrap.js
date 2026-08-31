@@ -80,8 +80,11 @@ export function startContentBootstrap({ getExtensionUrl, importModule } = {}) {
 }
 
 // 顶层自动启动。守卫条件在生产环境恒真（content script 环境必有
-// chrome.runtime.getURL）；单测环境（tests/setup.js 的 chrome stub 未提供
-// getURL）自动跳过，避免测试导入本模块时真的发起模块加载。
-if (typeof chrome?.runtime?.getURL === "function") {
+// chrome.runtime.getURL）；单测环境（vitest 注入 process.env.VITEST）显式
+// 跳过——S3 分层后 setup.js 的通用 chrome stub 提供 getURL（样式挂载用），
+// 守卫若只看 getURL 会在测试导入本模块时真的发起主包加载（vite 模块运行器
+// 对不存在的 chrome-extension:// URL 报错并上报 unhandled rejection）。
+const isTestEnv = typeof process !== "undefined" && Boolean(process.env?.VITEST);
+if (!isTestEnv && typeof chrome?.runtime?.getURL === "function") {
   startContentBootstrap().loadContentMain();
 }

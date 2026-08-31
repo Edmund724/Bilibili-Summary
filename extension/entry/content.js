@@ -39,6 +39,9 @@ import {
 } from "../reader/presenter.js";
 
 import { bindRuntimeEvents, bindUrlChangeHandler } from "../core/message-handler.js";
+// S3 分层：阅读表随阅读模式挂载（进入/URL 编排与 message-handler 共用同一
+// 挂载器；此处 handle 启动直开路径与页内跳转路径）
+import { ensureReaderStyles, removeReaderStyles } from "../shared/style-injector.js";
 
 globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
 
@@ -66,9 +69,14 @@ function init() {
 
   const shouldEnterReaderMode = isReaderMode();
   if (shouldEnterReaderMode) {
+    // S3：先挂阅读表再翻 data-boc-reader-mode 属性——属性门控是样式生效开关，
+    // 表提前挂（哪怕 link 尚未加载完）不会误伤普通页面；属性翻转瞬间阅读样式
+    // 已注入，无闪变窗口。
+    ensureReaderStyles();
     document.documentElement.setAttribute("data-boc-reader-mode", "1");
     document.body.setAttribute("data-boc-reader-mode", "1");
   } else {
+    removeReaderStyles();
     clearReaderModePageState();
   }
 

@@ -1,0 +1,601 @@
+/* 阅读视图壳与播放器槽位（#boc-reading-view 基础布局）——随阅读模式挂载的
+ * 非门控段（S3 分层）：页面无 data-boc-reader-mode 时视图 display:none 静默，
+ * 挂载后任何时刻建节点都不会闪现。 */
+
+#boc-reading-view {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  height: min(76vh, 860px);
+  z-index: 2147483646;
+  display: none;
+  padding: 20px 22px;
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  box-shadow: 0 28px 60px rgba(15, 23, 42, 0.16);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue",
+    Arial, sans-serif;
+}
+
+#boc-reading-view.open {
+  display: block;
+}
+
+#boc-reading-view[data-boc-reader-ready="0"] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.boc-reading-layout {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 28px;
+}
+
+.boc-reading-rail {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  align-content: start;
+}
+
+.boc-reading-stage {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(320px, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.boc-reading-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.boc-reading-header-copy {
+  min-width: 0;
+}
+
+.boc-reading-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #9ca3af;
+  text-transform: uppercase;
+}
+
+.boc-reading-title {
+  display: block;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.15;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.boc-reading-meta,
+.boc-reading-status {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #6b7280;
+}
+
+.boc-reading-meta {
+  margin-top: 8px;
+}
+
+.boc-reading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  transition: opacity 0.2s ease;
+}
+
+.boc-reading-actions[data-boc-icon-hidden="1"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boc-reading-actions {
+    transition: none;
+  }
+}
+
+.boc-reading-actions button,
+.boc-reading-toggle {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 999px;
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 13px;
+  color: #1f2937;
+  box-sizing: border-box;
+}
+
+.boc-reading-actions button {
+  cursor: pointer;
+}
+
+.boc-reading-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.boc-reading-toggle input {
+  margin: 0;
+}
+
+.boc-reading-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+  padding: 0;
+  color: #1f2937;
+}
+
+.boc-reading-icon-btn svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.boc-reading-icon-btn:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.boc-reading-icon-btn.is-active {
+  background: #eff6ff;
+  border-color: #2563eb;
+  color: #2563eb;
+}
+
+.boc-reading-select-sm {
+  min-height: 28px;
+  padding: 0 6px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #1f2937;
+  cursor: pointer;
+}
+
+.boc-reading-select-sm:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.boc-reading-list,
+.boc-reading-transcript {
+  min-height: 0;
+  overflow: auto;
+}
+
+.boc-reading-list {
+  padding-right: 6px;
+}
+
+.boc-reading-player-shell {
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  pointer-events: none;
+}
+
+.boc-reading-player-slot {
+  width: min(100%, 960px);
+  aspect-ratio: 16 / 9;
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.boc-reading-player-slot > * {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+}
+
+.boc-reading-player-slot > video {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  background: #000;
+  object-fit: contain;
+}
+
+.boc-reading-player-slot #bilibili-player,
+.boc-reading-player-slot .bpx-player-container,
+.boc-reading-player-slot .bpx-player-video-area,
+.boc-reading-player-slot .bpx-player-primary-area,
+.boc-reading-player-slot .bpx-player-inner {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.boc-reading-main {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.boc-reading-transcript {
+  width: min(100%, 960px);
+  height: 100%;
+  max-height: 100%;
+  margin: 0 auto;
+  padding: 6px 8px 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+.boc-reading-chapter,
+.boc-reading-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: 14px;
+  text-align: left;
+  cursor: pointer;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.boc-reading-chapter {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  color: #4b5563;
+}
+
+.boc-reading-item {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 6px 8px;
+  color: #111827;
+  position: relative;
+}
+
+.boc-reading-chapter:hover {
+  background: #f9fafb;
+}
+
+.boc-reading-chapter.is-active,
+.boc-reading-item.is-active {
+  background: transparent;
+  box-shadow: none;
+}
+
+.boc-reading-chapter-time,
+.boc-reading-time {
+  font-size: var(--boc-reader-transcript-font-size);
+  font-weight: 600;
+  color: #16a34a;
+  padding-top: 2px;
+  line-height: 1.4;
+}
+
+.boc-reading-chapter-title {
+  font-size: 13px;
+  line-height: 1.45;
+  color: inherit;
+}
+
+.boc-reading-chapter.is-active .boc-reading-chapter-title,
+.boc-reading-item.is-active .boc-reading-text {
+  text-decoration-line: underline;
+  text-decoration-color: #22c55e;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+.boc-reading-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: inherit;
+}
+
+.boc-reading-empty {
+  padding: 12px 4px;
+  font-size: 14px;
+  color: #94a3b8;
+}
+
+@media (max-width: 1100px) {
+  #boc-reading-view {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    padding: 18px;
+  }
+
+  .boc-reading-layout {
+    grid-template-columns: 210px minmax(0, 1fr);
+    gap: 20px;
+  }
+
+  .boc-reading-title {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 760px) {
+  #boc-reading-view {
+    top: 72px;
+    height: auto;
+  }
+
+  .boc-reading-layout {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .boc-reading-stage {
+    grid-template-rows: auto auto minmax(220px, auto) minmax(0, 1fr);
+  }
+
+  .boc-reading-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .boc-reading-actions {
+    justify-content: flex-start;
+  }
+
+  .boc-reading-title {
+    font-size: 16px;
+  }
+
+  .boc-reading-item {
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .boc-reading-text {
+    font-size: 13px;
+  }
+}
+
+/* 主题 token 属阅读表：引用方（gate 段）随表同挂同摘，无跨表串色 */
+#boc-reading-view,
+#boc-reading-view .boc-reading-meta,
+#boc-reading-view .boc-reading-status,
+#boc-reading-view .boc-reading-chapter,
+#boc-reading-view .boc-reading-item,
+#boc-reading-view .boc-reading-panel,
+#boc-reading-view .boc-reading-select {
+  color: var(--boc-reader-text);
+}
+
+#boc-reading-view .boc-reading-layout {
+  gap: 22px;
+}
+
+#boc-reading-view .boc-reading-stage {
+  display: grid;
+  gap: 16px;
+}
+
+#boc-reading-view .boc-reading-header {
+  align-items: flex-start;
+}
+
+#boc-reading-view .boc-reading-title {
+  font-size: 20px;
+  color: var(--boc-reader-text);
+  margin-top: 10px;
+}
+
+#boc-reading-view .boc-reading-meta,
+#boc-reading-view .boc-reading-status,
+#boc-reading-view .boc-reading-panel-grid label,
+#boc-reading-view .boc-reading-info-label {
+  font-size: 14px;
+  color: var(--boc-reader-muted);
+}
+
+#boc-reading-view .boc-reading-actions {
+  gap: 10px;
+}
+
+#boc-reading-view .boc-reading-actions button,
+#boc-reading-view .boc-reading-toggle,
+#boc-reading-view .boc-reading-select {
+  border: 1px solid var(--boc-reader-border);
+  background: var(--boc-reader-surface);
+  color: var(--boc-reader-text);
+  box-shadow: none;
+}
+
+#boc-reading-view .boc-reading-actions button.is-active,
+#boc-reading-view .boc-reading-toggle.is-active,
+#boc-reading-view .boc-reading-select:focus {
+  background: var(--boc-reader-accent-soft);
+  color: var(--boc-reader-accent);
+}
+
+#boc-reading-view .boc-reading-select {
+  min-height: 36px;
+  border-radius: 999px;
+  padding: 0 12px;
+  width: auto;
+  margin: 0;
+}
+
+#boc-reading-view .boc-reading-panel {
+  border-radius: 18px;
+  padding: 14px 16px;
+  pointer-events: auto;
+  background: var(--boc-reader-surface);
+  border: 1px solid var(--boc-reader-border);
+  box-shadow: var(--boc-reader-shadow);
+}
+
+#boc-reading-view .boc-reading-panel-grid label,
+#boc-reading-view .boc-reading-info-group {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+#boc-reading-view .boc-reading-info-panel,
+#boc-reading-view .boc-reading-info-list {
+  display: grid;
+  gap: 6px;
+}
+
+#boc-reading-view .boc-reading-info-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+#boc-reading-view .boc-reading-info-value,
+#boc-reading-view .boc-reading-info-copy {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--boc-reader-text);
+  word-break: break-word;
+}
+
+#boc-reading-view .boc-reading-text-btn {
+  border: 0;
+  background: transparent;
+  color: var(--boc-reader-accent);
+  padding: 0;
+  cursor: pointer;
+  width: fit-content;
+  font-size: 13px;
+}
+
+#boc-reading-view .boc-reading-main {
+  justify-content: center;
+  background: transparent;
+}
+
+#boc-reading-view .boc-reading-transcript {
+  width: min(100%, var(--boc-reader-content-max));
+}
+
+#boc-reading-view[data-transcript-visible="0"] #boc-reading-inline-host {
+  border: none;
+  background: transparent;
+}
+
+#boc-reading-view .boc-reading-item {
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 18px;
+  background: transparent;
+}
+
+#boc-reading-view .boc-reading-chapter:hover {
+  background: var(--boc-reader-surface-2);
+}
+
+#boc-reading-view .boc-reading-item.is-active,
+#boc-reading-view .boc-reading-chapter.is-active {
+  background: var(--boc-reader-accent-soft);
+}
+
+#boc-reading-view .boc-reading-time,
+#boc-reading-view .boc-reading-chapter-time {
+  color: var(--boc-reader-accent);
+}
+
+#boc-reading-view .boc-reading-text {
+  font-size: var(--boc-reader-transcript-font-size);
+  line-height: var(--boc-reader-transcript-line-height);
+  letter-spacing: var(--boc-reader-letter-spacing);
+  color: var(--boc-reader-text);
+}
+
+.boc-reading-stepper-list {
+  display: grid;
+  gap: 7px;
+}
+
+.boc-reading-stepper {
+  align-items: center;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.boc-reading-stepper-title {
+  min-width: 0;
+  color: var(--boc-reader-text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.boc-reading-stepper-buttons {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border: 1px solid var(--boc-reader-border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--boc-reader-surface);
+}
+
+.boc-reading-stepper-btn {
+  min-height: 28px;
+  border: 0;
+  border-right: 1px solid var(--boc-reader-border);
+  background: transparent;
+  color: var(--boc-reader-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.boc-reading-stepper-btn:last-child {
+  border-right: 0;
+}
+
+.boc-reading-stepper-btn:hover {
+  background: var(--boc-reader-accent-soft);
+  color: var(--boc-reader-accent);
+}
+
+.boc-reading-stepper-btn.is-active {
+  background: var(--boc-reader-accent-soft);
+  color: var(--boc-reader-accent);
+}

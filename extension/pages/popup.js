@@ -353,9 +353,12 @@ async function ensureContentScriptReady(tabId) {
     return;
   }
 
+  // S3 分层：语义与 background.js 的修复注入一致——「确保 content 就绪」时
+  // 页面可能缺失任何样式，常驻表 + 阅读表全量补齐（阅读表在阅读模式未开启时
+  // 因 data-boc-reader-mode 门控静默，无副作用）。
   await chrome.scripting.insertCSS({
     target: { tabId },
-    files: ["entry/content.css"]
+    files: ["entry/styles/panel.css", "entry/styles/reader.css", "entry/styles/reader-gate.css"]
   });
 
   try {

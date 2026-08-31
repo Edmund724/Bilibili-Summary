@@ -5,7 +5,7 @@
 //   A. 进入阅读模式时章节已在 state → 渲染 + 三处 data 属性契约
 //   B. 章节经 presenter seam 迟到（subtitle-ready）→ 应触发重渲染
 //   C. 真实复选框 change 事件 → data-*-chapter-visibility 应跟随勾选态
-//   D. JS 写入的属性名必须与 content.css 隐藏选择器匹配（CSS/JS 契约）
+//   D. JS 写入的属性名必须与阅读表（reader-gate.css）隐藏选择器匹配（CSS/JS 契约）
 //   E. hydrateReaderStateFromSettings 读取的设置 key 必须存在于 DEFAULT_SETTINGS
 
 import { readFileSync } from "node:fs";
@@ -170,13 +170,15 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
     expect(chapterButtons().length).toBe(2);
   });
 
-  it("D. CSS 契约：content.css 隐藏 rail 的选择器必须引用 JS 实际写入的属性名", () => {
-    const cssPath = resolve(process.cwd(), "extension/entry/content.css");
+  it("D. CSS 契约：阅读表（reader-gate.css）隐藏 rail 的选择器必须引用 JS 实际写入的属性名", () => {
+    // S3 分层：门控 CSS 迁往 entry/styles/reader-gate.css（随阅读模式挂载），
+    // 契约文件跟随（路径经 manifest 声明/运行时挂载，构建校验覆盖存在性）。
+    const cssPath = resolve(process.cwd(), "extension/entry/styles/reader-gate.css");
     const css = readFileSync(cssPath, "utf8");
 
     // 找到控制 .boc-reading-rail display:none 的规则块
     const hideRule = css.match(/[^{}]*\.boc-reading-rail[^{}]*\{[^}]*display:\s*none[^}]*\}/s);
-    expect(hideRule, "content.css 中应存在隐藏 .boc-reading-rail 的规则").not.toBe(null);
+    expect(hideRule, "reader-gate.css 中应存在隐藏 .boc-reading-rail 的规则").not.toBe(null);
     const selectors = hideRule[0];
 
     // JS 侧实际写入的属性（lifecycle.js applyReadingViewPresentation /

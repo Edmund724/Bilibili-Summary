@@ -43,7 +43,7 @@
         "https://www.bilibili.com/list/watchlater/*"
       ],
       "js": ["entry/content-bootstrap.iife.js"],
-      "css": ["entry/content.css"],
+      "css": ["entry/styles/panel.css"],
       "run_at": "document_idle",
       "all_frames": false
     }

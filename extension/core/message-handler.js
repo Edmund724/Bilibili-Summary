@@ -44,6 +44,8 @@ import { enforceNormalPageStateIfNeeded } from "../reader/page-state.js";
 import { renderReadingStatus } from "../reader/presentation.js";
 // 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
 import { logWarn } from "../shared/logging.js";
+// S3 分层：阅读表随阅读模式挂载/移除（打开/关闭/URL 跳转编排三处共用）
+import { ensureReaderStyles, removeReaderStyles } from "../shared/style-injector.js";
 
 import {
   isReaderMode,
@@ -138,6 +140,8 @@ export function bindRuntimeEvents() {
       const readerUrl = String(message.readerUrl || "").trim();
       if (readerUrl) {
         replaceReaderModeUrl(readerUrl);
+        // S3：先挂阅读表再翻属性（无闪变时序，见 content.js 同款注释）
+        ensureReaderStyles();
         document.documentElement.setAttribute("data-boc-reader-mode", "1");
         document.body.setAttribute("data-boc-reader-mode", "1");
       }
@@ -169,6 +173,9 @@ export function bindRuntimeEvents() {
       ensureReaderDomain()
         .then((reader) => {
           reader.closeReadingView();
+          // S3：关闭后移除阅读表——门控样式随属性清除已停止生效，摘表进一步
+          // 释放级联；下次进入重挂（link 数据在浏览器缓存，二进宫无闪变）。
+          removeReaderStyles();
           sendResponse({ ok: true });
         })
         .catch((error) => {
@@ -332,6 +339,8 @@ export function bindUrlChangeHandler() {
     }
     const shouldEnterReaderMode = isReaderMode(nextUrl);
     if (!isReaderViewOpen() && shouldEnterReaderMode) {
+      // S3：先挂阅读表再翻属性（无闪变时序，见 content.js 同款注释）
+      ensureReaderStyles();
       document.documentElement.setAttribute("data-boc-reader-mode", "1");
       document.body.setAttribute("data-boc-reader-mode", "1");
       // renderReadingStatus 为常驻微模块（presentation.js）的轻函数，直接写

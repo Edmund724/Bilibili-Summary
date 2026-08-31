@@ -322,9 +322,12 @@ function probeContentScriptVersionOnce(tabId) {
 }
 
 async function injectReaderAssets(tabId) {
+  // S3 分层：修复注入语义是「补齐整页样式」（页面可能被 manifest 注入路径
+  // 遗漏，阅读模式可能正处于开启状态），因此常驻表 + 阅读表全量注入；播放器
+  // AI 表不需要——它只随 ai/player-ai.js 模块装载挂载，与内容脚本注入无关。
   await chrome.scripting.insertCSS({
     target: { tabId },
-    files: ["entry/content.css"]
+    files: ["entry/styles/panel.css", "entry/styles/reader.css", "entry/styles/reader-gate.css"]
   });
 
   await chrome.scripting.executeScript({

@@ -15,6 +15,11 @@ function stubChromeApi() {
   const chromeStub = {
     runtime: {
       lastError: null,
+      // S3 分层：content 侧按需 CSS 经 chrome.runtime.getURL 挂 link（阅读表/
+      // player-ai 表）；jsdom 无扩展上下文，返回占位 URL（真实值只影响 href
+      // 文本，不影响断言）。守卫条件与 content-bootstrap 一致：getURL 存在才
+      // 触发自动加载——本 stub 在 setup 顶层安装，所有测试文件共享。
+      getURL: vi.fn((path) => `chrome-extension://test/${path}`),
       sendMessage: vi.fn((_message, callback) => {
         callback?.({ ok: true });
         return undefined;
