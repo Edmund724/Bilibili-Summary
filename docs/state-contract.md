@@ -57,6 +57,29 @@ readingVideoEl
 readingDocumentClickBound
 ```
 
+## Context attribution (runtime volatility)
+
+The four namespaces above form a **content-script (page-context) singleton**: every importer of
+`core/state.js` runs in the content bundle (`entry/content.js`, `reader/*`, `subtitle/*`,
+`bilibili/*`, `asr/fallback.js`, …). The service-worker bundle reaches `state.js` only through
+static imports (`shared/logging.js`, `shared/error-helpers.js`, `bilibili/gateway.js`), and its
+paths only read defaults (`state.settings?.enableDebugLogs`); no SW path writes business fields.
+Loss of this state on page reload is accepted product semantics (state is re-derived from the URL,
+Bilibili APIs, or a re-fetch), so nothing here is persisted to `chrome.storage.session`.
+
+Consequences of that attribution:
+
+- MV3 SW termination does not touch any namespace above.
+- The only module-level mutable state in the SW graph is the DNR session-rule id ledger in
+  `extension/asr/offscreen-bridge.bg.js`. DNR session rules outlive SW instances while the ledger
+  resets on cold start, so the ledger reconciles against
+  `chrome.declarativeNetRequest.getSessionRules()` before the first allocation in each SW
+  instance — the platform is the source of truth.
+- Per-page in-memory registries that hold live promises (for example `activeAsrTranscribes` in
+  `asr/fallback.js`, the "don't cancel on video switch" carrier) belong to the page context and
+  are intentionally not persisted; when the context dies the registry dies with it and the
+  completed results are recovered from the subtitle cache in `chrome.storage.local`.
+
 ## Future note
 
 A dev-mode `Proxy`/assertion helper that hard-fails on a direct business-field write was considered but
