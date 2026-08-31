@@ -1,13 +1,13 @@
-// extension/core/settings-store.js
+// extension/core/settings-store.ts
 // 全局设置（reader/AI/ASR/下载域共 21 个受管字段）的归一化 + 读写存储。
-// 从 extension/core/ai-provider-store.js 拆出：原先「AI provider 存储」文件
+// 从 extension/core/ai-provider-store.ts 拆出：原先「AI provider 存储」文件
 // 实际承载了全部设置域的归一化，导致 ASR 域（asr/asr-provider-store.js）
 // 反向依赖「AI 域」文件，名实不符。本模块只与 chrome.storage 交互，
 // 不涉及消息路由。provider 列表（asrProviders）不在受管字段内：列表+Key 归
 // provider-store（asr/asr-provider-store.js），经 asr-providers-save 消息写回，
 // settings 只存 ASR 标量（activeAsrProviderId / asrAutoFallback / asrLanguage）。
 
-import { DEFAULT_SETTINGS } from "./defaults.js";
+import { DEFAULT_SETTINGS, type Settings } from "./defaults.js";
 import { normalizeAsrLanguage } from "./presets.js";
 import {
   normalizeDownloadFormat,
@@ -33,14 +33,16 @@ import {
 // ===== 设置归一化 + 存储 =====
 
 // asrAutoFallback 标量兜底（asrProviders 列表已摘出 settings，归 provider-store）。
-function normalizeAsrAutoFallback(value) {
+function normalizeAsrAutoFallback(value: unknown): boolean {
   return value !== false; // 默认 true，仅显式 false 关闭
 }
+
+type NormalizerStep = [string, (m: Record<string, unknown>) => unknown];
 
 // 归一化步骤表：[key, normalizeField]，normalizeField 接收完整对象、返回该 key
 // 的归一化值。readerLetterSpacing 依赖同一对象里尚未归一化的 readerLineHeight
 // （缺失时派生兜底），因此步骤顺序即历史内联顺序，不可调整。
-const SETTINGS_NORMALIZER_STEPS = [
+const SETTINGS_NORMALIZER_STEPS: NormalizerStep[] = [
   ["downloadFormat", (m) => normalizeDownloadFormat(m.downloadFormat)],
   ["includeHotCommentsInNote", (m) => normalizeIncludeHotCommentsInNote(m.includeHotCommentsInNote)],
   ["enablePlayerAiQuickAction", (m) => normalizeEnablePlayerAiQuickAction(m.enablePlayerAiQuickAction)],
@@ -69,16 +71,16 @@ const SETTINGS_NORMALIZER_STEPS = [
 // 更新迁移（background 的 initializeSettingsStorage）统一经由这里。
 // aiSystemPrompt 在此把 LEGACY 默认提示词映射为当前默认（LEGACY 常量保留
 // 一个版本周期）；落盘收口后，存储里的旧值会被一次性改写而非反复映射。
-export function normalizeSettings(merged) {
-  const normalized = { ...merged };
+export function normalizeSettings(merged: Record<string, unknown>): Settings {
+  const normalized: Record<string, unknown> = { ...merged };
   for (const [key, normalizeField] of SETTINGS_NORMALIZER_STEPS) {
     normalized[key] = normalizeField(normalized);
   }
-  return normalized;
+  return normalized as Settings;
 }
 
-export async function getMergedSettings(timeoutMs = 5000) {
-  const timeoutPromise = new Promise((_, reject) => {
+export async function getMergedSettings(timeoutMs = 5000): Promise<Settings> {
+  const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => reject(new Error("storage timeout")), timeoutMs);
   });
   const syncSettings = await Promise.race([
@@ -86,17 +88,17 @@ export async function getMergedSettings(timeoutMs = 5000) {
     timeoutPromise
   ]).catch(() => ({}));
 
-  return normalizeSettings({ ...DEFAULT_SETTINGS, ...syncSettings });
+  return normalizeSettings({ ...DEFAULT_SETTINGS, ...(syncSettings as Record<string, unknown>) });
 }
 
 // 写入白名单：settings 域的键面 = DEFAULT_SETTINGS 声明的键集。除归一化步骤表
 // 覆盖的字段外，tags / readerChapterVisible 等透传字段也经 save-settings 落盘，
 // 因此白名单取键面全集而非步骤表键集。saveSettings 据此剔除键面外的键。
-const SETTINGS_STORAGE_KEYS = new Set(Object.keys(DEFAULT_SETTINGS));
+const SETTINGS_STORAGE_KEYS = new Set<string>(Object.keys(DEFAULT_SETTINGS));
 
-export async function saveSettings(settings) {
-  const payload = settings && typeof settings === "object" ? settings : {};
-  const syncPayload = { ...payload };
+export async function saveSettings(settings: unknown): Promise<void> {
+  const payload = settings && typeof settings === "object" ? settings as Record<string, unknown> : {};
+  const syncPayload: Record<string, unknown> = { ...payload };
   // 值为 undefined 的 key 视为缺失，不写入存储，
   // 避免部分保存时把空值覆盖到其它设置项。
   for (const key of Object.keys(syncPayload)) {
@@ -112,7 +114,7 @@ export async function saveSettings(settings) {
   // （如 content.js 整对象写回里的 asrProviders）不再经 save-settings 落盘、
   // 陈旧快照无法借此复活；写回 asrProviders 请走 asr-providers-save 消息
   // （provider-store 收口，见 asr/asr-provider-store.js）。
-  const whitelisted = {};
+  const whitelisted: Record<string, unknown> = {};
   for (const key of Object.keys(syncPayload)) {
     if (SETTINGS_STORAGE_KEYS.has(key)) whitelisted[key] = syncPayload[key];
   }

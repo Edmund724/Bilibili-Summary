@@ -256,7 +256,7 @@ export function bindRuntimeEvents() {
             // 视图开 ⇒ 域已装载（ensure 即命中缓存）；装载/执行失败统一走
             // 下方 catch 的错误口径回包。
             const reader = await ensureReaderDomain();
-            const seekedTo = reader.seekReadingTarget(message.seconds, { resumePlayback: false });
+            const seekedTo = reader.seekReadingTarget(message.seconds ?? 0, { resumePlayback: false });
             if (seekedTo === null) {
               // reader 域内未绑定到视频（与无视频同型降级）。
               sendResponse({ ok: false, error: "当前页面没有找到可联动的视频播放器。" });

@@ -1,4 +1,4 @@
-// reader 域（reader/index.js facade 及其 LAYOUT/SYNC/LIFECYCLE 闭包）的按需
+// reader 域（reader/index.ts facade 及其 LAYOUT/SYNC/LIFECYCLE 闭包）的按需
 // 加载器（候选02 分层惰性）。
 //
 // 为什么惰性：reader 域（~50KB）只在进入阅读模式 / reader 交互 / presenter
@@ -8,8 +8,8 @@
 // 连同 lifecycle/page-frame/player-host/sync 切进独立 chunk，只在首次
 // ensureReaderDomain() 时才下载。
 //
-// 写法与 core/lazy-player-ai.js、subtitle/lazy.js 同款：加载器本体收拢于
-// shared/lazy-import.js 的 createLazyLoader（手写 promise 缓存 + 失败清缓存
+// 写法与 core/lazy-player-ai.ts、subtitle/lazy.ts 同款：加载器本体收拢于
+// shared/lazy-import.ts 的 createLazyLoader（手写 promise 缓存 + 失败清缓存
 // 可重试的共享工厂）。
 //
 // 为什么直接写相对路径：本模块身处 ESM 主包模块图内，动态 import() 的相对
@@ -23,17 +23,24 @@
 // 从未打开 ⇒ presenter 通知的 reader 侧处理（停止同步/重渲染）在本域内的
 // 效果都是 no-op，消费方据此跳过装载（isReaderDomainLoaded）。
 
+interface ReaderDomain {
+  enterReaderMode(): void;
+  closeReadingView(): void;
+  waitForVideoMetadata(timeoutMs?: number): Promise<void>;
+  seekReadingTarget(seconds: number | string, options?: { resumePlayback?: boolean }): number | null;
+}
+
 import { createLazyLoader } from "../shared/lazy-import.js";
 
-const loader = createLazyLoader(() => import("../reader/index.js"));
+const loader = createLazyLoader<ReaderDomain>(() => import("../reader/index.js"));
 
-// 按需加载 reader/index.js facade，同一文档内重复调用共享同一 promise。
-export function ensureReaderDomain() {
+// 按需加载 reader/index.ts facade，同一文档内重复调用共享同一 promise。
+export function ensureReaderDomain(): Promise<ReaderDomain> {
   return loader.load();
 }
 
 // 模块是否已存在加载请求（含仍在加载中）。消费方用它区分「未装载可跳过」
 // 与「已装载需继续走异步路径」。
-export function isReaderDomainLoaded() {
+export function isReaderDomainLoaded(): boolean {
   return loader.isLoaded();
 }

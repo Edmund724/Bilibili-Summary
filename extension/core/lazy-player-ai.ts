@@ -1,8 +1,8 @@
-// ai/player-ai.js 的按需加载器（候选4 分包）。
+// ai/player-ai.ts 的按需加载器（候选4 分包）。
 //
 // 为什么惰性：player-ai 只在设置 enablePlayerAiQuickAction 开启时才有职责
 // （挂 observer、layout 监听、播放器快捷按钮），而该设置默认关闭
-// （core/defaults.js）。分包前它随单文件 bundle 常驻；分包后这里成为动态
+// （core/defaults.ts）。分包前它随单文件 bundle 常驻；分包后这里成为动态
 // import 边，esbuild 会把它连同其专属依赖切进 entry/chunks/，只在首次
 // start 需要时才下载。
 //
@@ -17,20 +17,25 @@
 // 从未挂上 ⇒ 一切「移除按钮 / 同步按钮」的请求都是 no-op，消费方据此跳过
 // 调用即可（stop/remove/sync 的幂等性由该不变量保证）。
 //
-// 加载器本体收拢于 shared/lazy-import.js 的 createLazyLoader（与
-// core/lazy-reader.js、subtitle/lazy.js、subtitle/fetcher.js 的 ASR 回退装载
+// 加载器本体收拢于 shared/lazy-import.ts 的 createLazyLoader（与
+// core/lazy-reader.ts、subtitle/lazy.ts、subtitle/fetcher.ts 的 ASR 回退装载
 // 同款），本模块保留仓库既有导出名。
+interface PlayerAiDomain {
+  removePlayerAiQuickActionButton(): void;
+  schedulePlayerAiQuickActionSync(): void;
+}
+
 import { createLazyLoader } from "../shared/lazy-import.js";
 
-const loader = createLazyLoader(() => import("../ai/player-ai.js"));
+const loader = createLazyLoader<PlayerAiDomain>(() => import("../ai/player-ai.js"));
 
-// 按需加载 ai/player-ai.js，同一文档内重复调用共享同一 promise。
-export function loadPlayerAi() {
+// 按需加载 ai/player-ai.ts，同一文档内重复调用共享同一 promise。
+export function loadPlayerAi(): Promise<PlayerAiDomain> {
   return loader.load();
 }
 
 // 模块是否已存在加载请求（含仍在加载中）。消费方用它区分「未加载可跳过」
 // 与「已加载/加载中需继续走异步路径」。
-export function isPlayerAiLoaded() {
+export function isPlayerAiLoaded(): boolean {
   return loader.isLoaded();
 }

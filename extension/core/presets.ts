@@ -1,4 +1,4 @@
-// extension/core/presets.js
+// extension/core/presets.ts
 // AI / ASR platform presets plus the provider normalizers built on them.
 // Pure data + pure functions; no Chrome APIs, no DOM.
 
@@ -6,7 +6,25 @@
 // 字段含义见 spec.md 第 4 节。type 决定走哪个适配器，共一种：
 //   openai-transcriptions：OpenAI 兼容 multipart 端点（SiliconFlow / 本地 Whisper / 自定义）
 // supportsTimestamps 决定时间戳合成方式。
-export const ASR_PROVIDER_PRESETS = [
+
+export interface AsrProviderPresetModelOption {
+  value: string;
+  label: string;
+}
+
+export interface AsrProviderPreset {
+  id: string;
+  name: string;
+  type: string;
+  baseUrl: string;
+  model: string;
+  modelOptions?: AsrProviderPresetModelOption[];
+  supportsTimestamps: boolean;
+  note?: string;
+  language?: string;
+}
+
+export const ASR_PROVIDER_PRESETS: readonly AsrProviderPreset[] = [
   {
     id: "siliconflow-sensevoice",
     name: "SiliconFlow 硅基流动（免费）",
@@ -49,29 +67,48 @@ const ASR_PROVIDER_TYPES = new Set([
   "openai-transcriptions"
 ]);
 
+export interface AsrProvider {
+  id: string;
+  presetId: string;
+  name: string;
+  type: string;
+  baseUrl: string;
+  model: string;
+  supportsTimestamps: boolean;
+  enabled: boolean;
+}
+
 // 归一化单个 ASR provider：字段齐全 + type 合法值校验。
 // 与 normalizeAiProvider 平行：持久化层只存"明文可回传"字段，
 // apiKey 单独存放在 chrome.storage.local，不进列表，故此处不带 apiKey。
-export function normalizeAsrProvider(item) {
+export function normalizeAsrProvider(item: unknown): AsrProvider | null {
   if (!item || typeof item !== "object") return null;
-  const id = String(item.id || "").trim();
+  const raw = item as Partial<AsrProvider>;
+  const id = String(raw.id || "").trim();
   if (!id) return null;
-  const type = String(item.type || "").trim();
+  const type = String(raw.type || "").trim();
   if (!ASR_PROVIDER_TYPES.has(type)) return null;
   return {
     id,
-    presetId: String(item.presetId || "custom"),
-    name: String(item.name || "自定义").trim() || "自定义",
+    presetId: String(raw.presetId || "custom"),
+    name: String(raw.name || "自定义").trim() || "自定义",
     type,
-    baseUrl: String(item.baseUrl || "").trim().replace(/\/+$/, ""),
-    model: String(item.model || "").trim(),
-    supportsTimestamps: item.supportsTimestamps !== false,
-    enabled: item.enabled !== false
+    baseUrl: String(raw.baseUrl || "").trim().replace(/\/+$/, ""),
+    model: String(raw.model || "").trim(),
+    supportsTimestamps: raw.supportsTimestamps !== false,
+    enabled: raw.enabled !== false
   };
 }
 
 // ===== AI platform presets =====
-export const PRESETS = [
+export interface AiProviderPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  requiresKey: boolean;
+}
+
+export const PRESETS: readonly AiProviderPreset[] = [
   { id: "openai_compat", name: "OpenAI 兼容", baseUrl: "https://api.openai.com/v1", requiresKey: true },
   { id: "deepseek",      name: "DeepSeek",    baseUrl: "https://api.deepseek.com/v1", requiresKey: true },
   { id: "qwen",          name: "Qwen",        baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", requiresKey: true },
@@ -87,7 +124,7 @@ export const PRESETS = [
   { id: "custom",        name: "自定义",      baseUrl: "", requiresKey: true }
 ];
 
-export function normalizeBaseUrl(value) {
+export function normalizeBaseUrl(value: unknown): string {
   return String(value || "").trim().replace(/\/+$/, "");
 }
 
@@ -96,7 +133,7 @@ export function normalizeBaseUrl(value) {
 // （XingChen）系列模型只有传 ?language=english 才走英文转写，否则纯英文
 // 音频静默返回空文本；本地 Whisper 忽略该参数（服务端自动识别）。
 // 该设置只出现在 popup 顶部。
-export function normalizeAsrLanguage(value) {
+export function normalizeAsrLanguage(value: unknown): "auto" | "zh" | "en" {
   const lang = String(value || "").trim().toLowerCase();
   return lang === "zh" || lang === "en" ? lang : "auto";
 }

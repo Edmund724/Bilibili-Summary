@@ -1,4 +1,4 @@
-// sidepanel-payload.js — content ↔ sidepanel 上下文快照的「形状单源」（纯模块，零依赖）。
+// sidepanel-payload.ts — content ↔ sidepanel 上下文快照的「形状单源」（纯模块，零依赖）。
 //
 // 为什么存在：sidepanel-get-context 的 payload 是 content 与 sidepanel 之间的隐式
 // 跨 context 契约。此前字段清单手写在 message-handler 的组装字面量里，「哪些字段
@@ -17,9 +17,36 @@
 // 纯模块约束：不 import state/defaults/location——运行时输入（clip/settings/url）
 // 全部由调用方注入；对 snapshot 的非法形状一律按旧实现的缺省口径容错。
 
+import type { ClipState, NoSubtitleReason, SubtitleBodyItem, SubtitleOption, ChapterItem } from "./state.js";
+import type { Settings } from "./defaults.js";
+
 // ============================================================
 // 1. 字段清单（顺序即组装顺序，与线上响应的 key 序逐字一致）
 // ============================================================
+
+export type SidepanelContextPayload = {
+  url: string | undefined;
+  title: string;
+  author: string;
+  uploadDate: string;
+  bvid: string;
+  cid: string;
+  aid: string;
+  pageIndex: number;
+  pageCount: number;
+  pageTitle: string;
+  subtitleBody: SubtitleBodyItem[];
+  videoDuration: number;
+  includeTimestampInBody: boolean;
+  subtitleFetchState: string;
+  noSubtitleReason: NoSubtitleReason;
+  subtitleLang: string;
+  selectedSubtitleId: string;
+  selectedSubtitleUrl: string;
+  subtitleOptions: SubtitleOption[];
+  chapters: ChapterItem[];
+  hotComments: unknown[];
+};
 
 // sidepanel-get-context 全量 payload 的字段清单。每个字段注明消费方（对账于
 // pages/sidepanel*.js、ai/context-resolver.js、offscreen/ai 层）：
@@ -55,7 +82,7 @@
 //                         整体覆盖（getAiSidepanelState）。此占位仅为字段齐全。
 // 新增字段必须：同时进本清单 + 工厂 + 签名三分类（参与/间接/排除）之一，
 // 并在 tests/core/message-handler-signature.test.js 的形状锁死断言里显式过测试。
-export const SIDEPANEL_CONTEXT_PAYLOAD_FIELDS = Object.freeze([
+export const SIDEPANEL_CONTEXT_PAYLOAD_FIELDS: readonly (keyof SidepanelContextPayload)[] = Object.freeze([
   "url",
   "title",
   "author",
@@ -89,46 +116,57 @@ export const SIDEPANEL_CONTEXT_PAYLOAD_FIELDS = Object.freeze([
 //   settings content 侧 state.settings（缺省时调用方传 DEFAULT_SETTINGS）。
 //   url      location.href（由调用方注入，保持本模块纯函数可测）。
 // 输出字段名/key 顺序与线上响应逐字一致（key 序 = SIDEPANEL_CONTEXT_PAYLOAD_FIELDS）。
-export function createSidepanelContextPayload({ clip, settings, url } = {}) {
+export function createSidepanelContextPayload({
+  clip,
+  settings,
+  url
+}: {
+  clip?: Partial<ClipState>;
+  settings?: Partial<Settings>;
+  url?: string;
+} = {}): SidepanelContextPayload {
   const c = clip || {};
   const body = c.subtitleBody || [];
-  const payload = {};
-  payload.url = url;
-  payload.title = c.title || "";
-  payload.author = c.author || "";
-  payload.uploadDate = c.uploadDate || "";
-  payload.bvid = c.bvid || "";
-  payload.cid = c.cid || "";
-  payload.aid = c.aid || "";
-  payload.pageIndex = Number(c.pageIndex) > 0 ? Number(c.pageIndex) : 1;
-  payload.pageCount = Number(c.pageCount) > 0 ? Number(c.pageCount) : 0;
-  payload.pageTitle = c.pageTitle || "";
-  payload.subtitleBody = body;
-  // 视频时长（fetcher 经 page-context seam 写入 clip.videoDuration）：offscreen
-  // 渲染 prompt 时用于 withHours（小时级时间戳）判定。
-  payload.videoDuration = Number(c.videoDuration || 0) || 0;
-  // 字幕时间戳开关透传：offscreen 渲染 prompt 时沿用同一设置；缺失按默认 true。
-  payload.includeTimestampInBody = settings?.includeTimestampInBody !== false;
-  // idle/loading/ready/error：loading 且 subtitleBody 为空表示抓取（可能含小时级
-  // ASR 转写）仍在进行，sidepanel 据此等待而非把空字幕直接发给模型。
-  payload.subtitleFetchState = c.subtitleFetchState || "idle";
-  // empty 时的无字幕原因归类（null | "no-asr-config" | "asr-disabled" |
-  // "asr-failed" | "asr-empty"），sidepanel 拦截总结发送时按原因提示。
-  payload.noSubtitleReason = c.noSubtitleReason || null;
-  payload.subtitleLang = c.selectedSubtitleLang || "";
-  payload.selectedSubtitleId = c.selectedSubtitleId || "";
-  payload.selectedSubtitleUrl = c.selectedSubtitleUrl || "";
-  payload.subtitleOptions = c.subtitles || [];
-  // 章节透传（fetcher 写入 clip.chapters）：供侧边栏回传 offscreen 后做章节对齐
-  // 切段（budgeter）与追问章节名检索（raw-retrieval）。
-  payload.chapters = Array.isArray(c.chapters) ? c.chapters : [];
-  payload.hotComments = [];
+  const payload: SidepanelContextPayload = {
+    url,
+    title: c.title || "",
+    author: c.author || "",
+    uploadDate: c.uploadDate || "",
+    bvid: c.bvid || "",
+    cid: c.cid || "",
+    aid: c.aid || "",
+    pageIndex: Number(c.pageIndex) > 0 ? Number(c.pageIndex) : 1,
+    pageCount: Number(c.pageCount) > 0 ? Number(c.pageCount) : 0,
+    pageTitle: c.pageTitle || "",
+    subtitleBody: body as SubtitleBodyItem[],
+    // 视频时长（fetcher 经 page-context seam 写入 clip.videoDuration）：offscreen
+    // 渲染 prompt 时用于 withHours（小时级时间戳）判定。
+    videoDuration: Number(c.videoDuration || 0) || 0,
+    // 字幕时间戳开关透传：offscreen 渲染 prompt 时沿用同一设置；缺失按默认 true。
+    includeTimestampInBody: settings?.includeTimestampInBody !== false,
+    // idle/loading/ready/error：loading 且 subtitleBody 为空表示抓取（可能含小时级
+    // ASR 转写）仍在进行，sidepanel 据此等待而非把空字幕直接发给模型。
+    subtitleFetchState: c.subtitleFetchState || "idle",
+    // empty 时的无字幕原因归类（null | "no-asr-config" | "asr-disabled" |
+    // "asr-failed" | "asr-empty"），sidepanel 拦截总结发送时按原因提示。
+    noSubtitleReason: c.noSubtitleReason || null,
+    subtitleLang: c.selectedSubtitleLang || "",
+    selectedSubtitleId: c.selectedSubtitleId || "",
+    selectedSubtitleUrl: c.selectedSubtitleUrl || "",
+    subtitleOptions: c.subtitles || [],
+    // 章节透传（fetcher 写入 clip.chapters）：供侧边栏回传 offscreen 后做章节对齐
+    // 切段（budgeter）与追问章节名检索（raw-retrieval/followup-context）。
+    chapters: Array.isArray(c.chapters) ? (c.chapters as ChapterItem[]) : [],
+    hotComments: []
+  };
   return payload;
 }
 
 // ============================================================
 // 3. 状态签名（候选5 上下文同步瘦身的失效判定）
 // ============================================================
+
+type SignatureProjection = readonly [keyof SidepanelContextPayload | "cid", (s: Partial<SidepanelContextPayload>) => string | number];
 
 // 参与签名的字段（有序）+ 逐字段投影。签名相同 ⇒ 重发全量对 SP 是纯冗余——
 // applyContextPayload 本就按 contextKey 去重不重渲染，但整份字幕体的消息传输
@@ -148,28 +186,28 @@ export function createSidepanelContextPayload({ clip, settings, url } = {}) {
 //   chapters               只取长度：章节集合变化影响切段与检索。
 //   includeTimestampInBody 设置项变化改变 offscreen 渲染产物，需触发重发。
 //   subtitleLang           与 selectedSubtitleId 互补的轨身份（lang 可独立变化）。
-const SIGNATURE_FIELD_PROJECTIONS = Object.freeze([
-  ["bvid", (s) => String(s.bvid || "").trim()],
-  ["cid", (s) => String(s.cid || "").trim() || String(s.aid || "").trim()],
-  ["pageIndex", (s) => (Number(s.pageIndex) > 0 ? Number(s.pageIndex) : 1)],
-  ["subtitleFetchState", (s) => String(s.subtitleFetchState || "idle")],
-  ["subtitleBody", (s) => (Array.isArray(s.subtitleBody) ? s.subtitleBody : []).length],
-  ["selectedSubtitleId", (s) => String(s.selectedSubtitleId || "").trim()],
-  ["subtitleOptions", (s) => (Array.isArray(s.subtitleOptions) ? s.subtitleOptions : []).length],
-  ["chapters", (s) => (Array.isArray(s.chapters) ? s.chapters : []).length],
-  ["includeTimestampInBody", (s) => (s.includeTimestampInBody !== false ? "1" : "0")],
-  ["subtitleLang", (s) => String(s.subtitleLang || "").trim()]
+const SIGNATURE_FIELD_PROJECTIONS: readonly SignatureProjection[] = Object.freeze([
+  ["bvid", (s: Partial<SidepanelContextPayload>) => String(s.bvid || "").trim()],
+  ["cid", (s: Partial<SidepanelContextPayload>) => String(s.cid || "").trim() || String(s.aid || "").trim()],
+  ["pageIndex", (s: Partial<SidepanelContextPayload>) => (Number(s.pageIndex) > 0 ? Number(s.pageIndex) : 1)],
+  ["subtitleFetchState", (s: Partial<SidepanelContextPayload>) => String(s.subtitleFetchState || "idle")],
+  ["subtitleBody", (s: Partial<SidepanelContextPayload>) => (Array.isArray(s.subtitleBody) ? s.subtitleBody : []).length],
+  ["selectedSubtitleId", (s: Partial<SidepanelContextPayload>) => String(s.selectedSubtitleId || "").trim()],
+  ["subtitleOptions", (s: Partial<SidepanelContextPayload>) => (Array.isArray(s.subtitleOptions) ? s.subtitleOptions : []).length],
+  ["chapters", (s: Partial<SidepanelContextPayload>) => (Array.isArray(s.chapters) ? s.chapters : []).length],
+  ["includeTimestampInBody", (s: Partial<SidepanelContextPayload>) => (s.includeTimestampInBody !== false ? "1" : "0")],
+  ["subtitleLang", (s: Partial<SidepanelContextPayload>) => String(s.subtitleLang || "").trim()]
 ]);
 
 // 直接参与签名的字段名（从投影表派生，保持单一事实）。
-export const SIGNATURE_PARTICIPATING_FIELDS = Object.freeze(
-  SIGNATURE_FIELD_PROJECTIONS.map(([name]) => name)
+export const SIGNATURE_PARTICIPATING_FIELDS: readonly string[] = Object.freeze(
+  SIGNATURE_FIELD_PROJECTIONS.map(([name]) => name as string)
 );
 
 // 间接参与：aid 仅在 cid 为空时经 cid 投影回退进入签名（见 cid 投影），自身
 // 变化不独立驱动签名。单独列出而非并入排除清单，保证三分类划分完备、
 // 「改排除字段签名不变」可机械遍历测试。
-export const SIGNATURE_INDIRECT_FIELDS = Object.freeze(["aid"]);
+export const SIGNATURE_INDIRECT_FIELDS: readonly string[] = Object.freeze(["aid"]);
 
 // 刻意不纳入签名的字段（排除清单即知识：此前只活在函数注释里）。逐项理由：
 //   hotComments          由 background 按需拉取并在转发层整体覆盖（unchanged 短路
@@ -183,7 +221,7 @@ export const SIGNATURE_INDIRECT_FIELDS = Object.freeze(["aid"]);
 //                        SP contextKey 按 id 去重的语义一致）。
 //   noSubtitleReason     与 subtitleFetchState 同源变化（empty 收尾时两者同时
 //                        落定），跟随 fetchState 即可。
-export const SIGNATURE_EXCLUDED_FIELDS = Object.freeze([
+export const SIGNATURE_EXCLUDED_FIELDS: readonly string[] = Object.freeze([
   "hotComments",
   "url",
   "title",
@@ -200,7 +238,6 @@ export const SIGNATURE_EXCLUDED_FIELDS = Object.freeze([
 // 持有快照的 shape，背景层附加的 signature/hotComments/isVideoContext 字段天然
 // 被投影表忽略）。字段覆盖 SP 消费的全部可变状态；实现从投影表派生，不再手列
 // join 数组——加/减签名键只改 SIGNATURE_FIELD_PROJECTIONS 一处。
-export function computeSidepanelStateSignature(snapshot) {
-  const safe = snapshot && typeof snapshot === "object" ? snapshot : {};
-  return SIGNATURE_FIELD_PROJECTIONS.map(([, project]) => String(project(safe))).join("|");
+export function computeSidepanelStateSignature(snapshot: Partial<SidepanelContextPayload>): string {
+  return SIGNATURE_FIELD_PROJECTIONS.map(([, project]) => String(project(snapshot))).join("|");
 }

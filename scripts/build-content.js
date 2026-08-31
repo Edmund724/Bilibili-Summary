@@ -35,20 +35,20 @@ const legacyOutfile = path.join(outDir, "content-classic.js");
 // __BOC_CONTENT_SCRIPT_LOADED__ (bootstrap 写入) against
 // chrome.runtime.getManifest().version.
 const manifestPath = path.join(__dirname, "..", "extension", "manifest.json");
-// 版本实体在 core/version.js（bootstrap 专用拆分，defaults.js re-export）；
-// defaults.js 若丢了 re-export，主包构建会因 content.js 的 import 失败而报错，
+// 版本实体在 core/version.ts（bootstrap 专用拆分，defaults.ts re-export）；
+// defaults.ts 若丢了 re-export，主包构建会因 content.js 的 import 失败而报错，
 // 天然兜底。
-const versionJsPath = path.join(__dirname, "..", "extension", "core", "version.js");
+const versionTsPath = path.join(__dirname, "..", "extension", "core", "version.ts");
 
 const manifestVersion = JSON.parse(fs.readFileSync(manifestPath, "utf8")).version;
-const versionJsText = fs.readFileSync(versionJsPath, "utf8");
-const versionJsMatch = /export const BOC_VERSION = "([^"]+)"/.exec(versionJsText);
-const versionJsVersion = versionJsMatch ? versionJsMatch[1] : null;
+const versionTsText = fs.readFileSync(versionTsPath, "utf8");
+const versionTsMatch = /export const BOC_VERSION = "([^"]+)"/.exec(versionTsText);
+const versionTsVersion = versionTsMatch ? versionTsMatch[1] : null;
 
-if (!versionJsVersion || versionJsVersion !== manifestVersion) {
+if (!versionTsVersion || versionTsVersion !== manifestVersion) {
   console.error(
     `Version mismatch: ${manifestPath} has "version": ${manifestVersion}, ` +
-      `but ${versionJsPath} declares BOC_VERSION = ${versionJsVersion ?? "(unparseable)"}`
+      `but ${versionTsPath} declares BOC_VERSION = ${versionTsVersion ?? "(unparseable)"}`
   );
   process.exit(1);
 }

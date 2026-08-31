@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS } from "./defaults.js";
+import { DEFAULT_SETTINGS, type Settings } from "./defaults.js";
 
 /**
  * State namespace objects.
@@ -11,13 +11,81 @@ import { DEFAULT_SETTINGS } from "./defaults.js";
  * supported; use the structured namespace (state.reader.readingViewOpen) instead.
  */
 
-// Reader namespace. Issue 06 hoisted reader-internal bookkeeping into
-// reader-impl.js module closure; issue 07 removed the now-dead fields. The
-// remaining fields are settings/shared flags plus a few cross-module
-// bookkeeping fields: readingVideoEl (video-probe reads, fetcher writes null,
-// reader-impl writes the element when binding/unbinding),
-// readingDocumentClickBound (ui-renderer sets).
-const readerState = {
+export type NoSubtitleReason = string | null;
+
+export type SubtitleOption = {
+  id?: string;
+  subtitleUrl?: string;
+  lan?: string;
+  [key: string]: unknown;
+};
+
+export type SubtitleBodyItem = {
+  from: number;
+  to: number;
+  content: string;
+};
+
+export type ChapterItem = {
+  title: string;
+  from: number;
+  to: number;
+};
+
+// ===== Reader namespace =====
+// Issue 06 hoisted reader-internal bookkeeping into reader-impl.js module closure;
+// issue 07 removed the now-dead fields. The remaining fields are settings/shared
+// flags plus a few cross-module bookkeeping fields: readingVideoEl (video-probe
+// reads, fetcher writes null, reader-impl writes the element when binding/
+// unbinding), readingDocumentClickBound (ui-renderer sets).
+
+type ReaderBusinessState = {
+  readingViewOpen: boolean;
+  readingNativePageMode: boolean;
+  readingAutoScroll: boolean;
+  readingTheme: string;
+  readingFontScale: string;
+  readingLetterSpacing: string;
+  readingLineHeight: string;
+  readingContentWidth: string;
+  readingChapterVisible: boolean;
+  readingTranscriptVisible: boolean;
+  readingSettingsExpanded: boolean;
+  readingDescriptionExpanded: boolean;
+  readingActiveSubtitleIndex: number;
+  readingActiveChapterIndex: number;
+  readingNextScrollBehavior: string;
+  readingViewReady: boolean;
+};
+
+type ReaderInternalState = {
+  readingVideoEl: HTMLVideoElement | null;
+  readingDocumentClickBound: boolean;
+};
+
+type ReaderSetters = {
+  setViewOpen(value: boolean): void;
+  setNativePageMode(value: boolean): void;
+  setAutoScroll(value: boolean): void;
+  setTheme(value: string): void;
+  setFontScale(value: string): void;
+  setLetterSpacing(value: string): void;
+  setLineHeight(value: string): void;
+  setContentWidth(value: string): void;
+  setChapterVisible(value: boolean): void;
+  setTranscriptVisible(value: boolean): void;
+  setSettingsExpanded(value: boolean): void;
+  setDescriptionExpanded(value: boolean): void;
+  setActiveSubtitleIndex(value: number): void;
+  setActiveChapterIndex(value: number): void;
+  setNextScrollBehavior(value: string): void;
+  setViewReady(value: boolean): void;
+};
+
+export type ReaderState = Readonly<ReaderBusinessState> & ReaderInternalState & ReaderSetters;
+type ReaderStateWritable = ReaderBusinessState & ReaderInternalState & ReaderSetters;
+
+const readerState: ReaderStateWritable = {
   readingViewOpen: false,
   readingNativePageMode: false,
   readingAutoScroll: true,
@@ -54,7 +122,72 @@ const readerState = {
   setViewReady(value) { this.readingViewReady = value; }
 };
 
-const clipState = {
+// ===== Clip namespace =====
+
+type ClipBusinessState = {
+  currentUrl: string;
+  fetchRunId: number;
+  bvid: string;
+  aid: string;
+  cid: string;
+  cidSource: string;
+  pageIndex: number;
+  pageCount: number;
+  pageTitle: string;
+  videoDuration: number;
+  description: string;
+  title: string;
+  author: string;
+  uploadDate: string;
+  subtitles: SubtitleOption[];
+  selectedSubtitleId: string;
+  selectedSubtitleUrl: string;
+  selectedSubtitleLang: string;
+  subtitleBody: SubtitleBodyItem[];
+  subtitleFetchState: string;
+  noSubtitleReason: NoSubtitleReason;
+  chapters: ChapterItem[];
+  hotComments: unknown[];
+  markdown: string;
+  srt: string;
+  txt: string;
+  currentClipSignature: string;
+};
+
+type ClipSetters = {
+  setCurrentUrl(value: string): void;
+  setFetchRunId(value: number): void;
+  setBvid(value: string): void;
+  setAid(value: string): void;
+  setCid(value: string): void;
+  setCidSource(value: string): void;
+  setPageIndex(value: number): void;
+  setPageCount(value: number): void;
+  setPageTitle(value: string): void;
+  setVideoDuration(value: number): void;
+  setDescription(value: string): void;
+  setTitle(value: string): void;
+  setAuthor(value: string): void;
+  setUploadDate(value: string): void;
+  setSubtitles(value: SubtitleOption[]): void;
+  setSelectedSubtitleId(value: string): void;
+  setSelectedSubtitleUrl(value: string): void;
+  setSelectedSubtitleLang(value: string): void;
+  setSubtitleBody(value: SubtitleBodyItem[]): void;
+  setSubtitleFetchState(value: string): void;
+  setNoSubtitleReason(value: NoSubtitleReason): void;
+  setChapters(value: ChapterItem[]): void;
+  setHotComments(value: unknown[]): void;
+  setMarkdown(value: string): void;
+  setSrt(value: string): void;
+  setTxt(value: string): void;
+  setCurrentClipSignature(value: string): void;
+};
+
+export type ClipState = Readonly<ClipBusinessState> & ClipSetters;
+type ClipStateWritable = ClipBusinessState & ClipSetters;
+
+const clipState: ClipStateWritable = {
   currentUrl: typeof location !== "undefined" ? location.href : "",
   fetchRunId: 0,
   bvid: "",
@@ -122,7 +255,34 @@ const clipState = {
   setCurrentClipSignature(value) { this.currentClipSignature = value; }
 };
 
-const playerAiState = {
+// ===== Player-AI namespace =====
+
+type PlayerAiBusinessState = {
+  playerAiQuickActionObserver: MutationObserver | null;
+  playerAiQuickActionLayoutBound: boolean;
+  playerAiQuickActionSyncTimer: number;
+  playerAiQuickActionRevealTimer: number;
+  playerAiQuickActionHideTimer: number;
+  playerAiQuickActionCursorHideTimer: number;
+  playerAiQuickActionSubmitting: boolean;
+  playerAiQuickActionSuppressedUntil: number;
+};
+
+type PlayerAiSetters = {
+  setObserver(value: MutationObserver | null): void;
+  setLayoutBound(value: boolean): void;
+  setSyncTimer(value: number): void;
+  setRevealTimer(value: number): void;
+  setHideTimer(value: number): void;
+  setCursorHideTimer(value: number): void;
+  setSubmitting(value: boolean): void;
+  setSuppressedUntil(value: number): void;
+};
+
+export type PlayerAiState = Readonly<PlayerAiBusinessState> & PlayerAiSetters;
+type PlayerAiStateWritable = PlayerAiBusinessState & PlayerAiSetters;
+
+const playerAiState: PlayerAiStateWritable = {
   playerAiQuickActionObserver: null,
   playerAiQuickActionLayoutBound: false,
   playerAiQuickActionSyncTimer: 0,
@@ -141,7 +301,32 @@ const playerAiState = {
   setSuppressedUntil(value) { this.playerAiQuickActionSuppressedUntil = value; }
 };
 
-const uiState = {
+// ===== UI namespace =====
+
+type UiBusinessState = {
+  uiEventsBound: boolean;
+  runtimeEventsBound: boolean;
+  settingsWatcherBound: boolean;
+  normalPageStateGuardBound: boolean;
+  urlWatcherStarted: boolean;
+  statusText: string;
+  messageText: string;
+};
+
+type UiSetters = {
+  setEventsBound(value: boolean): void;
+  setRuntimeEventsBound(value: boolean): void;
+  setSettingsWatcherBound(value: boolean): void;
+  setNormalPageStateGuardBound(value: boolean): void;
+  setUrlWatcherStarted(value: boolean): void;
+  setStatusText(value: string): void;
+  setMessageText(value: string): void;
+};
+
+export type UiState = Readonly<UiBusinessState> & UiSetters;
+type UiStateWritable = UiBusinessState & UiSetters;
+
+const uiState: UiStateWritable = {
   uiEventsBound: false,
   runtimeEventsBound: false,
   settingsWatcherBound: false,
@@ -158,7 +343,22 @@ const uiState = {
   setMessageText(value) { this.messageText = value; }
 };
 
-const stateTarget = {
+// ===== State container =====
+
+export interface State {
+  settings: Settings;
+  readerState: ReaderState;
+  clipState: ClipState;
+  playerAiState: PlayerAiState;
+  uiState: UiState;
+  reader: ReaderState;
+  clip: ClipState;
+  playerAi: PlayerAiState;
+  ui: UiState;
+  setSettings(next: Settings): void;
+}
+
+const stateTarget: State = {
   settings: { ...DEFAULT_SETTINGS },
   readerState,
   clipState,
@@ -171,6 +371,5 @@ const stateTarget = {
   setSettings(next) { this.settings = next; }
 };
 
-const state = stateTarget;
-
-export { state, clipState, playerAiState, uiState };
+export const state: State = stateTarget;
+export { clipState, playerAiState, uiState };

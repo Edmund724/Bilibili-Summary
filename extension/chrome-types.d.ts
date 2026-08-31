@@ -99,7 +99,7 @@ declare namespace chrome {
     interface StorageArea {
       get(keys?: string | string[] | Record<string, unknown> | null): Promise<Record<string, unknown>>;
       set(items: Record<string, unknown>): Promise<void>;
-      remove?(keys: string | string[]): Promise<void>;
+      remove(keys: string | string[]): Promise<void>;
     }
 
     const sync: StorageArea;
@@ -108,6 +108,8 @@ declare namespace chrome {
 
   namespace permissions {
     function contains(permissions: { origins?: string[]; permissions?: string[] }): Promise<boolean>;
+    function request(permissions: { origins?: string[]; permissions?: string[] }): Promise<boolean>;
+    function remove(permissions: { origins?: string[]; permissions?: string[] }): Promise<boolean>;
   }
 
   namespace scripting {

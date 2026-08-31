@@ -1,13 +1,13 @@
-// extension/core/defaults.js
+// extension/core/defaults.ts
 // Default settings and default prompt constants shared across extension
-// contexts. Pure data only — no logic; normalizers live in validators.js /
-// presets.js, generic utils in shared/utils.js.
+// contexts. Pure data only — no logic; normalizers live in validators.ts /
+// presets.ts, generic utils in shared/utils.ts.
 
 // ===== Version =====
 // Single source of truth for the extension version; consumed by the content
 // script and the background side panel. Kept in sync with manifest.json's
 // "version" by scripts/build-content.js' version guard.
-// 实体在 core/version.js（bootstrap 只打包这一个常量，不连带全部默认设置），
+// 实体在 core/version.ts（bootstrap 只打包这一个常量，不连带全部默认设置），
 // 这里 re-export 维持既有 import 路径不变。
 export { BOC_VERSION } from "./version.js";
 
@@ -47,8 +47,51 @@ export const DEFAULT_AI_SYSTEM_PROMPT = [
 
 export const PLAYER_AI_QUICK_ACTION_STORAGE_KEY = "boc_player_ai_quick_action_v1";
 
+export interface FixedFrontmatterProperty {
+  key: string;
+  type: "text" | "number" | "checkbox" | "list" | "date";
+  value: string;
+}
+
+export interface NotePlaceholderSection {
+  title: string;
+  position: "before_intro" | "before_chapters" | "before_subtitle";
+  content: string;
+}
+
+export interface Settings {
+  [key: string]: unknown;
+  tags: string;
+  downloadFormat: string;
+  includeDateInFilename: boolean;
+  includeHotCommentsInNote: boolean;
+  enablePlayerAiQuickAction: boolean;
+  playerAiQuickPrompt: string;
+  includeTimestampInBody: boolean;
+  enableDebugLogs: boolean;
+  readerTheme: string;
+  readerFontScale: string;
+  readerLetterSpacing: string;
+  readerLineHeight: string;
+  readerContentWidth: string;
+  readerChapterVisibility: string;
+  readerChapterVisible: boolean;
+  readerTranscriptVisible: boolean;
+  frontmatterFields: string[];
+  fixedFrontmatterProperties: FixedFrontmatterProperty[];
+  notePlaceholderSections: NotePlaceholderSection[];
+  aiSystemPrompt: string;
+  aiInitialQuickPrompts: string[];
+  aiPresetPrompts: string[];
+  defaultModel: string;
+  aiThinkingLevel: "off" | "low" | "high";
+  activeAsrProviderId: string;
+  asrAutoFallback: boolean;
+  asrLanguage: string;
+}
+
 // ===== Merged default settings =====
-export const DEFAULT_SETTINGS = {
+export const DEFAULT_SETTINGS: Settings = {
   tags: "clippings,bilibili",
   downloadFormat: "srt",
   includeDateInFilename: true,
