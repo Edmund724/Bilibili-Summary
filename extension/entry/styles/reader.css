@@ -286,6 +286,11 @@
   padding: 6px 8px;
   color: #111827;
   position: relative;
+  /* 视口外条目跳过布局：估计高度按默认字号单行取 42px（视图内实际内边距
+   * 10px×2 + max(时间列 14px×1.4+2px, 文本列 14px×1.5)≈41.6px），auto 让
+   * 浏览器记住首次绘制后的实际尺寸，多行/调字号条目上屏后即用真实值。 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 42px;
 }
 
 .boc-reading-chapter:hover {
