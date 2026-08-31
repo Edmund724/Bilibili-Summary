@@ -8,6 +8,7 @@
 // 拖进 SW 静态图；options 页直调 provider-test，本模块回归纯存储）。
 
 import { createProviderStore } from "./provider-store.js";
+import { HOST_PERMISSION_HINT, hasHostPermission } from "./host-permissions.js";
 
 // ===== AI 模型平台存储 =====
 // 列表 CRUD（load/save/delete/Key 读写）委托给通用工厂 createProviderStore，
@@ -43,6 +44,12 @@ export const aiProviderStore = createProviderStore({
 // `${baseUrl}/v1/models`（纯 GET fetch，不依赖 completion 链），故留在本模块。
 export async function handleAiProvidersModels({ baseUrl, apiKey, providerId }) {
   const normalizedBaseUrl = String(baseUrl || "").trim().replace(/\/+$/, "").replace(/\/v1$/i, "");
+  // S2 收紧 host_permissions：平台域名未授权时这条 GET 只会以 CORS 失败，回包是
+  // 「Failed to fetch」这种看不出原因的文案，因此先做权限预检，未授权直接回可操作
+  // 提示（与 AI/ASR 连通性探针共用 core/host-permissions.js 的判定）。
+  if (!(await hasHostPermission(normalizedBaseUrl))) {
+    return { ok: false, error: HOST_PERMISSION_HINT };
+  }
   const headers = { Accept: "application/json" };
   let controller = null;
   let timer = null;

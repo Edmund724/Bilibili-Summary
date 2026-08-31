@@ -246,6 +246,21 @@ function assertManifestReferences() {
 
   const refs = [];
   if (manifest.background?.service_worker) refs.push(manifest.background.service_worker);
+
+  // S2 收紧 host_permissions：通配符只允许出现在 optional_host_permissions
+  // （常驻权限只剩 B 站三条；AI/ASR 平台域名按需申请，见
+  // core/host-permissions.js）。用 http://*/* 或 https://*/* 兜底会导致
+  // Chrome Web Store 审核挑战项复现，在此 fail fast。
+  const wildcardHostPatterns = ["http://*/*", "https://*/*"];
+  const residentWildcards = (manifest.host_permissions || []).filter((p) => wildcardHostPatterns.includes(p));
+  if (residentWildcards.length > 0) {
+    console.error(
+      `build.js: manifest host_permissions 含通配符 ${residentWildcards.join(", ")}，` +
+        `必须移入 optional_host_permissions（按需申请）`
+    );
+    process.exit(1);
+  }
+
   for (const p of Object.values(manifest.icons ?? {})) refs.push(p);
   if (manifest.action?.default_popup) refs.push(manifest.action.default_popup);
   for (const p of Object.values(manifest.action?.default_icon ?? {})) refs.push(p);

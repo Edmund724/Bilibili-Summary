@@ -18,6 +18,12 @@ beforeEach(async () => {
   resetModuleState();
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("chrome", {
+    ...globalThis.chrome,
+    permissions: {
+      contains: vi.fn(async () => true)
+    }
+  });
 });
 
 // 最小响应对象（探针代码只消费 ok / status / text / json）。
@@ -209,5 +215,69 @@ describe("testAiProviderConnection Key 代查", () => {
 
     expect(resp).toEqual({ ok: true });
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
+  });
+});
+
+// S2 收紧 host_permissions 后：options 页「测试」按钮在发起探针请求前先确认该
+// 平台域名已获 host 权限——未授权时跨域 fetch 只会以 CORS 失败（「无法连接：
+// Failed to fetch」），看不出真正原因，因此权限缺失直接短路成可操作提示。
+describe("testAiProviderConnection 的 host 权限预检", () => {
+  async function loadEntry() {
+    const mod = await loadModule();
+    return mod.testAiProviderConnection;
+  }
+
+  it("域名未授权 → 返回可操作提示，且不发探针请求", async () => {
+    vi.mocked(globalThis.chrome.permissions.contains).mockResolvedValue(false);
+    fetchMock.mockResolvedValue(jsonResponse(200, {}));
+    const entry = await loadEntry();
+
+    const resp = await entry({
+      providerId: "p1",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-1",
+      model: "gpt"
+    });
+
+    expect(resp).toEqual({ ok: false, error: "该平台域名未授权，请在保存时允许权限" });
+    expect(globalThis.chrome.permissions.contains).toHaveBeenCalledWith({
+      origins: ["https://api.openai.com"]
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("已授权时探针错误原样返回（HTTP 401 不被权限文案覆盖）", async () => {
+    vi.mocked(globalThis.chrome.permissions.contains).mockResolvedValue(true);
+    fetchMock.mockResolvedValue(jsonResponse(401, { error: { message: "bad key" } }));
+    const entry = await loadEntry();
+
+    const resp = await entry({
+      providerId: "p1",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-1",
+      model: "gpt"
+    });
+
+    expect(resp.ok).toBe(false);
+    expect(resp.error).toContain("HTTP 401");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("不持有 chrome.permissions 实现时按已授权处理（不阻塞既有探针行为）", async () => {
+    vi.stubGlobal("chrome", {
+      ...globalThis.chrome,
+      permissions: undefined
+    });
+    fetchMock.mockResolvedValue(jsonResponse(200, {}));
+    const entry = await loadEntry();
+
+    const resp = await entry({
+      providerId: "p1",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-1",
+      model: "gpt"
+    });
+
+    expect(resp).toEqual({ ok: true });
   });
 });

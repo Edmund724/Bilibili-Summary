@@ -54,6 +54,9 @@ export function createProviderRow({
   // 测试成功 / 删除后的回调，由调用页注入，避免行构建器耦合保存流程
   let onTestSuccess = async () => {};
   let onDelete = async () => {};
+  // 删除动作前先执行的钩子（调用页注入 chrome.permissions.remove 回收 origin，
+  // 需要在被删行摘出 DOM 之前拿到它的 baseUrl）
+  let onBeforeDelete = async () => {};
 
   function generateId() {
     return `${idPrefix}${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
@@ -117,10 +120,17 @@ export function createProviderRow({
       row.dataset.currentPresetId = next.id;
     });
 
-    // 删除：确认后调后台删除；若删的是当前选用平台，清空选用态（onDelete 注入处理）
+    // 删除：确认后调后台删除；若删的是当前选用平台，清空选用态（onDelete 注入处理）。
+    // onBeforeDelete 在被删行摘出 DOM 之前执行，注入方据此拿到该行当前的 baseUrl
+    // 并回收 host 权限（chrome.permissions.remove 不需要用户手势）；钩子报错不
+    // 阻断删除。
     row.querySelector(`.${removeClass}`)?.addEventListener("click", async () => {
       if (!confirm("确定要删除这个平台吗？")) return;
       const providerId = row.dataset.providerId || "";
+      const baseUrl = row.querySelector(`.${baseUrlClass}`)?.value.trim() || "";
+      try {
+        await onBeforeDelete(providerId, baseUrl);
+      } catch {}
       if (providerId) {
         try {
           await sendRuntimeMessage(buildDeleteMessage(providerId));
@@ -212,6 +222,9 @@ export function createProviderRow({
     },
     setDeleteHandler(handler) {
       onDelete = handler;
+    },
+    setBeforeDeleteHandler(handler) {
+      onBeforeDelete = handler;
     }
   };
 }

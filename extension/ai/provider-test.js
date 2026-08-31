@@ -13,6 +13,7 @@
 import { chatCompletion } from "./completion.js";
 import { formatProbeConnectionError } from "../core/provider-store.js";
 import { aiProviderStore } from "../core/ai-provider-store.js";
+import { HOST_PERMISSION_HINT, hasHostPermission } from "../core/host-permissions.js";
 
 // 把接缝抛出的类型化错误转成探针错误文案：
 // - HTTP 失败（err.status / err.overflow）：接缝 message 与 formatProbeHttpError 同型，直接透传；
@@ -71,6 +72,14 @@ export async function probeAiChatCompletion({ baseUrl, apiKey, model, headers })
 // Key 解析优先用户重输的 apiKey，否则按 providerId 从已存 Key 代查，都没有为空串。
 // 返回 { ok, error? }，UX 语义与原消息往返完全一致。
 export async function testAiProviderConnection({ providerId, baseUrl, apiKey, model }) {
+  // S2 收紧 host_permissions：域名未授权时跨域 fetch 只会以 CORS 失败，探针原样
+  // 抛出是「无法连接：Failed to fetch」这类看不出原因的文案，所以先把权限缺失换成
+  // 可操作提示，不再发起注定失败的请求，也不读一次 Key 存储。
+  // 判定收口在 core/host-permissions.js（与 ASR 探针共用一份）：取不到
+  // chrome.permissions 实现（单测环境）时按已授权处理，不阻塞既有探针行为。
+  if (!(await hasHostPermission(baseUrl))) {
+    return { ok: false, error: HOST_PERMISSION_HINT };
+  }
   let resolvedApiKey = String(apiKey || "").trim();
   if (!resolvedApiKey && providerId) {
     try {

@@ -293,6 +293,44 @@ describe("createProviderRow：AI 平台行（options-rows.js 配置）", () => {
     expect(emptyNode.hidden).toBe(false);
   });
 
+  it("删除：确认后先同步触发 onBeforeDelete（权限回收钩子）再走后台删除；取消确认不触发", async () => {
+    const rows = await loadAiRows();
+    const { listNode, emptyNode } = makeContainer();
+    const onBeforeDelete = vi.fn(async () => {});
+    rows.setAiBeforeDeleteHandler(onBeforeDelete);
+    rows.renderAiProviders(listNode, emptyNode, [aiItem], { presets: AI_PRESETS });
+    const row = listNode.querySelector(".ai-provider-row");
+
+    confirmMock.mockReturnValueOnce(false);
+    fireClick(row.querySelector(".ai-provider-remove"));
+    expect(onBeforeDelete).not.toHaveBeenCalled();
+
+    fireClick(row.querySelector(".ai-provider-remove"));
+    await flushMicrotasks();
+    expect(onBeforeDelete).toHaveBeenCalledTimes(1);
+    expect(onBeforeDelete).toHaveBeenCalledWith("p1", "https://api.openai.com/v1");
+    expect(sendRuntimeMessageMock).toHaveBeenCalledWith({ type: "ai-providers-delete", providerId: "p1" });
+    expect(listNode.querySelectorAll(".ai-provider-row")).toHaveLength(0);
+    expect(emptyNode.hidden).toBe(false);
+  });
+
+  it("删除：onBeforeDelete 抛错不阻断删除（权限回收失败可忽略）", async () => {
+    const rows = await loadAiRows();
+    const { listNode, emptyNode } = makeContainer();
+    const onBeforeDelete = vi.fn(async () => {
+      throw new Error("permissions API unavailable");
+    });
+    rows.setAiBeforeDeleteHandler(onBeforeDelete);
+    rows.renderAiProviders(listNode, emptyNode, [aiItem], { presets: AI_PRESETS });
+    const row = listNode.querySelector(".ai-provider-row");
+
+    fireClick(row.querySelector(".ai-provider-remove"));
+    await flushMicrotasks();
+    expect(sendRuntimeMessageMock).toHaveBeenCalledWith({ type: "ai-providers-delete", providerId: "p1" });
+    expect(listNode.querySelectorAll(".ai-provider-row")).toHaveLength(0);
+    expect(emptyNode.hidden).toBe(false);
+  });
+
   it("模型下拉：点击 toggle 发拉取消息并填充选项，选中写回输入框", async () => {
     sendRuntimeMessageMock.mockImplementation(async () => ({ ok: true, models: ["gpt-4o-mini", "gpt-4o"] }));
     const rows = await loadAiRows();
@@ -454,11 +492,14 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     const { listNode, emptyNode } = makeContainer();
     const onDelete = vi.fn(async () => {});
     rows.setAsrDeleteHandler(onDelete);
+    const onBeforeDelete = vi.fn(async () => {});
+    rows.setAsrBeforeDeleteHandler(onBeforeDelete);
     rows.renderAsrProviders(listNode, emptyNode, [asrItem], { presets: ASR_PRESETS });
     const row = listNode.querySelector(".asr-provider-row");
 
     fireClick(row.querySelector(".ai-provider-remove"));
     await flushMicrotasks();
+    expect(onBeforeDelete).toHaveBeenCalledWith("asr1", "https://api.siliconflow.cn/v1");
     expect(sendRuntimeMessageMock.mock.calls[0][0]).toEqual({ type: "asr-providers-delete", providerId: "asr1" });
     expect(onDelete).toHaveBeenCalledWith("asr1");
     expect(listNode.querySelectorAll(".asr-provider-row")).toHaveLength(0);

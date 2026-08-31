@@ -557,3 +557,8 @@ export function collectAiProviders(listNode, { presets = PRESETS, generateId = a
 export function setTestSuccessHandler(handler) {
   aiProviderRow.setTestSuccessHandler(handler);
 }
+
+// 删除动作前先执行的钩子（回收 host 权限），由 options.js 注入
+export function setAiBeforeDeleteHandler(handler) {
+  aiProviderRow.setBeforeDeleteHandler(handler);
+}

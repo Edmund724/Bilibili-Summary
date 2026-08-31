@@ -23,6 +23,9 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("chrome", {
     ...globalThis.chrome,
+    permissions: {
+      contains: vi.fn(async () => true)
+    },
     storage: {
       ...globalThis.chrome.storage,
       sync: {
@@ -157,5 +160,51 @@ describe("注入 transport", () => {
     expect(init.body).toBeInstanceOf(FormData);
     // 全局 fetch（本文件的 fetchMock）未被触碰
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("host 权限预检（S2：optional_host_permissions 未授权时的可操作提示）", () => {
+  // 门禁在 testAsrConnection 分发前执行（取全局 chrome.permissions.contains），
+  // 未授权直接短路返回提示，不发起注定被 CORS 拦下的请求。
+  it("未授权 → 不发请求，返回可操作提示", async () => {
+    vi.mocked(globalThis.chrome.permissions.contains).mockResolvedValue(false);
+    const { testAsrConnection } = await loadModule();
+    const resp = await testAsrConnection(baseProvider({ apiKey: "sk-1" }));
+    expect(resp).toEqual({ ok: false, error: "该平台域名未授权，请在保存时允许权限" });
+    expect(globalThis.chrome.permissions.contains).toHaveBeenCalledWith({
+      origins: ["https://example.com"]
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("已授权 → 正常发请求并返回成功", async () => {
+    vi.mocked(globalThis.chrome.permissions.contains).mockResolvedValue(true);
+    fetchMock.mockResolvedValue(jsonResponse(200, { text: "ok" }));
+    const { testAsrConnection } = await loadModule();
+    const resp = await testAsrConnection(baseProvider({ apiKey: "sk-1" }));
+    expect(resp.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("注入 transport（不经真实网络）→ 不受权限门禁", async () => {
+    vi.mocked(globalThis.chrome.permissions.contains).mockResolvedValue(false);
+    const transport = vi.fn(async () => jsonResponse(200, { text: "ok" }));
+    const { testAsrConnection } = await loadModule();
+    const resp = await testAsrConnection(baseProvider({ apiKey: "sk-1" }), { transport });
+    expect(resp.ok).toBe(true);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(globalThis.chrome.permissions.contains).not.toHaveBeenCalled();
+  });
+
+  it("不持有 chrome.permissions 实现时按已授权处理（不阻塞既有探针行为）", async () => {
+    vi.stubGlobal("chrome", {
+      ...globalThis.chrome,
+      permissions: undefined
+    });
+    fetchMock.mockResolvedValue(jsonResponse(200, { text: "ok" }));
+    const { testAsrConnection } = await loadModule();
+    const resp = await testAsrConnection(baseProvider({ apiKey: "sk-1" }));
+    expect(resp.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

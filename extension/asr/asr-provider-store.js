@@ -12,6 +12,10 @@
 
 import { normalizeAsrProvider, normalizeBaseUrl } from "../core/presets.js";
 import {
+  HOST_PERMISSION_HINT,
+  hasHostPermission
+} from "../core/host-permissions.js";
+import {
   createProviderStore,
   formatProbeConnectionError,
   formatProbeHttpError
@@ -54,6 +58,14 @@ export async function testAsrConnection(provider, { transport } = {}) {
   const normalized = normalizeAsrProvider(provider);
   if (!normalized) {
     return { ok: false, error: "平台配置不完整或 type 非法" };
+  }
+
+  // S2 收紧 host_permissions：平台域名未授权时探针的跨域 fetch 只会以 CORS 失败
+  // （「无法连接：Failed to fetch」看不出原因），先换成可操作提示。注入 transport
+  // 的调用方（单测假传输）不经过真实网络，不受这道门禁。判定与 AI 探针共用
+  // core/host-permissions.js 一份实现：取不到 chrome.permissions 时按已授权处理。
+  if (!transport && !(await hasHostPermission(normalized.baseUrl))) {
+    return { ok: false, error: HOST_PERMISSION_HINT };
   }
 
   // 解析 apiKey：优先 provider.apiKey，否则按 id 读已存 Key

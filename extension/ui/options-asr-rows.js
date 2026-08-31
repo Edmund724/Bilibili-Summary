@@ -149,3 +149,8 @@ export function setAsrTestSuccessHandler(handler) {
 export function setAsrDeleteHandler(handler) {
   asrProviderRow.setDeleteHandler(handler);
 }
+
+// 删除动作前先执行的钩子（回收 host 权限），由 options.js 注入
+export function setAsrBeforeDeleteHandler(handler) {
+  asrProviderRow.setBeforeDeleteHandler(handler);
+}

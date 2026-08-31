@@ -23,7 +23,8 @@ import {
   renderDefaultModelSelect,
   addAiProviderRow,
   collectAiProviders,
-  setTestSuccessHandler
+  setTestSuccessHandler,
+  setAiBeforeDeleteHandler
 } from "../ui/options-rows.js";
 import {
   renderAsrProviders,
@@ -32,8 +33,14 @@ import {
   setActiveAsrProvider,
   getActiveAsrProviderId,
   setAsrTestSuccessHandler,
-  setAsrDeleteHandler
+  setAsrDeleteHandler,
+  setAsrBeforeDeleteHandler
 } from "../ui/options-asr-rows.js";
+import {
+  requestProviderOrigins,
+  revokeOrphanOrigin,
+  permissionRevokeErrorMessage
+} from "../core/host-permissions.js";
 
 const NOTE_SECTION_POSITIONS = new Set(["before_intro", "before_chapters", "before_subtitle"]);
 
@@ -106,19 +113,38 @@ async function init() {
   await loadAiPresets();
   await loadAsrPresets();
   setTestSuccessHandler(async (providerId) => {
-    await saveSettings();
+    // 探针已成功 → 该平台 origin 必已授权；此路无用户手势，不再申请（见 saveSettings）
+    await saveSettings({ requestPermissions: false });
     return providerId;
   });
   setAsrTestSuccessHandler(async () => {
-    await saveSettings();
+    await saveSettings({ requestPermissions: false });
   });
   setAsrDeleteHandler(async (providerId) => {
     if (providerId && String(getActiveAsrProviderId(elements.asrProvidersList) || "") === providerId) {
       await sendRuntimeMessage({ type: "save-settings", settings: { activeAsrProviderId: "" } });
     }
   });
+  // 删除平台时回收 host 权限：AI 与 ASR 两组共用同一条判定——origin 不再被任何
+  // 存活平台使用（含另一组）才 remove。权限本就不在（当初拒绝过授权）静默跳过，
+  // 回收失败不阻断删除：平台已从存储与列表移除，权限残留只影响提示，状态条给出
+  // 可操作文案。（chrome.permissions.remove 不需要用户手势，钩子放在删除消息
+  // 之前只为「先回收、后删除」这一顺序可读。）
+  const revokeOriginOnDelete = async (providerId, baseUrl) => {
+    const providers = [
+      ...collectAiProviders(elements.aiProvidersList, { presets: aiPresets }),
+      ...collectAsrProviders(elements.asrProvidersList, { presets: asrPresets })
+    ];
+    const { origins, revoked } = await revokeOrphanOrigin({ id: providerId, baseUrl }, providers);
+    if (origins.length > 0 && !revoked) {
+      setStatus(permissionRevokeErrorMessage(origins), true);
+    }
+  };
+  setAiBeforeDeleteHandler(revokeOriginOnDelete);
+  setAsrBeforeDeleteHandler(revokeOriginOnDelete);
   loadSettings();
-  elements.saveBtn.addEventListener("click", saveSettings);
+  // 保存按钮：这条同步调用链上的 chrome.permissions.request 才拿得到用户手势
+  elements.saveBtn.addEventListener("click", () => saveSettings());
   elements.addFixedPropertyBtn.addEventListener("click", () => addFixedPropertyRow(elements.fixedPropertiesList, elements.fixedPropertiesEmpty));
   elements.addNoteSectionBtn.addEventListener("click", () => addNoteSectionRow(elements.noteSectionsList, elements.noteSectionsEmpty));
   elements.addAiProviderBtn.addEventListener("click", () => addAiProviderRow(elements.aiProvidersList, elements.aiProvidersEmpty, {}, { presets: aiPresets }));
@@ -205,19 +231,44 @@ async function loadSettings() {
   });
 }
 
-async function saveSettings() {
+// 保存设置。requestPermissions 区分两条来路：只有「点击保存设置」这条同步链持有
+// 用户手势，chrome.permissions.request 能弹窗；「测试连接」成功后也复用本函数落盘
+// （见下方 setTestSuccessHandler），那条路已被探针的 await 用掉手势，此时申请必被
+// Chrome 以「缺少用户手势」拒绝、把正常保存误判成「未授权」而中止，故传 false 跳过。
+// 跳过的代价是空的：能连通即说明该平台 origin 早已在点保存时授出；确实没授权的平台
+// 走 core/host-permissions.js 的探针/模型列表预检，回「请在保存时允许权限」提示。
+async function saveSettings({ requestPermissions = true } = {}) {
   clearInputErrors();
+  const aiProvidersPayload = collectAiProviders(elements.aiProvidersList, { presets: aiPresets });
+  const asrProvidersPayload = collectAsrProviders(elements.asrProvidersList, { presets: asrPresets });
+
   const payload = collectFormPayload();
   const validation = validateSettings(payload);
   if (!validation.ok) {
     applyValidationError(validation);
     return;
   }
-  const aiProvidersPayload = collectAiProviders(elements.aiProvidersList, { presets: aiPresets });
   const aiProvidersValidation = validateAiProviders(aiProvidersPayload);
   if (!aiProvidersValidation.ok) {
     applyValidationError(aiProvidersValidation);
     return;
+  }
+
+  // 按需申请 AI/ASR 平台域名的 host 权限（见 saveSettings 头部注释：只有点保存
+  // 这条路有用户手势）。上面全是同步收集与同步校验（零 await），所以本行仍在
+  // 「点击保存」的同步调用链上、chrome.permissions.request 拿得到用户手势；一次
+  // 手势只够一次弹窗，故把两组平台的所有 origin 去重后合并成单次申请。校验先行
+  // 可避免为格式非法的 baseUrl 弹窗。用户拒绝授权则中止保存并给出可操作提示——
+  // 未授权该平台无法连通测试/使用。编辑改过 baseUrl 时新 origin 一并申请。
+  if (requestPermissions) {
+    const permission = await requestProviderOrigins([
+      ...aiProvidersPayload.map((provider) => provider.baseUrl),
+      ...asrProvidersPayload.map((provider) => provider.baseUrl)
+    ]);
+    if (!permission.ok) {
+      setStatus(permission.error, true);
+      return;
+    }
   }
 
   setBusy(true);
@@ -240,8 +291,7 @@ async function saveSettings() {
     renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, aiResp.providers || [], { defaultModel: payload.defaultModel, onRenderDefaultModel: (list) => renderDefaultModelSelect(elements.defaultModel, list, payload.defaultModel) });
 
     // ASR 平台：同样 list 走 sync、apiKey 走 local；空输入沿用已存 Key（后台处理）
-    const asrPayload = collectAsrProviders(elements.asrProvidersList, { presets: asrPresets });
-    const asrResp = await sendRuntimeMessage({ type: "asr-providers-save", providers: asrPayload });
+    const asrResp = await sendRuntimeMessage({ type: "asr-providers-save", providers: asrProvidersPayload });
     if (!asrResp?.ok) {
       setStatus(`已保存，但语音转写平台保存失败：${asrResp?.error || "未知错误"}`, true);
       return;
