@@ -24,6 +24,7 @@ WEBSTORE_LISTING_zh-CN.md
 docs/agents/domain.md
 
 # Local / agent / IDE
+.agents
 .env
 .scratch/
 
