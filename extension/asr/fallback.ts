@@ -29,12 +29,6 @@ import {
 } from "../subtitle/cache.js";
 import { validateSubtitleByDuration } from "../subtitle/selection.js";
 
-const _clearStaleAsrSubtitleCache = clearStaleAsrSubtitleCache as unknown as (opts: {
-  bvid: string;
-  cid: string;
-  keepKey: string;
-}) => Promise<void>;
-
 // STALE_RUN 信号构造：在本模块里只表示"调用方让位、零 UI 写入"（fetcher 的
 // catch 对 STALE_RUN 静默返回），不再表示转写被中止——切视频不取消任务。
 function throwStaleRun(): never {
@@ -288,7 +282,7 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
               // 孤儿清理：新 ASR 转写落盘后，移除同视频其它 provider/model/language
               // 的过期 ASR 变体键；平台字幕轨不是孤儿，保留。清理只在写入成功后
               // 执行——写失败时旧变体仍是唯一可用副本，不能删。
-              await _clearStaleAsrSubtitleCache({ bvid, cid, keepKey: cacheKey });
+              await clearStaleAsrSubtitleCache({ bvid, cid, keepKey: cacheKey });
             }
           }
           return body;

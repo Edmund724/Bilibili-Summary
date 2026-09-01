@@ -15,7 +15,7 @@ import {
   ASR_TASK_PREPARE,
   ASR_TASK_CLEANUP
 } from "./protocol.js";
-import type { AsrChunkResultMessage, AsrDoneMessage, AsrErrorMessage } from "./protocol.js";
+import type { AsrProgressMessage, AsrChunkResultMessage, AsrDoneMessage, AsrErrorMessage } from "./protocol.js";
 
 // ===== 页面侧任务契约类型 =====
 
@@ -72,13 +72,10 @@ interface OffscreenPrepareResponse {
   error?: string;
 }
 
-// port 消息读取形状：progress 的文本字段为 text（entry/offscreen-asr.js 的
-// postMessage 实发字段；protocol.js 的 AsrProgressMessage 声明为 data，与实发
-// 字段不符——页面侧按实发字段读取）。chunk-result/done/error 复用 protocol
-// 的消息类型（线格式一致）。
-type AsrProgressPortMessage = { type: typeof ASR_MSG_PROGRESS; text?: unknown };
+// port 消息读取形状直接复用 protocol 的消息类型（线格式一致）。progress 的
+// 文本字段是 text（entry/offscreen-asr.ts 的 postMessage 实发字段）。
 type AsrPortMessageLike =
-  | AsrProgressPortMessage
+  | AsrProgressMessage
   | AsrChunkResultMessage
   | AsrDoneMessage
   | AsrErrorMessage;

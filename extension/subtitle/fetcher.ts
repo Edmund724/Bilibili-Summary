@@ -587,7 +587,7 @@ const asrFallbackLoader = createLazyLoader(() =>
       setMessage,
       acceptSubtitle,
       commitNoSubtitle,
-      runAsrPipeline: runAsrPipeline as unknown as import("../asr/fallback.js").CreateAsrFallbackDeps["runAsrPipeline"],
+      runAsrPipeline,
       broadcastSubtitleStatus
     })
   )

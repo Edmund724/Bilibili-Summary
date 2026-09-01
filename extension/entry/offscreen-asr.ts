@@ -29,9 +29,10 @@ import { getErrorMessage, withTimeout } from "../shared/error-helpers.js";
 import { logWarn } from "../shared/logging.js";
 import type { AsrProvider } from "../asr/asr-provider-store.js";
 
-// 以下 asr/* 模块仍为 .js，其导出签名在 checkJs:false 下无法为 tsc 所用；
-// 这里用本地接口描述 offscreen-asr 实际依赖的契约，并将导入函数断言到该形状。
-// 运行时仍调用原始导出，零行为变化。
+// 本地接口描述 offscreen-asr 实际消费的 asr/* 契约子集（如 Summary 只看
+// accepted/failed 两个字段），导入函数经断言收窄到该形状，运行时零变化。
+// TODO: 与 engine.ts/chunker.ts 导出的完整类型对账后可收拢（chunk 形状
+// WavChunk vs TranscribeChunk 需先统一）。
 
 interface AsrChunk {
   index: number;

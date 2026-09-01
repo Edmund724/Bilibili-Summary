@@ -27,7 +27,6 @@
   },
   "homepage": "https://github.com/Edmund724/Bilibili-Summary#readme",
   "devDependencies": {
-    "@types/node": "^26.4.0",
     "@vitest/coverage-v8": "^4.1.11",
     "esbuild": "^0.28.2",
     "jsdom": "^30.0.1",

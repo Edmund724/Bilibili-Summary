@@ -60,7 +60,8 @@ export type AsrPortMessageType =
   | typeof ASR_MSG_DONE
   | typeof ASR_MSG_ERROR;
 
-export type AsrProgressMessage = { type: typeof ASR_MSG_PROGRESS; data: string };
+// progress 的文本字段为 text（entry/offscreen-asr.ts 的 postMessage 实发字段）。
+export type AsrProgressMessage = { type: typeof ASR_MSG_PROGRESS; text: string };
 export type AsrChunkResultMessage = {
   type: typeof ASR_MSG_CHUNK_RESULT;
   index: number;
