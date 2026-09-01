@@ -54,9 +54,9 @@ const distDir = path.join(root, "dist");
 // offscreen 入口不在此列——它开 splitting 拆动态 chunk（见 buildOffscreenEntry）。
 const jsEntries = [
   "entry/background.ts",
-  "pages/sidepanel.js",
-  "pages/options.js",
-  "pages/popup.js",
+  "pages/sidepanel.ts",
+  "pages/options.ts",
+  "pages/popup.ts",
 ];
 
 // CSS minify 入口（popup.css 是纯静态拷贝，见下）。S3 分层：content 样式拆为

@@ -1,3 +1,8 @@
+// popup.ts — 弹出页控制器（自 popup.js 迁移，仅加类型；行为逐字节不变）。
+//
+// 职责：读取活动标签页的字幕快照（popup-refresh / popup-get-state）、字幕
+// 切换（popup-select-subtitle）、下载/复制、阅读视图开关与侧边栏入口。
+// content 不可达时的「确保注入 + 重试」时序在 ensureContentScriptReady。
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import { normalizeAsrLanguage } from "../core/presets.js";
 import { normalizeDownloadFormat } from "../core/validators.js";
@@ -10,56 +15,88 @@ import {
 import { escapeHtml, sanitizeFileName } from "../shared/string-utils.js";
 import { sendMessageToTab } from "../shared/tab-utils.js";
 
+// content 侧 popup 消息的响应信封（payload 为页面快照）
+interface ContentResponse {
+  ok?: boolean;
+  error?: unknown;
+  payload?: PopupPayload | null;
+  settings?: Partial<typeof DEFAULT_SETTINGS>;
+}
+
+// popup-get-state / popup-refresh payload 的消费侧视图（缺失字段走兜底文案）
+interface PopupPayload {
+  status?: unknown;
+  message?: unknown;
+  title?: unknown;
+  url?: unknown;
+  tags?: unknown;
+  markdown?: unknown;
+  txt?: unknown;
+  srt?: unknown;
+  downloadFormat?: unknown;
+  subtitlePreview?: unknown;
+  subtitleOptions?: PopupSubtitleOption[];
+}
+
+interface PopupSubtitleOption {
+  url?: unknown;
+  id?: unknown;
+  lang?: unknown;
+  selected?: unknown;
+  isAi?: unknown;
+}
+
 const el = {
-  status: document.getElementById("status"),
-  message: document.getElementById("message"),
-  propTitle: document.getElementById("propTitle"),
-  propUrl: document.getElementById("propUrl"),
-  propCreated: document.getElementById("propCreated"),
-  propTags: document.getElementById("propTags"),
-  subtitleSelect: document.getElementById("subtitleSelect"),
-  preview: document.getElementById("preview"),
-  refreshBtn: document.getElementById("refreshBtn"),
-  copyBtn: document.getElementById("copyBtn"),
-  downloadBtn: document.getElementById("downloadBtn"),
-  readingViewBtn: document.getElementById("readingViewBtn"),
-  aiBtn: document.getElementById("aiBtn"),
-  settingsBtn: document.getElementById("settingsBtn"),
-  asrLanguageSelect: document.getElementById("asrLanguageSelect")
+  status: document.getElementById("status") as HTMLElement,
+  message: document.getElementById("message") as HTMLElement,
+  propTitle: document.getElementById("propTitle") as HTMLElement,
+  propUrl: document.getElementById("propUrl") as HTMLElement,
+  propCreated: document.getElementById("propCreated") as HTMLElement,
+  propTags: document.getElementById("propTags") as HTMLElement,
+  subtitleSelect: document.getElementById("subtitleSelect") as HTMLSelectElement,
+  preview: document.getElementById("preview") as HTMLTextAreaElement,
+  refreshBtn: document.getElementById("refreshBtn") as HTMLButtonElement,
+  copyBtn: document.getElementById("copyBtn") as HTMLButtonElement,
+  downloadBtn: document.getElementById("downloadBtn") as HTMLButtonElement,
+  readingViewBtn: document.getElementById("readingViewBtn") as HTMLButtonElement | null,
+  aiBtn: document.getElementById("aiBtn") as HTMLButtonElement | null,
+  settingsBtn: document.getElementById("settingsBtn") as HTMLButtonElement,
+  asrLanguageSelect: document.getElementById("asrLanguageSelect") as HTMLSelectElement
 };
 
-let latestPayload = null;
+let latestPayload: PopupPayload | null = null;
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 
 // 无字幕视频在做音频转写时会广播阶段，刷新等待期间据此把笼统的“正在抓取...”
 // 替换为更准确的转写提示，以便用户区分抓取本地字幕与语音转写。
 chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type === "boc-subtitle-status" && message.phase === "asr-transcribing") {
+  const statusMessage = message as { type?: string; phase?: string } | null;
+  if (statusMessage?.type === "boc-subtitle-status" && statusMessage.phase === "asr-transcribing") {
     setStatus("此视频无字幕，正在进行音频转写…");
   }
 });
 
 init().catch((error) => {
-  setStatus(`初始化失败：${error.message}`, true);
+  setStatus(`初始化失败：${(error as Error).message}`, true);
 });
 
-async function init() {
+async function init(): Promise<void> {
   bindEvents();
   await loadAsrLanguage();
   await refreshFromTab();
 }
 
-function bindEvents() {
+function bindEvents(): void {
   el.asrLanguageSelect.addEventListener("change", async () => {
     const language = el.asrLanguageSelect.value || "auto";
     try {
-      const resp = await sendToRuntime({ type: "save-settings", settings: { asrLanguage: language } });
+      const resp = (await sendToRuntime({ type: "save-settings", settings: { asrLanguage: language } })) as ContentResponse;
       if (!resp?.ok) {
-        throw new Error(resp?.error || "保存失败");
+        throw new Error(String(resp?.error || "保存失败"));
       }
       setMessage("转写语言已切换，点击刷新重新转写。");
     } catch (error) {
-      setMessage(`语言切换失败：${error?.message || "未知错误"}`);
+      setMessage(`语言切换失败：${(error as Error)?.message || "未知错误"}`);
       // 失败回滚下拉显示值
       await loadAsrLanguage();
     }
@@ -75,10 +112,10 @@ function bindEvents() {
       return;
     }
     try {
-      await navigator.clipboard.writeText(payload.markdown);
+      await navigator.clipboard.writeText(String(payload.markdown));
       setMessage("已复制完整 Markdown。");
     } catch (error) {
-      setMessage(`复制失败：${error?.message || "无法访问剪贴板"}`);
+      setMessage(`复制失败：${(error as Error)?.message || "无法访问剪贴板"}`);
     }
   });
 
@@ -86,13 +123,14 @@ function bindEvents() {
     const payload = await ensurePayload();
     const settings = await getSettingsFromRuntime();
     const format = normalizeDownloadFormat(settings?.downloadFormat || payload?.downloadFormat);
-    const content =
-      format === "txt" ? payload?.txt || payload?.subtitlePreview || "" : payload?.srt || "";
+    const content: BlobPart = format === "txt"
+      ? (payload?.txt || payload?.subtitlePreview || "") as BlobPart
+      : (payload?.srt || "") as BlobPart;
     if (!content) {
       setMessage("没有可下载字幕。");
       return;
     }
-    const safeTitle = sanitizeFileName(payload.title || "bilibili-subtitle");
+    const safeTitle = sanitizeFileName(String(payload?.title || "bilibili-subtitle"));
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -114,10 +152,10 @@ function bindEvents() {
 
     if (isReaderModeUrl(tab?.url || "")) {
       setStatus("正在退出阅读视图...");
-      const resp = await sendToRuntime({
+      const resp = (await sendToRuntime({
         type: "close-reading-view-tab",
         tabId: tab.id
-      });
+      })) as ContentResponse;
       if (!resp?.ok) {
         setStatus(`退出失败：${resp?.error || "未知错误"}`, true);
         setMessage(`退出失败：${resp?.error || "未知错误"}`);
@@ -129,19 +167,19 @@ function bindEvents() {
       return;
     }
 
-    const prepResp = await sendToContent({ type: "popup-get-state" });
+    const prepResp = (await sendToContent({ type: "popup-get-state" })) as ContentResponse;
     if (!prepResp?.ok) {
-      setStatus(prepResp?.error || "请刷新浏览器网页重试，或当前网页不支持", true);
-      setMessage(prepResp?.error || "请刷新浏览器网页重试，或当前网页不支持");
+      setStatus(String(prepResp?.error || "请刷新浏览器网页重试，或当前网页不支持"), true);
+      setMessage(String(prepResp?.error || "请刷新浏览器网页重试，或当前网页不支持"));
       return;
     }
 
     setStatus("正在打开阅读视图...");
-    const resp = await sendToRuntime({
+    const resp = (await sendToRuntime({
       type: "open-reading-view-tab",
       url: tab.url,
       tabId: tab.id
-    });
+    })) as ContentResponse;
     if (!resp?.ok) {
       setStatus(`打开失败：${resp?.error || "未知错误"}`, true);
       setMessage(`打开失败：${resp?.error || "未知错误"}`);
@@ -153,18 +191,19 @@ function bindEvents() {
   });
 
   el.subtitleSelect.addEventListener("change", async (event) => {
-    const option = event.target.options[event.target.selectedIndex];
+    const target = event.target as HTMLSelectElement;
+    const option = target.options[target.selectedIndex];
     const url = String(option?.value || "");
     if (!url) {
       return;
     }
     setStatus("正在切换字幕...");
-    const resp = await sendToContent({
+    const resp = (await sendToContent({
       type: "popup-select-subtitle",
       url,
       lang: String(option.dataset.lang || "unknown"),
       subtitleId: String(option.dataset.id || "")
-    });
+    })) as ContentResponse;
     if (!resp?.ok) {
       setStatus(`切换失败：${resp?.error || "未知错误"}`, true);
       setMessage(`切换失败：${resp?.error || "未知错误"}`);
@@ -194,17 +233,17 @@ function bindEvents() {
       }
       window.setTimeout(() => window.close(), 80);
     } catch (error) {
-      setStatus(`打开侧边栏失败：${error?.message || error}`, true);
-      setMessage(`打开侧边栏失败：${error?.message || error}`);
+      setStatus(`打开侧边栏失败：${(error as Error)?.message || String(error)}`, true);
+      setMessage(`打开侧边栏失败：${(error as Error)?.message || String(error)}`);
     }
   });
 }
 
-async function refreshFromTab() {
+async function refreshFromTab(): Promise<void> {
   setStatus("正在抓取...");
-  const resp = await sendToContent({ type: "popup-refresh" });
+  const resp = (await sendToContent({ type: "popup-refresh" })) as ContentResponse;
   if (!resp?.ok) {
-    const errorText = (resp?.error || "请在 B 站视频页使用。").replace(
+    const errorText = String(resp?.error || "请在 B 站视频页使用。").replace(
       "请刷新浏览器网页重试，或当前网页不支持",
       "请刷新网页重试，或当前网页不支持"
     );
@@ -216,24 +255,24 @@ async function refreshFromTab() {
 }
 
 // 读取已保存的转写语言档位并同步下拉显示
-async function loadAsrLanguage() {
+async function loadAsrLanguage(): Promise<void> {
   const settings = await getSettingsFromRuntime();
   const language = normalizeAsrLanguage(settings?.asrLanguage);
   el.asrLanguageSelect.value = language;
 }
 
-async function ensurePayload() {
+async function ensurePayload(): Promise<PopupPayload | null> {
   if (latestPayload) {
     return latestPayload;
   }
-  const resp = await sendToContent({ type: "popup-get-state" });
+  const resp = (await sendToContent({ type: "popup-get-state" })) as ContentResponse;
   if (resp?.ok && resp.payload) {
     latestPayload = resp.payload;
   }
   return latestPayload;
 }
 
-function render(payload, { preserveStatus = false } = {}) {
+function render(payload: PopupPayload | null | undefined, { preserveStatus = false }: { preserveStatus?: boolean } = {}): void {
   if (!payload) {
     return;
   }
@@ -250,8 +289,8 @@ function render(payload, { preserveStatus = false } = {}) {
   setText(el.propUrl, payload.url || "-");
   setText(el.propCreated, formatLocalDate());
   setText(el.propTags, payload.tags || "clippings");
-  el.propTitle.title = payload.title || "";
-  el.propUrl.title = payload.url || "";
+  el.propTitle.title = String(payload.title || "");
+  el.propUrl.title = String(payload.url || "");
 
   const options = payload.subtitleOptions || [];
   if (options.length === 0) {
@@ -272,19 +311,19 @@ function render(payload, { preserveStatus = false } = {}) {
     el.subtitleSelect.disabled = false;
   }
 
-  el.preview.value = payload.subtitlePreview || "";
+  el.preview.value = String(payload.subtitlePreview || "");
 }
 
-function setText(node, text) {
+function setText(node: HTMLElement, text: unknown): void {
   node.textContent = String(text || "");
 }
 
-function setStatus(text, isError = false) {
+function setStatus(text: unknown, isError = false): void {
   el.status.textContent = String(text || "");
   el.status.classList.toggle("is-error", Boolean(isError));
 }
 
-function setMessage(text) {
+function setMessage(text: unknown): void {
   el.message.textContent = String(text || "");
 }
 
@@ -293,7 +332,7 @@ async function getActiveTab() {
   return tabs?.[0] || null;
 }
 
-function isReaderModeUrl(url) {
+function isReaderModeUrl(url: string): boolean {
   try {
     return new URL(url).searchParams.get("boc_reader") === "1";
   } catch {
@@ -301,7 +340,7 @@ function isReaderModeUrl(url) {
   }
 }
 
-async function sendToContent(message) {
+async function sendToContent(message: unknown): Promise<unknown> {
   const tab = await getActiveTab();
   const tabId = tab?.id || null;
   if (!tabId) {
@@ -328,22 +367,22 @@ async function sendToContent(message) {
   }
 }
 
-function normalizeContentErrorMessage(error) {
-  const message = String(error?.message || "").trim();
+function normalizeContentErrorMessage(error: unknown): string {
+  const message = String((error as Error)?.message || "").trim();
   if (message.includes(RECEIVING_END_MISSING_SENTINEL)) {
     return "请刷新浏览器网页重试，或当前网页不支持";
   }
   return message || "未知错误";
 }
 
-function shouldRetryAfterInjection(error) {
-  const message = String(error?.message || "");
+function shouldRetryAfterInjection(error: unknown): boolean {
+  const message = String((error as Error)?.message || "");
   return message.includes(RECEIVING_END_MISSING_SENTINEL);
 }
 
 
 
-async function ensureContentScriptReady(tabId) {
+async function ensureContentScriptReady(tabId: number): Promise<void> {
   if (!chrome.scripting) {
     throw new Error("请刷新浏览器网页重试，或当前网页不支持");
   }
@@ -369,7 +408,7 @@ async function ensureContentScriptReady(tabId) {
       files: ["entry/content-bootstrap.iife.js"]
     });
   } catch (error) {
-    const message = String(error?.message || "");
+    const message = String((error as Error)?.message || "");
     if (!message.includes(DUPLICATE_CLASSIC_INJECTION_SENTINEL)) {
       throw error;
     }
@@ -389,7 +428,7 @@ async function ensureContentScriptReady(tabId) {
   throw new Error("扩展刚更新，请刷新当前页面后重试。");
 }
 
-async function probeContentScriptVersion(tabId) {
+async function probeContentScriptVersion(tabId: number): Promise<string> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const probe = await chrome.scripting.executeScript({
@@ -410,7 +449,7 @@ async function probeContentScriptVersion(tabId) {
   return "";
 }
 
-async function sendToRuntime(message) {
+async function sendToRuntime(message: unknown): Promise<unknown> {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(message, (resp) => {
       if (chrome.runtime.lastError) {
@@ -422,9 +461,9 @@ async function sendToRuntime(message) {
   });
 }
 
-async function getSettingsFromRuntime() {
+async function getSettingsFromRuntime(): Promise<Partial<typeof DEFAULT_SETTINGS>> {
   try {
-    const resp = await sendToRuntime({ type: "get-settings" });
+    const resp = (await sendToRuntime({ type: "get-settings" })) as ContentResponse;
     if (!resp?.ok) {
       return { ...DEFAULT_SETTINGS };
     }

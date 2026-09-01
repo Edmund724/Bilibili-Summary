@@ -1,4 +1,4 @@
-// sidepanel-subtitle-wait.js — 一键总结「等待抓取/音频转写完成」的轮询状态机。
+// sidepanel-subtitle-wait.ts — 一键总结「等待抓取/音频转写完成」的轮询状态机。
 //
 // 从 sidepanel.js 提取（与 sidepanel-chat-runtime 同一套拆分手法）：sidepanel
 // 只负责组装 deps，本模块拥有轮询/失效/清理的全部时序状态。模块顶层零副作用，
@@ -15,6 +15,8 @@
 //   - kick() 与轮询去重：同一时刻最多一轮 pollContext 在跑；
 //   - finish（就绪/失败/失效）后挂着的定时器必须作废，notice 必须清理。
 
+import type { SidepanelContextSnapshot } from "./sidepanel-state.js";
+
 // 「上下文是否仍在抓取/转写中」的判定（sidepanel 组装 pollContext 用，纯函数可测）。
 // 两个信号缺一不可互为兜底：
 //   - 快照的 subtitleFetchState：主信号。content 侧在转写进行中也可能因辅助
@@ -24,7 +26,10 @@
 //     boc-subtitle-status(asr-transcribing) 广播置 true，收到 asr-done/asr-failed
 //     置 false。转写广播仍活跃时，即使快照状态被清也继续等待。
 // 字幕体非空即视为就绪，不受上述信号影响。
-export function isContextPending(snapshot, { asrTranscribingActive = false } = {}) {
+export function isContextPending(
+  snapshot: SidepanelContextSnapshot | null | undefined,
+  { asrTranscribingActive = false }: { asrTranscribingActive?: boolean } = {}
+): boolean {
   if (!snapshot) {
     return false;
   }
@@ -35,8 +40,24 @@ export function isContextPending(snapshot, { asrTranscribingActive = false } = {
   return snapshot.subtitleFetchState === "loading" || asrTranscribingActive === true;
 }
 
+export interface CreateSubtitleWaiterDeps {
+  pollContext: () => Promise<{ ok: boolean; pending: boolean }>;
+  showWaitingNotice: () => void;
+  removeNotice: () => void;
+  setTimer: (fn: () => void, ms: number) => number;
+  clearTimer: (handle: number) => void;
+  pollIntervalMs: number;
+}
+
+export interface SubtitleWaiter {
+  wait: () => Promise<boolean>;
+  kick: () => void;
+}
+
 /**
- * @param {object} deps
+ * createSubtitleWaiter(deps) — 工厂返回轮询状态机。
+ *
+ * deps 语义（与迁移前 JSDoc 一致）：
  *   pollContext:      () => Promise<{ok: boolean, pending: boolean}>
  *                     sidepanel 组装：loadContextState(silent) + contextData 的
  *                     subtitleFetchState/subtitleBody 折算成「读取成败 + 是否仍在抓取/转写」。
@@ -44,12 +65,8 @@ export function isContextPending(snapshot, { asrTranscribingActive = false } = {
  *   removeNotice:      () => void     finish 时清理提示。
  *   setTimer / clearTimer:             可注入定时器（测试手动推进）。
  *   pollIntervalMs:    number         轮询间隔。
- * @returns {{
- *   wait: () => Promise<boolean>,  // true=上下文就绪可发送；false=读取失败或被新等待顶掉
- *   kick: () => void               // 广播到达时提前触发一轮轮询（无等待时no-op）
- * }}
  */
-export function createSubtitleWaiter(deps) {
+export function createSubtitleWaiter(deps: CreateSubtitleWaiterDeps): SubtitleWaiter {
   const {
     pollContext,
     showWaitingNotice,
@@ -61,18 +78,18 @@ export function createSubtitleWaiter(deps) {
 
   // 单调等待代币：只认最新一次 wait()，旧等待在 finish 前先失效
   let token = 0;
-  let activeFinish = null;
-  let kickCurrent = null;
+  let activeFinish: ((ok: boolean) => void) | null = null;
+  let kickCurrent: (() => void) | null = null;
 
-  function wait() {
+  function wait(): Promise<boolean> {
     if (activeFinish) {
       activeFinish(false);
     }
     return new Promise((resolve) => {
-      let timer = null;
+      let timer: number | null = null;
       let ticking = false;
       const currentToken = ++token;
-      const finish = (ok) => {
+      const finish = (ok: boolean) => {
         if (currentToken !== token) {
           return;
         }

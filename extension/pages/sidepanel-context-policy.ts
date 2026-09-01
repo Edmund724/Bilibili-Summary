@@ -1,4 +1,4 @@
-// sidepanel-context-policy.js — loadContextState 的分支判定纯函数（候选08，可测）。
+// sidepanel-context-policy.ts — loadContextState 的分支判定纯函数（候选08，可测）。
 //
 // 为什么存在：sidepanel.js 的 loadContextState 把「签名短路 / pinned / streaming
 // 守卫 / live 快照应用」四态判定交错在带副作用的编排里（消息往返、setState、
@@ -14,6 +14,20 @@
 //   blocked-streaming chatRuntime 流式中或有待发送 prompt
 //   apply-live        以上皆否：live 快照落地并应用到主上下文
 
+// ai-sidepanel-get-state 的响应信封（sendRuntimeMessage 结果经编排壳收窄；
+// payload 为 content 侧的上下文快照，本模块只读其 unchanged 信封字段）。
+export interface LoadContextResponse {
+  ok?: boolean;
+  error?: unknown;
+  payload?: { unchanged?: unknown; [key: string]: unknown } | null;
+}
+
+// 会话绑定判定输入（sidepanelState.currentConversationMeta 的窄视图）
+export interface CurrentConversationMetaLike {
+  pinnedContext?: unknown;
+  [key: string]: unknown;
+}
+
 // 动作枚举：loadContextState 一次调用可能采取的全部动作（编排壳据此执行）。
 export const LOAD_CONTEXT_ACTION = Object.freeze({
   NO_TAB: "no-tab",
@@ -22,7 +36,19 @@ export const LOAD_CONTEXT_ACTION = Object.freeze({
   APPLY_PINNED: "apply-pinned",
   BLOCKED_STREAMING: "blocked-streaming",
   APPLY_LIVE: "apply-live"
-});
+} as const);
+
+// 动作计划（resolveNoTabPlan / resolveLoadContextAction 的输出形态）。
+// 可选字段只在其动作需要时出现，与旧分支的返回对象逐字段一致。
+export interface LoadContextPlan {
+  action: (typeof LOAD_CONTEXT_ACTION)[keyof typeof LOAD_CONTEXT_ACTION];
+  clearTabUrl?: boolean;
+  clearContext?: boolean;
+  resetView?: boolean;
+  message?: unknown;
+  returnValue: boolean;
+  applyToMainContext?: boolean;
+}
 
 // 失败分支的用户可见文案（loadContextState 的兜底与 ensureCurrentContextForSend
 // 的三次失败闸共用同一句，收敛为常量防漂移）。
@@ -33,18 +59,18 @@ export const CONTEXT_READ_FAILED_MESSAGE = "当前页面上下文读取失败。
 //（pinnedContext === true），ensureCurrentContextForSend 用真值判断。当前
 // conversation-store 只会写入字面量 true，两者实际等价，但严格度不同是历史
 // 现状——为保证行为逐字节保持，分别提供两个谓词，调用点各用其原始语义。
-export function isPinnedContextStrict(currentConversationMeta) {
+export function isPinnedContextStrict(currentConversationMeta: CurrentConversationMetaLike | null | undefined): boolean {
   return currentConversationMeta?.pinnedContext === true;
 }
 
-export function isPinnedContextTruthy(currentConversationMeta) {
+export function isPinnedContextTruthy(currentConversationMeta: CurrentConversationMetaLike | null | undefined): boolean {
   return Boolean(currentConversationMeta?.pinnedContext);
 }
 
 // 决策点一（消息往返之前）：无可用标签页。此时不能发 ai-sidepanel-get-state
 //（tabId 缺失），直接走失败清理。clearTabUrl 为 true：no-tab 分支连 liveTabUrl
 // 一起清（error 分支刚用 tab.url 刷新过它，故为 false，见 resolveLoadContextAction）。
-export function resolveNoTabPlan({ hasPinnedConversation = false, silent = false } = {}) {
+export function resolveNoTabPlan({ hasPinnedConversation = false, silent = false } = {}): LoadContextPlan {
   return {
     action: LOAD_CONTEXT_ACTION.NO_TAB,
     clearTabUrl: true,
@@ -71,13 +97,21 @@ export function resolveNoTabPlan({ hasPinnedConversation = false, silent = false
 //   applyToMainContext  成功时 live 快照是否进一步应用到主上下文
 //                      （pinned / 流式守卫为 false：只落地 live 快照）
 //   returnValue         loadContextState 的返回值契约
+export interface ResolveLoadContextActionOptions {
+  response?: LoadContextResponse | null;
+  hasPinnedConversation?: boolean;
+  silent?: boolean;
+  isStreaming?: boolean;
+  hasPendingUserPrompt?: boolean;
+}
+
 export function resolveLoadContextAction({
   response = null,
   hasPinnedConversation = false,
   silent = false,
   isStreaming = false,
   hasPendingUserPrompt = false
-} = {}) {
+}: ResolveLoadContextActionOptions = {}): LoadContextPlan {
   // 候选5：content 状态未变 → 保持现状不动（不 applyContextPayload、不重渲染、
   // 不刷新 live 快照、不转 spinner）。liveContextData 仍持有带 signature 的
   // 上次全量 payload：既是下一轮 ifSignature 的来源，也是等待轮询

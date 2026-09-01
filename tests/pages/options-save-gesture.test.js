@@ -10,7 +10,7 @@
 //
 // 断言刻意只认「await 的位置」而不认变量名/文案，改注释、换字段名都不该红。
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -23,10 +23,15 @@ function stripComments(source) {
 
 // 注意：URL 参数必须走变量传入，不能写 new URL("<字面量>", import.meta.url)——
 // Vite 会把字面量形式改写成资源 URL，jsdom 下解析成 https:// 开头而 fileURLToPath 报错。
+// TS 渐进迁移期间源文件可能是 .js 或 .ts，缺失时回退到另一扩展名（与
+// tests/core/message-handler-signature.test.js 的 readSource 同一口径）。
 function readOptionsSource() {
   const relativePath = "../../extension/pages/options.js";
-  const path = fileURLToPath(new URL(relativePath, import.meta.url));
-  return stripComments(readFileSync(path, "utf8"));
+  const jsUrl = new URL(relativePath, import.meta.url);
+  const url = existsSync(fileURLToPath(jsUrl))
+    ? jsUrl
+    : new URL(relativePath.replace(/\.js$/, ".ts"), import.meta.url);
+  return stripComments(readFileSync(fileURLToPath(url), "utf8"));
 }
 
 describe("saveSettings 的手势同步链", () => {

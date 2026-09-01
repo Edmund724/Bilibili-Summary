@@ -1,4 +1,4 @@
-// sidepanel-presets.js — 预设提示词 CRUD + 双存储同步（候选09 自 sidepanel.js
+// sidepanel-presets.ts — 预设提示词 CRUD + 双存储同步（候选09 自 sidepanel.js
 // 迁出）。
 //
 // 预设提示词有两份真相，本模块负责两份的同步写：
@@ -15,8 +15,19 @@
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { sidepanelState } from "./sidepanel-state.js";
 
-export function createPresetPrompts({ presetInput, renderPresetPrompts }) {
-  async function addPresetPrompt() {
+export interface CreatePresetPromptsDeps {
+  presetInput: HTMLInputElement;
+  renderPresetPrompts: () => void;
+}
+
+export interface PresetPrompts {
+  addPresetPrompt: () => Promise<void>;
+  removePresetPrompt: (index: number) => Promise<void>;
+  persistAiPresetPrompts: () => Promise<void>;
+}
+
+export function createPresetPrompts({ presetInput, renderPresetPrompts }: CreatePresetPromptsDeps): PresetPrompts {
+  async function addPresetPrompt(): Promise<void> {
     const text = String(presetInput.value || "").trim();
     if (!text) {
       return;
@@ -31,7 +42,7 @@ export function createPresetPrompts({ presetInput, renderPresetPrompts }) {
     renderPresetPrompts();
   }
 
-  async function removePresetPrompt(index) {
+  async function removePresetPrompt(index: number): Promise<void> {
     if (index < 0) {
       return;
     }
@@ -40,7 +51,7 @@ export function createPresetPrompts({ presetInput, renderPresetPrompts }) {
     renderPresetPrompts();
   }
 
-  async function persistAiPresetPrompts() {
+  async function persistAiPresetPrompts(): Promise<void> {
     await sendRuntimeMessage({
       type: "save-settings",
       settings: { aiPresetPrompts: (sidepanelState.aiPrefs.aiPresetPrompts || []).slice(0, 12) }

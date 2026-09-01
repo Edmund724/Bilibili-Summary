@@ -1,4 +1,4 @@
-// sidepanel-chat-runtime.js — chat + stream state machine orchestration layer
+// sidepanel-chat-runtime.ts — chat + stream state machine orchestration layer
 // extracted out of extension/pages/sidepanel.js (ticket 07 of sidepanel-split).
 //
 // Responsibility: orchestrate "send message → stream receive → render assistant
@@ -29,10 +29,92 @@
 // scope) — unlike sidepanel.js, this module evaluates cleanly under a Node test
 // harness without a DOM shim.
 import { renderMarkdown, splitMarkdownTail, stripThinkBlocks } from "../ui/markdown.js";
-import { linkifyAssistantTimestamps } from "../ui/timestamp-nav.js";
+import { linkifyAssistantTimestamps, type TimestampNavDeps } from "../ui/timestamp-nav.js";
+import type { ConversationStore } from "./sidepanel-conversation-store.js";
 import { sidepanelState } from "./sidepanel-state.js";
 
 const STREAM_SLOW_NOTICE_MS = 15000;
+
+// ---------------------------------------------------------------------------
+// offscreen chat port 的窄视图（chrome.runtime.Port 的结构子集，测试假 port 同构）
+// ---------------------------------------------------------------------------
+
+export interface ChatPort {
+  name: string;
+  postMessage(message: unknown): void;
+  disconnect(): void;
+  onMessage: {
+    addListener(listener: (message: unknown) => void): void;
+  };
+  onDisconnect: {
+    addListener(listener: () => void): void;
+  };
+}
+
+// offscreen → sidepanel 的 port 消息协议（七分派）。reasoning/token/stream-reset/
+// done/stopped/error/notice/cost-guard 的载荷字段按分派分支收窄；所有分支都
+// 可携带 cachedContextKey（offscreen 单槽字幕体缓存的当前 key 回执）。
+export type ChatPortMessage =
+  | { type: "reasoning"; data?: unknown; cachedContextKey?: string }
+  | { type: "token"; data?: unknown; cachedContextKey?: string }
+  | { type: "stream-reset"; cachedContextKey?: string }
+  | { type: "done"; cachedContextKey?: string }
+  | { type: "stopped"; reason?: string; cachedContextKey?: string }
+  | { type: "error"; code?: string; error?: unknown; cachedContextKey?: string }
+  | { type: "notice"; data: string; cachedContextKey?: string }
+  | { type: "cost-guard"; data?: { message?: unknown }; cachedContextKey?: string };
+
+// chat-runtime 消费的最窄 store 面（会话身份守卫 + 在途一问一答持久化）
+export interface ChatRuntimeStore {
+  isCurrent(id: string): boolean;
+  persistCurrent(): Promise<void>;
+}
+
+// UI 门面（sidepanel 布局回调的纯分组，方法名不变）
+export interface ChatRuntimeUi {
+  setStreamingUiState: (isStreaming: boolean, options?: { stopping?: boolean }) => void;
+  showConversationContextNotice: (message: string, autoHideMs?: number, options?: { openSettingsAction?: boolean }) => void;
+  removeConversationContextNotice: () => void;
+  hidePresetPopover: () => void;
+  hideHistoryPopover: () => void;
+  removeCenteredState: () => void;
+  removeSuggestions: () => void;
+  resetConversationView: (stateHtml?: string) => void;
+  autosizeInput: () => void;
+}
+
+export interface CreateChatRuntimeDeps {
+  // ---- DOM container / element refs (sidepanel module-level `els`) ----
+  messages: HTMLElement;
+  input: HTMLTextAreaElement;
+  stopBtn: HTMLButtonElement | null;
+  // ---- conversation-store narrow interface (ticket 05) ----
+  store: ChatRuntimeStore;
+  // ---- UI 门面 ----
+  ui: ChatRuntimeUi;
+  // ---- context/transport helpers (AI domain, sidepanel local) ----
+  ensureCurrentContextForSend: () => Promise<boolean | string>;
+  getProviderId: () => string;
+  getTimestampNavDeps: () => TimestampNavDeps;
+  normalizeMarkdownForSectionPaste: (raw: string, baseLevel?: number) => string;
+  connectPort: () => Promise<ChatPort> | ChatPort;
+}
+
+// 流式 token 累加器（按节点存放在 WeakMap）：base = 已 flush 的全量文本，
+// pending = 未 flush 的增量帧，stableText/stableEl/tailEl 为双容器渲染状态。
+interface TokenStreamState {
+  base: string;
+  pending: string[];
+  stableText: string;
+  stableEl: HTMLDivElement | null;
+  tailEl: HTMLDivElement | null;
+}
+
+// 思考文本的截断显示状态（头缓冲 + 溢出计数）
+interface ThinkingDisplayState {
+  head: string;
+  overflow: number;
+}
 
 /**
  * createChatRuntime(deps) — factory returning the chat runtime method set.
@@ -101,10 +183,10 @@ const STREAM_SLOW_NOTICE_MS = 15000;
  *     handleChatPortMessage,       // (msg) => void  (与 port.onMessage 监听器同分派)
  *   }
  */
-export function createChatRuntime(deps) {
+export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   // ---- stream runtime state (closure-local) ----
-  let activePort = null;
-  let activeAssistantNode = null;
+  let activePort: ChatPort | null = null;
+  let activeAssistantNode: HTMLDivElement | null = null;
   let activeUserPrompt = "";
   // 会话身份快照：sendMessage 发起时捕获 currentConversationId，finalize /
   // stopped 持久化前经 deps.store.isCurrent(快照) 判定（守卫逻辑单点收在
@@ -120,7 +202,7 @@ export function createChatRuntime(deps) {
   //（某些实现的收尾 reasoning 事件）不能重新附着到已移除的旧节点，必须为
   // 下一条消息在 activeAssistantNode 上新建。两语义（未创建 vs 已结束）此前
   // 都折叠进 thinkingNode === null，导致跨消息 reasoning 串进游离节点。
-  let thinkingNode = null;
+  let thinkingNode: HTMLDivElement | null = null;
   let thinkingEnded = false;
   let streamSlowNoticeTimer = 0;
   // 慢响应计时器与首 token 标志的分离（见 startStreamSlowNoticeTimer /
@@ -146,14 +228,14 @@ export function createChatRuntime(deps) {
   // cachedContextKey 读到）。追问消息据此省略整份 subtitleBody——长视频单份
   // 字幕体可达数 MB，逐条追问经 port 重传纯属浪费。null = 未确认（首条消息、
   // port 断连、字幕体缺失错误之后），必然全量携带。
-  let lastAckedContextKey = null;
+  let lastAckedContextKey: string | null = null;
 
   // ---- internal helpers ----
-  function setStreamingUiState(isStreaming, { stopping = false } = {}) {
+  function setStreamingUiState(isStreaming: boolean, { stopping = false }: { stopping?: boolean } = {}): void {
     deps.ui.setStreamingUiState(isStreaming, { stopping });
   }
 
-  function scrollToBottom(force = false) {
+  function scrollToBottom(force = false): void {
     if (!force && !shouldAutoScrollMessages) {
       return;
     }
@@ -166,7 +248,7 @@ export function createChatRuntime(deps) {
   // sendMessage 内 port.onMessage 监听器的函数体与公开的 handleChatPortMessage
   // （协议测试入口）共用同一份分派。port 参数仅用于 cost-guard 的确认回执：
   // 真实监听器传当前 port；测试入口传 activePort。
-  function dispatchChatPortMessage(msg, port) {
+  function dispatchChatPortMessage(msg: ChatPortMessage | null | undefined, port: ChatPort | null): void {
     if (!msg) return;
     // 候选5：offscreen 每次回执都带 cachedContextKey（其单槽字幕体缓存当前
     // 持有的 key）——推进 lastAcked，后续追问省略 subtitleBody。字幕体缺失
@@ -210,14 +292,14 @@ export function createChatRuntime(deps) {
     } else if (msg.type === "cost-guard") {
       // offscreen 发起 Map-Reduce 前弹成本护栏，等待确认后回执。
       const ok = window.confirm(String(msg.data?.message || "预计会有多次调用，是否继续？"));
-      port.postMessage({ action: "cost-guard-confirm", ok });
+      port!.postMessage({ action: "cost-guard-confirm", ok });
     }
   }
 
   // =========================================================================
   // sendMessage — entry point of the chat flow
   // =========================================================================
-  async function sendMessage() {
+  async function sendMessage(): Promise<void> {
     const text = deps.input.value.trim();
     // 双发竞态闸：activePort 已建（流式进行中）或发送流程已在进行
     //（ensureCurrentContextForSend / connectPort 的 await 窗口内端口未建、
@@ -276,7 +358,7 @@ export function createChatRuntime(deps) {
       activePort = port;
 
       port.onMessage.addListener((msg) => {
-        dispatchChatPortMessage(msg, port);
+        dispatchChatPortMessage(msg as ChatPortMessage, port);
       });
 
       port.onDisconnect.addListener(() => {
@@ -322,7 +404,7 @@ export function createChatRuntime(deps) {
       thinkingEnded = false;
       const node = activeAssistantNode;
       if (node) {
-        showAssistantError(node, err?.message || String(err));
+        showAssistantError(node, (err as Error)?.message || String(err));
       } else {
         // 失败发生在占位建立前（ensure/上下文阶段）：只复位流式 UI 与计时器。
         clearStreamRuntimeState();
@@ -337,7 +419,7 @@ export function createChatRuntime(deps) {
   // =========================================================================
   // appendUserMessage
   // =========================================================================
-  function appendUserMessage(text, shouldScroll = true) {
+  function appendUserMessage(text: string, shouldScroll = true): void {
     const node = document.createElement("div");
     node.className = "sp-msg sp-msg-user";
     node.textContent = text;
@@ -351,7 +433,7 @@ export function createChatRuntime(deps) {
   // =========================================================================
   // appendAssistantPlaceholder
   // =========================================================================
-  function appendAssistantPlaceholder() {
+  function appendAssistantPlaceholder(): HTMLDivElement {
     const node = document.createElement("div");
     node.className = "sp-msg sp-msg-assistant";
     // 流式 token 累加器（原 dataset.raw）随占位节点初始化/重置，
@@ -369,7 +451,7 @@ export function createChatRuntime(deps) {
   // =========================================================================
   // createThinkingNode
   // =========================================================================
-  function createThinkingNode(assistantNode) {
+  function createThinkingNode(assistantNode: HTMLDivElement | null): HTMLDivElement | null {
     if (!assistantNode) {
       return null;
     }
@@ -395,10 +477,10 @@ export function createChatRuntime(deps) {
   // 每条增量只复制能进头缓冲的部分，其余仅累加计数，总复制量 O(n)。
   // 显示输出与旧逻辑逐字节一致：头缓冲 +（溢出时的截断提示）。
   // 头缓冲/计数随 thinking 节点（每条消息新建）走，跨消息天然隔离重置。
-  const thinkingDisplayStates = new WeakMap();
+  const thinkingDisplayStates = new WeakMap<Element, ThinkingDisplayState>();
   const THINKING_TRUNCATION_SUFFIX = "\n…（思考内容过长，已截断显示）";
 
-  function appendThinkingText(node, text) {
+  function appendThinkingText(node: HTMLDivElement | null, text: unknown): void {
     if (!node) {
       return;
     }
@@ -451,13 +533,13 @@ export function createChatRuntime(deps) {
   // 总复制量 O(n)。stableText 记录该节点上次渲染过的稳定前缀，用于跳过未
   // 增长的 stable 重渲染。finalize / stopped 从 base + pending 取全量文本。
   // 随占位节点初始化（appendAssistantPlaceholder），跨消息天然隔离。
-  const tokenStreamStates = new WeakMap();
+  const tokenStreamStates = new WeakMap<HTMLElement, TokenStreamState>();
 
-  function resetTokenStreamState(node) {
+  function resetTokenStreamState(node: HTMLElement): void {
     tokenStreamStates.set(node, { base: "", pending: [], stableText: "", stableEl: null, tailEl: null });
   }
 
-  function getTokenStreamState(node) {
+  function getTokenStreamState(node: HTMLElement): TokenStreamState {
     let state = tokenStreamStates.get(node);
     if (!state) {
       state = { base: "", pending: [], stableText: "", stableEl: null, tailEl: null };
@@ -477,7 +559,7 @@ export function createChatRuntime(deps) {
   //   流式 UI 不退出、慢响应计时器不关）；
   // - 移除已渲染的 stable/tail 容器与思考节点（光标先摘下来放回节点末尾，
   //   flush 时机随下一帧恢复）；思考节点随下一个 reasoning 事件重建。
-  function resetAssistantStream(node) {
+  function resetAssistantStream(node: HTMLDivElement | null): void {
     if (!node) {
       return;
     }
@@ -494,7 +576,7 @@ export function createChatRuntime(deps) {
 
   // 流式双容器懒创建（首帧 flush 时挂上；finalize / stopped 的整体重渲染会
   // 自然清掉它们）
-  function ensureStreamContainers(node, state) {
+  function ensureStreamContainers(node: HTMLDivElement, state: TokenStreamState): void {
     if (state.stableEl && state.tailEl) {
       return;
     }
@@ -509,7 +591,7 @@ export function createChatRuntime(deps) {
   }
 
   // 全量流式文本 = base + 未 flush 的 pending（不做清空，供 finalize/stopped 只读）
-  function getStreamRaw(node) {
+  function getStreamRaw(node: HTMLElement): string {
     const state = tokenStreamStates.get(node);
     if (!state) {
       return "";
@@ -517,7 +599,7 @@ export function createChatRuntime(deps) {
     return state.base + state.pending.join("");
   }
 
-  function cancelTokenFlush() {
+  function cancelTokenFlush(): void {
     if (!tokenFlushFrame) {
       return;
     }
@@ -529,7 +611,7 @@ export function createChatRuntime(deps) {
     tokenFlushFrame = 0;
   }
 
-  function appendToken(node, token) {
+  function appendToken(node: HTMLDivElement | null, token: unknown): void {
     if (!node) {
       return;
     }
@@ -541,7 +623,7 @@ export function createChatRuntime(deps) {
       tokenFlushFrame = 0;
       const state = getTokenStreamState(node);
       const text = state.base + state.pending.join("");
-      // think 块先剥除再切分，保证未闭合的 <think> 不会横跨 stable/tail 切点
+      // think 块先剥除再切分，保证未闭合的  ``` 不会横跨 stable/tail 切点
       // （renderMarkdown 内部的再 strip 是无害幂等）。
       const cleaned = stripThinkBlocks(text);
       const { stableText, tailText } = splitMarkdownTail(cleaned);
@@ -554,13 +636,13 @@ export function createChatRuntime(deps) {
       // 稳定前缀只在增长时渲染一次；末块每帧重渲染
       if (state.stableText !== stableText) {
         state.stableText = stableText;
-        state.stableEl.innerHTML = renderMarkdown(stableText);
+        state.stableEl!.innerHTML = renderMarkdown(stableText);
       }
       // 先取光标引用再重写 tail（innerHTML 赋值会清掉 tail 内的旧光标）
       const cursor = node.querySelector(".sp-msg-cursor");
-      state.tailEl.innerHTML = renderMarkdown(tailText);
+      state.tailEl!.innerHTML = renderMarkdown(tailText);
       if (cursor) {
-        state.tailEl.appendChild(cursor);
+        state.tailEl!.appendChild(cursor);
       }
       scrollToBottom();
       state.base = text;
@@ -584,7 +666,7 @@ export function createChatRuntime(deps) {
   //   ⑤ setStreamingUiState(false)；
   //   ⑥ deps.input.focus() + scrollToBottom()。
   // activeUserPrompt 在 ③ 之后统一清空（③ 内的写回判定还要读它）。
-  function endStream(node, renderStep) {
+  function endStream(node: HTMLDivElement, renderStep: ((node: HTMLDivElement) => void) | undefined): void {
     cancelTokenFlush();
     clearStreamRuntimeState();
     if (renderStep) {
@@ -603,7 +685,7 @@ export function createChatRuntime(deps) {
   // 在途一问一答写回（done / stopped 共享）：身份守卫判定收在 store
   // （deps.store.isCurrent）。发送后当前会话已变（删除/清空/切换）→ 不写回
   // chatHistory、不持久化（防会话复活 / 串话），DOM 仍由 renderStep 更新。
-  function commitAssistantTurn(raw) {
+  function commitAssistantTurn(raw: string): void {
     if (activeUserPrompt && raw && deps.store.isCurrent(activeConversationId)) {
       sidepanelState.chatHistory.push({ role: "user", content: activeUserPrompt });
       sidepanelState.chatHistory.push({ role: "assistant", content: raw });
@@ -616,7 +698,7 @@ export function createChatRuntime(deps) {
   // -------------------------------------------------------------------------
 
   // done：全量重渲染 + 写回一问一答
-  function finalizeAssistant(node) {
+  function finalizeAssistant(node: HTMLDivElement | null): void {
     if (!node) {
       return;
     }
@@ -628,7 +710,7 @@ export function createChatRuntime(deps) {
   }
 
   // error：错误占位（不渲染正文、不写回、不持久化）
-  function showAssistantError(node, error) {
+  function showAssistantError(node: HTMLDivElement | null, error: unknown): void {
     if (!node) {
       return;
     }
@@ -642,7 +724,7 @@ export function createChatRuntime(deps) {
   }
 
   // stopped：有正文则渲染正文 + 停止徽标（并写回）；无正文则只放停止徽标
-  function handleAssistantStopped(node, reason) {
+  function handleAssistantStopped(node: HTMLDivElement | null, reason: string): void {
     if (!node) {
       return;
     }
@@ -665,7 +747,7 @@ export function createChatRuntime(deps) {
   // =========================================================================
   // stopActiveStream
   // =========================================================================
-  function stopActiveStream() {
+  function stopActiveStream(): void {
     if (!activePort) {
       return;
     }
@@ -684,7 +766,7 @@ export function createChatRuntime(deps) {
   // =========================================================================
   // startStreamSlowNoticeTimer
   // =========================================================================
-  function startStreamSlowNoticeTimer() {
+  function startStreamSlowNoticeTimer(): void {
     clearStreamRuntimeState();
     streamSlowNoticeTimer = window.setTimeout(() => {
       if (!activePort || streamFirstTokenReceived) {
@@ -702,7 +784,7 @@ export function createChatRuntime(deps) {
   // streamFirstTokenReceived 置 true 后不再重复执行；clearStreamRuntimeState
   // 不复位它（见下方注释），下一代的重新武装由 sendMessage 在发送前显式
   // streamFirstTokenReceived = false 完成。
-  function handleFirstStreamToken() {
+  function handleFirstStreamToken(): void {
     if (streamFirstTokenReceived) {
       return;
     }
@@ -723,7 +805,7 @@ export function createChatRuntime(deps) {
   //    handleFirstStreamToken 再次执行、撤下下一条消息的上下文 notice；
   // 2. 慢响应提示的重新武装职责归位到 sendMessage（发送前置 false），
   //    clear 只管"当前代际内"的清计时器语义。
-  function clearStreamRuntimeState() {
+  function clearStreamRuntimeState(): void {
     if (streamSlowNoticeTimer) {
       window.clearTimeout(streamSlowNoticeTimer);
       streamSlowNoticeTimer = 0;
@@ -734,7 +816,7 @@ export function createChatRuntime(deps) {
   // =========================================================================
   // renderAssistantMessage
   // =========================================================================
-  function renderAssistantMessage(node, raw, { userPrompt = "" } = {}) {
+  function renderAssistantMessage(node: HTMLDivElement | null, raw: unknown, { userPrompt = "" }: { userPrompt?: string } = {}): void {
     if (!node) {
       return;
     }
@@ -784,7 +866,7 @@ export function createChatRuntime(deps) {
   // setAutoScroll — 自动滚动标志的窄写入口（sidepanel scroll 监听与消息区
   // 重建点调用；appendUserMessage / appendAssistantPlaceholder 直接写闭包）
   // =========================================================================
-  function setAutoScroll(value) {
+  function setAutoScroll(value: boolean): void {
     shouldAutoScrollMessages = Boolean(value);
   }
 
@@ -793,15 +875,15 @@ export function createChatRuntime(deps) {
   // the reset entry point for sidepanel (replaces direct reads of the old
   // module-level variables)
   // =========================================================================
-  function isStreaming() {
+  function isStreaming(): boolean {
     return activePort !== null;
   }
 
-  function hasPendingUserPrompt() {
+  function hasPendingUserPrompt(): boolean {
     return activeUserPrompt !== "";
   }
 
-  function resetStreamState() {
+  function resetStreamState(): void {
     // 挂起的流式渲染帧（rAF flush）必须先取消：flush 闭包捕获的是节点引用，
     // 不清的话会向已脱离的旧节点渲染（首帧还会把新消息的思考节点当旧的移除）。
     cancelTokenFlush();
@@ -827,7 +909,7 @@ export function createChatRuntime(deps) {
   // dispatchChatPortMessage：协议消息对象进、DOM/状态变化出。测试以此喂
   // reasoning / token / stream-reset / done / stopped / error / notice /
   // cost-guard，无需触达任何内部渲染步骤函数。
-  function handleChatPortMessage(msg) {
+  function handleChatPortMessage(msg: ChatPortMessage | null | undefined): void {
     dispatchChatPortMessage(msg, activePort);
   }
 

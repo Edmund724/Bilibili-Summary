@@ -1,4 +1,4 @@
-// sidepanel-offscreen-ensure.js — 聊天通道 offscreen 文档的 ensure（sidepanel
+// sidepanel-offscreen-ensure.ts — 聊天通道 offscreen 文档的 ensure（sidepanel
 // split 模式抽出的可测模块，依赖全部走全局 chrome，测试里 stub 即可）。
 //
 // 历史行为：sidepanel 只在 init 时创建一次 offscreen 文档；文档意外死亡
@@ -16,7 +16,7 @@ import { logWarn } from "../shared/logging.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { OFFSCREEN_URL, OFFSCREEN_CREATE_REASON } from "../shared/offscreen-constants.js";
 
-export async function ensureChatOffscreenDocument() {
+export async function ensureChatOffscreenDocument(): Promise<boolean> {
   const url = chrome.runtime.getURL(OFFSCREEN_URL);
   try {
     const contexts = await chrome.runtime.getContexts({

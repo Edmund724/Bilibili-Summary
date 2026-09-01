@@ -1,4 +1,4 @@
-// sidepanel-player-ai-requests.js — 播放器 AI 快捷动作的消费侧（候选09 自
+// sidepanel-player-ai-requests.ts — 播放器 AI 快捷动作的消费侧（候选09 自
 // sidepanel.js 迁出）。
 //
 // content 侧播放器 AI 面板点击快捷动作后写入 chrome.storage.local 的
@@ -19,13 +19,22 @@
 // 本模块不 import sidepanel.js。
 import { PLAYER_AI_QUICK_ACTION_STORAGE_KEY } from "../core/defaults.js";
 
-export function normalizePlayerAiQuickActionRequest(value) {
+// storage 里的快捷动作请求的归一化形态
+export interface PlayerAiQuickActionRequest {
+  id: string;
+  prompt: string;
+  tabId: number;
+  createdAt: number;
+}
+
+export function normalizePlayerAiQuickActionRequest(value: unknown): PlayerAiQuickActionRequest | null {
   if (!value || typeof value !== "object") {
     return null;
   }
-  const id = String(value.id || "").trim();
-  const prompt = String(value.prompt || "").trim();
-  const tabId = Number(value.tabId || 0) || 0;
+  const raw = value as Record<string, unknown>;
+  const id = String(raw.id || "").trim();
+  const prompt = String(raw.prompt || "").trim();
+  const tabId = Number(raw.tabId || 0) || 0;
   if (!id || !tabId) {
     return null;
   }
@@ -33,8 +42,16 @@ export function normalizePlayerAiQuickActionRequest(value) {
     id,
     prompt,
     tabId,
-    createdAt: Number(value.createdAt) || Date.now()
+    createdAt: Number(raw.createdAt) || Date.now()
   };
+}
+
+export interface CreatePlayerAiQuickActionsDeps {
+  getActiveTab: () => Promise<{ id?: number; url?: string } | null>;
+  startNewConversation: () => Promise<void> | void;
+  sendMessage: () => Promise<void> | void;
+  input: HTMLTextAreaElement;
+  autosizeInput: () => void;
 }
 
 export function createPlayerAiQuickActions({
@@ -43,8 +60,11 @@ export function createPlayerAiQuickActions({
   sendMessage,
   input,
   autosizeInput
-}) {
-  async function handlePlayerAiQuickActionRequest(value, { fromStorageChange = true } = {}) {
+}: CreatePlayerAiQuickActionsDeps) {
+  async function handlePlayerAiQuickActionRequest(
+    value: unknown,
+    { fromStorageChange = true }: { fromStorageChange?: boolean } = {}
+  ): Promise<boolean> {
     const request = normalizePlayerAiQuickActionRequest(value);
     if (!request) {
       return false;
@@ -58,8 +78,9 @@ export function createPlayerAiQuickActions({
     if (fromStorageChange) {
       await chrome.storage.local.remove(PLAYER_AI_QUICK_ACTION_STORAGE_KEY).catch(() => null);
     } else {
-      const latest = await chrome.storage.local.get([PLAYER_AI_QUICK_ACTION_STORAGE_KEY]).catch(() => ({}));
-      const latestId = String(latest?.[PLAYER_AI_QUICK_ACTION_STORAGE_KEY]?.id || "").trim();
+      const latest = await chrome.storage.local.get([PLAYER_AI_QUICK_ACTION_STORAGE_KEY]).catch(() => ({}) as Record<string, unknown>);
+      const latestRecord = latest?.[PLAYER_AI_QUICK_ACTION_STORAGE_KEY] as { id?: unknown } | undefined;
+      const latestId = String(latestRecord?.id || "").trim();
       if (latestId && latestId !== request.id) {
         return false;
       }
@@ -70,7 +91,7 @@ export function createPlayerAiQuickActions({
     return true;
   }
 
-  async function runPlayerAiQuickActionPrompt(prompt) {
+  async function runPlayerAiQuickActionPrompt(prompt: unknown): Promise<void> {
     const text = String(prompt || "").trim();
     if (!text) {
       autosizeInput();
@@ -83,8 +104,8 @@ export function createPlayerAiQuickActions({
     await sendMessage();
   }
 
-  async function consumePendingPlayerAiQuickAction() {
-    const data = await chrome.storage.local.get([PLAYER_AI_QUICK_ACTION_STORAGE_KEY]).catch(() => ({}));
+  async function consumePendingPlayerAiQuickAction(): Promise<boolean> {
+    const data = await chrome.storage.local.get([PLAYER_AI_QUICK_ACTION_STORAGE_KEY]).catch(() => ({}) as Record<string, unknown>);
     const request = normalizePlayerAiQuickActionRequest(data?.[PLAYER_AI_QUICK_ACTION_STORAGE_KEY]);
     if (!request) {
       return false;
