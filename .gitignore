@@ -12,7 +12,9 @@ node_modules/
 
 # Generated extension files（候选4 分包：classic bootstrap + ESM 主包 + 动态 chunk）
 /extension/entry/content-bootstrap.iife.js
+/extension/entry/content-bootstrap.iife.js.map
 /extension/entry/content-main.mjs
+/extension/entry/content-main.mjs.map
 /extension/entry/chunks/
 
 # Local agent / store assets

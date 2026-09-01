@@ -10,6 +10,8 @@
 //   entry/content-bootstrap.iife.js  经典 IIFE，manifest.content_scripts 指向它
 //   entry/content-main.mjs           ESM 主包（entry/content.ts 的模块图）
 //   entry/chunks/chunk-<hash>.mjs    splitting 为动态 import 边切出的 chunk
+//   各产物同名 .map                  linked sourcemap（devtools 调试用；release
+//                                    zip 由 build_release.py 剔除）
 //
 // web_accessible_resources 必须覆盖 content-main.mjs 与 chunks/*（见
 // extension/manifest.json），否则页面上下文里的 bootstrap 无权拉取模块。
@@ -17,7 +19,11 @@
 const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
-const { build } = require("esbuild");
+const { build, context } = require("esbuild");
+
+// --watch：esbuild context 常驻监听，供 build.js --watch（npm run dev）以子进程
+// 方式拉起；首轮仍跑全量自检与报表，之后每次重建只打一行日志。
+const watchMode = process.argv.includes("--watch");
 
 const extensionRoot = path.join(__dirname, "..", "extension");
 const entry = path.join(extensionRoot, "entry", "content.ts");
@@ -99,38 +105,84 @@ function sizeInBytes(file) {
   return fs.statSync(file).size;
 }
 
-async function buildMainPackage() {
-  await build({
-    // 对象形式 entryPoints：key 直接决定输出文件名（相对 outdir、不含扩展名），
-    // 源 entry/content.ts 保持模块形态不动。
-    entryPoints: { "content-main": entry },
-    outdir: outDir,
-    entryNames: "[name]",
-    // chunk 统一进 chunks/ 子目录：manifest 的 WAR 用 "entry/chunks/*" 一条
-    // 通配即可覆盖未来新增的所有动态 chunk。
-    chunkNames: "chunks/[name]-[hash]",
-    outExtension: { ".js": ".mjs" },
-    bundle: true,
-    splitting: true,
-    format: "esm",
-    platform: "browser",
-    minify: true,
-    target: "chrome120",
-    plugins: [localImportGuard],
-  });
-}
+// 构建配置提取为共享对象：一次性构建走 build()，--watch 走 context()。
+// sourcemap 恒开（linked external map，非 inline/eval——扩展 CSP 禁 eval）：
+// content 脚本的 .map 需经 manifest WAR（"entry/*.map"、"entry/chunks/*"）暴露
+// 给 devtools；发布 zip 由 build_release.py 剔除全部 .map。
+const mainPackageOptions = {
+  // 对象形式 entryPoints：key 直接决定输出文件名（相对 outdir、不含扩展名），
+  // 源 entry/content.ts 保持模块形态不动。
+  entryPoints: { "content-main": entry },
+  outdir: outDir,
+  entryNames: "[name]",
+  // chunk 统一进 chunks/ 子目录：manifest 的 WAR 用 "entry/chunks/*" 一条
+  // 通配即可覆盖未来新增的所有动态 chunk。
+  chunkNames: "chunks/[name]-[hash]",
+  outExtension: { ".js": ".mjs" },
+  bundle: true,
+  splitting: true,
+  format: "esm",
+  platform: "browser",
+  minify: true,
+  sourcemap: true,
+  target: "chrome120",
+  plugins: [localImportGuard],
+};
 
-async function buildBootstrap() {
-  await build({
-    entryPoints: [bootstrapEntry],
-    outfile: bootstrapOutfile,
-    bundle: true,
-    format: "iife",
-    platform: "browser",
-    minify: true,
-    target: "chrome120",
-    plugins: [localImportGuard],
+const bootstrapOptions = {
+  entryPoints: [bootstrapEntry],
+  outfile: bootstrapOutfile,
+  bundle: true,
+  format: "iife",
+  platform: "browser",
+  minify: true,
+  sourcemap: true,
+  target: "chrome120",
+  plugins: [localImportGuard],
+};
+
+// watch 重建日志：首轮（rebuild()）由下方自检/报表覆盖，只在后续增量重建时
+// 打一行；构建错误由 esbuild 自身输出，这里不重复。
+const watchRebuildLog = {
+  name: "watch-rebuild-log",
+  setup(buildApi) {
+    let first = true;
+    buildApi.onEnd((result) => {
+      if (first) {
+        first = false;
+        return;
+      }
+      if (result.errors.length > 0) return;
+      console.log(`[watch] content rebuilt at ${new Date().toLocaleTimeString()}`);
+    });
+  },
+};
+
+async function main() {
+  cleanPreviousOutput();
+  if (!watchMode) {
+    await Promise.all([build(mainPackageOptions), build(bootstrapOptions)]);
+    if (!selfCheck()) {
+      return;
+    }
+    report();
+    return;
+  }
+  const mainCtx = await context({
+    ...mainPackageOptions,
+    plugins: [...mainPackageOptions.plugins, watchRebuildLog],
   });
+  const bootstrapCtx = await context({
+    ...bootstrapOptions,
+    plugins: [...bootstrapOptions.plugins, watchRebuildLog],
+  });
+  await Promise.all([mainCtx.rebuild(), bootstrapCtx.rebuild()]);
+  if (!selfCheck()) {
+    process.exit(1);
+  }
+  report();
+  await Promise.all([mainCtx.watch(), bootstrapCtx.watch()]);
+  console.log("[watch] build-content watching for changes...");
 }
 
 function selfCheck() {
@@ -238,16 +290,7 @@ function report() {
   );
 }
 
-cleanPreviousOutput();
-
-Promise.all([buildMainPackage(), buildBootstrap()])
-  .then(() => {
-    if (!selfCheck()) {
-      return;
-    }
-    report();
-  })
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

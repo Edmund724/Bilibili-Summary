@@ -53,7 +53,8 @@
       "resources": [
         "entry/content-main.mjs",
         "entry/chunks/*",
-        "entry/styles/*"
+        "entry/styles/*",
+        "entry/*.map"
       ],
       "matches": ["https://www.bilibili.com/*"]
     }

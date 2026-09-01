@@ -63,7 +63,8 @@ def build_zip(version: str):
 
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for file_path in sorted(DIST_DIR.rglob("*")):
-            if file_path.is_dir():
+            # sourcemap（构建恒开，供 devtools 调试）不进发布包。
+            if file_path.is_dir() or file_path.suffix == ".map":
                 continue
             archive.write(file_path, file_path.relative_to(DIST_DIR))
 

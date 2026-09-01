@@ -88,13 +88,16 @@
 git clone https://github.com/Edmund724/Bilibili-Summary.git
 cd Bilibili-Summary
 npm install
-npm run build          # 生成 content-bootstrap.iife.js + content-main.mjs（+ chunks/）
-npm run build:release  # 生成 Chrome / Firefox 打包到 release/
+npm run build          # 生成 dist/（content 分包 + 各入口 bundle，含 sourcemap）
+npm run dev            # watch 模式：首轮全量构建到 dist/ 后持续重建，改代码即生效
+npm run build:release  # 生成 Chrome 打包到 release/（zip 不含 sourcemap）
 ```
+
+日常开发：跑 `npm run dev`，在扩展管理页「加载已解压的扩展程序」选择 `dist/`，重建后点扩展的刷新按钮即可。
 
 ### Chrome / Edge 加载
 
-1. 解压下载的 Chrome zip 包（或使用源码目录中的 `extension/` 文件夹）
+1. 解压下载的 Chrome zip 包（或源码构建后使用 `dist/` 文件夹）
 2. 打开扩展管理页：
    - Chrome：`chrome://extensions/`
    - Edge：`edge://extensions/`
@@ -103,7 +106,7 @@ npm run build:release  # 生成 Chrome / Firefox 打包到 release/
 
 ### Firefox 加载
 
-1. 解压下载的 Firefox zip 包（或使用源码目录中的 `extension/` 文件夹）
+1. 解压下载的 Firefox zip 包（或源码构建后使用 `dist/` 文件夹）
 2. 打开 Firefox 附加组件管理页：`about:addons`
 3. 点击右上角齿轮图标 → "调试附加组件"
 4. 点击"临时加载附加组件..."，选择文件夹中的 `manifest.json` 文件
@@ -149,7 +152,7 @@ extension/
    - "调整 AI 总结视频的提示词和预期输出格式"
    - "新增一个自定义的总结命令或快捷方式"
    - "修改视频总结的触发方式（例如自动总结、播放器内快捷按钮或侧边栏手动触发）"
-4. 修改完成后，在浏览器扩展管理页选择 `extension/` 文件夹进行本地加载
+4. 修改完成后跑 `npm run build`（或开发时直接 `npm run dev` 持续重建），在浏览器扩展管理页选择 `dist/` 文件夹进行本地加载
 5. 打开 B 站视频页测试字幕抓取、AI 对话和视频总结是否正常
 
 建议先在本地测试确认无误，再替换日常使用的扩展版本。修改源码前也建议保留一份原始版本，方便出现问题时回退。

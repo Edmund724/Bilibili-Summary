@@ -36,11 +36,20 @@
 //   pages/*.html                     原样拷贝
 //   icons/*.png                      原样拷贝
 //   manifest.json                    原样拷贝（零改写）
+//   各 JS/CSS 产物伴随同名 .map        linked sourcemap（devtools 调试用；
+//                                    release zip 由 build_release.py 剔除）
 
 const fs = require("fs");
 const path = require("path");
-const { execFileSync } = require("child_process");
-const { build } = require("esbuild");
+const { execFileSync, spawn } = require("child_process");
+const { build, context } = require("esbuild");
+
+// --watch（npm run dev）：首轮走与发布完全一致的全量构建 + 自检 + 报表，之后
+// esbuild context 监听三个构建任务原地重建 dist/，content 部分拉起
+// build-content.js --watch 子进程（产物落 extension/entry/，由下方 fs.watch
+// 侦测后重拷进 dist/），静态资源（manifest/html/popup.css/icons）变化同样
+// 重拷。watch 只做重建与拷贝，manifest/html 校验留给首轮全量构建。
+const watchMode = process.argv.includes("--watch");
 
 const root = path.join(__dirname, "..");
 // 固定 cwd：metafile.inputs 的 key 是相对 esbuild 进程 cwd 的路径，固定后
@@ -79,9 +88,12 @@ const copyFiles = [
   "pages/options.html",
   "pages/sidepanel.html",
   "pages/popup.css",
-  // content 构建产物（build-content.js 跑完后的最新产物）。
+  // content 构建产物（build-content.js 跑完后的最新产物；.map 为 linked
+  // sourcemap，devtools 调试用，release zip 由 build_release.py 剔除）。
   "entry/content-bootstrap.iife.js",
+  "entry/content-bootstrap.iife.js.map",
   "entry/content-main.mjs",
+  "entry/content-main.mjs.map",
 ];
 
 // 原样拷贝的目录（icons 资源；chunks/ 文件名带内容 hash，整目录拷）。
@@ -118,6 +130,23 @@ function cleanDist() {
   fs.rmSync(distDir, { recursive: true, force: true });
   fs.mkdirSync(distDir, { recursive: true });
 }
+
+// watch 重建日志（与 build-content.js 同款）：首轮 rebuild 由全量报表覆盖，
+// 只在后续增量重建时各任务打一行；构建错误由 esbuild 自身输出。
+const watchRebuildLog = {
+  name: "watch-rebuild-log",
+  setup(buildApi) {
+    let first = true;
+    buildApi.onEnd((result) => {
+      if (first) {
+        first = false;
+        return;
+      }
+      if (result.errors.length > 0) return;
+      console.log(`[watch] dist rebuilt at ${new Date().toLocaleTimeString()}`);
+    });
+  },
+};
 
 // 先跑 content 构建（bootstrap + ESM 主包 + chunks），保证拷进 dist 的是
 // 最新产物；其字节报表由子进程直接打印，保持现有口径不变。
@@ -164,8 +193,9 @@ function copyDirRecursive(src, dest) {
 // JS 入口统一 bundle：format esm（源即 ESM，manifest background.type=module、
 // 页面 script type=module，产物路径与源一致 → 零改写）；不 splitting，动态
 // import 的本地模块会被内联进同一文件（SW 全静态图，ADR-0003 的预期形态）。
-async function buildRestJsEntries() {
-  return build({
+// sourcemap 恒开（linked external，非 inline/eval——扩展 CSP 禁 eval）。
+function restJsOptions() {
+  return {
     entryPoints: jsEntries.map((rel) => path.join(extensionRoot, rel)),
     outbase: extensionRoot,
     outdir: distDir,
@@ -174,11 +204,12 @@ async function buildRestJsEntries() {
     format: "esm",
     platform: "browser",
     minify: true,
+    sourcemap: true,
     target: "chrome120",
     metafile: true,
     logLevel: "warning",
     plugins: [localImportGuard],
-  });
+  };
 }
 
 // offscreen 入口：开 splitting（format esm）。源里 AI 族（../ai/ladder.js）
@@ -188,8 +219,8 @@ async function buildRestJsEntries() {
 // SW，background 仍走上方无 splitting 构建）。chunkNames 用
 // entry/offscreen-chunks/ 与 content 产物的 entry/chunks/ 区分（两者同在
 // dist/entry/ 下，避免混淆）；chunk 由 esbuild 直接写进 dist，无需拷贝。
-async function buildOffscreenEntry() {
-  return build({
+function offscreenOptions() {
+  return {
     entryPoints: [path.join(extensionRoot, "entry/offscreen.ts")],
     outbase: extensionRoot,
     outdir: distDir,
@@ -199,25 +230,27 @@ async function buildOffscreenEntry() {
     chunkNames: "entry/offscreen-chunks/[name]-[hash]",
     platform: "browser",
     minify: true,
+    sourcemap: true,
     target: "chrome120",
     metafile: true,
     logLevel: "warning",
     plugins: [localImportGuard],
-  });
+  };
 }
 
 // CSS minify：@import 会内联，产物落 dist 同相对路径。
-async function buildCssEntries() {
-  return build({
+function cssOptions() {
+  return {
     entryPoints: cssEntries.map((rel) => path.join(extensionRoot, rel)),
     outbase: extensionRoot,
     outdir: distDir,
     bundle: true,
     minify: true,
+    sourcemap: true,
     metafile: true,
     logLevel: "warning",
     plugins: [localImportGuard],
-  });
+  };
 }
 
 // 语法自检：dist 产物按 ESM 解析（node --check 对 .js 文件会按最近
@@ -422,11 +455,21 @@ async function main() {
   runContentBuild();
   copyStaticAssets();
 
-  const [jsResult, offscreenResult, cssResult] = await Promise.all([
-    buildRestJsEntries(),
-    buildOffscreenEntry(),
-    buildCssEntries()
-  ]);
+  const jobOptions = [restJsOptions(), offscreenOptions(), cssOptions()];
+  let jsResult, offscreenResult, cssResult;
+  let esbuildContexts = null;
+  if (watchMode) {
+    esbuildContexts = await Promise.all(
+      jobOptions.map((opts) => context({ ...opts, plugins: [...opts.plugins, watchRebuildLog] }))
+    );
+    [jsResult, offscreenResult, cssResult] = await Promise.all(
+      esbuildContexts.map((ctx) => ctx.rebuild())
+    );
+  } else {
+    [jsResult, offscreenResult, cssResult] = await Promise.all(
+      jobOptions.map((opts) => build(opts))
+    );
+  }
 
   // 自检：JS 产物按 ESM 语法过一遍（offscreen 动态 chunk 也是 ESM 产物，
   // 一并检查）；manifest 与 html 引用闭合。
@@ -461,6 +504,57 @@ async function main() {
   printDistSummary();
   console.log("");
   console.log(`dist/ assembled at ${distDir}`);
+
+  if (watchMode) {
+    await startWatch(esbuildContexts);
+  }
+}
+
+// watch 模式收尾：esbuild context 监听三个构建任务；content 产物由
+// build-content.js --watch 子进程重建（落 extension/entry/），连同静态资源
+// 一起由 fs.watch 侦测后重拷进 dist/。重拷统一走 copyStaticAssets() 全量
+// （幂等、文件少），150ms 去抖等 esbuild 同轮多个产物写入落盘。
+async function startWatch(esbuildContexts) {
+  const child = spawn(
+    process.execPath,
+    [path.join(root, "scripts", "build-content.js"), "--watch"],
+    { stdio: "inherit" }
+  );
+  // SIGINT/SIGTERM 默认终止不触发 "exit" 事件，必须显式监听才能把
+  // build-content 子进程一起带走，否则会残留孤儿 watch 进程。
+  const shutdown = () => {
+    child.kill();
+    process.exit(0);
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+  process.on("exit", () => child.kill());
+
+  let recopyTimer = null;
+  const scheduleRecopy = () => {
+    if (recopyTimer) clearTimeout(recopyTimer);
+    recopyTimer = setTimeout(() => {
+      recopyTimer = null;
+      copyStaticAssets();
+      console.log(`[watch] static/content assets re-copied at ${new Date().toLocaleTimeString()}`);
+    }, 150);
+  };
+
+  fs.watch(extensionRoot, (event, filename) => {
+    if (filename === "manifest.json") scheduleRecopy();
+  });
+  for (const dir of copyDirs) {
+    fs.watch(path.join(extensionRoot, dir), scheduleRecopy);
+  }
+  fs.watch(path.join(extensionRoot, "pages"), (event, filename) => {
+    if (filename && copyFiles.includes(`pages/${filename}`)) scheduleRecopy();
+  });
+  fs.watch(path.join(extensionRoot, "entry"), (event, filename) => {
+    if (filename && copyFiles.includes(`entry/${filename}`)) scheduleRecopy();
+  });
+
+  await Promise.all(esbuildContexts.map((ctx) => ctx.watch()));
+  console.log("[watch] watching for changes... (load dist/ unpacked; reload the extension after rebuilds)");
 }
 
 main().catch((error) => {
