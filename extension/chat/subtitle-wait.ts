@@ -1,8 +1,9 @@
-// sidepanel-subtitle-wait.ts — 一键总结「等待抓取/音频转写完成」的轮询状态机。
+// extension/chat/subtitle-wait.ts — 一键总结「等待抓取/音频转写完成」的轮询状态机。
 //
-// 从 sidepanel.js 提取（与 sidepanel-chat-runtime 同一套拆分手法）：sidepanel
-// 只负责组装 deps，本模块拥有轮询/失效/清理的全部时序状态。模块顶层零副作用，
-// 可在 Node 测试环境直接 evaluate（见 tests/sidepanel/subtitle-wait.test.js）。
+// 从 sidepanel.js 提取（与 chat-runtime 同一套拆分手法；PR5 自
+// extension/pages/sidepanel-subtitle-wait.ts 迁入 chat 域，逻辑零语义改动）：
+// 组合根只负责组装 deps，本模块拥有轮询/失效/清理的全部时序状态。模块顶层零
+// 副作用，可在 Node 测试环境直接 evaluate（见 tests/chat/subtitle-wait.test.js）。
 //
 // 为什么存在：一键总结发送前若 content 侧正在抓取或做小时级 ASR 转写
 // （subtitleFetchState === "loading" 且字幕体为空），把空 subtitleBody 直接发
@@ -15,7 +16,7 @@
 //   - kick() 与轮询去重：同一时刻最多一轮 pollContext 在跑；
 //   - finish（就绪/失败/失效）后挂着的定时器必须作废，notice 必须清理。
 
-import type { SidepanelContextSnapshot } from "./sidepanel-state.js";
+import type { SidepanelContextSnapshot } from "./chat-state.js";
 
 // 「上下文是否仍在抓取/转写中」的判定（sidepanel 组装 pollContext 用，纯函数可测）。
 // 两个信号缺一不可互为兜底：

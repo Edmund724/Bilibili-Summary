@@ -28,6 +28,13 @@
 // ../shared/messaging.js 提供（shared 传输层）。
 // 随候选5 清理孤儿 import：renderMarkdown / stripThinkBlocks（ui/markdown）、
 // linkifyAssistantTimestamps（ui/timestamp-nav）在本文件已无使用点。
+//
+// PR5 对话内核搬运：对话内核 11 个子模块（chat-runtime / chat-state /
+// conversation-store / context-policy / subtitle-wait / no-subtitle /
+// offscreen-ensure / presets / providers / context-sync / context-load）迁入
+// ../chat/（上面历史注释里的旧路径仅作沿革记录）。本文件改 import 指向新家，
+// sidepanel 功能保持完好（过渡期并存，工单 08 决议）；providers 的选中平台
+// 持久化通道随迁移换 chrome.storage.local（模块内做 localStorage 一次性搬迁）。
 
 import { PLAYER_AI_QUICK_ACTION_STORAGE_KEY } from "../core/defaults.js";
 
@@ -36,38 +43,41 @@ import { escapeHtml } from "../shared/string-utils.js";
 import { sendMessageToActiveTab } from "../shared/tab-utils.js";
 import { ensureReaderContentReady } from "../core/content-orchestration-wiring.js";
 import {
-  getAiSidepanelState,
   resolveAiSidepanelContext,
   resolveAiSidepanelPageRef
 } from "../ai/context-resolver.js";
 import { normalizeMarkdownForSectionPaste } from "../notes/paste.js";
-import { createChatRuntime } from "./sidepanel-chat-runtime.js";
-import { createSubtitleWaiter, isContextPending } from "./sidepanel-subtitle-wait.js";
+// PR5 对话内核搬运：对话内核子模块迁入 ../chat/（sidepanel 过渡期保活，仅改
+// import 指向；context-load 的消息链策略在此组装，进程内直读策略供 reader 壳
+// 任务使用）。DOM 壳三件（lists/notices/popovers）与 player-ai 请求消费仍在本
+// 目录（随各自任务迁出/摘除）。
+import { createChatRuntime } from "../chat/chat-runtime.js";
+import { createSubtitleWaiter, isContextPending } from "../chat/subtitle-wait.js";
 import {
   NO_SUBTITLE_SEND_BLOCKED,
   buildNoSubtitleNotice,
   isNoSubtitleEmptyContext,
   type NoSubtitleReason
-} from "./sidepanel-no-subtitle.js";
-import { createConversationStore } from "./sidepanel-conversation-store.js";
-import { ensureChatOffscreenDocument } from "./sidepanel-offscreen-ensure.js";
-import { sidepanelState } from "./sidepanel-state.js";
+} from "../chat/no-subtitle.js";
+import { createConversationStore } from "../chat/conversation-store.js";
+import { ensureChatOffscreenDocument } from "../chat/offscreen-ensure.js";
+import { sidepanelState } from "../chat/chat-state.js";
 // ensureChatOffscreenDocument / context-load 的 content 就绪探针（带顶层
 // chrome 副作用，仅在组合根 import）。
 import { sendMessageToTab } from "../shared/tab-utils.js";
 // 候选09：player AI 快捷动作消费 / 预设提示词 CRUD；候选5：六块 UI/编排子模块。
 // 各工厂的 deps 组装见下文对应段落。
 import { createPlayerAiQuickActions } from "./sidepanel-player-ai-requests.js";
-import { createPresetPrompts } from "./sidepanel-presets.js";
+import { createPresetPrompts } from "../chat/presets.js";
 import { createSidepanelLists } from "./sidepanel-lists.js";
 import { createConversationFeedback } from "./sidepanel-notices.js";
-import { createProviderPrefs, SELECTED_PROVIDER_KEY } from "./sidepanel-providers.js";
-import { createLiveContextSync } from "./sidepanel-context-sync.js";
-import { createContextLoad } from "./sidepanel-context-load.js";
+import { createProviderPrefs } from "../chat/providers.js";
+import { createLiveContextSync } from "../chat/context-sync.js";
+import { createContextLoad, createMessageChainContextFetch } from "../chat/context-load.js";
 import { createPopovers } from "./sidepanel-popovers.js";
 import { updateModelSelectWidth } from "../ui/model-select-width.js";
 // 上下文加载失败文案：ensureCurrentContextForSend 的失败闸共用策略模块常量。
-import { CONTEXT_READ_FAILED_MESSAGE, isPinnedContextTruthy } from "./sidepanel-context-policy.js";
+import { CONTEXT_READ_FAILED_MESSAGE, isPinnedContextTruthy } from "../chat/context-policy.js";
 
 const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
 const NON_VIDEO_CONTEXT_MESSAGE = "当前页非 B 站视频页面，<br>无法获取当前页面信息作为对话上下文，<br>仅支持 AI 对话。";
@@ -121,7 +131,7 @@ chrome.runtime.onMessage.addListener((message) => {
 // 跨模块共享状态（contextData / currentContextKey / providers / chatHistory /
 // savedConversations / currentConversationId / currentConversationMeta /
 // liveContextData / liveContextKey / liveTabUrl / aiPrefs / asrTranscribingActive /
-// aiThinkingLevel）收拢在 ./sidepanel-state.ts 的 sidepanelState，本文件与各
+// aiThinkingLevel）收拢在 ../chat/chat-state.ts 的 sidepanelState，本文件与各
 // 子模块直接 import 读写。以下为纯局部单例。
 let suggestionsNode: HTMLElement | null = null;
 let initCompleted = false;
@@ -206,10 +216,15 @@ const popovers = createPopovers({
 
 // 上下文状态加载（读标签页状态 → 按策略动作执行编排副作用）+ context chip。
 // 流式守卫判定惰性取 chatRuntime（回调执行时实例已存在）。
+// PR5：拉数据一段抽成 ContextFetch 策略注入点——sidepanel 过渡期用扩展页
+// 消息链（getActiveTab + getAiSidepanelState，行为与迁移前一致）。
 const contextLoad = createContextLoad({
+  fetchContext: createMessageChainContextFetch({
+    getActiveTab,
+    ensureReaderContentReady: (tabId) => ensureReaderContentReady(tabId),
+    sendMessageToTab: (tabId, message) => sendMessageToTab(tabId, message)
+  }),
   getActiveTab,
-  ensureReaderContentReady: (tabId) => ensureReaderContentReady(tabId),
-  sendMessageToTab: (tabId, message) => sendMessageToTab(tabId, message),
   contextChip: els.contextChip,
   renderHistoryList: () => lists.renderHistoryList(),
   renderInitialState,
@@ -296,7 +311,7 @@ init().catch((err) => {
 });
 
 // 抓取/音频转写进行中（content 的 subtitleFetchState 为 loading 且字幕体为空）
-// 时等待其完成再放行发送流程，状态机本体在 ./sidepanel-subtitle-wait.ts（可测）。
+// 时等待其完成再放行发送流程，状态机本体在 ../chat/subtitle-wait.ts（可测）。
 // 这里只组装 deps：轮询读当前上下文、提示走消息区 notice、定时器用 window。
 // 引用的 loadContextState / 通知函数都是组装后的实例方法（惰性接线），放在
 // 广播监听之前只为保证监听触发时组装已完成。
@@ -326,7 +341,7 @@ async function init(): Promise<void> {
   } catch {}
 
   // 创建 Offscreen Document，把 SSE 流式请求移到隐藏页面，避免 Side Panel 被
-  // 冻结。创建参数抽在 ensureChatOffscreenDocument（./sidepanel-offscreen-ensure.ts），
+  // 冻结。创建参数抽在 ensureChatOffscreenDocument（../chat/offscreen-ensure.ts），
   // 与每次聊天发送前（connectPort）复用：文档意外死亡后下一封消息自动重建，
   // 聊天不再静默坏到面板重开。ensure 失败不阻断 init（helper 内部吞掉）。
   await ensureChatOffscreenDocument();
@@ -379,7 +394,9 @@ function bindEvents(): void {
   els.modelSelect.addEventListener("change", () => {
     const providerId = els.modelSelect.value;
     if (providerId) {
-      localStorage.setItem(SELECTED_PROVIDER_KEY, providerId);
+      // PR5：选中平台的持久化通道换 chrome.storage.local（providers 模块的
+      // setSelectedProvider）；原 localStorage.setItem 随通道改造退役。
+      providerPrefs.setSelectedProvider(providerId);
       sidepanelState.aiPrefs.defaultModel = providerId;
       chrome.storage.sync.set({ defaultModel: providerId }).catch(() => {});
     } else {
@@ -395,7 +412,7 @@ function bindEvents(): void {
   });
   window.addEventListener("resize", () => updateModelSelectWidth(els));
   document.addEventListener("click", popovers.handleDocumentClick);
-  // 候选5：可见性/聚焦/切签恢复的触发处理体在 ./sidepanel-context-sync.ts
+  // 候选5：可见性/聚焦/切签恢复的触发处理体在 ../chat/context-sync.ts
   //（handlers，语义与迁移前一致），本文件只负责监听挂载。
   document.addEventListener("visibilitychange", liveContextSync.handlers.onVisibilityChange);
   window.addEventListener("focus", liveContextSync.handlers.onFocus);
@@ -431,12 +448,13 @@ function setStreamingUiState(isStreaming: boolean, { stopping = false }: { stopp
   }
 }
 
-// AI 平台 / 预设：实现在 ./sidepanel-providers.ts（候选5 迁出），本文件只
-// 组装 deps 并保留「外部设置变更 → 刷新」编排（流式守卫 + 重渲染留在组合根）。
-// SELECTED_PROVIDER_KEY（localStorage 键，change 监听与编排读写）从 providers
-// 模块 import。
+// AI 平台 / 预设：实现在 ../chat/providers.ts（候选5 迁出；PR5 持久化通道
+// localStorage → chrome.storage.local），本文件只组装 deps 并保留「外部设置
+// 变更 → 刷新」编排（流式守卫 + 重渲染留在组合根）。
 async function refreshProvidersAndPrefsAfterExternalChange(): Promise<void> {
-  const previousProviderId = String(els.modelSelect?.value || localStorage.getItem(SELECTED_PROVIDER_KEY) || "").trim();
+  // 选中平台回退取 providers 模块的 storage 闭包缓存（原 localStorage.getItem
+  // 的替代，值源相同）。
+  const previousProviderId = String(els.modelSelect?.value || providerPrefs.getStoredSelectedProviderId() || "").trim();
   await loadProvidersAndPrefs({ preferredProviderId: previousProviderId });
   if (chatRuntime.isStreaming()) {
     return;
@@ -451,8 +469,9 @@ async function refreshProvidersAndPrefsAfterExternalChange(): Promise<void> {
 // playerAiQuickActions 在文件头组装。
 
 // ============================================================
-// 上下文状态加载 / context chip：实现在 ./sidepanel-context-load.ts（候选5
-// 迁出，分支判定仍在 ./sidepanel-context-policy.ts）。
+// 上下文状态加载 / context chip：实现在 ../chat/context-load.ts（候选5
+// 迁出；PR5 起拉数据段为可注入 ContextFetch 策略，分支判定仍在
+// ../chat/context-policy.ts）。
 // ============================================================
 
 function renderInitialState(): void {
@@ -503,7 +522,7 @@ function resetConversationView(stateHtml = ""): void {
 
 // 预设/历史 popover 开合：实现在 ./sidepanel-popovers.ts（候选5 迁出）。
 
-// 实时上下文同步调度：实现在 ./sidepanel-context-sync.ts（候选5 迁出，
+// 实时上下文同步调度：实现在 ../chat/context-sync.ts（候选5 迁出，
 // syncLiveContextState 的 post-sync 分支编排留在下方组合根）。
 
 async function syncLiveContextState(forceRefresh = false): Promise<void> {
@@ -520,7 +539,7 @@ async function syncLiveContextState(forceRefresh = false): Promise<void> {
 }
 
 // 候选09：预设提示词 CRUD + 双存储同步（addPresetPrompt / removePresetPrompt /
-// persistAiPresetPrompts）迁往 ./sidepanel-presets.ts，实例 presets 在文件头组装。
+// persistAiPresetPrompts）迁往 ../chat/presets.ts，实例 presets 在文件头组装。
 
 function updateSidepanelLayoutState(): void {
   const useCompactInput = Boolean(
@@ -632,7 +651,7 @@ function findPreviousUserPrompt(index: number): string {
 // chatHistory、不发起 port），并按 noSubtitleReason 显示对应 notice。
 async function ensureCurrentContextForSend(): Promise<boolean | string> {
   // pinned 判定沿用本调用点的原始语义（真值判断，与 loadContextState 的严格
-  // 相等不同——见 sidepanel-context-policy.ts 两个谓词的疑义记录）。
+  // 相等不同——见 ../chat/context-policy.ts 两个谓词的疑义记录）。
   if (isPinnedContextTruthy(sidepanelState.currentConversationMeta)) {
     await loadContextState({ forceRefresh: false, silent: true }).catch(() => null);
     return conversationStore.hydratePinned();

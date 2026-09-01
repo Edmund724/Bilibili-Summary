@@ -21,7 +21,7 @@ let sidepanelState;
 
 async function importModule() {
   const module = await import("../../extension/pages/sidepanel-lists.js");
-  const state = (await import("../../extension/pages/sidepanel-state.js")).sidepanelState;
+  const state = (await import("../../extension/chat/chat-state.js")).sidepanelState;
   createSidepanelLists = module.createSidepanelLists;
   sidepanelState = state;
 }

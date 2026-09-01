@@ -43,8 +43,8 @@ let sidepanelState;
 // 组装工厂 + 重置模块级单例（与 provider-row.test.js 同构：resetModules
 // 后同纪元导入被测模块与其状态模块）
 async function makePresets() {
-  const module = await import("../../extension/pages/sidepanel-presets.js");
-  const state = (await import("../../extension/pages/sidepanel-state.js")).sidepanelState;
+  const module = await import("../../extension/chat/presets.js");
+  const state = (await import("../../extension/chat/chat-state.js")).sidepanelState;
   state.aiPrefs.aiPresetPrompts = [];
   createPresetPrompts = module.createPresetPrompts;
   sidepanelState = state;

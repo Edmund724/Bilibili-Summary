@@ -1,5 +1,6 @@
-// sidepanel-chat-runtime.ts — chat + stream state machine orchestration layer
-// extracted out of extension/pages/sidepanel.js (ticket 07 of sidepanel-split).
+// extension/chat/chat-runtime.ts — chat + stream state machine orchestration layer
+// extracted out of extension/pages/sidepanel.js (ticket 07 of sidepanel-split;
+// PR5 自 extension/pages/sidepanel-chat-runtime.ts 迁入 chat 域).
 //
 // Responsibility: orchestrate "send message → stream receive → render assistant
 // tokens → stop/error handling". It owns the stream runtime state
@@ -15,10 +16,15 @@
 // 三条终态路径的六步收尾时序收敛为唯一的 endStream 实现。返回面收窄为
 // 9 个 sidepanel 消费方法 + handleChatPortMessage，内部步骤全部私有化。
 //
+// PR5 改造（宿主解耦补齐）：cost-guard 的确认通道经 deps.confirmCostGuard
+// 注入，缺省仍为 window.confirm（sidepanel 过渡期行为不变；reader 壳任务再
+// 注入面板内确认 UI）。endStream 的输入框聚焦（deps.input.focus()）本就经
+// deps 注入，无需改动。
+//
 // Boundary: this module does NOT touch sidepanel module-level layout variables
 // or the surrounding chrome (header/popovers/context chip). Conversation state
 // (chatHistory / conversation meta / context / aiPrefs / thinking level) lives
-// in ./sidepanel-state.js and is imported directly; everything else it needs —
+// in ./chat-state.js and is imported directly; everything else it needs —
 // layout callback, context notices, DOM container references, input/stop-button
 // element refs — arrives via the `deps` object of the `createChatRuntime(deps)`
 // factory. The auto-scroll flag (shouldAutoScrollMessages) is owned by this
@@ -30,8 +36,8 @@
 // harness without a DOM shim.
 import { renderMarkdown, splitMarkdownTail, stripThinkBlocks } from "../ui/markdown.js";
 import { linkifyAssistantTimestamps, type TimestampNavDeps } from "../ui/timestamp-nav.js";
-import type { ConversationStore } from "./sidepanel-conversation-store.js";
-import { sidepanelState } from "./sidepanel-state.js";
+import type { ConversationStore } from "./conversation-store.js";
+import { sidepanelState } from "./chat-state.js";
 
 const STREAM_SLOW_NOTICE_MS = 15000;
 
@@ -92,12 +98,16 @@ export interface CreateChatRuntimeDeps {
   store: ChatRuntimeStore;
   // ---- UI 门面 ----
   ui: ChatRuntimeUi;
-  // ---- context/transport helpers (AI domain, sidepanel local) ----
+  // ---- context/transport helpers (AI domain, chat local) ----
   ensureCurrentContextForSend: () => Promise<boolean | string>;
   getProviderId: () => string;
   getTimestampNavDeps: () => TimestampNavDeps;
   normalizeMarkdownForSectionPaste: (raw: string, baseLevel?: number) => string;
   connectPort: () => Promise<ChatPort> | ChatPort;
+  // cost-guard 确认通道（offscreen 发起 Map-Reduce 前的成本护栏）。缺省
+  // window.confirm——sidepanel 过渡期行为不变；reader 壳任务注入面板内
+  // 确认 UI（window.confirm 在页面语境下不可用/体验不符）。
+  confirmCostGuard?: (message: string) => boolean;
 }
 
 // 流式 token 累加器（按节点存放在 WeakMap）：base = 已 flush 的全量文本，
@@ -156,8 +166,9 @@ interface ThinkingDisplayState {
  *     getProviderId,                     // () => els.modelSelect.value
  *     getTimestampNavDeps,               // () => timestamp-nav deps object
  *     normalizeMarkdownForSectionPaste,  // (raw, baseLevel) => string
- *     connectPort,                       // () => Promise<chrome.runtime.Port> (name "offscreen-chat"; 先 ensure offscreen 文档)
- *   }
+   *     connectPort,                       // () => Promise<chrome.runtime.Port> (name "offscreen-chat"; 先 ensure offscreen 文档)
+   *     confirmCostGuard,                  // (message) => boolean（可选；缺省 window.confirm。cost-guard 确认通道）
+   *   }
  *
  * @returns {object} method set (all closures; stream state only via the
  *   runtime's own closure variables — sidepanel queries it with isStreaming() /
@@ -290,8 +301,10 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     } else if (msg.type === "notice") {
       deps.ui.showConversationContextNotice(msg.data, 4000);
     } else if (msg.type === "cost-guard") {
-      // offscreen 发起 Map-Reduce 前弹成本护栏，等待确认后回执。
-      const ok = window.confirm(String(msg.data?.message || "预计会有多次调用，是否继续？"));
+      // offscreen 发起 Map-Reduce 前弹成本护栏，等待确认后回执。确认通道经
+      // deps 注入（缺省 window.confirm，sidepanel 过渡期行为不变）。
+      const confirmCostGuard = deps.confirmCostGuard || ((message: string) => window.confirm(message));
+      const ok = confirmCostGuard(String(msg.data?.message || "预计会有多次调用，是否继续？"));
       port!.postMessage({ action: "cost-guard-confirm", ok });
     }
   }

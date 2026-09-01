@@ -95,8 +95,8 @@ function getChatMessage(session) {
 beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
-  ({ createChatRuntime } = await import("../../extension/pages/sidepanel-chat-runtime.js"));
-  ({ sidepanelState } = await import("../../extension/pages/sidepanel-state.js"));
+  ({ createChatRuntime } = await import("../../extension/chat/chat-runtime.js"));
+  ({ sidepanelState } = await import("../../extension/chat/chat-state.js"));
   sidepanelState.contextData = null;
   sidepanelState.currentContextKey = "";
   sidepanelState.chatHistory = [];

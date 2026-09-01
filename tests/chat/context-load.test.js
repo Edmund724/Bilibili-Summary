@@ -1,6 +1,7 @@
-// tests/sidepanel/sidepanel-context-load.test.js
+// tests/chat/context-load.test.js
 // createContextLoad（上下文状态加载 + context chip + 跳转）行为契约（候选5 拆分
-// 直测）。
+// 直测；PR5 自 tests/sidepanel 随迁并适配 ContextFetch 策略注入——组装面更新，
+// 行为断言与迁移前一致）。
 //
 // 覆盖 loadContextState 的策略动作分支（表驱动）：
 //   no-tab（清 live/主上下文，非静默重置视图）
@@ -14,7 +15,9 @@
 //
 // 依赖全注入：getActiveTab / 流式判定 / 渲染回调均为 vi.fn；getAiSidepanelState
 // 的消息往返经 vi.mock ../ai/context-resolver（hoisted mock，模板同
-// sidepanel-presets.test.js）。
+// presets.test.js）。PR5：拉数据段注入消息链策略 createMessageChainContextFetch
+//（getActiveTab + ensureReaderContentReady + sendMessageToTab 三 transport 也在
+// 注入面），进程内直读策略的行为契约见 context-inprocess.test.js。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
@@ -28,12 +31,14 @@ vi.mock("../../extension/ai/context-resolver.js", () => ({
 }));
 
 let createContextLoad;
+let createMessageChainContextFetch;
 let sidepanelState;
 
 async function importModule() {
-  const module = await import("../../extension/pages/sidepanel-context-load.js");
-  const state = (await import("../../extension/pages/sidepanel-state.js")).sidepanelState;
+  const module = await import("../../extension/chat/context-load.js");
+  const state = (await import("../../extension/chat/chat-state.js")).sidepanelState;
   createContextLoad = module.createContextLoad;
+  createMessageChainContextFetch = module.createMessageChainContextFetch;
   sidepanelState = state;
 }
 
@@ -48,6 +53,8 @@ function makeHarness({ tab = ACTIVE_TAB } = {}) {
   document.body.appendChild(contextChip);
   const deps = {
     getActiveTab: vi.fn(async () => tab),
+    ensureReaderContentReady: vi.fn(async () => {}),
+    sendMessageToTab: vi.fn(async () => ({ ok: true })),
     contextChip,
     renderHistoryList: vi.fn(),
     renderInitialState: vi.fn(),
@@ -58,7 +65,24 @@ function makeHarness({ tab = ACTIVE_TAB } = {}) {
     isStreaming: vi.fn(() => false),
     hasPendingUserPrompt: vi.fn(() => false)
   };
-  const contextLoad = createContextLoad(deps);
+  const contextLoad = createContextLoad({
+    // 消息链策略：getAiSidepanelState 走 vi.mock，往返参数断言保留原样
+    fetchContext: createMessageChainContextFetch({
+      getActiveTab: deps.getActiveTab,
+      ensureReaderContentReady: deps.ensureReaderContentReady,
+      sendMessageToTab: deps.sendMessageToTab
+    }),
+    getActiveTab: deps.getActiveTab,
+    contextChip: deps.contextChip,
+    renderHistoryList: deps.renderHistoryList,
+    renderInitialState: deps.renderInitialState,
+    renderSuggestions: deps.renderSuggestions,
+    resetConversationView: deps.resetConversationView,
+    restartChat: deps.restartChat,
+    restoreLatest: deps.restoreLatest,
+    isStreaming: deps.isStreaming,
+    hasPendingUserPrompt: deps.hasPendingUserPrompt
+  });
   return { deps, contextLoad, contextChip };
 }
 

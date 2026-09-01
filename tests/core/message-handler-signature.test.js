@@ -653,10 +653,12 @@ function readSource(relativePath) {
 }
 
 // 扫描源码中 `<receiver>?.field` / `<receiver>.field` 形式的属性访问字段名。
-// lookbehind 防子串误配（如 liveContextData 内含 contextData）。
+// lookbehind 防子串误配（如 liveContextData 内含 contextData）；`-` 同样排除
+//——JS 标识符不含连字符，receiver 前出现 `-` 只可能是字符串字面量里的模块
+// 路径（如 "sidepanel-payload.js"），不应参与对账。
 // 允许 TS 非空断言 `receiver!.field`（迁移期 .ts 源码常见）。
 function scanFields(source, receiver) {
-  const pattern = new RegExp(`(?<![A-Za-z0-9_$])${receiver}[?!]*\\.([A-Za-z_$][\\w$]*)`, "g");
+  const pattern = new RegExp(`(?<![A-Za-z0-9_$-])${receiver}[?!]*\\.([A-Za-z_$][\\w$]*)`, "g");
   return new Set([...source.matchAll(pattern)].map((match) => match[1]));
 }
 
@@ -707,8 +709,8 @@ describe("消费方对账锚点：SP 读取字段 ⊆ payload ∪ {signature, ho
     assertReconciliation(scanFields(source, "payload"), [], "sidepanel.js resp.payload");
   });
 
-  it("pages/sidepanel-context-load.js：上下文加载读 title/url（chip）与 signature（回传）", () => {
-    const source = readSource("../../extension/pages/sidepanel-context-load.js");
+  it("chat/context-load.js：上下文加载读 title/url（chip）与 signature（回传）", () => {
+    const source = readSource("../../extension/chat/context-load.js");
     // updateContextChip 文案/跳转提示（title/url）+ isBoundConversationMismatched
     // / openCurrentContextUrl 的目标 URL 读取（url）
     assertReconciliation(
@@ -743,11 +745,11 @@ describe("消费方对账锚点：SP 读取字段 ⊆ payload ∪ {signature, ho
     assertReconciliation(scanFields(source, "liveVideoRef"), ["url"], "lists liveVideoRef");
   });
 
-  it("pages/sidepanel-context-policy.js：unchanged 短路判定读响应信封字段", () => {
+  it("chat/context-policy.js：unchanged 短路判定读响应信封字段", () => {
     // loadContextState 的分支判定纯函数（候选08 抽出）：skip-unchanged 分支读
     // response.payload.unchanged === true。unchanged 是响应信封字段（非快照
     // 字段），已在 ALLOWED_SNAPSHOT_FIELDS 记录。
-    const source = readSource("../../extension/pages/sidepanel-context-policy.js");
+    const source = readSource("../../extension/chat/context-policy.js");
     assertReconciliation(
       scanFields(source, "payload"),
       ["unchanged"],
@@ -755,8 +757,8 @@ describe("消费方对账锚点：SP 读取字段 ⊆ payload ∪ {signature, ho
     );
   });
 
-  it("pages/sidepanel-subtitle-wait.js：等待轮询读 subtitleFetchState/subtitleBody", () => {
-    const source = readSource("../../extension/pages/sidepanel-subtitle-wait.js");
+  it("chat/subtitle-wait.js：等待轮询读 subtitleFetchState/subtitleBody", () => {
+    const source = readSource("../../extension/chat/subtitle-wait.js");
     assertReconciliation(
       scanFields(source, "snapshot"),
       ["subtitleBody", "subtitleFetchState"],
@@ -764,8 +766,8 @@ describe("消费方对账锚点：SP 读取字段 ⊆ payload ∪ {signature, ho
     );
   });
 
-  it("pages/sidepanel-no-subtitle.js：无字幕拦截读 subtitleFetchState/subtitleBody", () => {
-    const source = readSource("../../extension/pages/sidepanel-no-subtitle.js");
+  it("chat/no-subtitle.js：无字幕拦截读 subtitleFetchState/subtitleBody", () => {
+    const source = readSource("../../extension/chat/no-subtitle.js");
     assertReconciliation(
       scanFields(source, "snapshot"),
       ["subtitleBody", "subtitleFetchState"],
@@ -830,19 +832,19 @@ describe("消费方对账锚点：SP 读取字段 ⊆ payload ∪ {signature, ho
     expect(block).toMatch(/unchanged:\s*true/);
   });
 
-  it("pages/sidepanel-chat-runtime.js：整包转发 contextData（含 subtitleBody 省略重传）", () => {
+  it("chat/chat-runtime.js：整包转发 contextData（含 subtitleBody 省略重传）", () => {
     // offscreen 渲染链（videoDuration/includeTimestampInBody/chapters 等）的字段级
     // 消费不在 SP 对账锚点范围（由整包展开天然随 payload 下传）；此处仅固化转发
     // 形态：contextData 整包展开 + contextKey 命中时删除 subtitleBody 省传输。
-    const source = readSource("../../extension/pages/sidepanel-chat-runtime.js");
+    const source = readSource("../../extension/chat/chat-runtime.js");
     expect(source).toMatch(/\.\.\.sidepanelState\.contextData/);
     expect(source).toMatch(/delete context\.subtitleBody/);
   });
 
-  it("pages/sidepanel-state.js：状态容器整对象持有快照，无字段级消费", () => {
+  it("chat/chat-state.js：状态容器整对象持有快照，无字段级消费", () => {
     // contextData/liveContextData 在容器中以整对象存取，对账锚点由上面的读取方
     // 覆盖；此处断言容器源码中不出现对快照的字段级访问（防未来在容器层散读）。
-    const source = readSource("../../extension/pages/sidepanel-state.js");
+    const source = readSource("../../extension/chat/chat-state.js");
     expect(scanFields(source, "contextData").size).toBe(0);
     expect(scanFields(source, "liveContextData").size).toBe(0);
   });

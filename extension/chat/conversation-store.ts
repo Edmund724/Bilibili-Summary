@@ -1,8 +1,9 @@
-// sidepanel-conversation-store.ts
-// 会话持久化 + 上下文绑定关注点（sidepanel-split ticket #05）。
+// extension/chat/conversation-store.ts
+// 会话持久化 + 上下文绑定关注点（sidepanel-split ticket #05 抽出；PR5 自
+// extension/pages/sidepanel-conversation-store.ts 迁入 chat 域，逻辑零语义改动）。
 //
 // 本模块从 extension/pages/sidepanel.js 抽出「会话列表的存取、按视频上下文
-// 绑定/恢复、增删改」这条关注点。会话状态本体收拢在 ./sidepanel-state.js
+// 绑定/恢复、增删改」这条关注点。会话状态本体收拢在 ./chat-state.js
 // 的 sidepanelState，本模块直接 import 读写；deps 只剩 UI/transport 回调、
 // storage 抽象与常量。
 //
@@ -22,7 +23,7 @@ import {
   MAX_SAVED_CONVERSATIONS
 } from "../ai/conversation.js";
 import { extractPageIndexFromUrl } from "../bilibili/video-id-shared.js";
-import { sidepanelState as _sidepanelState } from "./sidepanel-state.js";
+import { sidepanelState as _sidepanelState } from "./chat-state.js";
 
 // ---------------------------------------------------------------------------
 // 本地类型契约

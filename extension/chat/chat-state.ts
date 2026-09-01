@@ -1,16 +1,17 @@
-// sidepanel-state.ts — sidepanel 跨子模块共享的可变状态（sidepanel-split 后续
-// 收拢产物）。
+// extension/chat/chat-state.ts — 对话内核跨子模块共享的可变状态（PR5 自
+// extension/pages/sidepanel-state.ts 迁入 chat 域；模块级单例与字段全部保留，
+// 仅归属与命名空间变化）。
 //
 // sidepanel.js 原本持有 20 个模块级可变量，其中 13 个被 conversation-store /
 // chat-runtime 子模块经 deps getter/setter 跨模块读写。本模块把这 13 个字段
-// 收拢为一个可变状态对象，pages/* 子模块与 sidepanel.js 直接 import 它，deps
-// 里只留 UI/transport 回调、storage 抽象与常量。
+// 收拢为一个可变状态对象，chat/* 子模块与 sidepanel.js（过渡期组合根）直接
+// import 它，deps 里只剩 UI/transport 回调、storage 抽象与常量。
 //
 // 依赖方向（无环）：本文件是零依赖叶子——唯一 import 是 ../core/defaults.js
 // 的纯常量（DEFAULT_INITIAL_QUICK_PROMPTS / DEFAULT_PRESET_PROMPTS，纯数据无
 // 逻辑），用于给出 aiPrefs 的初始值；AiContext 类型仅供编译期（import type，
-// 运行时零依赖）。sidepanel.js / sidepanel-conversation-store.ts /
-// sidepanel-chat-runtime.ts 单向 import 本文件。
+// 运行时零依赖）。sidepanel.js / conversation-store.ts / chat-runtime.ts 单向
+// import 本文件。
 //
 // 纯局部单例（suggestionsNode / contextNoticeTimer / liveContextSyncTimer /
 // liveContextSyncForceRefresh / modelSelectMeasureCanvas / initCompleted / els /
@@ -104,9 +105,10 @@ export interface SidepanelState {
   // content 侧音频转写进行中的兜底信号（boc-subtitle-status 广播写，
   // subtitleWaiter 轮询读）
   asrTranscribingActive: boolean;
-  // 思考档位（off/low/high）。双持久化：localStorage boc_ai_thinking_level +
-  // sync settings.aiThinkingLevel；读取以 settings ?? localStorage 为准
-  //（写点在 sidepanel.js 的 setThinkingLevel / loadProvidersAndPrefs）。
+  // 思考档位（off/low/high）。双持久化：chrome.storage.local
+  // boc_ai_thinking_level（PR5 前为 localStorage）+ sync settings.aiThinkingLevel；
+  // 读取以 settings ?? storage 为准（写点在 providers.ts 的 setThinkingLevel /
+  // loadProvidersAndPrefs）。
   aiThinkingLevel: "off" | "low" | "high";
 }
 
@@ -143,8 +145,9 @@ export const sidepanelState: SidepanelState = {
   // content 侧音频转写进行中的兜底信号（boc-subtitle-status 广播写，
   // subtitleWaiter 轮询读）
   asrTranscribingActive: false,
-  // 思考档位（off/low/high）。双持久化：localStorage boc_ai_thinking_level +
-  // sync settings.aiThinkingLevel；读取以 settings ?? localStorage 为准
-  //（写点在 sidepanel.js 的 setThinkingLevel / loadProvidersAndPrefs）。
+  // 思考档位（off/low/high）。双持久化：chrome.storage.local
+  // boc_ai_thinking_level（PR5 前为 localStorage）+ sync settings.aiThinkingLevel；
+  // 读取以 settings ?? storage 为准（写点在 providers.ts 的 setThinkingLevel /
+  // loadProvidersAndPrefs）。
   aiThinkingLevel: "off"
 };

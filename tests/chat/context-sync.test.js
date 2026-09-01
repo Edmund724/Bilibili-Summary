@@ -1,5 +1,6 @@
-// tests/sidepanel/sidepanel-context-sync.test.js
-// createLiveContextSync（实时上下文同步调度）行为契约（候选5 拆分直测）。
+// tests/chat/context-sync.test.js
+// createLiveContextSync（实时上下文同步调度）行为契约（候选5 拆分直测；PR5 自
+// tests/sidepanel 随迁并新增 reader 世界触发源用例）。
 //
 // 覆盖：
 // - schedule：防抖（220ms 普通档 / 120ms 强刷快档）、重复 schedule 重置定时器、
@@ -8,6 +9,8 @@
 // - handlers.onFocus / onTabActivated：调度 false；
 // - handlers.onTabUpdated：非 active 标签页忽略；url 与 status 都没有时忽略；
 //   url 变化强刷；仅 complete 不强刷。
+// - handlers.onUrlChange（PR5，reader 世界）：URL watcher 事件 → 强刷快档；
+// - handlers.onReaderOpened（PR5）：reader 打开 → 弱刷；onReaderClosed：不调度。
 //
 // 依赖全注入（sync 回调 + 定时器 fake），纯 Node 时序验证，同 subtitle-wait 模板。
 
@@ -18,7 +21,7 @@ let createLiveContextSync;
 
 beforeEach(async () => {
   resetModuleState();
-  const module = await import("../../extension/pages/sidepanel-context-sync.js");
+  const module = await import("../../extension/chat/context-sync.js");
   createLiveContextSync = module.createLiveContextSync;
 });
 
@@ -174,5 +177,47 @@ describe("handlers（四个触发源）", () => {
     expect(timers[0].ms).toBe(220);
     fireNextTimer();
     expect(deps.sync).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("handlers（reader 世界触发源，PR5 新增）", () => {
+  it("onUrlChange：URL watcher 事件（boc:urlchange）→ 强刷快档 120ms", () => {
+    const { syncInstance, deps, timers, fireNextTimer } = makeHarness();
+
+    syncInstance.handlers.onUrlChange();
+
+    expect(timers).toHaveLength(1);
+    expect(timers[0].ms).toBe(120);
+    fireNextTimer();
+    expect(deps.sync).toHaveBeenCalledWith(true);
+  });
+
+  it("onReaderOpened：reader 打开 → 弱刷 220ms（签名短路判定是否有变）", () => {
+    const { syncInstance, deps, timers, fireNextTimer } = makeHarness();
+
+    syncInstance.handlers.onReaderOpened();
+
+    expect(timers).toHaveLength(1);
+    expect(timers[0].ms).toBe(220);
+    fireNextTimer();
+    expect(deps.sync).toHaveBeenCalledWith(false);
+  });
+
+  it("onReaderClosed：reader 关闭 → 不调度（对话区随视图卸载）", () => {
+    const { syncInstance, timers } = makeHarness();
+
+    syncInstance.handlers.onReaderClosed();
+
+    expect(timers).toHaveLength(0);
+  });
+
+  it("强刷合并跨世界成立：onUrlChange 后接 onReaderOpened，挂起的 true 不被降级", () => {
+    const { syncInstance, deps, fireNextTimer } = makeHarness();
+
+    syncInstance.handlers.onUrlChange();
+    syncInstance.handlers.onReaderOpened();
+
+    fireNextTimer();
+    expect(deps.sync).toHaveBeenCalledWith(true);
   });
 });

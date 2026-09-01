@@ -6,7 +6,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createSubtitleWaiter, isContextPending } from "../../extension/pages/sidepanel-subtitle-wait.js";
+import { createSubtitleWaiter, isContextPending } from "../../extension/chat/subtitle-wait.js";
 
 const POLL_MS = 4000;
 

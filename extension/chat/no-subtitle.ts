@@ -1,10 +1,11 @@
-// sidepanel-no-subtitle.ts — 一键总结「无字幕拦截」的判定与文案（可测纯模块）。
+// extension/chat/no-subtitle.ts — 一键总结「无字幕拦截」的判定与文案（可测纯模块；
+// PR5 自 extension/pages/sidepanel-no-subtitle.ts 迁入 chat 域，逻辑零语义改动）。
 //
 // 为什么存在：content 侧无字幕收尾后快照为 subtitleFetchState === "empty" 且字
 // 幕体为空，此时把空 subtitleBody 发给模型只会得到凭标题+热评编造的总结。
 // ensureCurrentContextForSend 在最终快照后据此拦截发送，并按 noSubtitleReason
 // （content 侧 asr/fallback.js 写入、经 sidepanel-get-context payload 透传）给
-// 出对应提示。文案与原因的对应关系锁定在本模块（tests/sidepanel/no-subtitle.test.js）。
+// 出对应提示。文案与原因的对应关系锁定在本模块（tests/chat/no-subtitle.test.js）。
 //
 // reason 取值（clipState.noSubtitleReason，见 core/state.js）：
 //   null            未知/未归类 → 通用文案
@@ -13,7 +14,7 @@
 //   "asr-failed"    语音识别失败 → 建议重新抓取或稍后再试
 //   "asr-empty"     未识别到语音内容 → 该视频没有人声
 
-import type { SidepanelContextSnapshot } from "./sidepanel-state.js";
+import type { SidepanelContextSnapshot } from "./chat-state.js";
 
 // ensureCurrentContextForSend 的类型化拦截信号：非 true 的返回值一律让
 // chat-runtime 的 sendMessage 提前返回（不追加用户消息、不落 chatHistory、

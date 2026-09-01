@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 // 被测模块无自身状态（chrome 只在函数体内访问），静态导入即可；
 // stubChrome 在 beforeEach 重置后逐用例重建，避免 mock 污染。
-import { ensureChatOffscreenDocument } from "../../extension/pages/sidepanel-offscreen-ensure.js";
+import { ensureChatOffscreenDocument } from "../../extension/chat/offscreen-ensure.js";
 import { OFFSCREEN_URL, OFFSCREEN_CREATE_REASON } from "../../extension/shared/offscreen-constants.js";
 
 function stubChrome({ contexts, contextsError, createError } = {}) {

@@ -13,7 +13,7 @@ import {
   NO_SUBTITLE_SEND_BLOCKED,
   buildNoSubtitleNotice,
   isNoSubtitleEmptyContext
-} from "../../extension/pages/sidepanel-no-subtitle.js";
+} from "../../extension/chat/no-subtitle.js";
 
 describe("NO_SUBTITLE_SEND_BLOCKED", () => {
   it("类型化拦截信号：真值但严格不等 true（chat-runtime 以 !== true 放行）", () => {

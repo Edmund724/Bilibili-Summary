@@ -1,4 +1,6 @@
-// sidepanel-context-policy.ts — loadContextState 的分支判定纯函数（候选08，可测）。
+// extension/chat/context-policy.ts — loadContextState 的分支判定纯函数
+//（候选08 抽出，可测；PR5 自 extension/pages/sidepanel-context-policy.ts 迁入
+// chat 域，逻辑零语义改动）。
 //
 // 为什么存在：sidepanel.js 的 loadContextState 把「签名短路 / pinned / streaming
 // 守卫 / live 快照应用」四态判定交错在带副作用的编排里（消息往返、setState、

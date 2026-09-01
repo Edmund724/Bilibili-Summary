@@ -97,8 +97,8 @@ beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
   // 同一模块纪元内新鲜导入（先 resetModules 再 import，两个模块同图解析）：
-  ({ createChatRuntime } = await import("../../extension/pages/sidepanel-chat-runtime.js"));
-  ({ sidepanelState } = await import("../../extension/pages/sidepanel-state.js"));
+  ({ createChatRuntime } = await import("../../extension/chat/chat-runtime.js"));
+  ({ sidepanelState } = await import("../../extension/chat/chat-state.js"));
   // sidepanelState 是模块级单例，手动重置本文件用到的字段
   sidepanelState.contextData = null;
   sidepanelState.currentContextKey = "";

@@ -131,9 +131,9 @@ beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
   // 同一模块纪元内新鲜导入（先 resetModules 再 import，被测模块与 state 同图解析）
-  ({ createConversationStore } = await import("../../extension/pages/sidepanel-conversation-store.js"));
-  ({ createChatRuntime } = await import("../../extension/pages/sidepanel-chat-runtime.js"));
-  ({ sidepanelState } = await import("../../extension/pages/sidepanel-state.js"));
+  ({ createConversationStore } = await import("../../extension/chat/conversation-store.js"));
+  ({ createChatRuntime } = await import("../../extension/chat/chat-runtime.js"));
+  ({ sidepanelState } = await import("../../extension/chat/chat-state.js"));
   resetStateFields();
 });
 

@@ -1,6 +1,9 @@
-// sidepanel-offscreen-ensure.ts — 聊天通道 offscreen 文档的 ensure（sidepanel
-// split 模式抽出的可测模块，依赖全部走全局 chrome，测试里 stub 即可）。
+// extension/chat/offscreen-ensure.ts — 聊天通道 offscreen 文档的 ensure（sidepanel
+// split 模式抽出的可测模块，依赖全部走全局 chrome，测试里 stub 即可；PR5 自
+// extension/pages/sidepanel-offscreen-ensure.ts 迁入 chat 域，逻辑零语义改动）。
 //
+// offscreen 是扩展级共享文档，与 sidepanel 页面无生命周期绑定：任何扩展上下文
+// （sidepanel 过渡期 / 未来 reader 对话 tab）都连同一个 "offscreen-chat" 端口。
 // 历史行为：sidepanel 只在 init 时创建一次 offscreen 文档；文档意外死亡
 // （崩溃 / 被系统回收）后，"offscreen-chat" 端口连上即断、聊天静默失效，
 // 直到重开侧边栏。这里把 init 的创建参数原样抽成 ensure：init 与每次聊天

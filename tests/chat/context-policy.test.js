@@ -16,7 +16,7 @@ import {
   isPinnedContextTruthy,
   resolveLoadContextAction,
   resolveNoTabPlan
-} from "../../extension/pages/sidepanel-context-policy.js";
+} from "../../extension/chat/context-policy.js";
 
 // 常用响应夹具（冻结防误改）
 const OK_FULL = Object.freeze({ ok: true, payload: { signature: "sig-1", title: "视频" } });

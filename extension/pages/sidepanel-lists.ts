@@ -21,7 +21,7 @@ import {
 } from "../ai/conversation.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { normalizeAiInitialQuickPrompts } from "../core/validators.js";
-import { sidepanelState } from "./sidepanel-state.js";
+import { sidepanelState } from "../chat/chat-state.js";
 
 export interface CreateSidepanelListsDeps {
   presetList: HTMLElement;
