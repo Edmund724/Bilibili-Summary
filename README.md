@@ -77,6 +77,8 @@
 
 ## 安装方式
 
+> 仅支持 Chrome / Edge 等 Chromium 浏览器（依赖 sidePanel、offscreen 等 Chrome 专属 API），不支持 Firefox。
+
 ### 方式一：下载打包版本（推荐）
 
 1. 前往 [Releases](https://github.com/Edmund724/Bilibili-Summary/releases) 下载最新版本的 zip 包
@@ -104,13 +106,6 @@ npm run build:release  # 生成 Chrome 打包到 release/（zip 不含 sourcemap
 3. 开启"开发者模式"
 4. 点击"加载已解压的扩展程序"，选择解压后的文件夹
 
-### Firefox 加载
-
-1. 解压下载的 Firefox zip 包（或源码构建后使用 `dist/` 文件夹）
-2. 打开 Firefox 附加组件管理页：`about:addons`
-3. 点击右上角齿轮图标 → "调试附加组件"
-4. 点击"临时加载附加组件..."，选择文件夹中的 `manifest.json` 文件
-
 ## 项目结构
 
 ```
@@ -118,6 +113,7 @@ extension/
 ├── manifest.json          # 扩展清单
 ├── entry/                 # 入口（background、content、offscreen）
 ├── ai/                    # AI 客户端、SSE 流式解析、播放器 AI 按钮
+├── asr/                   # 语音识别（音频分片、转写、WAV 编码）
 ├── bilibili/              # B 站 API 网关与视频 ID 解析
 ├── core/                  # 核心状态、运行时、消息处理
 ├── notes/                 # 笔记/导出渲染（Markdown、SRT、TXT）
@@ -129,7 +125,7 @@ extension/
 └── icons/                 # 扩展图标
 ```
 
-> `extension/entry/content-bootstrap.iife.js`、`entry/content-main.mjs` 与 `entry/chunks/` 是构建产物，由 `npm run build`（scripts/build-content.js）生成，已加入 `.gitignore`，请勿手动编辑。修改 `shared-defaults.js` 或 `content.js` 后需重新构建。
+> `extension/entry/content-bootstrap.iife.js`、`entry/content-main.mjs` 与 `entry/chunks/` 是构建产物，由 `npm run build` 生成（content 部分由 scripts/build-content.js 产出），已加入 `.gitignore`，请勿手动编辑。
 
 ## 使用方式
 
@@ -180,9 +176,9 @@ extension/
 
 点击「测试」按钮会发送一次最小化的 AI 请求来验证连接。如果报错，请先确认 API Base URL、API Key 和模型名称均已正确填写；同时检查网络环境是否能访问对应平台的服务。
 
-### Firefox 和 Chrome 的体验有差异吗？
+### 为什么只支持 Chrome / Edge，不支持 Firefox？
 
-Firefox 当前采用"临时加载附加组件"的方式安装，更适合开发调试；重新加载扩展后，本地设置和 AI 历史对话可能不会保留。Chrome / Edge 的体验相对更稳定。
+「一键总结」依赖 sidePanel 与 offscreen 两个 Chrome 专属 API，Firefox 下侧边栏、音频解码/转写等核心功能无法工作，因此发布只提供 Chrome 变体（Chrome / Edge 等 Chromium 浏览器均可使用）。
 
 ### 稍后再看页面和普通视频页有什么区别？
 
