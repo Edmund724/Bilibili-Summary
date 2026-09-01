@@ -71,13 +71,15 @@ function targetNode(target: AttrTarget) {
 
 let ids: Record<string, string>;
 let shell: typeof import("../../extension/reader/index.js");
+let presentation: typeof import("../../extension/reader/presentation.js");
 let state: TestState;
 
 async function loadModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state as TestState;
   shell = await import("../../extension/reader/index.js");
-  ids = shell.ids;
+  presentation = await import("../../extension/reader/presentation.js");
+  ids = (await import("../../extension/reader/state.js")).ids;
 }
 
 beforeEach(async () => {
@@ -245,7 +247,7 @@ describe("D. 源码扫描：data-boc-* 属性字面量必须登记在案", () =>
   const SCANNED_FILES = [
     "extension/reader/presentation.ts",
     "extension/reader/lifecycle.ts",
-    "extension/reader/page-state.ts",
+    "extension/reader/state.ts",
     "extension/reader/init-essentials.ts",
     "extension/entry/content.ts",
     "extension/core/message-handler.ts",
@@ -270,7 +272,7 @@ describe("D. 源码扫描：data-boc-* 属性字面量必须登记在案", () =>
   });
 
   it("消费方不再手抄清单：page-state 与 init-essentials 中已无属性/监听键字面量", () => {
-    for (const relPath of ["extension/reader/page-state.ts", "extension/reader/init-essentials.ts"]) {
+    for (const relPath of ["extension/reader/state.ts", "extension/reader/init-essentials.ts"]) {
       const source = readFileSync(resolve(process.cwd(), relPath), "utf8");
       expect(source.match(ATTR_PATTERN), `${relPath} 不应再出现属性字面量`).toBe(null);
       expect(source.includes("changes.reader"), `${relPath} 不应手抄 reader 监听键`).toBe(false);
@@ -295,7 +297,7 @@ describe("E. 行为：表声明的职责与 DOM 真实读写一致", () => {
     readingView.setAttribute("data-boc-reader-follow", "manual");
     readingView.setAttribute("data-has-chapters", "1");
 
-    shell.applyReadingViewPresentation();
+    presentation.applyReadingViewPresentation();
 
     for (const field of READER_APPLY_FIELDS) {
       const expected = field.readValue!(state.reader);
@@ -341,7 +343,7 @@ describe("E. 行为：表声明的职责与 DOM 真实读写一致", () => {
 
   it("E3. 守卫收敛：body 全集属性在非阅读页被清（filter 加宽生效），视图内 follow 不受守卫管辖", async () => {
     setLocationUrl(NORMAL_PAGE_URL);
-    const pageState = await import("../../extension/reader/page-state.js");
+    const pageState = await import("../../extension/reader/state.js");
     pageState.bindNormalPageStateGuard();
 
     // 旧 body filter 只有 3 项，theme/transcript-visible 写入不触发收敛；

@@ -20,7 +20,7 @@ vi.mock("../../extension/bilibili/video-probe.js", () => ({
   getRuntimeVideoElement: vi.fn(),
   findReaderPlayerHost: vi.fn(() => null)
 }));
-vi.mock("../../extension/reader/view-state.js", () => ({
+vi.mock("../../extension/reader/state.js", () => ({
   isReaderViewOpen: vi.fn(() => false)
 }));
 // message-handler 的其余静态依赖按 chapters/signature 测试同款 mock（本文件不触达其行为）。
@@ -46,7 +46,7 @@ vi.mock("../../extension/core/lazy-player-ai.js", () => ({
 import { bindRuntimeEvents } from "../../extension/core/message-handler.js";
 import { ensureReaderDomain } from "../../extension/core/lazy-reader.js";
 import { getRuntimeVideoElement } from "../../extension/bilibili/video-probe.js";
-import { isReaderViewOpen } from "../../extension/reader/view-state.js";
+import { isReaderViewOpen } from "../../extension/reader/state.js";
 
 const onMessageListeners = [];
 vi.stubGlobal("chrome", {

@@ -14,7 +14,7 @@ import { loadPlayerAi, isPlayerAiLoaded } from "../core/lazy-player-ai.js";
 import { ensureUiReady } from "../ui/ui-renderer.js";
 // 候选02 分层惰性：init() 的启动符号全部来自常驻微模块/轻呈现层——
 //   启动接线（debug 辅助/设置监听/presenter 注册）：./reader/init-essentials.js
-//   页面状态守卫（clear/guard）：./reader/page-state.js
+//   页面状态守卫（clear/guard）：./reader/state.js
 //   设置水合/排版呈现/状态栏文案：./reader/presentation.js
 // 它们只依赖常驻叶子，不把 reader 重域（lifecycle/page-frame/player-host/sync）
 // 拖进常驻。唯一例外是 enterReaderMode（reader 直达 URL 路径）：reader 重域
@@ -24,7 +24,7 @@ import {
   bindSettingsWatcher,
   bindReaderPresenter
 } from "../reader/init-essentials.js";
-import { clearReaderModePageState, bindNormalPageStateGuard } from "../reader/page-state.js";
+import { clearReaderModePageState, bindNormalPageStateGuard } from "../reader/state.js";
 import {
   hydrateReaderStateFromSettings,
   applyReadingViewPresentation,

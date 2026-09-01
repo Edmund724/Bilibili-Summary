@@ -7,10 +7,10 @@ import { getErrorMessage } from "../shared/error-helpers.js";
 import { getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import { state, playerAiState } from "../core/state.js";
 import { isVisibleReaderControl } from "../shared/dom-utils.js";
-// isReaderViewOpen 位于常驻微模块（候选02 分层惰性）：纯 state 读取。原先经
-// reader/index.js facade 静态转发，会把整个 reader 域拖进本模块的动态 chunk
-// 闭包，并经 esbuild 提升为常驻静态共享 chunk——分层后改走微模块。
-import { isReaderViewOpen } from "../reader/view-state.js";
+// isReaderViewOpen 位于 reader 状态微模块（候选04 结构归并）：纯 state 读取。
+// 原先经 reader/index.js facade 静态转发，会把整个 reader 域拖进本模块的动态
+// chunk 闭包，并经 esbuild 提升为常驻静态共享 chunk——分层后改走微模块。
+import { isReaderViewOpen } from "../reader/state.js";
 // S3 分层：播放器 AI 样式随本动态 chunk 挂载（节点创建前就绪，见文件尾注释）
 import { ensurePlayerAiStyles, removePlayerAiStyles } from "../shared/style-injector.js";
 

@@ -19,23 +19,26 @@ import type { TestState } from "./reader-test-env.js";
 
 let state: TestState;
 let shell: typeof import("../../extension/reader/index.js");
-let scrollState: typeof import("../../extension/reader/scroll-state.js");
+let scrollState: typeof import("../../extension/reader/state.js");
+let ids: typeof import("../../extension/reader/state.js").ids;
 let video: HTMLVideoElement;
 
 async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state as TestState;
   shell = await import("../../extension/reader/index.js");
-  // scroll-state 与 facade 同批动态 import：resetModules 后必须取同一模块实例，
+  // scroll-state/ids 与动态域同批 import：resetModules 后必须取同一模块实例，
   // 否则测试读到的暂停状态与被测代码读到的不是同一份闭包。
-  scrollState = await import("../../extension/reader/scroll-state.js");
+  const stateModule = await import("../../extension/reader/state.js");
+  scrollState = stateModule;
+  ids = stateModule.ids;
 }
 
 beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
   await loadReaderModules();
-  mountReaderSkeleton(shell.ids);
+  mountReaderSkeleton(ids);
   video = mountPlayerChain();
   mockPlayerRects();
   state.clip.chapters = [{ title: "开场", from: 0 }];
@@ -79,7 +82,7 @@ function recordCurrentTimeAssignments(targetVideo: HTMLVideoElement) {
 
 describe("seekReadingTarget 规范序", () => {
   it("清手动滚动暂停先于 currentTime 赋值（timeupdate 落在干净状态上）", () => {
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     // 先制造一次未过期的手动滚动暂停（自动滚动开启时生效）
     shell.noteManualReaderInteraction(5000);
     expect(scrollState.isManualScrollPaused()).toBe(true);
@@ -99,7 +102,7 @@ describe("seekReadingTarget 规范序", () => {
   it("未清暂停时同型同步会吞掉跟随滚动（回归对照：bug 形态可观察）", () => {
     // 对照组：手动暂停处于生效状态时，同步走 manual 分支——follow 保持 manual，
     // 证明上面用例断言的 pausedAtAssign=false 确实是行为分岔点。
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     shell.noteManualReaderInteraction(5000);
     expect(scrollState.isManualScrollPaused()).toBe(true);
 
@@ -163,7 +166,7 @@ describe("seekReadingTarget 播放策略（resumePlayback 参数化）", () => {
     const seekedTo = shell.seekReadingTarget(12, { resumePlayback: false });
 
     expect(seekedTo).toBeNull();
-    const status = document.getElementById(shell.ids.readingStatus) as HTMLElement;
+    const status = document.getElementById(ids.readingStatus) as HTMLElement;
     expect(status.textContent).toBe("当前页面没有找到可联动的视频播放器。");
   });
 });

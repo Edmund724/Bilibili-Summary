@@ -20,7 +20,8 @@
 // ensureReadingTranscriptRenderedUpTo / TRANSCRIPT_FIRST_BATCH）由 lifecycle.js
 // 的 renderReadingView/closeReadingView/端口注册调用；本模块不 import lifecycle。
 import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
-import { ids, updateReadingTranscriptTailSpacer } from "./page-frame.js";
+import { ids } from "./state.js";
+import { updateReadingTranscriptTailSpacer } from "./page-frame.js";
 import type { ReadingTranscriptItem } from "../subtitle/core.js";
 
 const TRANSCRIPT_FIRST_BATCH = 120;

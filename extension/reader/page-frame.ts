@@ -17,32 +17,30 @@
 //
 // 候选02 分层惰性：页面状态守卫三件套（clearReaderModePageState /
 // enforceNormalPageStateIfNeeded / bindNormalPageStateGuard）、id 表、
-// isReaderViewOpen、applyInlineHostPresentation 已迁往常驻微模块
-//（./page-state.js、./ids.js、./view-state.js、./presentation.js）。本文件
-// 经 re-export 保持域内旧 import 路径与 facade 转发不变。
+// 候选04：isReaderViewOpen/ids/scroll-state/page-state 已收进 ./state.js。
+// 本文件继续经 re-export 保持域内旧 import 路径不变，但真实来源统一为 state.js。
 import { state } from "../core/state.js";
 import { getReaderElement, isVisibleReaderControl } from "../shared/dom-utils.js";
 import { isReaderMode } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
-import { isProgrammaticScrolling } from "./scroll-state.js";
+import { isProgrammaticScrolling } from "./state.js";
 // 跨域模块接口：播放器宿主状态与布局函数（player-host.js 导出）。
 import { getPlayerHost, layoutReaderPlayerHost } from "./player-host.js";
 // 候选06：SYNC 域回调经 reader 域唯一显式端口（ports.js 叶子，缺失即抛错）。
 import { readerPorts } from "./ports.js";
 import { applyInlineHostPresentation } from "./presentation.js";
-// 候选02 分层惰性：id 表已迁往 ./ids.js（常驻微模块），本文件内部仍大量按 id
+// 候选02 分层惰性：id 表已迁往 ./state.js（常驻微模块），本文件内部仍大量按 id
 // 读写 reader DOM，经该 import 取用（此前为本地 const 定义，迁移后补上）。
-import { ids } from "./ids.js";
+import { ids } from "./state.js";
 
-// ===== 常驻微模块 re-export（域内旧路径兼容 + facade 转发） =====
+// ===== 状态微模块 re-export（域内旧路径兼容） =====
 
-export { ids } from "./ids.js";
-export { isReaderViewOpen } from "./view-state.js";
+export { ids, isReaderViewOpen } from "./state.js";
 export {
   clearReaderModePageState,
   enforceNormalPageStateIfNeeded,
   bindNormalPageStateGuard
-} from "./page-state.js";
+} from "./state.js";
 export { applyInlineHostPresentation } from "./presentation.js";
 
 // ===== page-frame 域闭包状态（自 reader-impl.js 头部迁入） =====
@@ -52,9 +50,9 @@ export { applyInlineHostPresentation } from "./presentation.js";
 let mainOriginalParent: Node | null = null;     // readingMainOriginalParent
 let mainOriginalNextSibling: Node | null = null;// readingMainOriginalNextSibling
 
-// Reader 私有 DOM id 表已迁往 ./ids.js（常驻微模块，供 UI 模板与总结链共享），
-// isReaderViewOpen 迁往 ./view-state.js，页面状态守卫迁往 ./page-state.js，
-// applyInlineHostPresentation 迁往 ./presentation.js——见文件头的 re-export。
+// Reader 私有 DOM id 表 / isReaderViewOpen / 页面状态守卫已迁往 ./state.js
+//（候选04 结构归并），applyInlineHostPresentation 留在 ./presentation.js——
+// 见文件头的 re-export。
 // getReaderElement / isVisibleReaderControl live in ../shared/dom-utils.js:
 // reading reader DOM ids is a reader-internal concern, and keeping that helper
 // out of core/runtime.js keeps the reader modules free of a static import back

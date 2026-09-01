@@ -70,7 +70,7 @@ export { unbindReaderPlayerControlsHover };
 // unbinding the video), so state.reader stays its single source of truth.
 //
 // syncTimer moved to sync.js with the sync domain. manualScrollPauseUntil /
-// programmaticScrollUntil moved to ./scroll-state.js, the shared leaf owned by
+// programmaticScrollUntil moved to ./state.js, the shared leaf owned by
 // SYNC and LAYOUT alike; this module reads them only through that module's
 // exported is* functions.
 //
@@ -160,7 +160,7 @@ function cancelScheduledReaderLayout() {
 //
 // These accessors are the seam between the layout (player-host.js) closure and
 // the sync/lifecycle modules that depend on it. The scroll-pause variables
-// moved to ./scroll-state.js, the shared leaf both domains read and write
+// moved to ./state.js, the shared leaf both domains read and write
 // directly; sync.js resets the videoEventsBound flag through setVideoEventsBound.
 export function getPlayerHost(): Element | null {
   return playerHost;

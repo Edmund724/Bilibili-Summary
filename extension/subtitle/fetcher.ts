@@ -17,9 +17,9 @@ import {
 } from "../shared/error-helpers.js";
 import { logInfo, logWarn } from "../shared/logging.js";
 import { createLazyLoader } from "../shared/lazy-import.js";
-// isReaderViewOpen 位于常驻微模块（候选02 分层惰性）：纯 state 读取，不再经
-// reader/index.js facade 静态转发（否则整条 reader 域会被拖进本链闭包）。
-import { isReaderViewOpen } from "../reader/view-state.js";
+// isReaderViewOpen 位于 reader 状态微模块（候选04 结构归并）：纯 state 读取，
+// 不再经 reader/index.js facade 静态转发（否则整条 reader 域会被拖进本链闭包）。
+import { isReaderViewOpen } from "../reader/state.js";
 import { readVideoTitle, readVideoAuthor, readUploadDate } from "./core.js";
 import {
   normalizeChapters,

@@ -4,15 +4,15 @@
 // getBoundingClientRect + getComputedStyle + data 属性，产出一份可序列化布局
 // 快照，用于排查宿主浮动/小窗/内联化走样。注册在 ./init-essentials.js（常驻
 // 轻量），只在手动调用全局函数时经 ensureReaderDomain 装载 reader 域后转发；
-// 对外经 facade（./index.js）按新家转发本导出。
+// 对外经 reader/index.js 动态域入口转发本导出。
 //
-// 依赖方向（无环）：core/state、bilibili 探针/URL 工具、page-frame 的 ids 表、
+// 依赖方向（无环）：core/state、bilibili 探针/URL 工具、reader/state.js 的 ids 表、
 // player-host 的宿主访问器与呈现稳定性判定（LAYOUT 层）；本模块不被 reader
 // 域内任何实现模块 import。
 import { state } from "../core/state.js";
 import { cleanVideoUrl } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
-import { ids } from "./page-frame.js";
+import { ids } from "./state.js";
 import {
   getPlayerHost,
   getReaderPlayerWrapNode,

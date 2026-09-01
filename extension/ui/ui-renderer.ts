@@ -10,19 +10,20 @@ import {
 import { escapeHtml } from "../shared/string-utils.js";
 import { READING_HEADER_ICONS } from "./reading-header-icons.js";
 // 候选02 分层惰性：本模块保持常驻（ensureUiReady 启动建 UI 壳），静态 import
-// 只允许常驻叶子——reader 私有 id 表（./reader/ids.js）、轻呈现（./reader/
-// presentation.js）、状态 accessor（./reader/view-state.js）与共享滚动叶子
-//（./reader/scroll-state.js）。reader 重域（sync/lifecycle 的交互处理）与
-// 总结链（fetcher/subtitle-ui）一律在回调内经 ensure 动态装载后调用：注册
-// 监听是启动同步操作，监听体只有用户操作/视图交互时才执行。
-import { ids } from "../reader/ids.js";
+// 只允许常驻叶子——reader 状态微模块（./reader/state.js，含 ids/view-state/
+// scroll-state）、轻呈现（./reader/presentation.js）。reader 重域（sync/lifecycle
+// 的交互处理）与总结链（fetcher/subtitle-ui）一律在回调内经 ensure 动态装载后
+// 调用：注册监听是启动同步操作，监听体只有用户操作/视图交互时才执行。
+import {
+  ids,
+  isReaderViewOpen,
+  resetManualScrollPause,
+  isProgrammaticScrolling
+} from "../reader/state.js";
 import {
   buildReaderStepperControl,
   bindReaderStepperControl
 } from "../reader/presentation.js";
-import { isReaderViewOpen } from "../reader/view-state.js";
-// 滚动暂停 / 程序化滚动状态位于 reader 域的共享叶子模块（不再经 reader/index.js 转发）
-import { resetManualScrollPause, isProgrammaticScrolling } from "../reader/scroll-state.js";
 // 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
 import { logWarn } from "../shared/logging.js";
 // 总结链与 reader 域的按需加载器（常驻轻文件，动态边在其内部）。
@@ -31,11 +32,11 @@ import { ensureReaderDomain } from "../core/lazy-reader.js";
 
 // ensureReaderDomain 的返回类型在 core/lazy-reader.ts 只声明了启动期窄接口
 //（enterReaderMode/closeReadingView/waitForVideoMetadata/seekReadingTarget）；
-// 本模块经 ensure 转发的交互回调落在 reader/index.ts facade 的完整导出面上
+// 本模块经 ensure 转发的交互回调落在 reader/index.ts 动态域入口的完整导出面上
 //（syncReadingViewPlayback/updateReaderPreferences/renderReaderPanels 等）。
-// 此处以 facade 模块类型交叉收口，运行时对象不变（与原调用完全一致）。
-type ReaderFacade = typeof import("../reader/index.js");
-type UiReaderDomain = Awaited<ReturnType<typeof ensureReaderDomain>> & ReaderFacade;
+// 此处以动态域入口模块类型交叉收口，运行时对象不变（与原调用完全一致）。
+type ReaderDomain = typeof import("../reader/index.js");
+type UiReaderDomain = Awaited<ReturnType<typeof ensureReaderDomain>> & ReaderDomain;
 const loadReaderDomain = ensureReaderDomain as () => Promise<UiReaderDomain>;
 
 // 打开设置页（原 core/runtime.js 提供；因 runtime 不得依赖 ui 域，且本模块是

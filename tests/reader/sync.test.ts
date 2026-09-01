@@ -8,6 +8,7 @@ import type { TestState } from "./reader-test-env.js";
 
 let state: TestState;
 let shell: typeof import("../../extension/reader/index.js");
+let ids: typeof import("../../extension/reader/state.js").ids;
 let sync: typeof shell;
 let playerHost: typeof shell;
 let uiRenderer: typeof import("../../extension/ui/ui-renderer.js");
@@ -17,6 +18,7 @@ async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state as TestState;
   shell = await import("../../extension/reader/index.js");
+  ids = (await import("../../extension/reader/state.js")).ids;
   sync = shell;
   playerHost = shell;
   uiRenderer = await import("../../extension/ui/ui-renderer.js");
@@ -26,13 +28,13 @@ function mountExtraSkeleton() {
   const doc = document;
 
   // bindUiEvents 需要的额外节点（阅读视图相关）
-  const readingView = doc.body.querySelector(`#${shell.ids.readingView}`) as HTMLElement;
+  const readingView = doc.body.querySelector(`#${ids.readingView}`) as HTMLElement;
   const readingThemeSelect = doc.createElement("button");
-  readingThemeSelect.id = shell.ids.readingThemeSelect;
+  readingThemeSelect.id = ids.readingThemeSelect;
   readingView.appendChild(readingThemeSelect);
 
   const readingCloseBtn = doc.createElement("button");
-  readingCloseBtn.id = shell.ids.readingCloseBtn;
+  readingCloseBtn.id = ids.readingCloseBtn;
   readingView.appendChild(readingCloseBtn);
 
   // 经典面板（bindUiEvents 通过 byId 访问）
@@ -74,7 +76,7 @@ beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
   await loadReaderModules();
-  mountReaderSkeleton(shell.ids);
+  mountReaderSkeleton(ids);
   mountExtraSkeleton();
   video = mountPlayerChain();
   mockPlayerRects();
@@ -91,7 +93,7 @@ afterEach(() => {
 describe("播放同步与高亮", () => {
   it("渲染后首个字幕项默认高亮（readerState 重置为 -1 后的 get 行为）", () => {
     expect(state.reader.readingActiveSubtitleIndex).toBe(-1);
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     expect(readingView.querySelectorAll(".boc-reading-item").length).toBe(0);
     // 列表尚未渲染（未调 renderReadingView），因此无高亮项
     expect(readingView.querySelector(".boc-reading-item.is-active")).toBe(null);
@@ -99,7 +101,7 @@ describe("播放同步与高亮", () => {
 
   it("手动渲染列表后无高亮项（activeIndex 为 -1）", () => {
     shell.renderReadingView();
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     expect(readingView.querySelectorAll(".boc-reading-item").length).toBe(3);
     expect(readingView.querySelector(".boc-reading-item.is-active")).toBe(null);
     expect(readingView.querySelector(".boc-reading-chapter.is-active")).toBe(null);
@@ -118,7 +120,7 @@ describe("播放同步与高亮", () => {
     video.currentTime = 12;
     sync.syncReadingViewPlayback();
 
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     const activeTranscript = readingView.querySelector(".boc-reading-item.is-active") as HTMLElement;
     const activeChapter = readingView.querySelector(".boc-reading-chapter.is-active") as HTMLElement;
     expect(activeTranscript.dataset.index).toBe("1");
@@ -139,7 +141,7 @@ describe("播放同步与高亮", () => {
     video.currentTime = 35;
     video.dispatchEvent(new Event("timeupdate"));
 
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     const activeTranscript = readingView.querySelector(".boc-reading-item.is-active") as HTMLElement;
     const activeChapter = readingView.querySelector(".boc-reading-chapter.is-active") as HTMLElement;
     expect(activeTranscript.dataset.index).toBe("2");
@@ -169,7 +171,7 @@ describe("播放同步与高亮", () => {
     video.play = vi.fn(() => Promise.resolve());
     uiRenderer.bindUiEvents();
 
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     const secondChapter = readingView.querySelectorAll(".boc-reading-chapter")[1] as HTMLElement;
     const event = new MouseEvent("click", { bubbles: true, cancelable: true });
     secondChapter.dispatchEvent(event);
@@ -192,7 +194,7 @@ describe("播放同步与高亮", () => {
     video.play = vi.fn(() => Promise.resolve());
     uiRenderer.bindUiEvents();
 
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     const target = readingView.querySelectorAll(".boc-reading-item")[2] as HTMLElement;
 
     // 选中文本时不跳转：候选02 后点击经 ensure 异步转发，先等一拍确保处理器
@@ -228,7 +230,7 @@ describe("播放同步与高亮", () => {
   });
 
   it("updateReaderFollowState：按自动滚动/手动暂停状态写入 data-boc-reader-follow", () => {
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     state.reader.readingViewOpen = true;
     state.reader.readingAutoScroll = true;
 
@@ -244,7 +246,7 @@ describe("播放同步与高亮", () => {
   });
 
   it("noteManualReaderInteraction：自动滚动开启时暂停跟随（data-boc-reader-follow=manual）", () => {
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     state.reader.readingViewOpen = true;
     state.reader.readingAutoScroll = true;
 

@@ -89,7 +89,7 @@ import {
 // 候选09：控制条自动隐藏/恢复与头部悬停 chrome 迁往 ./hover-chrome.js；本文件
 // 经该模块驱动头部悬停接线（finishEnterReaderMode）。
 import { bindReaderHeaderActionsHover } from "./hover-chrome.js";
-import { resetManualScrollPause, setProgrammaticScrollUntil } from "./scroll-state.js";
+import { resetManualScrollPause, setProgrammaticScrollUntil } from "./state.js";
 // 候选06 端口半边：reader 域唯一显式端口的单点注册入口（见文件尾注册区）。
 import { registerReaderPorts } from "./ports.js";
 // 候选09：字幕分批渲染状态机（rAF 任务/游标/spacer 收敛）迁往 ./batched-render.js；

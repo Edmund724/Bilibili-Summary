@@ -11,9 +11,9 @@ import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import { normalizeDownloadFormat } from "../core/validators.js";
 import { state } from "../core/state.js";
 import { setMessage, setStatus } from "../ui/ui-renderer.js";
-// ids 为常驻微模块（候选02 分层惰性）：纯常量表，不经 reader/index.js facade
-// 转发（否则总结链会静态拖起整个 reader 域）。
-import { ids } from "../reader/ids.js";
+// ids 为 reader 状态微模块（候选04 结构归并）：纯常量表，不经 reader/index.js
+// facade 转发（否则总结链会静态拖起整个 reader 域）。
+import { ids } from "../reader/state.js";
 import { refreshDerivedContent, rebuildDerivedContent } from "./core.js";
 
 // ===== 抓取结果渲染（候选02 分层惰性：自 ui/ui-renderer.js 移入） =====

@@ -20,7 +20,7 @@ import {
   applyReadingViewPresentation,
   hydrateReaderStateFromSettings
 } from "./presentation.js";
-import { isReaderViewOpen } from "./view-state.js";
+import { isReaderViewOpen } from "./state.js";
 import { ensureReaderDomain, isReaderDomainLoaded } from "../core/lazy-reader.js";
 import type * as LifecycleModule from "./lifecycle.js";
 import type * as DebugSnapshotModule from "./debug-snapshot.js";

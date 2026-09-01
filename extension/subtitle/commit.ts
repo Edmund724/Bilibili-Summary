@@ -17,16 +17,16 @@
 // renderSubtitleSelect / setStatus 由 fetcher 在模块求值期经 configureCommitUi
 // 注入一次。其余依赖全部是叶子或常驻轻模块：core/state、subtitle/selection、
 // subtitle/core、reader/presenter（常驻轻 seam）、reader/view-state（常驻微
-// 模块，纯 state 读取）、shared/dom-utils、reader/ids（纯常量表）、shared/logging。
+// 模块，纯 state 读取）、shared/dom-utils、reader/state（状态微模块，含 ids
+// 常量表）、shared/logging。
 
 import { clipState } from "../core/state.js";
 import type { NoSubtitleReason, SubtitleBodyItem } from "../core/state.js";
 import { sortSubtitleBodyByFrom } from "./selection.js";
 import { refreshDerivedContent } from "./core.js";
 import { notifyReaderPresenter } from "../reader/presenter.js";
-import { isReaderViewOpen } from "../reader/view-state.js";
+import { isReaderViewOpen, ids } from "../reader/state.js";
 import { byId } from "../shared/dom-utils.js";
-import { ids } from "../reader/ids.js";
 
 export interface CommitUiCallbacks {
   renderMeta(): void;

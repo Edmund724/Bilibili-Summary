@@ -27,13 +27,12 @@ import { getReaderElement } from "../shared/dom-utils.js";
 import { findActiveSubtitleIndex, findActiveChapterIndex } from "../subtitle/core.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import {
+  ids,
   isManualScrollPaused,
   resetManualScrollPause,
   setManualScrollPaused,
   setProgrammaticScrollUntil
-} from "./scroll-state.js";
-
-import { ids } from "./page-frame.js";
+} from "./state.js";
 import {
   getPlayerHost,
   bindReadingViewVideo,
@@ -55,7 +54,7 @@ import { readerPorts } from "./ports.js";
 // ===== sync-domain private bookkeeping (module-level closure state) =====
 //
 // syncTimer (readingSyncTimer) moved here with the sync domain.
-// manualScrollPauseUntil / programmaticScrollUntil live in ./scroll-state.js,
+// manualScrollPauseUntil / programmaticScrollUntil live in ./state.js,
 // the shared leaf both this module and the LAYOUT layer read/write directly.
 let syncTimer = 0; // readingSyncTimer
 

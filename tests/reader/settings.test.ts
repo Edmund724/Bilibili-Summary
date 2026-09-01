@@ -8,7 +8,10 @@ import { mountReaderSkeleton } from "../helpers/reader-skeleton.js";
 import type { TestState, ChromeRuntimeStub } from "./reader-test-env.js";
 
 let state: TestState;
-let shell: typeof import("../../extension/reader/index.js");
+let presentation: typeof import("../../extension/reader/presentation.js");
+let lifecycle: typeof import("../../extension/reader/index.js");
+let initEssentials: typeof import("../../extension/reader/init-essentials.js");
+let ids: typeof import("../../extension/reader/state.js").ids;
 let presenter: typeof import("../../extension/reader/presenter.js");
 let chromeStub: ChromeRuntimeStub;
 
@@ -16,7 +19,10 @@ async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state as TestState;
   presenter = await import("../../extension/reader/presenter.js");
-  shell = await import("../../extension/reader/index.js");
+  presentation = await import("../../extension/reader/presentation.js");
+  initEssentials = await import("../../extension/reader/init-essentials.js");
+  lifecycle = await import("../../extension/reader/index.js");
+  ids = (await import("../../extension/reader/state.js")).ids;
   chromeStub = globalThis.chrome as unknown as ChromeRuntimeStub;
   // 模拟 content.js 的接线：reader-impl 经 presenter seam 持久化/读取设置，
   // 底层仍是 chrome.runtime.sendMessage（tests/setup.js 的 stub）。
@@ -48,10 +54,10 @@ function makeStepper(node: HTMLElement) {
 // renderReaderStepperState 有可操作节点。
 function seedStepperButtons() {
   [
-    shell.ids.readingFontScaleSelect,
-    shell.ids.readingLetterSpacingSelect,
-    shell.ids.readingLineHeightSelect,
-    shell.ids.readingContentWidthSelect
+    ids.readingFontScaleSelect,
+    ids.readingLetterSpacingSelect,
+    ids.readingLineHeightSelect,
+    ids.readingContentWidthSelect
   ].forEach((id) => {
     const node = document.getElementById(id);
     if (node) {
@@ -64,7 +70,7 @@ beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
   await loadReaderModules();
-  mountReaderSkeleton(shell.ids);
+  mountReaderSkeleton(ids);
   seedStepperButtons();
 });
 
@@ -75,7 +81,7 @@ afterEach(() => {
 
 describe("设置变更与 data-attribute", () => {
   it("hydrateReaderStateFromSettings：应用主题/字体/宽度等设置", () => {
-    shell.hydrateReaderStateFromSettings({
+    presentation.hydrateReaderStateFromSettings({
       readerTheme: "dark",
       readerFontScale: "xl",
       readerLetterSpacing: "loose",
@@ -95,7 +101,7 @@ describe("设置变更与 data-attribute", () => {
   });
 
   it("applyReadingViewPresentation：在视图/html/body 三处写 data-attribute", () => {
-    shell.hydrateReaderStateFromSettings({
+    presentation.hydrateReaderStateFromSettings({
       readerTheme: "paper",
       readerFontScale: "l",
       readerLetterSpacing: "tight",
@@ -104,9 +110,9 @@ describe("设置变更与 data-attribute", () => {
       readerChapterVisible: true,
       readerTranscriptVisible: true
     });
-    shell.applyReadingViewPresentation();
+    presentation.applyReadingViewPresentation();
 
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     const htmlEl = document.documentElement;
     const bodyEl = document.body;
 
@@ -139,12 +145,12 @@ describe("设置变更与 data-attribute", () => {
   });
 
   it("updateReaderPreferences：变更宽度/字体并持久化到 chrome.runtime", () => {
-    shell.updateReaderPreferences({ readerFontScale: "xs", readerContentWidth: "narrow" }, { persist: true });
+    lifecycle.updateReaderPreferences({ readerFontScale: "xs", readerContentWidth: "narrow" }, { persist: true });
 
     expect(state.reader.readingFontScale).toBe("xs");
     expect(state.reader.readingContentWidth).toBe("narrow");
 
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     expect(readingView.dataset.fontScale).toBe("xs");
     expect(readingView.dataset.contentWidth).toBe("narrow");
     expect(document.documentElement.dataset.bocReaderFontScale).toBe("xs");
@@ -157,7 +163,7 @@ describe("设置变更与 data-attribute", () => {
   });
 
   it("updateReaderPreferences：非法值被归一化", () => {
-    shell.updateReaderPreferences(
+    lifecycle.updateReaderPreferences(
       { readerFontScale: "huge", readerContentWidth: "ultra", readerTheme: "neon" },
       { persist: false }
     );
@@ -169,16 +175,16 @@ describe("设置变更与 data-attribute", () => {
 
   it("settings 变更监听：chrome.storage.onChanged 触发时刷新设置", async () => {
     // bindSettingsWatcher 在 chrome.storage.onChanged 存在时绑定
-    shell.bindSettingsWatcher();
+    initEssentials.bindSettingsWatcher();
     expect(state.ui.settingsWatcherBound).toBe(true);
     expect(chromeStub.storage.onChanged.addListener).toHaveBeenCalled();
   });
 
   it("settings 变更后：storage.onChanged 回调应用新主题", async () => {
-    shell.bindSettingsWatcher();
+    initEssentials.bindSettingsWatcher();
     const listener = chromeStub.storage.onChanged.addListener.mock.calls[0][0];
 
-    // 让 getSettings 返回指定设置（shell.js 内部经 runtime.getSettings -> chrome.runtime.sendMessage）
+    // 让 getSettings 返回指定设置（init-essentials.js 内部经 runtime.getSettings -> chrome.runtime.sendMessage）
     chromeStub.runtime.sendMessage.mockImplementation((message, callback) => {
       if (message?.type === "get-settings") {
         callback?.({
@@ -207,7 +213,7 @@ describe("设置变更与 data-attribute", () => {
       expect(state.reader.readingTheme).toBe("dark");
     });
 
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     expect(readingView.dataset.theme).toBe("dark");
   });
 });

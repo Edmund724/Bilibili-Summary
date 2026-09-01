@@ -17,6 +17,7 @@ import type { TestState } from "./reader-test-env.js";
 
 let state: TestState;
 let shell: typeof import("../../extension/reader/index.js");
+let ids: typeof import("../../extension/reader/state.js").ids;
 let video: HTMLVideoElement;
 
 // fake rAF：捕获回调 + 尊重 cancelAnimationFrame（验证取消路径）。
@@ -73,10 +74,11 @@ async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state as TestState;
   shell = await import("../../extension/reader/index.js");
+  ids = (await import("../../extension/reader/state.js")).ids;
 }
 
 function mountSkeleton() {
-  mountReaderSkeleton(shell.ids);
+  mountReaderSkeleton(ids);
   video = mountPlayerChain();
 }
 
@@ -97,7 +99,7 @@ afterEach(() => {
 });
 
 function transcriptList() {
-  return document.getElementById(shell.ids.readingTranscriptList) as HTMLElement;
+  return document.getElementById(ids.readingTranscriptList) as HTMLElement;
 }
 
 function renderedItemCount() {
@@ -106,7 +108,7 @@ function renderedItemCount() {
 
 function tailSpacer() {
   const list = transcriptList();
-  const spacer = document.getElementById(shell.ids.readingTranscriptTailSpacer) as HTMLElement | null;
+  const spacer = document.getElementById(ids.readingTranscriptTailSpacer) as HTMLElement | null;
   // spacer 必须始终是列表最后一个子节点（滚动定位的尾部留白依赖它）
   if (spacer && spacer.parentElement === list && spacer === list.lastElementChild) {
     return spacer;

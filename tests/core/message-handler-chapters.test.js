@@ -42,13 +42,14 @@ vi.mock("../../extension/reader/index.js", () => ({
   syncReadingViewPlayback: vi.fn(),
   enterReaderMode: vi.fn(async () => {}),
   closeReadingView: vi.fn(),
+  waitForVideoMetadata: vi.fn(async () => {})
+}));
+vi.mock("../../extension/reader/state.js", () => ({
   isReaderViewOpen: vi.fn(() => false),
-  renderReadingStatus: vi.fn(),
-  waitForVideoMetadata: vi.fn(async () => {}),
   enforceNormalPageStateIfNeeded: vi.fn()
 }));
-vi.mock("../../extension/reader/scroll-state.js", () => ({
-  resetManualScrollPause: vi.fn()
+vi.mock("../../extension/reader/presentation.js", () => ({
+  renderReadingStatus: vi.fn()
 }));
 vi.mock("../../extension/bilibili/gateway.js", () => ({
   getCurrentAid: vi.fn(() => ""),

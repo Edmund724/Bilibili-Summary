@@ -17,6 +17,8 @@ import type { TestState } from "./reader-test-env.js";
 
 let state: TestState;
 let reader: typeof import("../../extension/reader/index.js");
+let initEssentials: typeof import("../../extension/reader/init-essentials.js");
+let ids: typeof import("../../extension/reader/state.js").ids;
 let presenter: typeof import("../../extension/reader/presenter.js");
 let uiRenderer: typeof import("../../extension/ui/ui-renderer.js");
 let defaultsModule: typeof import("../../extension/core/defaults.js");
@@ -25,6 +27,8 @@ async function loadModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state as TestState;
   reader = await import("../../extension/reader/index.js");
+  initEssentials = await import("../../extension/reader/init-essentials.js");
+  ids = (await import("../../extension/reader/state.js")).ids;
   presenter = await import("../../extension/reader/presenter.js");
   uiRenderer = await import("../../extension/ui/ui-renderer.js");
   defaultsModule = await import("../../extension/core/defaults.js");
@@ -48,11 +52,11 @@ function seedSubtitleBody() {
 }
 
 function chapterButtons() {
-  return document.querySelectorAll(`#${reader.ids.readingChapterList} .boc-reading-chapter`);
+  return document.querySelectorAll(`#${ids.readingChapterList} .boc-reading-chapter`);
 }
 
 function railVisibilityAttrs() {
-  const readingView = document.getElementById(reader.ids.readingView)!;
+  const readingView = document.getElementById(ids.readingView)!;
   return {
     readingViewChapterVisibility: readingView.getAttribute("data-chapter-visibility"),
     readingViewHasChapters: readingView.getAttribute("data-has-chapters"),
@@ -90,7 +94,7 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
   it("A. 进入阅读模式：章节渲染到列表，且三处 has-chapters/visibility 属性落位", async () => {
     seedChapters();
     seedSubtitleBody();
-    reader.bindReaderPresenter();
+    initEssentials.bindReaderPresenter();
 
     document.documentElement.setAttribute("data-boc-reader-mode", "1");
     document.body.setAttribute("data-boc-reader-mode", "1");
@@ -110,7 +114,7 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
 
   it("B. 章节经 presenter seam 迟到（subtitle-ready）后应重渲染出章节", async () => {
     seedSubtitleBody();
-    reader.bindReaderPresenter();
+    initEssentials.bindReaderPresenter();
 
     document.documentElement.setAttribute("data-boc-reader-mode", "1");
     document.body.setAttribute("data-boc-reader-mode", "1");
@@ -136,13 +140,13 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
   it("C. 勾选/取消章节复选框（真实 change 事件）应切换 chapter-visibility 属性", async () => {
     seedChapters();
     seedSubtitleBody();
-    reader.bindReaderPresenter();
+    initEssentials.bindReaderPresenter();
 
     document.documentElement.setAttribute("data-boc-reader-mode", "1");
     document.body.setAttribute("data-boc-reader-mode", "1");
     await reader.enterReaderMode();
 
-    const checkbox = document.getElementById(reader.ids.readingChapterVisible)! as HTMLInputElement;
+    const checkbox = document.getElementById(ids.readingChapterVisible)! as HTMLInputElement;
     expect(checkbox).not.toBe(null);
     expect(checkbox.checked).toBe(true);
 
@@ -191,7 +195,7 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
 
     // 反向：选择器里出现的 chapter 相关属性名，JS 必须真的会写。
     // 从 renderReadingView + applyReadingViewPresentation 路径取真实写入值比对。
-    const readingView = document.getElementById(reader.ids.readingView)!;
+    const readingView = document.getElementById(ids.readingView)!;
     state.clip.chapters = [{ title: "x", from: 0 }];
     reader.renderReadingView();
     reader.updateReaderPreferences({ readerChapterVisible: false }, { persist: false });

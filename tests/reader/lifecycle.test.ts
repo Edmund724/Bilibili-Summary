@@ -9,16 +9,16 @@ import type { TestState } from "./reader-test-env.js";
 
 let state: TestState;
 let shell: typeof import("../../extension/reader/index.js");
-let pageFrame: typeof shell;
+let ids: typeof import("../../extension/reader/state.js").ids;
 let impl: typeof shell;
 
 async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state as TestState;
   shell = await import("../../extension/reader/index.js");
-  pageFrame = shell;
+  ids = (await import("../../extension/reader/state.js")).ids;
   impl = shell;
-  return { state, shell, pageFrame };
+  return { state, shell, ids };
 }
 
 // 通过视频元素上挂载的同步 AbortController 判断播放同步是否在运行
@@ -32,7 +32,7 @@ beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
   await loadReaderModules();
-  mountReaderSkeleton(shell.ids);
+  mountReaderSkeleton(ids);
   mountPlayerChain();
   mockPlayerRects();
 });
@@ -64,7 +64,7 @@ describe("reader 生命周期", () => {
 
     await shell.enterReaderMode();
 
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     expect(state.reader.readingViewOpen).toBe(true);
     expect(readingView.classList.contains("open")).toBe(true);
     expect(readingView.classList.contains("reader-page")).toBe(true);
@@ -124,7 +124,7 @@ describe("reader 生命周期", () => {
 
     shell.closeReadingView();
 
-    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     expect(state.reader.readingViewOpen).toBe(false);
     expect(readingView.classList.contains("open")).toBe(false);
     expect(readingView.getAttribute("aria-hidden")).toBe("true");

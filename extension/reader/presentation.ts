@@ -28,7 +28,7 @@ import {
   normalizeReaderTranscriptVisible
 } from "../core/validators.js";
 import { escapeHtml } from "../shared/string-utils.js";
-import { ids } from "./ids.js";
+import { ids } from "./state.js";
 import { ensureReaderDomain } from "../core/lazy-reader.js";
 import { READER_APPLY_FIELDS } from "./presentation-fields.js";
 

@@ -34,13 +34,12 @@ import { loadPlayerAi, isPlayerAiLoaded } from "./lazy-player-ai.js";
 
 // reader 域经加载器按需引入（候选02 分层惰性）：重符号（enterReaderMode 等）
 // 在处理器内 ensureReaderDomain() 后经命名空间取用；启动必需的轻符号直接从
-// 常驻微模块 import（isReaderViewOpen=纯 state 读、enforceNormalPageState-
+// reader 状态微模块 import（isReaderViewOpen=纯 state 读、enforceNormalPageState-
 // IfNeeded=DOM 守卫、renderReadingStatus=状态栏文案写入），不拖入 reader 重文件。
 // （候选06：seek 的滚动暂停重置/跟随设置已收进 reader 域单入口
 // seekReadingTarget 的规范序，本文件不再触碰 scroll-state 与跟随状态。）
 import { ensureReaderDomain } from "./lazy-reader.js";
-import { isReaderViewOpen } from "../reader/view-state.js";
-import { enforceNormalPageStateIfNeeded } from "../reader/page-state.js";
+import { isReaderViewOpen, enforceNormalPageStateIfNeeded } from "../reader/state.js";
 import { renderReadingStatus } from "../reader/presentation.js";
 // 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
 import { logWarn } from "../shared/logging.js";
