@@ -21,7 +21,7 @@ import {
 } from "./player-host.js";
 
 export function createReaderDebugSnapshot(label = "manual") {
-  const pickNodeSnapshot = (selector) => {
+  const pickNodeSnapshot = (selector: string) => {
     const node = document.querySelector(selector);
     if (!node) {
       return null;

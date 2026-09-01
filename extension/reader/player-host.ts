@@ -76,9 +76,32 @@ export { unbindReaderPlayerControlsHover };
 //
 // playerRetryTimer（readingPlayerRetryTimer）迁入 ./lifecycle.js：属主启动
 //（scheduleReaderPlayerRetry）与清除（closeReadingView）都在那个模块。
-let playerHost = null;             // readingPlayerHost
-let playerAdjustedNodes = [];      // readingPlayerAdjustedNodes
-let playerObserver = null;         // readingPlayerObserver
+interface AdjustedNodeSnapshot {
+  node: HTMLElement;
+  position: string;
+  left: string;
+  top: string;
+  right: string;
+  bottom: string;
+  width: string;
+  height: string;
+  transform: string;
+  margin: string;
+  zIndex: string;
+}
+
+interface LayoutSnapshot {
+  mode: "native" | "slot";
+  viewEl: HTMLElement;
+  hostEl: Element;
+  cssWidth: string;
+  cssHeight: string;
+  slot: Record<string, string> | null;
+}
+
+let playerHost: Element | null = null;             // readingPlayerHost
+let playerAdjustedNodes: AdjustedNodeSnapshot[] = [];      // readingPlayerAdjustedNodes
+let playerObserver: MutationObserver | null = null;         // readingPlayerObserver
 let playerMountTimer = 0;          // readingPlayerMountTimer
 let miniDismissTimer = 0;          // readingMiniDismissTimer
 let videoEventsBound = false;      // readingVideoEventsBound
@@ -97,7 +120,7 @@ let layoutRafId = 0;
 // CSS 变量与 slot 分支的 8 个 setProperty 值。与本次计算结果全同则整组跳写，
 // 避免每拍 tick / 每个滚动事件的无谓样式失效；模式切换（native↔slot）或
 // 宿主/视图节点换新时强制写全量，防止旧快照掩盖新节点上的缺省样式。
-let lastLayoutSnapshot = null;
+let lastLayoutSnapshot: LayoutSnapshot | null = null;
 
 // （候选10 批1 spacer 的脏检查采用「读内联现值比较」，无需模块级缓存字段：
 // 内联样式读取是纯字符串操作，无布局开销；列表整段重建换新 spacer 节点
@@ -139,11 +162,11 @@ function cancelScheduledReaderLayout() {
 // the sync/lifecycle modules that depend on it. The scroll-pause variables
 // moved to ./scroll-state.js, the shared leaf both domains read and write
 // directly; sync.js resets the videoEventsBound flag through setVideoEventsBound.
-export function getPlayerHost() {
+export function getPlayerHost(): Element | null {
   return playerHost;
 }
 
-export function setVideoEventsBound(bound) {
+export function setVideoEventsBound(bound: boolean) {
   videoEventsBound = Boolean(bound);
 }
 
@@ -185,13 +208,13 @@ export function closeReaderCleanup() {
 
 // ===== player-host.js (player host lifecycle) =====
 
-function clearNativeReaderFloatingStyles(playerHostArg = playerHost) {
+function clearNativeReaderFloatingStyles(playerHostArg: Element | null = playerHost) {
   if (!state.reader.readingNativePageMode || !playerHostArg) {
     return;
   }
 
-  const targets = [];
-  let current = playerHostArg;
+  const targets: Element[] = [];
+  let current: Element | null = playerHostArg;
   let depth = 0;
   while (current && current !== document.body && depth < 8) {
     if (
@@ -209,23 +232,24 @@ function clearNativeReaderFloatingStyles(playerHostArg = playerHost) {
   }
 
   targets.forEach((node) => {
-    node.style.removeProperty("position");
-    node.style.removeProperty("inset");
-    node.style.removeProperty("left");
-    node.style.removeProperty("top");
-    node.style.removeProperty("right");
-    node.style.removeProperty("bottom");
-    node.style.removeProperty("transform");
-    node.style.removeProperty("width");
-    node.style.removeProperty("height");
-    node.style.removeProperty("max-width");
-    node.style.removeProperty("max-height");
-    node.style.removeProperty("margin");
-    node.style.removeProperty("z-index");
+    const el = node as HTMLElement;
+    el.style.removeProperty("position");
+    el.style.removeProperty("inset");
+    el.style.removeProperty("left");
+    el.style.removeProperty("top");
+    el.style.removeProperty("right");
+    el.style.removeProperty("bottom");
+    el.style.removeProperty("transform");
+    el.style.removeProperty("width");
+    el.style.removeProperty("height");
+    el.style.removeProperty("max-width");
+    el.style.removeProperty("max-height");
+    el.style.removeProperty("margin");
+    el.style.removeProperty("z-index");
   });
 }
 
-export function getReaderPlayerWrapNode(playerHostArg = playerHost) {
+export function getReaderPlayerWrapNode(playerHostArg: Element | null = playerHost): Element | null {
   return (
     playerHostArg?.closest?.("#playerWrap") ||
     playerHostArg?.closest?.(".player-wrap") ||
@@ -234,7 +258,7 @@ export function getReaderPlayerWrapNode(playerHostArg = playerHost) {
   );
 }
 
-export function hasNativeReaderPlayerLayoutIssue(playerHostArg = playerHost) {
+export function hasNativeReaderPlayerLayoutIssue(playerHostArg: Element | null = playerHost): boolean {
   if (!state.reader.readingNativePageMode || !playerHostArg) {
     return false;
   }
@@ -254,7 +278,7 @@ export function hasNativeReaderPlayerLayoutIssue(playerHostArg = playerHost) {
   return wrapRect.height <= 8 && playerRect.height > 120;
 }
 
-export async function ensureReaderPlayerMounted({ retries = 1, delayMs = 100, forceLayout = false } = {}) {
+export async function ensureReaderPlayerMounted({ retries = 1, delayMs = 100, forceLayout = false }: { retries?: number; delayMs?: number; forceLayout?: boolean } = {}) {
   for (let attempt = 0; attempt < retries; attempt += 1) {
     const video = getRuntimeVideoElement();
     const playerHostCandidate = findReaderPlayerHost(video);
@@ -338,7 +362,7 @@ export function queueEnsureReaderPlayerMounted() {
   }, 60);
 }
 
-export function isReaderPresentationStable(playerHostArg = playerHost) {
+export function isReaderPresentationStable(playerHostArg: Element | null = playerHost): boolean {
   if (!state.reader.readingViewOpen || !playerHostArg?.isConnected) {
     return false;
   }
@@ -399,7 +423,7 @@ export function layoutReaderPlayerHost() {
     const video = state.reader.readingVideoEl;
     let renderedWidth = rect.width;
     let renderedHeight = rect.height;
-    if (Number(video?.videoWidth) > 0 && Number(video?.videoHeight) > 0) {
+    if (video && Number(video.videoWidth) > 0 && Number(video.videoHeight) > 0) {
       const aspectRatio = Number(video.videoWidth) / Number(video.videoHeight);
       if (aspectRatio > 0) {
         const hostAspectRatio = rect.width / rect.height;
@@ -464,7 +488,7 @@ export function layoutReaderPlayerHost() {
 
   const video = state.reader.readingVideoEl;
   const aspectRatio =
-    Number(video?.videoWidth) > 0 && Number(video?.videoHeight) > 0
+    video && Number(video.videoWidth) > 0 && Number(video.videoHeight) > 0
       ? Number(video.videoWidth) / Number(video.videoHeight)
       : 16 / 9;
   const targetHeight = rect.height;
@@ -505,37 +529,39 @@ export function layoutReaderPlayerHost() {
   if (!unchanged) {
     readingView.style.setProperty("--boc-reader-player-rendered-width", cssWidth);
     readingView.style.setProperty("--boc-reader-player-rendered-height", cssHeight);
-    playerHostNode.style.setProperty("position", slotStyles.position, "important");
-    playerHostNode.style.setProperty("left", slotStyles.left, "important");
-    playerHostNode.style.setProperty("top", slotStyles.top, "important");
-    playerHostNode.style.setProperty("width", slotStyles.width, "important");
-    playerHostNode.style.setProperty("height", slotStyles.height, "important");
-    playerHostNode.style.setProperty("margin", slotStyles.margin, "important");
-    playerHostNode.style.setProperty("z-index", slotStyles.zIndex, "important");
-    playerHostNode.style.setProperty("max-width", slotStyles.maxWidth, "important");
-    playerHostNode.style.setProperty("max-height", slotStyles.maxHeight, "important");
+    const hostNode = playerHostNode as HTMLElement;
+    hostNode.style.setProperty("position", slotStyles.position, "important");
+    hostNode.style.setProperty("left", slotStyles.left, "important");
+    hostNode.style.setProperty("top", slotStyles.top, "important");
+    hostNode.style.setProperty("width", slotStyles.width, "important");
+    hostNode.style.setProperty("height", slotStyles.height, "important");
+    hostNode.style.setProperty("margin", slotStyles.margin, "important");
+    hostNode.style.setProperty("z-index", slotStyles.zIndex, "important");
+    hostNode.style.setProperty("max-width", slotStyles.maxWidth, "important");
+    hostNode.style.setProperty("max-height", slotStyles.maxHeight, "important");
   }
   updateReadingTranscriptTailSpacer();
 }
 
-function cleanupReaderPlayerHostNode(playerHostNode) {
+function cleanupReaderPlayerHostNode(playerHostNode: Element | null) {
   if (!playerHostNode) {
     return;
   }
-  playerHostNode.classList.remove("boc-reader-player-host");
-  playerHostNode.style.removeProperty("position");
-  playerHostNode.style.removeProperty("inset");
-  playerHostNode.style.removeProperty("left");
-  playerHostNode.style.removeProperty("top");
-  playerHostNode.style.removeProperty("right");
-  playerHostNode.style.removeProperty("bottom");
-  playerHostNode.style.removeProperty("transform");
-  playerHostNode.style.removeProperty("width");
-  playerHostNode.style.removeProperty("height");
-  playerHostNode.style.removeProperty("margin");
-  playerHostNode.style.removeProperty("z-index");
-  playerHostNode.style.removeProperty("max-width");
-  playerHostNode.style.removeProperty("max-height");
+  const node = playerHostNode as HTMLElement;
+  node.classList.remove("boc-reader-player-host");
+  node.style.removeProperty("position");
+  node.style.removeProperty("inset");
+  node.style.removeProperty("left");
+  node.style.removeProperty("top");
+  node.style.removeProperty("right");
+  node.style.removeProperty("bottom");
+  node.style.removeProperty("transform");
+  node.style.removeProperty("width");
+  node.style.removeProperty("height");
+  node.style.removeProperty("margin");
+  node.style.removeProperty("z-index");
+  node.style.removeProperty("max-width");
+  node.style.removeProperty("max-height");
 }
 
 export function cleanupReaderPlayerHost() {
@@ -589,13 +615,13 @@ export function stopReaderPlayerObserver() {
   }
 }
 
-export function bindReadingViewVideo(video = getRuntimeVideoElement()) {
+export function bindReadingViewVideo(video: HTMLVideoElement | null = getRuntimeVideoElement()): HTMLVideoElement | null {
   if (!video) {
     if (state.reader.readingVideoEl && state.reader.readingVideoEl.__bocReadingSyncHandler) {
       const prev = state.reader.readingVideoEl;
-      prev.removeEventListener("timeupdate", prev.__bocReadingSyncHandler);
-      prev.removeEventListener("seeked", prev.__bocReadingSyncHandler);
-      prev.removeEventListener("loadedmetadata", prev.__bocReadingSyncHandler);
+      prev.removeEventListener("timeupdate", prev.__bocReadingSyncHandler!);
+      prev.removeEventListener("seeked", prev.__bocReadingSyncHandler!);
+      prev.removeEventListener("loadedmetadata", prev.__bocReadingSyncHandler!);
       delete prev.__bocReadingSyncHandler;
     }
     state.reader.readingVideoEl = null;
@@ -609,12 +635,12 @@ export function bindReadingViewVideo(video = getRuntimeVideoElement()) {
 
   if (state.reader.readingVideoEl && state.reader.readingVideoEl.__bocReadingSyncHandler) {
     const prev = state.reader.readingVideoEl;
-    prev.removeEventListener("timeupdate", prev.__bocReadingSyncHandler);
-    prev.removeEventListener("seeked", prev.__bocReadingSyncHandler);
-    prev.removeEventListener("loadedmetadata", prev.__bocReadingSyncHandler);
+    prev.removeEventListener("timeupdate", prev.__bocReadingSyncHandler!);
+    prev.removeEventListener("seeked", prev.__bocReadingSyncHandler!);
+    prev.removeEventListener("loadedmetadata", prev.__bocReadingSyncHandler!);
   }
 
-  const syncHandler = (event) => {
+  const syncHandler = (event: Event) => {
     if (state.reader.readingViewOpen) {
       if (event?.type === "loadedmetadata") {
         layoutReaderPlayerHost();
@@ -646,7 +672,7 @@ export function bindReadingViewVideo(video = getRuntimeVideoElement()) {
   return video;
 }
 
-export function scheduleReaderMiniPlayerDismiss(maxAttempts = 12, delayMs = 180) {
+export function scheduleReaderMiniPlayerDismiss(maxAttempts = 12, delayMs = 180): void {
   if (!state.reader.readingViewOpen) {
     return;
   }
@@ -683,19 +709,19 @@ export function scheduleReaderMiniPlayerDismiss(maxAttempts = 12, delayMs = 180)
   miniDismissTimer = window.setTimeout(run, 40);
 }
 
-function normalizeReaderPlayerContainer(playerHostArg = playerHost) {
+function normalizeReaderPlayerContainer(playerHostArg: Element | null = playerHost) {
   if (!playerHostArg) {
     return;
   }
 
   restoreReaderPlayerContainer();
-  const adjusted = [];
-  let current = playerHostArg;
+  const adjusted: AdjustedNodeSnapshot[] = [];
+  let current: Element | null = playerHostArg;
   let depth = 0;
 
   while (current && current !== document.body && depth < 12) {
     const computed = window.getComputedStyle(current);
-    const className = typeof current.className === "string" ? current.className : "";
+    const className = typeof (current as HTMLElement).className === "string" ? (current as HTMLElement).className : "";
     const isPlayerLayoutNode = current.matches?.(
       ".bpx-player-container, .bpx-player-video-area, .bpx-player-primary-area, .bpx-player-inner, .scroll-sticky, .player-wrap, #playerWrap, #bilibili-player"
     );
@@ -712,31 +738,32 @@ function normalizeReaderPlayerContainer(playerHostArg = playerHost) {
       : isPlayerLayoutNode || isMiniLike;
 
     if (shouldReset) {
+      const el = current as HTMLElement;
       adjusted.push({
-        node: current,
-        position: current.style.position,
-        left: current.style.left,
-        top: current.style.top,
-        right: current.style.right,
-        bottom: current.style.bottom,
-        width: current.style.width,
-        height: current.style.height,
-        transform: current.style.transform,
-        margin: current.style.margin,
-        zIndex: current.style.zIndex
+        node: el,
+        position: el.style.position,
+        left: el.style.left,
+        top: el.style.top,
+        right: el.style.right,
+        bottom: el.style.bottom,
+        width: el.style.width,
+        height: el.style.height,
+        transform: el.style.transform,
+        margin: el.style.margin,
+        zIndex: el.style.zIndex
       });
-      current.setAttribute("data-boc-reader-player-reset", "1");
-      current.style.setProperty("position", "static", "important");
-      current.style.setProperty("left", "auto", "important");
-      current.style.setProperty("top", "auto", "important");
-      current.style.setProperty("right", "auto", "important");
-      current.style.setProperty("bottom", "auto", "important");
-      current.style.setProperty("transform", "none", "important");
-      current.style.setProperty("margin", "0", "important");
-      current.style.setProperty("z-index", "auto", "important");
+      el.setAttribute("data-boc-reader-player-reset", "1");
+      el.style.setProperty("position", "static", "important");
+      el.style.setProperty("left", "auto", "important");
+      el.style.setProperty("top", "auto", "important");
+      el.style.setProperty("right", "auto", "important");
+      el.style.setProperty("bottom", "auto", "important");
+      el.style.setProperty("transform", "none", "important");
+      el.style.setProperty("margin", "0", "important");
+      el.style.setProperty("z-index", "auto", "important");
       if (current !== playerHostArg) {
-        current.style.removeProperty("width");
-        current.style.removeProperty("height");
+        el.style.removeProperty("width");
+        el.style.removeProperty("height");
       }
     }
 

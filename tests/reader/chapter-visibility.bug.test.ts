@@ -13,16 +13,17 @@ import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
 import { mountPlayerChain } from "../helpers/reader-skeleton.js";
+import type { TestState } from "./reader-test-env.js";
 
-let state;
-let reader; // reader/index.js facade
-let presenter;
-let uiRenderer;
-let defaultsModule;
+let state: TestState;
+let reader: typeof import("../../extension/reader/index.js");
+let presenter: typeof import("../../extension/reader/presenter.js");
+let uiRenderer: typeof import("../../extension/ui/ui-renderer.js");
+let defaultsModule: typeof import("../../extension/core/defaults.js");
 
 async function loadModules() {
   setLocationUrl(READER_MODE_URL);
-  state = (await import("../../extension/core/state.js")).state;
+  state = (await import("../../extension/core/state.js")).state as TestState;
   reader = await import("../../extension/reader/index.js");
   presenter = await import("../../extension/reader/presenter.js");
   uiRenderer = await import("../../extension/ui/ui-renderer.js");
@@ -51,7 +52,7 @@ function chapterButtons() {
 }
 
 function railVisibilityAttrs() {
-  const readingView = document.getElementById(reader.ids.readingView);
+  const readingView = document.getElementById(reader.ids.readingView)!;
   return {
     readingViewChapterVisibility: readingView.getAttribute("data-chapter-visibility"),
     readingViewHasChapters: readingView.getAttribute("data-has-chapters"),
@@ -141,7 +142,7 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
     document.body.setAttribute("data-boc-reader-mode", "1");
     await reader.enterReaderMode();
 
-    const checkbox = document.getElementById(reader.ids.readingChapterVisible);
+    const checkbox = document.getElementById(reader.ids.readingChapterVisible)! as HTMLInputElement;
     expect(checkbox).not.toBe(null);
     expect(checkbox.checked).toBe(true);
 
@@ -179,7 +180,7 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
     // 找到控制 .boc-reading-rail display:none 的规则块
     const hideRule = css.match(/[^{}]*\.boc-reading-rail[^{}]*\{[^}]*display:\s*none[^}]*\}/s);
     expect(hideRule, "reader-gate.css 中应存在隐藏 .boc-reading-rail 的规则").not.toBe(null);
-    const selectors = hideRule[0];
+    const selectors = hideRule![0];
 
     // JS 侧实际写入的属性（lifecycle.js applyReadingViewPresentation /
     // updateReaderChapterPresence）必须全部被选择器引用，否则属性写了也白写。
@@ -190,7 +191,7 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
 
     // 反向：选择器里出现的 chapter 相关属性名，JS 必须真的会写。
     // 从 renderReadingView + applyReadingViewPresentation 路径取真实写入值比对。
-    const readingView = document.getElementById(reader.ids.readingView);
+    const readingView = document.getElementById(reader.ids.readingView)!;
     state.clip.chapters = [{ title: "x", from: 0 }];
     reader.renderReadingView();
     reader.updateReaderPreferences({ readerChapterVisible: false }, { persist: false });

@@ -8,8 +8,15 @@
 import { describe, it, expect } from "vitest";
 import { resolvePageContext } from "../../extension/reader/page-context.js";
 
+interface MetaOverrides {
+  aid?: string;
+  defaultCid?: string;
+  defaultDuration?: number;
+  pages?: Array<{ cid: string; page: number; part: string; duration: number }>;
+}
+
 // 与 bili-gateway.fetchVideoMeta 返回结构一致的分P列表
-function buildMeta(overrides = {}) {
+function buildMeta(overrides: MetaOverrides = {}) {
   return {
     aid: "170001",
     defaultCid: "101",
@@ -23,9 +30,9 @@ function buildMeta(overrides = {}) {
   };
 }
 
-function stubVideoCtx(src) {
+function stubVideoCtx(src: string) {
   const video = { currentSrc: src || "", src: src || "" };
-  return { getVideo: () => video };
+  return { getVideo: () => video as unknown as HTMLVideoElement };
 }
 
 describe("resolvePageContext 多 P 解析", () => {
@@ -142,7 +149,7 @@ describe("player DOM 推断路径", () => {
     const options = {
       ctx: {
         __INITIAL_STATE__: {},
-        document: { querySelector: () => iframe }
+        document: { querySelector: () => iframe as unknown as Element }
       },
       getVideo: () => null
     };
@@ -156,7 +163,7 @@ describe("player DOM 推断路径", () => {
     const options = {
       ctx: {
         __INITIAL_STATE__: {},
-        document: { querySelector: () => playerRoot }
+        document: { querySelector: () => playerRoot as unknown as Element }
       },
       getVideo: () => null
     };

@@ -5,34 +5,37 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NORMAL_PAGE_URL, READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
 import { mountReaderSkeleton } from "../helpers/reader-skeleton.js";
+import type { TestState, ChromeRuntimeStub } from "./reader-test-env.js";
 
-let state;
-let shell;
-let presenter;
+let state: TestState;
+let shell: typeof import("../../extension/reader/index.js");
+let presenter: typeof import("../../extension/reader/presenter.js");
+let chromeStub: ChromeRuntimeStub;
 
 async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
-  state = (await import("../../extension/core/state.js")).state;
+  state = (await import("../../extension/core/state.js")).state as TestState;
   presenter = await import("../../extension/reader/presenter.js");
   shell = await import("../../extension/reader/index.js");
+  chromeStub = globalThis.chrome as unknown as ChromeRuntimeStub;
   // 模拟 content.js 的接线：reader-impl 经 presenter seam 持久化/读取设置，
   // 底层仍是 chrome.runtime.sendMessage（tests/setup.js 的 stub）。
   presenter.subscribeReaderSettingsPersist(() => {
-    globalThis.chrome.runtime.sendMessage(
+    chromeStub.runtime.sendMessage(
       { type: "save-settings", settings: state.settings },
       () => {}
     );
   });
   presenter.subscribeReaderSettingsLoad(() =>
-    new Promise((resolve) => {
-      globalThis.chrome.runtime.sendMessage({ type: "get-settings" }, (resp) => {
+    new Promise<Record<string, unknown>>((resolve) => {
+      chromeStub.runtime.sendMessage({ type: "get-settings" }, (resp: { ok: boolean; settings?: Record<string, unknown> }) => {
         resolve(resp?.ok ? { ...(resp.settings || {}) } : {});
       });
     })
   );
 }
 
-function makeStepper(node) {
+function makeStepper(node: HTMLElement) {
   // 与 buildReaderStepperControl 生成的按钮结构一致
   const btn = document.createElement("button");
   btn.type = "button";
@@ -103,7 +106,7 @@ describe("设置变更与 data-attribute", () => {
     });
     shell.applyReadingViewPresentation();
 
-    const readingView = document.getElementById(shell.ids.readingView);
+    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
     const htmlEl = document.documentElement;
     const bodyEl = document.body;
 
@@ -141,13 +144,13 @@ describe("设置变更与 data-attribute", () => {
     expect(state.reader.readingFontScale).toBe("xs");
     expect(state.reader.readingContentWidth).toBe("narrow");
 
-    const readingView = document.getElementById(shell.ids.readingView);
+    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
     expect(readingView.dataset.fontScale).toBe("xs");
     expect(readingView.dataset.contentWidth).toBe("narrow");
     expect(document.documentElement.dataset.bocReaderFontScale).toBe("xs");
     expect(document.body.dataset.bocReaderContentWidth).toBe("narrow");
 
-    expect(globalThis.chrome.runtime.sendMessage).toHaveBeenCalledWith(
+    expect(chromeStub.runtime.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: "save-settings" }),
       expect.any(Function)
     );
@@ -168,15 +171,15 @@ describe("设置变更与 data-attribute", () => {
     // bindSettingsWatcher 在 chrome.storage.onChanged 存在时绑定
     shell.bindSettingsWatcher();
     expect(state.ui.settingsWatcherBound).toBe(true);
-    expect(globalThis.chrome.storage.onChanged.addListener).toHaveBeenCalled();
+    expect(chromeStub.storage.onChanged.addListener).toHaveBeenCalled();
   });
 
   it("settings 变更后：storage.onChanged 回调应用新主题", async () => {
     shell.bindSettingsWatcher();
-    const listener = globalThis.chrome.storage.onChanged.addListener.mock.calls[0][0];
+    const listener = chromeStub.storage.onChanged.addListener.mock.calls[0][0];
 
     // 让 getSettings 返回指定设置（shell.js 内部经 runtime.getSettings -> chrome.runtime.sendMessage）
-    globalThis.chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+    chromeStub.runtime.sendMessage.mockImplementation((message, callback) => {
       if (message?.type === "get-settings") {
         callback?.({
           ok: true,
@@ -204,7 +207,7 @@ describe("设置变更与 data-attribute", () => {
       expect(state.reader.readingTheme).toBe("dark");
     });
 
-    const readingView = document.getElementById(shell.ids.readingView);
+    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
     expect(readingView.dataset.theme).toBe("dark");
   });
 });

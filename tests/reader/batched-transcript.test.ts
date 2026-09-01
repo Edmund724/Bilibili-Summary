@@ -13,17 +13,18 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
 import { mountPlayerChain, mountReaderSkeleton } from "../helpers/reader-skeleton.js";
+import type { TestState } from "./reader-test-env.js";
 
-let state;
-let shell;
-let video;
+let state: TestState;
+let shell: typeof import("../../extension/reader/index.js");
+let video: HTMLVideoElement;
 
 // fake rAF：捕获回调 + 尊重 cancelAnimationFrame（验证取消路径）。
-let rafPending;
-let rafCancelled;
-let rafNextId;
-let originalRaf;
-let originalCancelRaf;
+let rafPending: Map<number, (time: number) => void>;
+let rafCancelled: number[];
+let rafNextId: number;
+let originalRaf: typeof window.requestAnimationFrame;
+let originalCancelRaf: typeof window.cancelAnimationFrame;
 
 function installFakeRaf() {
   rafPending = new Map();
@@ -31,12 +32,12 @@ function installFakeRaf() {
   rafNextId = 0;
   originalRaf = window.requestAnimationFrame;
   originalCancelRaf = window.cancelAnimationFrame;
-  window.requestAnimationFrame = (cb) => {
+  window.requestAnimationFrame = (cb: (time: number) => void) => {
     rafNextId += 1;
     rafPending.set(rafNextId, cb);
     return rafNextId;
   };
-  window.cancelAnimationFrame = (id) => {
+  window.cancelAnimationFrame = (id: number) => {
     rafCancelled.push(id);
     rafPending.delete(id);
   };
@@ -60,7 +61,7 @@ function flushAnimationFrames(maxRounds = 30) {
   }
 }
 
-function makeBody(count) {
+function makeBody(count: number) {
   const body = [];
   for (let i = 0; i < count; i += 1) {
     body.push({ from: i * 2, to: i * 2 + 1.9, content: `字幕第${i}条` });
@@ -70,7 +71,7 @@ function makeBody(count) {
 
 async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
-  state = (await import("../../extension/core/state.js")).state;
+  state = (await import("../../extension/core/state.js")).state as TestState;
   shell = await import("../../extension/reader/index.js");
 }
 
@@ -96,7 +97,7 @@ afterEach(() => {
 });
 
 function transcriptList() {
-  return document.getElementById(shell.ids.readingTranscriptList);
+  return document.getElementById(shell.ids.readingTranscriptList) as HTMLElement;
 }
 
 function renderedItemCount() {
@@ -105,7 +106,7 @@ function renderedItemCount() {
 
 function tailSpacer() {
   const list = transcriptList();
-  const spacer = document.getElementById(shell.ids.readingTranscriptTailSpacer);
+  const spacer = document.getElementById(shell.ids.readingTranscriptTailSpacer) as HTMLElement | null;
   // spacer 必须始终是列表最后一个子节点（滚动定位的尾部留白依赖它）
   if (spacer && spacer.parentElement === list && spacer === list.lastElementChild) {
     return spacer;
@@ -142,7 +143,7 @@ describe("字幕列表分批渲染", () => {
     shell.renderReadingView();
     // 首屏 120 条里没有 index 300：先 flush 一批（120+200=320），300 上屏
     flushAnimationFrames();
-    const target = transcriptList().querySelector('[data-index="300"]');
+    const target = transcriptList().querySelector('[data-index="300"]') as HTMLElement;
     expect(target).not.toBeNull();
     const event = new MouseEvent("click", { bubbles: true, cancelable: true });
     Object.defineProperty(event, "target", { value: target });
@@ -167,8 +168,8 @@ describe("字幕列表分批渲染", () => {
     shell.syncReadingViewPlayback(true);
 
     expect(renderedItemCount()).toBeGreaterThanOrEqual(601);
-    const active = transcriptList().querySelector(".boc-reading-item.is-active");
-    expect(active?.dataset.index).toBe("600");
+    const active = transcriptList().querySelector(".boc-reading-item.is-active") as HTMLElement;
+    expect(active.dataset.index).toBe("600");
     expect(state.reader.readingActiveSubtitleIndex).toBe(600);
     // 剩余条目继续排进 rAF 队列，flush 后全量渲染完成
     flushAnimationFrames();
@@ -188,7 +189,7 @@ describe("字幕列表分批渲染", () => {
 
     flushAnimationFrames(); // 条目上屏
     shell.syncReadingViewPlayback(); // 下一拍：同一 index，缓存节点为 null 必然现查
-    expect(transcriptList().querySelector('.boc-reading-item.is-active')?.dataset.index).toBe("600");
+    expect((transcriptList().querySelector('.boc-reading-item.is-active') as HTMLElement).dataset.index).toBe("600");
   });
 
   it("渲染期间再次 renderReadingView（切轨）：取消上一轮任务，新数据不重不漏", () => {

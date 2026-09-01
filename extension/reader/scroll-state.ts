@@ -22,10 +22,10 @@ export function isProgrammaticScrolling() {
   return Date.now() <= programmaticScrollUntil;
 }
 
-export function setManualScrollPaused(until) {
+export function setManualScrollPaused(until: number) {
   manualScrollPauseUntil = until;
 }
 
-export function setProgrammaticScrollUntil(until) {
+export function setProgrammaticScrollUntil(until: number) {
   programmaticScrollUntil = until;
 }

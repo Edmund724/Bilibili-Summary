@@ -5,15 +5,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
 import { mockPlayerRects, mountPlayerChain, mountReaderSkeleton } from "../helpers/reader-skeleton.js";
+import type { TestState } from "./reader-test-env.js";
 
-let state;
-let shell;
-let pageFrame;
-let impl;
+let state: TestState;
+let shell: typeof import("../../extension/reader/index.js");
+let pageFrame: typeof shell;
+let impl: typeof shell;
 
 async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
-  state = (await import("../../extension/core/state.js")).state;
+  state = (await import("../../extension/core/state.js")).state as TestState;
   shell = await import("../../extension/reader/index.js");
   pageFrame = shell;
   impl = shell;
@@ -24,7 +25,7 @@ async function loadReaderModules() {
 // （内部同步定时器/绑定标志已收成 reader-impl 模块级闭包，不再暴露在 state.reader）
 function syncRunning() {
   const video = document.querySelector("video");
-  return Boolean(video?.__bocReadingSyncHandler);
+  return Boolean((video as HTMLVideoElement | null)?.__bocReadingSyncHandler);
 }
 
 beforeEach(async () => {
@@ -63,7 +64,7 @@ describe("reader 生命周期", () => {
 
     await shell.enterReaderMode();
 
-    const readingView = document.getElementById(shell.ids.readingView);
+    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
     expect(state.reader.readingViewOpen).toBe(true);
     expect(readingView.classList.contains("open")).toBe(true);
     expect(readingView.classList.contains("reader-page")).toBe(true);
@@ -77,13 +78,13 @@ describe("reader 生命周期", () => {
     expect(document.body.getAttribute("data-boc-reader-mode")).toBe("1");
 
     // 章节与字幕列表渲染
-    const chapterButtons = readingView.querySelectorAll(".boc-reading-chapter");
+    const chapterButtons = readingView.querySelectorAll(".boc-reading-chapter") as NodeListOf<HTMLElement>;
     expect(chapterButtons.length).toBe(2);
     expect(chapterButtons[0].dataset.seconds).toBe("0");
     expect(chapterButtons[1].dataset.seconds).toBe("30");
     expect(chapterButtons[0].textContent).toContain("开场");
 
-    const transcriptItems = readingView.querySelectorAll(".boc-reading-item");
+    const transcriptItems = readingView.querySelectorAll(".boc-reading-item") as NodeListOf<HTMLElement>;
     expect(transcriptItems.length).toBe(2);
     expect(transcriptItems[1].dataset.seconds).toBe("10");
     expect(transcriptItems[1].textContent).toContain("今天讲测试");
@@ -94,7 +95,7 @@ describe("reader 生命周期", () => {
     expect(readingView.getAttribute("aria-busy")).toBe("false");
 
     // 播放器挂载绑定 stub 视频
-    const video = document.querySelector("video");
+    const video = document.querySelector("video") as HTMLVideoElement;
     expect(video.__bocReadingSyncHandler).toBeTypeOf("function");
     expect(syncRunning()).toBe(true);
 
@@ -117,13 +118,13 @@ describe("reader 生命周期", () => {
     await shell.enterReaderMode();
 
     // 播放器挂载成功后会绑定视频同步 handler 与同步定时器
-    const video = document.querySelector("video");
+    const video = document.querySelector("video") as HTMLVideoElement;
     expect(video.__bocReadingSyncHandler).toBeTypeOf("function");
     expect(syncRunning()).toBe(true);
 
     shell.closeReadingView();
 
-    const readingView = document.getElementById(shell.ids.readingView);
+    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
     expect(state.reader.readingViewOpen).toBe(false);
     expect(readingView.classList.contains("open")).toBe(false);
     expect(readingView.getAttribute("aria-hidden")).toBe("true");

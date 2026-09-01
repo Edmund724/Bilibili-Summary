@@ -10,8 +10,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 
-let presenter;
-let received;
+let presenter: typeof import("../../extension/reader/presenter.js");
+let received: unknown[][];
 
 beforeEach(async () => {
   resetModuleState();
@@ -19,7 +19,7 @@ beforeEach(async () => {
   // 注册表清空），避免跨用例的 handler 累积污染断言。
   presenter = await import("../../extension/reader/presenter.js");
   received = [];
-  presenter.subscribeReaderPresenter((...args) => {
+  presenter.subscribeReaderPresenter((...args: unknown[]) => {
     received.push(args);
   });
 });

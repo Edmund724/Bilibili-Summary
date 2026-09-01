@@ -14,9 +14,38 @@
 import { getRuntimeVideoElement as defaultGetVideo } from "../bilibili/video-probe.js";
 import { extractPageIndex } from "../bilibili/video-id-shared.js";
 
+interface PageItem {
+  cid?: string | number;
+  page?: string | number;
+  part?: string;
+  duration?: string | number;
+}
+
+interface PageContextMeta {
+  aid?: string | number;
+  defaultCid?: string | number;
+  defaultDuration?: string | number;
+  pages?: PageItem[];
+}
+
+interface PageContextCtx {
+  href?: string;
+  document?: { querySelector: (selector: string) => Element | null };
+  __INITIAL_STATE__?: Record<string, unknown>;
+  __PLAYER_STATE__?: Record<string, unknown>;
+  __BILI_PLAYER__?: Record<string, unknown>;
+}
+
+interface PageContextOptions {
+  ctx?: PageContextCtx;
+  getVideo?: () => HTMLVideoElement | null;
+  aid?: string | number;
+  defaultCid?: string | number;
+}
+
 // ===== URL primitives =====
 
-function hasExplicitPageParam(url) {
+function hasExplicitPageParam(url: string) {
   try {
     return new URL(url).searchParams.has("p");
   } catch {
@@ -24,7 +53,7 @@ function hasExplicitPageParam(url) {
   }
 }
 
-function extractOid(url) {
+function extractOid(url: string) {
   try {
     return String(new URL(url).searchParams.get("oid") || "").trim();
   } catch {
@@ -32,7 +61,7 @@ function extractOid(url) {
   }
 }
 
-function pickPageFromPages(pages, pageIndex) {
+function pickPageFromPages(pages: PageItem[], pageIndex: number) {
   const safePageIndex = Number(pageIndex) > 0 ? Number(pageIndex) : 1;
   const safePages = Array.isArray(pages) ? pages : [];
   const pageByIndex = safePages[safePageIndex - 1];
@@ -48,7 +77,7 @@ function pickPageFromPages(pages, pageIndex) {
   return null;
 }
 
-function pickCidFromPages(pages, pageIndex, fallbackCid = "") {
+function pickCidFromPages(pages: PageItem[], pageIndex: number, fallbackCid: string | number = "") {
   const matchedPage = pickPageFromPages(pages, pageIndex);
   if (matchedPage?.cid) {
     return String(matchedPage.cid);
@@ -66,7 +95,7 @@ function pickCidFromPages(pages, pageIndex, fallbackCid = "") {
   throw new Error("没有找到当前分P的 CID。");
 }
 
-function pickPageIndexFromOid(pages, oid, options = {}) {
+function pickPageIndexFromOid(pages: PageItem[], oid: string | number, options: PageContextOptions = {}) {
   const safeOid = String(oid || "").trim();
   if (!safeOid) {
     return 0;
@@ -88,7 +117,7 @@ function pickPageIndexFromOid(pages, oid, options = {}) {
   return 0;
 }
 
-function readCurrentPageFromPageState(pages, fallbackCid = "", options = {}) {
+function readCurrentPageFromPageState(pages: PageItem[], fallbackCid: string | number = "", options: PageContextOptions = {}) {
   const safePages = Array.isArray(pages) ? pages : [];
   const { ctx = {}, getVideo = defaultGetVideo } = options;
 
@@ -104,16 +133,16 @@ function readCurrentPageFromPageState(pages, fallbackCid = "", options = {}) {
 
   // 2. 其次尝试页面全局状态（watchlater 等页面通常携带播放器状态）
   try {
-    const rootState = ctx.__INITIAL_STATE__ || window?.__INITIAL_STATE__ || {};
+    const rootState = (ctx.__INITIAL_STATE__ || window?.__INITIAL_STATE__ || {}) as Record<string, unknown>;
     const playerState =
-      rootState.player || ctx.__PLAYER_STATE__ || ctx.__BILI_PLAYER__ || window?.__PLAYER_STATE__ || window?.__BILI_PLAYER__;
+      (rootState.player || ctx.__PLAYER_STATE__ || ctx.__BILI_PLAYER__ || window?.__PLAYER_STATE__ || window?.__BILI_PLAYER__) as Record<string, unknown> | undefined;
     if (playerState) {
       const candidates = [
         playerState.page,
         playerState.pageIndex,
         playerState.currentPage,
-        playerState.data?.page,
-        playerState.data?.pageIndex
+        (playerState.data as Record<string, unknown> | undefined)?.page,
+        (playerState.data as Record<string, unknown> | undefined)?.pageIndex
       ];
       for (const value of candidates) {
         const pageFromState = Number(value || "0");
@@ -123,15 +152,15 @@ function readCurrentPageFromPageState(pages, fallbackCid = "", options = {}) {
       }
     }
 
-    const videoData = rootState.videoData || rootState.playletInfo;
+    const videoData = (rootState.videoData || rootState.playletInfo) as Record<string, unknown> | undefined;
     if (videoData) {
       const pageFromVideoData = Number(
-        videoData.page || videoData.pageIndex || videoData.currentPage || videoData.data?.page || "0"
+        videoData.page || videoData.pageIndex || videoData.currentPage || (videoData.data as Record<string, unknown> | undefined)?.page || "0"
       );
       if (Number.isFinite(pageFromVideoData) && pageFromVideoData > 0) {
         return pageFromVideoData;
       }
-      const cidFromVideoData = String(videoData.cid || videoData.data?.cid || "");
+      const cidFromVideoData = String(videoData.cid || (videoData.data as Record<string, unknown> | undefined)?.cid || "");
       if (cidFromVideoData) {
         const matched = safePages.find((item) => String(item?.cid || "") === cidFromVideoData);
         if (matched?.page) {
@@ -160,7 +189,7 @@ function readCurrentPageFromPageState(pages, fallbackCid = "", options = {}) {
   return safePages.length > 0 ? 1 : 0;
 }
 
-function readPageFromPlayerDom(pages, options = {}) {
+function readPageFromPlayerDom(pages: PageItem[], options: PageContextOptions = {}) {
   const safePages = Array.isArray(pages) ? pages : [];
   const { ctx = {}, getVideo = defaultGetVideo } = options;
   const doc = ctx.document || document;
@@ -194,10 +223,10 @@ function readPageFromPlayerDom(pages, options = {}) {
   // 3b. 从播放器 iframe src 提取 page / cid
   try {
     const iframe =
-      doc.querySelector(
+      (doc.querySelector(
         "#bilibili-player iframe, .bpx-player-container iframe, iframe[src*='player.bilibili.com']"
-      ) ||
-      doc.querySelector("iframe[src*='bilibili.com/player']");
+      ) as HTMLIFrameElement | null) ||
+      (doc.querySelector("iframe[src*='bilibili.com/player']") as HTMLIFrameElement | null);
     if (iframe?.src) {
       const pageMatch = iframe.src.match(/[?&]page=(\d+)/i);
       if (pageMatch) {
@@ -242,14 +271,14 @@ function readPageFromPlayerDom(pages, options = {}) {
   return 0;
 }
 
-function pickDurationFromPages(pages, pageIndex, fallbackDuration = 0) {
+function pickDurationFromPages(pages: PageItem[], pageIndex: number, fallbackDuration: string | number = 0) {
   const matchedPage = pickPageFromPages(pages, pageIndex);
-  if (Number(matchedPage?.duration) > 0) {
+  if (matchedPage && Number(matchedPage.duration) > 0) {
     return Number(matchedPage.duration);
   }
 
   const safePages = Array.isArray(pages) ? pages : [];
-  if (Number(safePages[0]?.duration) > 0) {
+  if (safePages[0] && Number(safePages[0].duration) > 0) {
     return Number(safePages[0].duration);
   }
 
@@ -276,9 +305,9 @@ function pickDurationFromPages(pages, pageIndex, fallbackDuration = 0) {
 // MutationObserver in module scope (now ./page-frame.js, formerly
 // reader-impl.js); the guard holds it here so the implementation can reuse it
 // across lifecycle phases.
-let normalPageStateObserver = null;
+let normalPageStateObserver: MutationObserver | null = null;
 
-export function setNormalPageStateObserver(observer) {
+export function setNormalPageStateObserver(observer: MutationObserver | null) {
   normalPageStateObserver = observer;
 }
 
@@ -286,7 +315,11 @@ function getNormalPageStateObserver() {
   return normalPageStateObserver;
 }
 
-export function resolvePageContext(url, meta = {}, options = {}) {
+export function resolvePageContext(
+  url: string,
+  meta: PageContextMeta = {},
+  options: PageContextOptions = {}
+) {
   const safePages = Array.isArray(meta.pages) ? meta.pages : [];
   const defaultPageIndex = extractPageIndex(url);
   const oid = extractOid(url);
@@ -310,7 +343,7 @@ export function resolvePageContext(url, meta = {}, options = {}) {
   const currentPage = pickPageFromPages(safePages, resolvedPageIndex);
   return {
     pageIndex: resolvedPageIndex,
-    cid: currentPage?.cid || pickCidFromPages(safePages, resolvedPageIndex, meta.defaultCid),
+    cid: currentPage?.cid || pickCidFromPages(safePages, resolvedPageIndex, meta.defaultCid ?? ""),
     cidSource: "meta-pages",
     duration: pickDurationFromPages(safePages, resolvedPageIndex, meta.defaultDuration),
     pageTitle: currentPage?.part || ""

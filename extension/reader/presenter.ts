@@ -36,14 +36,20 @@ import { logWarn } from "../shared/logging.js";
 //（常驻轻文件，动态边在其内部），不会把链拖回常驻。
 import { ensureSummarizeChain } from "../subtitle/lazy.js";
 
-const readers = [];
+type ReaderPresenterHandler = (kind: string, ...payload: unknown[]) => void;
+type SubtitleRefreshHandler = () => unknown;
+type SettingsPersistHandler = () => void;
+type SettingsLoadHandler = () => unknown;
+type PlayerAiSyncHandler = (delayMs?: number, options?: { resetRetry?: boolean }) => void;
 
-const subtitleRefreshHandlers = [];
+const readers: ReaderPresenterHandler[] = [];
 
-let persistSettingsHandler = null;
-let loadSettingsHandler = null;
+const subtitleRefreshHandlers: SubtitleRefreshHandler[] = [];
 
-export function subscribeReaderPresenter(handler) {
+let persistSettingsHandler: SettingsPersistHandler | null = null;
+let loadSettingsHandler: SettingsLoadHandler | null = null;
+
+export function subscribeReaderPresenter(handler: ReaderPresenterHandler) {
   if (typeof handler !== "function") {
     return () => {};
   }
@@ -62,7 +68,7 @@ export function subscribeReaderPresenter(handler) {
 // "subtitle-ready" 会带状态栏文案（如"当前视频无字幕。"），"status" 带提示文本；
 // 历史上这里只转发 kind，第二参被丢弃、阅读视图永远显示默认文案。单参调用
 // （reset/rerender/无文案的 subtitle-ready）行为不变。
-export function notifyReaderPresenter(kind, ...payload) {
+export function notifyReaderPresenter(kind: string, ...payload: unknown[]) {
   for (const handler of readers.slice()) {
     try {
       handler(kind, ...payload);
@@ -72,7 +78,7 @@ export function notifyReaderPresenter(kind, ...payload) {
   }
 }
 
-export function subscribeSubtitleRefresh(handler) {
+export function subscribeSubtitleRefresh(handler: SubtitleRefreshHandler) {
   if (typeof handler !== "function") {
     return () => {};
   }
@@ -90,7 +96,7 @@ export function subscribeSubtitleRefresh(handler) {
 // Asks the subtitle fetcher to re-fetch the current clip. Resolves with the
 // handler's return value (a Promise), or with undefined when no handler is
 // registered yet — must never throw.
-export function requestSubtitleRefresh() {
+export function requestSubtitleRefresh(): Promise<unknown> {
   const handler = subtitleRefreshHandlers[0];
   if (!handler) {
     // 候选02 分层惰性：链未装载 ⇒ refreshClip 未注册。先装载总结链（其
@@ -118,14 +124,14 @@ export function requestSubtitleRefresh() {
     return Promise.resolve(handler());
   } catch (error) {
     logWarn("[BOC] subtitle refresh handler failed", { error });
-    return undefined;
+    return Promise.resolve(undefined);
   }
 }
 
 // Registers the content-script callback that persists reader settings via
 // shared/messaging.js's sendRuntimeMessage. reader-impl.js calls
 // persistReaderSettingsThroughSeam() instead of importing sendRuntimeMessage.
-export function subscribeReaderSettingsPersist(handler) {
+export function subscribeReaderSettingsPersist(handler: SettingsPersistHandler) {
   persistSettingsHandler = typeof handler === "function" ? handler : null;
 }
 
@@ -143,7 +149,7 @@ export function persistReaderSettingsThroughSeam() {
 // Registers the content-script callback that loads settings via
 // core/runtime.js's getSettings (a Promise). reader-impl.js's settings-change
 // watcher delegates through here instead of importing getSettings.
-export function subscribeReaderSettingsLoad(handler) {
+export function subscribeReaderSettingsLoad(handler: SettingsLoadHandler) {
   loadSettingsHandler = typeof handler === "function" ? handler : null;
 }
 
@@ -163,13 +169,13 @@ export function loadReaderSettingsThroughSeam() {
 // button (ai/player-ai.js). reader-impl.js must not import ai/player-ai.js
 // (it would pull core/runtime.js back into the reader dependency graph), so
 // the debug helper and settings watcher delegate through this seam instead.
-let playerAiSyncHandler = null;
+let playerAiSyncHandler: PlayerAiSyncHandler | null = null;
 
-export function subscribePlayerAiSync(handler) {
+export function subscribePlayerAiSync(handler: PlayerAiSyncHandler) {
   playerAiSyncHandler = typeof handler === "function" ? handler : null;
 }
 
-export function requestPlayerAiSync(delayMs, options) {
+export function requestPlayerAiSync(delayMs?: number, options?: { resetRetry?: boolean }) {
   if (!playerAiSyncHandler) {
     return;
   }

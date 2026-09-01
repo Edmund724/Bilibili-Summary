@@ -22,6 +22,8 @@ import {
 } from "./presentation.js";
 import { isReaderViewOpen } from "./view-state.js";
 import { ensureReaderDomain, isReaderDomainLoaded } from "../core/lazy-reader.js";
+import type * as LifecycleModule from "./lifecycle.js";
+import type * as DebugSnapshotModule from "./debug-snapshot.js";
 // 候选06：监听键清单从呈现属性表派生（单一事实源 presentation-fields.js）。
 // 相对旧手抄清单的修正与保留：
 //   - 补进实际读写键 readerChapterVisible（旧清单盯的是改名前的旧键
@@ -31,6 +33,7 @@ import { ensureReaderDomain, isReaderDomainLoaded } from "../core/lazy-reader.js
 //   - enablePlayerAiQuickAction / playerAiQuickPrompt 两枚非呈现设置键以
 //     kind:"settings" 收进表（无属性落位，只为本监听键清单服务）。
 import { READER_SETTINGS_WATCH_KEYS } from "./presentation-fields.js";
+import type { Settings } from "../core/defaults.js";
 
 // 阅读模式调试辅助（__BOC_READER_DEBUG_SNAPSHOT__ 等）。注册保持常驻轻量；
 // 快照真身（createReaderDebugSnapshot，读播放器链布局/样式）在 reader 域内，
@@ -39,7 +42,7 @@ import { READER_SETTINGS_WATCH_KEYS } from "./presentation-fields.js";
 export function installReaderDebugHelpers() {
   const snapshotReader = (label = "manual") =>
     ensureReaderDomain()
-      .then((reader) => reader.createReaderDebugSnapshot(label))
+      .then((reader) => ((reader as unknown) as typeof DebugSnapshotModule).createReaderDebugSnapshot(label))
       .catch((error) => {
         logWarn("[BOC] reader debug snapshot failed (reader domain load failed)", error);
         return null;
@@ -69,14 +72,15 @@ export function bindSettingsWatcher() {
     }
     // 候选06：键清单表驱动（READER_SETTINGS_WATCH_KEYS = 全部 storageKey ∪
     // legacyStorageKey），不再手抄。
-    if (!READER_SETTINGS_WATCH_KEYS.some((key) => changes[key])) {
+    if (!READER_SETTINGS_WATCH_KEYS.some((key) => key && Object.prototype.hasOwnProperty.call(changes, key))) {
       return;
     }
 
     loadReaderSettingsThroughSeam()
       .then((settings) => {
-        state.setSettings(settings);
-        hydrateReaderStateFromSettings(settings);
+        const next = settings as Settings;
+        state.setSettings(next);
+        hydrateReaderStateFromSettings(next);
         applyReadingViewPresentation();
         requestPlayerAiSync();
       })
@@ -101,7 +105,7 @@ export function bindSettingsWatcher() {
 // lifecycle.handleReaderPresenterNotification（原 bindReaderPresenter 回调体
 // 原样搬移）。
 export function bindReaderPresenter() {
-  return subscribeReaderPresenter((kind, text) => {
+  return subscribeReaderPresenter((kind: string, text?: unknown) => {
     if (!isReaderDomainLoaded() && !isReaderViewOpen()) {
       return;
     }
@@ -109,7 +113,7 @@ export function bindReaderPresenter() {
       return;
     }
     ensureReaderDomain()
-      .then((reader) => reader.handleReaderPresenterNotification(kind, text))
+      .then((reader) => ((reader as unknown) as typeof LifecycleModule).handleReaderPresenterNotification(kind, text as string | number | null | undefined))
       .catch((error) => {
         logWarn("[BOC] reader presenter dispatch failed", { kind, error });
       });

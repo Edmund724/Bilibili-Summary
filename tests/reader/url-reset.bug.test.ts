@@ -14,29 +14,30 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NORMAL_PAGE_URL, resetModuleState, setLocationUrl } from "../setup.js";
+import type { TestState } from "./reader-test-env.js";
 
 // 签名不匹配 + 阅读模式 URL 时 handleUrlChange 会异步启动 enterReaderMode，
 // 其挂载重试在测试拆除 DOM 后仍在跑并产生未处理拒绝。本文件只关心
 // replaceState→urlchange→resetClipState 链路，因此把 enterReaderMode 换成空实现。
 vi.mock("../../extension/reader/index.js", async (importActual) => {
-  const actual = await importActual();
+  const actual = await importActual() as typeof import("../../extension/reader/index.js");
   return { ...actual, enterReaderMode: vi.fn(async () => {}) };
 });
 
 const OTHER_VIDEO_URL = "https://www.bilibili.com/video/BV1test999999/";
 const OTHER_VIDEO_READER_URL = "https://www.bilibili.com/video/BV1test999999/?boc_reader=1";
 
-let state;
-let clipState;
-let readerUrl;
-let messageHandler;
-let videoIdShared;
-let uiRenderer;
+let state: TestState;
+let clipState: typeof import("../../extension/core/state.js").clipState;
+let readerUrl: typeof import("../../extension/bilibili/reader-url.js");
+let messageHandler: typeof import("../../extension/core/message-handler.js");
+let videoIdShared: typeof import("../../extension/bilibili/video-id-shared.js");
+let uiRenderer: typeof import("../../extension/ui/ui-renderer.js");
 
 async function loadModules() {
   setLocationUrl(NORMAL_PAGE_URL);
-  const stateModule = await import("../../extension/core/state.js");
-  state = stateModule.state;
+  const stateModule = await import("../../extension/core/state.js") as typeof import("../../extension/core/state.js");
+  state = stateModule.state as TestState;
   clipState = stateModule.clipState;
   readerUrl = await import("../../extension/bilibili/reader-url.js");
   // URL 变化编排（handleUrlChange 监听）在组合根 message-handler；

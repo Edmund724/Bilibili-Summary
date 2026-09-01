@@ -120,9 +120,9 @@ let playerRetryTimer = 0;
 //     是依赖图禁止的边，经端口叶子反转。
 // 函数声明有提升，模块求值时表已完整；重复注册由端口侧报错拦截。
 registerReaderPorts({
-  syncReadingViewPlayback,
-  noteManualReaderInteraction,
-  flushReadingTranscriptToIndex: ensureReadingTranscriptRenderedUpTo
+  syncReadingViewPlayback: syncReadingViewPlayback as (...args: unknown[]) => unknown,
+  noteManualReaderInteraction: noteManualReaderInteraction as (...args: unknown[]) => unknown,
+  flushReadingTranscriptToIndex: ensureReadingTranscriptRenderedUpTo as (...args: unknown[]) => unknown
 });
 
 // SYNC functions this module drives (from sync.js):
@@ -135,7 +135,7 @@ import {
 } from "./sync.js";
 
 function maybeRefreshReaderSubtitleInBackground() {
-  if (state.clip.subtitleBody.length) {
+  if (state.clip.subtitleBody.length > 0) {
     return;
   }
   waitForVideoMetadata().then(() => {
@@ -151,7 +151,7 @@ function maybeRefreshReaderSubtitleInBackground() {
 // 原样搬移）。注册接线在常驻微模块 ./init-essentials.js：回调经
 // ensureReaderDomain() 惰性装载本域后转发到这里，因此本函数只在 reader 域
 // 装载后被调用，行为与搬迁前逐字一致。
-export function handleReaderPresenterNotification(kind, text) {
+export function handleReaderPresenterNotification(kind: string, text?: string | number | null) {
   switch (kind) {
     case "reset":
       stopReadingViewSync();
@@ -187,7 +187,7 @@ export function handleReaderPresenterNotification(kind, text) {
 }
 
 function renderReadingSubtitleSelect() {
-  const select = getReaderElement(ids.readingSubtitleSelect);
+  const select = getReaderElement(ids.readingSubtitleSelect) as HTMLSelectElement;
   const subtitles = state.clip.subtitles || [];
 
   if (subtitles.length === 0) {
@@ -296,8 +296,8 @@ function openReaderViewShell(readingView = getReaderElement(ids.readingView)) {
   renderReadingStatus("正在准备播放器和字幕...");
 }
 
-export function waitForVideoMetadata(timeoutMs = 5000) {
-  return new Promise((resolve) => {
+export function waitForVideoMetadata(timeoutMs = 5000): Promise<void> {
+  return new Promise<void>((resolve) => {
     const start = Date.now();
     const check = () => {
       const video = getRuntimeVideoElement();
@@ -373,7 +373,7 @@ export function closeReadingView() {
   unbindReaderLayout();
   cleanupReaderPlayerHost();
   clearReaderPageFocus();
-  const sendingBar = document.querySelector(".bpx-player-sending-bar");
+  const sendingBar = document.querySelector<HTMLElement>(".bpx-player-sending-bar");
   if (sendingBar) {
     sendingBar.setAttribute("data-boc-reader-hide-sending-bar", "1");
     sendingBar.style.setProperty("display", "none", "important");
@@ -470,7 +470,7 @@ export function renderReadingView() {
 // ./presentation.js（常驻微模块）；enterReaderMode/renderReadingView 等
 // 域内调用方经文件头 import 的 presentation 绑定取用。
 
-export function updateReaderChapterPresence(hasChapters) {
+export function updateReaderChapterPresence(hasChapters: boolean) {
   const value = hasChapters ? "1" : "0";
   const readingView = getReaderElement(ids.readingView);
   readingView.dataset.hasChapters = value;
@@ -481,7 +481,7 @@ export function updateReaderChapterPresence(hasChapters) {
 // ===== 设置面板/步进器/偏好更新（候选02：自 presentation.js 移回本域——
 // 仅在阅读视图交互时执行，常驻侧经 ensureReaderDomain 转发到这些导出） =====
 
-export function updateReaderPreferences(next, { persist = true } = {}) {
+export function updateReaderPreferences(next: Partial<Record<string, unknown>>, { persist = true } = {}) {
   state.reader.setTheme(normalizeReaderTheme(next.readerTheme ?? state.reader.readingTheme));
   state.reader.setFontScale(normalizeReaderFontScale(next.readerFontScale ?? state.reader.readingFontScale));
   state.reader.setLetterSpacing(
@@ -517,8 +517,8 @@ function persistReaderSettings() {
 // 步进器点击的偏好应用（原 presentation.js 私有 setReaderPreference，候选02
 // 更名导出：常驻侧 bindReaderStepperControl 的监听回调经 ensureReaderDomain
 // 转发到这里）。值校验/去重语义与搬迁前逐字一致。
-export function applyReaderStepperPreference(settingKey, nextValue) {
-  const config = getReaderStepperConfig(settingKey);
+export function applyReaderStepperPreference(settingKey: string, nextValue: string) {
+  const config = getReaderStepperConfig(settingKey as import("./presentation.js").StepperSettingKey);
   if (!config) {
     return;
   }
@@ -530,14 +530,14 @@ export function applyReaderStepperPreference(settingKey, nextValue) {
   updateReaderPreferences(config.buildPayload(nextValue), { persist: true });
 }
 
-function renderReaderStepperState(node, settingKey) {
-  const config = getReaderStepperConfig(settingKey);
+function renderReaderStepperState(node: HTMLElement, settingKey: string) {
+  const config = getReaderStepperConfig(settingKey as import("./presentation.js").StepperSettingKey);
   if (!node || !config) {
     return;
   }
 
   const current = config.getCurrent();
-  node.querySelectorAll("[data-value]").forEach((button) => {
+  node.querySelectorAll<HTMLElement>("[data-value]").forEach((button) => {
     const isActive = button.dataset.value === current;
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-pressed", isActive ? "true" : "false");
@@ -549,8 +549,8 @@ export function renderReaderPanels() {
   const settingsBtn = getReaderElement(ids.readingSettingsBtn);
   settingsPanel.hidden = !state.reader.readingSettingsExpanded;
   settingsBtn.classList.toggle("is-active", state.reader.readingSettingsExpanded);
-  getReaderElement(ids.readingAutoScroll).checked = state.reader.readingAutoScroll;
-  getReaderElement(ids.readingTranscriptVisible).checked = state.reader.readingTranscriptVisible;
+  (getReaderElement(ids.readingAutoScroll) as HTMLInputElement).checked = state.reader.readingAutoScroll;
+  (getReaderElement(ids.readingTranscriptVisible) as HTMLInputElement).checked = state.reader.readingTranscriptVisible;
   renderReaderStepperState(getReaderElement(ids.readingFontScaleSelect), "readerFontScale");
   renderReaderStepperState(getReaderElement(ids.readingLetterSpacingSelect), "readerLetterSpacing");
   renderReaderStepperState(getReaderElement(ids.readingLineHeightSelect), "readerLineHeight");
@@ -642,7 +642,7 @@ function buildReadingMetaLine() {
   return parts.join(" · ");
 }
 
-function setReadingViewReady(ready) {
+function setReadingViewReady(ready: boolean) {
   state.reader.setViewReady(Boolean(ready));
   const readingView = document.getElementById(ids.readingView);
   if (!readingView) {

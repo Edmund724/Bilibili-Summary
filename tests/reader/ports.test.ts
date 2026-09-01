@@ -13,8 +13,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
+import type { ReaderPortImpls } from "../../extension/reader/ports.js";
 
-let ports;
+let ports: typeof import("../../extension/reader/ports.js");
 
 beforeEach(async () => {
   resetModuleState();
@@ -67,7 +68,7 @@ describe("reader 显式端口", () => {
 
   it("注册表缺方法即抛错（禁止静默缺实现）", () => {
     const { flushReadingTranscriptToIndex: _omitted, ...partial } = validImpls();
-    expect(() => ports.registerReaderPorts(partial)).toThrow(/缺少方法.*flushReadingTranscriptToIndex/);
+    expect(() => ports.registerReaderPorts(partial as unknown as ReaderPortImpls)).toThrow(/缺少方法.*flushReadingTranscriptToIndex/);
   });
 
   it("注册表含未知方法键即抛错（防拼写漂移绕过显式方法集）", () => {
@@ -75,7 +76,7 @@ describe("reader 显式端口", () => {
       ports.registerReaderPorts({
         ...validImpls(),
         someTypoMethod: vi.fn()
-      })
+      } as unknown as ReaderPortImpls)
     ).toThrow(/未知方法.*someTypoMethod/);
   });
 

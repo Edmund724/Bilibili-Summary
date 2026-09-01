@@ -40,19 +40,25 @@ export const READER_PORT_METHODS = Object.freeze([
   "flushReadingTranscriptToIndex"
 ]);
 
-let portImpls = null;
+export type ReaderPortImpls = {
+  noteManualReaderInteraction: (...args: unknown[]) => unknown;
+  syncReadingViewPlayback: (...args: unknown[]) => unknown;
+  flushReadingTranscriptToIndex: (...args: unknown[]) => unknown;
+};
+
+let portImpls: ReaderPortImpls | null = null;
 
 // reader 域组装根（lifecycle.js）启动时的唯一注册入口。
 // 注册表必须精确覆盖方法集：缺方法抛错（防实现缺失静默化），多出未知键也
 // 抛错（防拼写漂移悄悄绕过显式方法集）。
-export function registerReaderPorts(impls) {
+export function registerReaderPorts(impls: ReaderPortImpls) {
   if (portImpls) {
     throw new Error("[BOC] reader 端口重复注册：只允许 lifecycle 启动时单点注册一次。");
   }
   if (!impls || typeof impls !== "object") {
     throw new Error("[BOC] reader 端口注册缺少实现表。");
   }
-  const missing = READER_PORT_METHODS.filter((name) => typeof impls[name] !== "function");
+  const missing = READER_PORT_METHODS.filter((name) => typeof impls[name as keyof ReaderPortImpls] !== "function");
   if (missing.length > 0) {
     throw new Error(`[BOC] reader 端口注册缺少方法：${missing.join(", ")}`);
   }
@@ -65,7 +71,7 @@ export function registerReaderPorts(impls) {
 
 // 取已注册实现；缺失直接抛错（不静默）。刻意不用可选链索引写法，
 // 杜绝「`?.[` 式静默端口调用」回潮。
-function requirePortMethod(name) {
+function requirePortMethod(name: keyof ReaderPortImpls) {
   const handler = portImpls ? portImpls[name] : null;
   if (typeof handler !== "function") {
     throw new Error(`[BOC] reader 端口方法 ${name} 未注册（应由 lifecycle 启动时单点注册）。`);
@@ -77,16 +83,16 @@ function requirePortMethod(name) {
 // reader 上层域，方法签名与被替换的旧 callSync/flush 槽逐一对应。
 export const readerPorts = {
   // LAYOUT(page-frame) → SYNC：内联宿主 scroll/wheel 的手动交互通知。
-  noteManualReaderInteraction(...args) {
+  noteManualReaderInteraction(...args: unknown[]) {
     return requirePortMethod("noteManualReaderInteraction")(...args);
   },
   // LAYOUT(player-host) → SYNC：视频 timeupdate/seeked/loadedmetadata 驱动同步。
-  syncReadingViewPlayback(...args) {
+  syncReadingViewPlayback(...args: unknown[]) {
     return requirePortMethod("syncReadingViewPlayback")(...args);
   },
   // SYNC → LIFECYCLE：跳转/跟随目标未上屏时的同步补渲染（分批渲染任务的
   // 实现属主是 lifecycle.js，经此端口供给 sync.js）。
-  flushReadingTranscriptToIndex(...args) {
+  flushReadingTranscriptToIndex(...args: unknown[]) {
     return requirePortMethod("flushReadingTranscriptToIndex")(...args);
   }
 };

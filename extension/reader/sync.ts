@@ -80,9 +80,9 @@ export function stopReadingViewSync() {
   unbindReaderPlayerControlsHover();
   if (state.reader.readingVideoEl && state.reader.readingVideoEl.__bocReadingSyncHandler) {
     const video = state.reader.readingVideoEl;
-    video.removeEventListener("timeupdate", video.__bocReadingSyncHandler);
-    video.removeEventListener("seeked", video.__bocReadingSyncHandler);
-    video.removeEventListener("loadedmetadata", video.__bocReadingSyncHandler);
+    video.removeEventListener("timeupdate", video.__bocReadingSyncHandler!);
+    video.removeEventListener("seeked", video.__bocReadingSyncHandler!);
+    video.removeEventListener("loadedmetadata", video.__bocReadingSyncHandler!);
     delete video.__bocReadingSyncHandler;
   }
   setVideoEventsBound(false);
@@ -131,7 +131,7 @@ export function syncReadingViewPlayback(forceScroll = false) {
 // 节点仍连接在文档时，整段跳过 querySelector 与 classList 写。列表整段重建
 // （renderReadingView）会使旧节点脱离文档、缓存自动失效回退到现查；分批渲染
 // 未追到目标时节点为 null，同样回退现查（条目上屏后的下一拍自然补上高亮）。
-const lastActiveItems = {
+const lastActiveItems: { subtitle: ActiveItemCache; chapter: ActiveItemCache } = {
   subtitle: { index: -1, node: null },
   chapter: { index: -1, node: null }
 };
@@ -141,18 +141,23 @@ const lastActiveItems = {
 // current——current 优先复用缓存里的旧激活节点（它就是上次被本函数加上
 // is-active 的节点，语义等价且省一次 querySelector），旧节点已脱离文档时
 // 退回 ".is-active" 现查，行为与原实现一致。
-function resolveActiveItem(cached, index, list, className) {
+interface ActiveItemCache {
+  index: number;
+  node: HTMLElement | null;
+}
+
+function resolveActiveItem(cached: ActiveItemCache, index: number, list: HTMLElement, className: string) {
   if (cached.node?.isConnected && cached.index === index) {
     return { next: cached.node, current: cached.node, unchanged: true };
   }
-  const next = list.querySelector(`[data-index="${index}"]`);
+  const next = list.querySelector<HTMLElement>(`[data-index="${index}"]`);
   const current = cached.node?.isConnected
     ? cached.node
-    : list.querySelector(`.${className}.is-active`);
+    : list.querySelector<HTMLElement>(`.${className}.is-active`);
   return { next, current, unchanged: false };
 }
 
-function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll = false) {
+function setActiveReadingItems(subtitleIndex: number, chapterIndex: number, shouldScroll = false) {
   const transcriptList = getReaderElement(ids.readingTranscriptList);
   const chapterList = getReaderElement(ids.readingChapterList);
   const subtitleHit = resolveActiveItem(lastActiveItems.subtitle, subtitleIndex, transcriptList, "boc-reading-item");
@@ -218,7 +223,7 @@ function setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll = false
   state.reader.setActiveChapterIndex(chapterIndex);
 }
 
-function scrollReadingRailItemIntoView(node) {
+function scrollReadingRailItemIntoView(node: HTMLElement) {
   if (!node) {
     return;
   }
@@ -230,7 +235,7 @@ function scrollReadingRailItemIntoView(node) {
   });
 }
 
-function scrollReadingTranscriptItemIntoView(node) {
+function scrollReadingTranscriptItemIntoView(node: HTMLElement) {
   if (!node) {
     return;
   }
@@ -295,7 +300,7 @@ function scrollReadingTranscriptItemIntoView(node) {
 // 播放策略：阅读视图内点击传 resumePlayback:true（旧行为：暂停即播放）；侧栏
 // seek 传 resumePlayback:false（暂停中不自动播放，与旧侧栏行为等价——旧侧栏
 // 只在「seek 前正在播放」时补一次 play，本就在播的视频无需干预）。
-export function seekReadingTarget(seconds, { resumePlayback = false } = {}) {
+export function seekReadingTarget(seconds: number | string, { resumePlayback = false } = {}) {
   const video = bindReadingViewVideo();
   if (!video) {
     renderReadingStatus("当前页面没有找到可联动的视频播放器。");
@@ -318,20 +323,20 @@ export function seekReadingTarget(seconds, { resumePlayback = false } = {}) {
 }
 
 // 阅读视图内点击跳转：自动播放策略（resumePlayback:true）委托给 seek 深入口。
-export function jumpReadingTarget(seconds) {
+export function jumpReadingTarget(seconds: number | string) {
   seekReadingTarget(seconds, { resumePlayback: true });
 }
 
-export function onReadingChapterClick(event) {
-  const target = event.target.closest(".boc-reading-chapter");
+export function onReadingChapterClick(event: MouseEvent) {
+  const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(".boc-reading-chapter");
   if (!target) {
     return;
   }
-  jumpReadingTarget(target.dataset.seconds);
+  jumpReadingTarget(target.dataset.seconds ?? 0);
 }
 
-export function onReadingTranscriptClick(event) {
-  const target = event.target.closest(".boc-reading-item");
+export function onReadingTranscriptClick(event: MouseEvent) {
+  const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(".boc-reading-item");
   if (!target) {
     return;
   }
@@ -339,7 +344,7 @@ export function onReadingTranscriptClick(event) {
   if (window.getSelection()?.toString().trim()) {
     return;
   }
-  jumpReadingTarget(target.dataset.seconds);
+  jumpReadingTarget(target.dataset.seconds ?? 0);
 }
 
 export function noteManualReaderInteraction(durationMs = 3000) {

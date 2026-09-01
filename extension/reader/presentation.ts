@@ -17,6 +17,7 @@
 // 函数体逐字搬自原文件对应分节，行为零变化。依赖全部为常驻叶子
 //（core/state、core/validators、shared/dom-utils、shared/string-utils、./ids）。
 import { state } from "../core/state.js";
+import { type Settings } from "../core/defaults.js";
 import { getReaderElement } from "../shared/dom-utils.js";
 import {
   normalizeReaderTheme,
@@ -33,9 +34,9 @@ import { READER_APPLY_FIELDS } from "./presentation-fields.js";
 
 // ===== 状态栏文案（自 player-host.js 迁入；sync/lifecycle 域内继续经本模块取用） =====
 
-export function renderReadingStatus(text) {
+export function renderReadingStatus(text: string | number | null | undefined) {
   const node = getReaderElement(ids.readingStatus);
-  const next = String(text || "");
+  const next = String(text ?? "");
   // 候选10 批1：250ms tick 会反复写同一文案，值未变时跳过 textContent 写入，
   // 避免无谓的 DOM 变更（节点缺失时仍按原样经 byId 抛错，行为不变）。
   if (node.textContent === next) {
@@ -70,7 +71,7 @@ export function applyInlineHostPresentation() {
 
 // ===== 设置水合与排版应用（自 lifecycle.js 迁入） =====
 
-export function hydrateReaderStateFromSettings(settings = state.settings) {
+export function hydrateReaderStateFromSettings(settings: Partial<Settings> = state.settings) {
   state.reader.setTheme(normalizeReaderTheme(settings?.readerTheme));
   state.reader.setFontScale(normalizeReaderFontScale(settings?.readerFontScale));
   state.reader.setLetterSpacing(normalizeReaderLetterSpacing(settings?.readerLetterSpacing ?? settings?.readerLineHeight));
@@ -85,30 +86,30 @@ export function applyReadingViewPresentation() {
   // 候选06：字段清单/作用目标/dataset 键/取值换算唯一来源 presentation-fields.js
   //（READER_APPLY_FIELDS 子表），写入方不再手抄。写入顺序与迁移前逐字一致：
   // readingView（短名）→ documentElement → body，各段内按表序逐字段。
-  const values = {};
+  const values: Record<string, string> = {};
   for (const field of READER_APPLY_FIELDS) {
-    values[field.id] = field.readValue(state.reader);
+    values[field.id] = field.readValue!(state.reader);
   }
   for (const field of READER_APPLY_FIELDS) {
-    if (field.targets.readingView) {
+    if (field.targets.readingView && field.datasetKeys.readingView) {
       readingView.dataset[field.datasetKeys.readingView] = values[field.id];
     }
   }
   for (const field of READER_APPLY_FIELDS) {
-    if (field.targets.html) {
+    if (field.targets.html && field.datasetKeys.html) {
       document.documentElement.dataset[field.datasetKeys.html] = values[field.id];
     }
   }
   for (const field of READER_APPLY_FIELDS) {
-    if (field.targets.body) {
+    if (field.targets.body && field.datasetKeys.body) {
       document.body.dataset[field.datasetKeys.body] = values[field.id];
     }
   }
-  const readingChapterVisibleEl = getReaderElement(ids.readingChapterVisible);
+  const readingChapterVisibleEl = getReaderElement(ids.readingChapterVisible) as HTMLInputElement;
   if (readingChapterVisibleEl) {
     readingChapterVisibleEl.checked = state.reader.readingChapterVisible;
   }
-  const main = document.querySelector(".boc-reading-main");
+  const main = document.querySelector<HTMLElement>(".boc-reading-main");
   if (main) {
     main.style.display = state.reader.readingTranscriptVisible ? "" : "none";
   }
@@ -123,8 +124,18 @@ export function applyReadingViewPresentation() {
 
 // ===== 设置面板渲染（自 lifecycle.js 迁入；仅步进器模板/绑定属启动路径） =====
 
-function getToggleLabel(key, value) {
-  const labels = {
+type StepperKey = "fontScale" | "letterSpacing" | "lineHeight" | "contentWidth";
+export type StepperSettingKey = "readerFontScale" | "readerLetterSpacing" | "readerLineHeight" | "readerContentWidth";
+
+interface StepperConfig {
+  options: string[];
+  labelKey: StepperKey;
+  getCurrent: () => string;
+  buildPayload: (value: string) => Partial<Record<StepperSettingKey, string>>;
+}
+
+function getToggleLabel(key: StepperKey, value: string) {
+  const labels: Record<StepperKey, Record<string, string>> = {
     fontScale: { xs: "最小", s: "偏小", m: "标准", l: "偏大", xl: "最大" },
     letterSpacing: { tighter: "最紧", tight: "偏紧", normal: "标准", relaxed: "偏松", loose: "最松" },
     lineHeight: { compact: "最紧", tight: "偏紧", normal: "标准", relaxed: "偏松", loose: "最松" },
@@ -136,8 +147,8 @@ function getToggleLabel(key, value) {
 // 步进器配置表：buildReaderStepperControl（本模块，启动模板）与 reader 域的
 // applyReaderStepperPreference/renderReaderStepperState（lifecycle.js，交互）
 // 共用，故导出。
-export function getReaderStepperConfig(settingKey) {
-  const configs = {
+export function getReaderStepperConfig(settingKey: StepperSettingKey): StepperConfig | null {
+  const configs: Record<StepperSettingKey, StepperConfig> = {
     readerFontScale: {
       options: ["xs", "s", "m", "l", "xl"],
       labelKey: "fontScale",
@@ -170,6 +181,10 @@ export function buildReaderStepperControl({
   id,
   title,
   settingKey
+}: {
+  id: string;
+  title: string;
+  settingKey: StepperSettingKey;
 }) {
   const config = getReaderStepperConfig(settingKey);
   if (!config) {
@@ -197,7 +212,7 @@ export function buildReaderStepperControl({
   `;
 }
 
-export function bindReaderStepperControl(node, settingKey) {
+export function bindReaderStepperControl(node: HTMLElement, settingKey: StepperSettingKey) {
   if (!node || node.dataset.bocBound === "1") {
     return;
   }
@@ -206,12 +221,12 @@ export function bindReaderStepperControl(node, settingKey) {
   // applyReaderStepperPreference（原 setReaderPreference）。监听绑定保持启动
   // 同步；回调经 ensureReaderDomain 转发（视图开着 ⇒ 域已装载，命中缓存）。
   node.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-value]");
+    const button = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-value]");
     if (!button) {
       return;
     }
     ensureReaderDomain()
-      .then((reader) => reader.applyReaderStepperPreference(settingKey, button.dataset.value || ""))
+      .then((reader) => ((reader as unknown) as typeof import("./lifecycle.js")).applyReaderStepperPreference(settingKey, button.dataset.value || ""))
       .catch(() => {});
   });
   node.dataset.bocBound = "1";

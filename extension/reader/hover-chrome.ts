@@ -26,17 +26,41 @@ import { sleep } from "../shared/utils.js";
 import { isWatchlaterPage } from "../bilibili/video-id-shared.js";
 import { getPlayerHost, layoutReaderPlayerHost } from "./player-host.js";
 
+declare global {
+  interface Element {
+    __bocReaderControlsHoverBound?: {
+      showControls: () => void;
+      hideControls: () => void;
+    };
+    __bocReaderHeaderHoverBound?: {
+      showActions: () => void;
+      hideActionsLater: () => void;
+    };
+  }
+}
+
+interface RecoveryOptions {
+  reason?: string;
+  retryDelayMs?: number;
+}
+
+interface QueueRecoveryOptions {
+  reason?: string;
+  delayMs?: number;
+  minIntervalMs?: number;
+}
+
 let controlsHideTimer = 0;         // readingControlsHideTimer
 let controlsRecoveryTimer = 0;     // readingControlsRecoveryTimer
 let controlsRecoveryInFlight = false; // readingControlsRecoveryInFlight
 let controlsLastRecoverAt = 0;     // readingControlsLastRecoverAt
-let controlsHoverHost = null;      // readingControlsHoverHost
-let headerHoverHost = null;        // readingHeaderHoverHost
+let controlsHoverHost: Element | null = null;      // readingControlsHoverHost
+let headerHoverHost: Element | null = null;        // readingHeaderHoverHost
 let headerHideTimer = 0;           // readingHeaderHideTimer
 
 export async function ensureReaderPlayerControlsRecovered(
-  playerHostArg = getPlayerHost(),
-  { reason = "unknown", retryDelayMs = 90 } = {}
+  playerHostArg: Element | null = getPlayerHost(),
+  { reason = "unknown", retryDelayMs = 90 }: RecoveryOptions = {}
 ) {
   if (!state.reader.readingNativePageMode || !playerHostArg || isWatchlaterPage()) {
     return false;
@@ -92,7 +116,7 @@ export async function ensureReaderPlayerControlsRecovered(
   return !hasReaderPlayerControlsIssue(playerHostArg);
 }
 
-function getReaderControlsRoot(playerHostArg = getPlayerHost()) {
+function getReaderControlsRoot(playerHostArg: Element | null = getPlayerHost()): Element | null {
   return (
     playerHostArg?.closest?.("#playerWrap") ||
     playerHostArg?.closest?.("#bilibili-player") ||
@@ -102,7 +126,7 @@ function getReaderControlsRoot(playerHostArg = getPlayerHost()) {
   );
 }
 
-function getReaderPlayerControlsState(playerHostArg = getPlayerHost()) {
+function getReaderPlayerControlsState(playerHostArg: Element | null = getPlayerHost()) {
   const controlRoot = getReaderControlsRoot(playerHostArg);
   const nodes = [".bpx-player-control-wrap", ".bpx-player-control-mask", ".bpx-player-control-entity"].map(
     (selector) => {
@@ -124,7 +148,7 @@ function getReaderPlayerControlsState(playerHostArg = getPlayerHost()) {
   };
 }
 
-function hasReaderPlayerControlsIssue(playerHostArg = getPlayerHost()) {
+function hasReaderPlayerControlsIssue(playerHostArg: Element | null = getPlayerHost()) {
   if (!state.reader.readingNativePageMode || !playerHostArg || isWatchlaterPage()) {
     return false;
   }
@@ -137,7 +161,7 @@ export function queueEnsureReaderPlayerControlsRecovered({
   reason = "unknown",
   delayMs = 120,
   minIntervalMs = 480
-} = {}) {
+}: QueueRecoveryOptions = {}) {
   if (!state.reader.readingViewOpen || !state.reader.readingNativePageMode || isWatchlaterPage()) {
     return;
   }
@@ -179,7 +203,7 @@ export function queueEnsureReaderPlayerControlsRecovered({
   }, delayMs);
 }
 
-export function setReaderPlayerControlsVisible(visible, playerHostArg = getPlayerHost()) {
+export function setReaderPlayerControlsVisible(visible: boolean, playerHostArg: Element | null = getPlayerHost()) {
   if (!state.reader.readingNativePageMode || !playerHostArg) {
     return;
   }
@@ -197,7 +221,7 @@ export function setReaderPlayerControlsVisible(visible, playerHostArg = getPlaye
 
   displayMap.forEach((displayValue, selector) => {
     const node = controlRoot.querySelector(selector);
-    if (!node) {
+    if (!(node instanceof HTMLElement)) {
       return;
     }
 
@@ -227,7 +251,7 @@ export function setReaderPlayerControlsVisible(visible, playerHostArg = getPlaye
   }
 }
 
-function scheduleReaderPlayerControlsHide(playerHostArg = controlsHoverHost || getPlayerHost()) {
+function scheduleReaderPlayerControlsHide(playerHostArg: Element | null = controlsHoverHost || getPlayerHost()) {
   if (controlsHideTimer) {
     window.clearTimeout(controlsHideTimer);
   }
@@ -240,7 +264,7 @@ function scheduleReaderPlayerControlsHide(playerHostArg = controlsHoverHost || g
   }, 1200);
 }
 
-export function bindReaderPlayerControlsHover(playerHostArg = getPlayerHost()) {
+export function bindReaderPlayerControlsHover(playerHostArg: Element | null = getPlayerHost()) {
   if (!state.reader.readingNativePageMode || !isWatchlaterPage() || !playerHostArg) {
     return;
   }
@@ -314,7 +338,7 @@ export function cancelReaderControlsRecovery() {
   controlsRecoveryInFlight = false;
 }
 
-function setReaderHeaderActionsVisible(visible) {
+function setReaderHeaderActionsVisible(visible: boolean) {
   const actions = document.querySelector(".boc-reading-actions");
   if (!actions) {
     return;

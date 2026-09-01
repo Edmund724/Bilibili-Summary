@@ -15,15 +15,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
 import { mockPlayerRects, mountPlayerChain, mountReaderSkeleton } from "../helpers/reader-skeleton.js";
+import type { TestState } from "./reader-test-env.js";
 
-let state;
-let shell;
-let scrollState;
-let video;
+let state: TestState;
+let shell: typeof import("../../extension/reader/index.js");
+let scrollState: typeof import("../../extension/reader/scroll-state.js");
+let video: HTMLVideoElement;
 
 async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
-  state = (await import("../../extension/core/state.js")).state;
+  state = (await import("../../extension/core/state.js")).state as TestState;
   shell = await import("../../extension/reader/index.js");
   // scroll-state 与 facade 同批动态 import：resetModules 后必须取同一模块实例，
   // 否则测试读到的暂停状态与被测代码读到的不是同一份闭包。
@@ -55,14 +56,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+interface CurrentTimeLogEntry {
+  pausedAtAssign: boolean;
+  next: number;
+}
+
 // 把视频的 currentTime 换成记录型存取器（见文件头说明），返回记录数组。
-function recordCurrentTimeAssignments(targetVideo) {
-  const log = [];
+function recordCurrentTimeAssignments(targetVideo: HTMLVideoElement) {
+  const log: CurrentTimeLogEntry[] = [];
   let value = targetVideo.currentTime;
   Object.defineProperty(targetVideo, "currentTime", {
     configurable: true,
     get: () => value,
-    set: (next) => {
+    set: (next: number) => {
       log.push({ pausedAtAssign: scrollState.isManualScrollPaused(), next });
       value = next;
       targetVideo.dispatchEvent(new Event("timeupdate"));
@@ -73,7 +79,7 @@ function recordCurrentTimeAssignments(targetVideo) {
 
 describe("seekReadingTarget 规范序", () => {
   it("清手动滚动暂停先于 currentTime 赋值（timeupdate 落在干净状态上）", () => {
-    const readingView = document.getElementById(shell.ids.readingView);
+    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
     // 先制造一次未过期的手动滚动暂停（自动滚动开启时生效）
     shell.noteManualReaderInteraction(5000);
     expect(scrollState.isManualScrollPaused()).toBe(true);
@@ -93,7 +99,7 @@ describe("seekReadingTarget 规范序", () => {
   it("未清暂停时同型同步会吞掉跟随滚动（回归对照：bug 形态可观察）", () => {
     // 对照组：手动暂停处于生效状态时，同步走 manual 分支——follow 保持 manual，
     // 证明上面用例断言的 pausedAtAssign=false 确实是行为分岔点。
-    const readingView = document.getElementById(shell.ids.readingView);
+    const readingView = document.getElementById(shell.ids.readingView) as HTMLElement;
     shell.noteManualReaderInteraction(5000);
     expect(scrollState.isManualScrollPaused()).toBe(true);
 
@@ -107,7 +113,7 @@ describe("seekReadingTarget 规范序", () => {
 
 describe("seekReadingTarget 播放策略（resumePlayback 参数化）", () => {
   it("resumePlayback:true：暂停中自动播放（阅读视图点击语义）", () => {
-    video.play = vi.fn(() => Promise.resolve());
+    video.play = vi.fn(() => Promise.resolve()) as unknown as HTMLVideoElement["play"];
     expect(video.paused).toBe(true);
 
     const seekedTo = shell.seekReadingTarget(30, { resumePlayback: true });
@@ -118,7 +124,7 @@ describe("seekReadingTarget 播放策略（resumePlayback 参数化）", () => {
   });
 
   it("resumePlayback:false：暂停中不自动播放（侧栏 seek 语义）", () => {
-    video.play = vi.fn(() => Promise.resolve());
+    video.play = vi.fn(() => Promise.resolve()) as unknown as HTMLVideoElement["play"];
 
     shell.seekReadingTarget(30, { resumePlayback: false });
 
@@ -127,7 +133,7 @@ describe("seekReadingTarget 播放策略（resumePlayback 参数化）", () => {
   });
 
   it("resumePlayback:true：正在播放时不重复 play", () => {
-    video.play = vi.fn(() => Promise.resolve());
+    video.play = vi.fn(() => Promise.resolve()) as unknown as HTMLVideoElement["play"];
     Object.defineProperty(video, "paused", { configurable: true, value: false });
 
     shell.seekReadingTarget(30, { resumePlayback: true });
@@ -136,7 +142,7 @@ describe("seekReadingTarget 播放策略（resumePlayback 参数化）", () => {
   });
 
   it("jumpReadingTarget 委托深入口：等价 resumePlayback:true", () => {
-    video.play = vi.fn(() => Promise.resolve());
+    video.play = vi.fn(() => Promise.resolve()) as unknown as HTMLVideoElement["play"];
 
     shell.jumpReadingTarget(45);
 
@@ -157,7 +163,7 @@ describe("seekReadingTarget 播放策略（resumePlayback 参数化）", () => {
     const seekedTo = shell.seekReadingTarget(12, { resumePlayback: false });
 
     expect(seekedTo).toBeNull();
-    const status = document.getElementById(shell.ids.readingStatus);
+    const status = document.getElementById(shell.ids.readingStatus) as HTMLElement;
     expect(status.textContent).toBe("当前页面没有找到可联动的视频播放器。");
   });
 });

@@ -29,7 +29,7 @@ export type SubtitleBodyItem = {
 export type ChapterItem = {
   title: string;
   from: number;
-  to: number;
+  to?: number;
 };
 
 // ===== Reader namespace =====

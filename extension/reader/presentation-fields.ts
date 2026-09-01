@@ -13,7 +13,37 @@
 //
 // 纯常量模块：零 import（连 core/state 都不碰），readValue 是注入 reader 状态
 // 对象的纯函数。content / pages / reader 任意侧都可安全 import，无循环依赖。
-//
+
+import type { ReaderState } from "../core/state.js";
+
+export type ReaderPresentationFieldKind =
+  | "presentation"
+  | "derived"
+  | "enter-flag"
+  | "view-flag"
+  | "settings";
+
+export interface ReaderPresentationTargets {
+  html: string | null;
+  body: string | null;
+  readingView: string | null;
+}
+
+export interface ReaderPresentationField {
+  id: string;
+  kind: ReaderPresentationFieldKind;
+  targets: ReaderPresentationTargets;
+  datasetKeys: ReaderPresentationTargets;
+  storageKey: string | null;
+  legacyStorageKey: string | null;
+  watchedByGuard: boolean;
+  clearOnGuard: boolean;
+  clearOnClose: boolean;
+  clearViewOnClose: boolean;
+  writtenByApply: boolean;
+  readValue: ((reader: ReaderState) => string) | null;
+}
+
 // ===== 字段条目各键的含义 =====
 //   id              逻辑名（表内唯一），也是 readValue/派生清单的关联键。
 //   kind            字段归属：
@@ -54,7 +84,7 @@
 //   readValue       (reader) => DOM 值：state.reader → 属性值的换算。只在
 //                   writtenByApply 字段上存在，属「值怎么算」的呈现逻辑，
 //                   随字段声明进表以免写入方再抄一份取值清单。
-export const READER_PRESENTATION_FIELDS = [
+export const READER_PRESENTATION_FIELDS: ReaderPresentationField[] = [
   // —— 排版设置五标量（顺序即 apply 的写入顺序，迁移前逐字一致）——
   {
     id: "theme",
@@ -258,10 +288,13 @@ export const READER_PRESENTATION_FIELDS = [
 // readingView 列额外要求 clearViewOnClose：clearOnGuard/clearOnClose 表达的是
 // 页面级（html/body）清理职责，readingView 短名镜像是否随清理删除由
 // clearViewOnClose 单独把关（守卫永不触碰视图，其 readingView 列因此恒空）。
-function collectAttrsByTarget(flag) {
-  const result = { html: [], body: [], readingView: [] };
+type AttrFlag = "clearOnClose" | "clearOnGuard" | "watchedByGuard";
+type AttrTarget = "html" | "body" | "readingView";
+
+function collectAttrsByTarget(flag: AttrFlag) {
+  const result: Record<AttrTarget, string[]> = { html: [], body: [], readingView: [] };
   for (const field of READER_PRESENTATION_FIELDS) {
-    for (const target of ["html", "body", "readingView"]) {
+    for (const target of ["html", "body", "readingView"] as AttrTarget[]) {
       if (!field[flag] || !field.targets[target]) {
         continue;
       }

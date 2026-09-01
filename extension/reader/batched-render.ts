@@ -21,17 +21,25 @@
 // 的 renderReadingView/closeReadingView/端口注册调用；本模块不 import lifecycle。
 import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
 import { ids, updateReadingTranscriptTailSpacer } from "./page-frame.js";
+import type { ReadingTranscriptItem } from "../subtitle/core.js";
 
 const TRANSCRIPT_FIRST_BATCH = 120;
 const TRANSCRIPT_APPEND_BATCH = 200;
 
+interface TranscriptAppendTask {
+  listEl: HTMLElement;
+  items: ReadingTranscriptItem[];
+  cursor: number;
+  withHours: boolean;
+}
+
 // 进行中的追加任务：{ listEl, items, cursor, withHours }。listEl 持有列表容器
 // 引用（innerHTML 重建不更换容器元素，容器身份稳定；再次 renderReadingView 会
 // 先 cancel 旧任务，不存在旧任务写新列表的窗口）。
-let transcriptAppendTask = null;
+let transcriptAppendTask: TranscriptAppendTask | null = null;
 let transcriptAppendRafId = 0;
 
-export function buildReadingTranscriptItemHtml(item, withHours) {
+export function buildReadingTranscriptItemHtml(item: ReadingTranscriptItem, withHours: boolean) {
   return `
     <button
       type="button"
@@ -49,7 +57,13 @@ export function buildReadingTranscriptItemHtml(item, withHours) {
 
 // 把 items[from, to) 追加进列表。tail spacer 必须始终是列表最后一个子节点
 // （滚动定位的尾部留白依赖它），因此插入点固定在 spacer 之前。
-function insertReadingTranscriptRange(listEl, items, from, to, withHours) {
+function insertReadingTranscriptRange(
+  listEl: HTMLElement,
+  items: ReadingTranscriptItem[],
+  from: number,
+  to: number,
+  withHours: boolean
+) {
   if (to <= from) {
     return;
   }
@@ -108,7 +122,7 @@ function appendReadingTranscriptBatch() {
 // 跳转/跟随定位的同步补渲染：把 [cursor, targetIndex] 一次性上屏后返回 true，
 // 剩余条目继续走 rAF 分批。目标已在屏内（或无进行中任务）时原样返回 true，
 // 调用方（sync.js）随后照常 querySelector。
-export function ensureReadingTranscriptRenderedUpTo(targetIndex) {
+export function ensureReadingTranscriptRenderedUpTo(targetIndex: number) {
   const task = transcriptAppendTask;
   if (!task) {
     // 无任务：要么列表为空（无目标可渲染，调用方 querySelector 落空等同旧行为），
@@ -137,7 +151,7 @@ export function ensureReadingTranscriptRenderedUpTo(targetIndex) {
 // renderReadingView（lifecycle.js）在首屏批之后启动追加任务的入口：原先是
 // 直接给 transcriptAppendTask 赋值再调 scheduleReadingTranscriptAppend 的两行
 // 内联语句，任务状态随状态机迁入本模块后收拢为单点入口，行为逐字一致。
-export function startReadingTranscriptAppendTask(task) {
+export function startReadingTranscriptAppendTask(task: TranscriptAppendTask) {
   transcriptAppendTask = task;
   scheduleReadingTranscriptAppend();
 }

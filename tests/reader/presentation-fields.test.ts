@@ -14,6 +14,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReaderPresentationField } from "../../extension/reader/presentation-fields.js";
 import {
   READER_PRESENTATION_FIELDS,
   READER_APPLY_FIELDS,
@@ -26,13 +27,14 @@ import {
 import { DEFAULT_SETTINGS } from "../../extension/core/defaults.js";
 import { NORMAL_PAGE_URL, READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
 import { mockPlayerRects, mountPlayerChain, mountReaderSkeleton } from "../helpers/reader-skeleton.js";
+import type { TestState } from "./reader-test-env.js";
 
-const TARGETS = ["html", "body", "readingView"];
+const TARGETS = ["html", "body", "readingView"] as const;
 const VALID_KINDS = new Set(["presentation", "derived", "enter-flag", "view-flag", "settings"]);
 
 // 连字符属性名 → dataset 驼峰键（浏览器 dataset 语义：去 "data-"，余下按 "-"
 // 分段、首段原样、后继段首字母大写）。
-function attrToDatasetKey(attr) {
+function attrToDatasetKey(attr: string) {
   return attr
     .slice("data-".length)
     .split("-")
@@ -40,13 +42,16 @@ function attrToDatasetKey(attr) {
     .join("");
 }
 
+type AttrFlag = "clearOnClose" | "clearOnGuard" | "watchedByGuard";
+type AttrTarget = "html" | "body" | "readingView";
+
 // 按标志 × 目标从表手工推导属性清单（与 presentation-fields.js 的派生函数
 // 独立实现，用于交叉验证；readingView 列同样要求 clearViewOnClose）。
-function deriveAttrs(flag, target) {
+function deriveAttrs(flag: AttrFlag, target: AttrTarget) {
   return READER_PRESENTATION_FIELDS
     .filter((field) => field[flag] && field.targets[target])
     .filter((field) => target !== "readingView" || field.clearViewOnClose)
-    .map((field) => field.targets[target]);
+    .map((field) => field.targets[target] as string);
 }
 
 // 表声明过的全部连字符属性名（含 readingView 短名）。
@@ -54,23 +59,23 @@ function allDeclaredAttrs() {
   return new Set(
     READER_PRESENTATION_FIELDS.flatMap((field) =>
       Object.values(field.targets).filter(Boolean)
-    )
+    ) as string[]
   );
 }
 
-function targetNode(target) {
+function targetNode(target: AttrTarget) {
   if (target === "html") return document.documentElement;
   if (target === "body") return document.body;
-  return document.getElementById(ids.readingView);
+  return document.getElementById(ids.readingView) as HTMLElement;
 }
 
-let ids;
-let shell;
-let state;
+let ids: Record<string, string>;
+let shell: typeof import("../../extension/reader/index.js");
+let state: TestState;
 
 async function loadModules() {
   setLocationUrl(READER_MODE_URL);
-  state = (await import("../../extension/core/state.js")).state;
+  state = (await import("../../extension/core/state.js")).state as TestState;
   shell = await import("../../extension/reader/index.js");
   ids = shell.ids;
 }
@@ -138,7 +143,7 @@ describe("A. 表结构不变量", () => {
 
   it("watchedByGuard/clearOnGuard/clearOnClose/clearViewOnClose 布尔标志齐全", () => {
     for (const field of READER_PRESENTATION_FIELDS) {
-      for (const flag of ["watchedByGuard", "clearOnGuard", "clearOnClose", "clearViewOnClose"]) {
+      for (const flag of ["watchedByGuard", "clearOnGuard", "clearOnClose", "clearViewOnClose"] as const) {
         expect(typeof field[flag], `${field.id}.${flag}`).toBe("boolean");
       }
       // clearViewOnClose 只对有 readingView 落位的字段有语义
@@ -159,13 +164,13 @@ describe("B. 派生清单与表标志一致（真实差异显式化）", () => {
   });
 
   it("守卫 filter 与守卫清理覆盖同一属性集（filter 存在的意义就是触发收敛清理）", () => {
-    for (const target of ["html", "body"]) {
+    for (const target of ["html", "body"] as const) {
       expect([...READER_GUARD_FILTER[target]].sort()).toEqual([...READER_GUARD_CLEAR_ATTRS[target]].sort());
     }
   });
 
   it("修正锚点：transcript-visible 同时在 close 与守卫两份清理清单（html/body）", () => {
-    for (const target of ["html", "body"]) {
+    for (const target of ["html", "body"] as const) {
       expect(READER_CLOSE_ATTRS[target]).toContain("data-boc-reader-transcript-visible");
       expect(READER_GUARD_CLEAR_ATTRS[target]).toContain("data-boc-reader-transcript-visible");
     }
@@ -238,11 +243,11 @@ describe("D. 源码扫描：data-boc-* 属性字面量必须登记在案", () =>
   // 消费方。page-frame / player-host / sync 属端口半边的并行改造区，其属性均为
   // LOCAL 局部标志（keep/hidden/controls-* 等），不纳入扫描面。
   const SCANNED_FILES = [
-    "extension/reader/presentation.js",
-    "extension/reader/lifecycle.js",
-    "extension/reader/page-state.js",
-    "extension/reader/init-essentials.js",
-    "extension/entry/content.js",
+    "extension/reader/presentation.ts",
+    "extension/reader/lifecycle.ts",
+    "extension/reader/page-state.ts",
+    "extension/reader/init-essentials.ts",
+    "extension/entry/content.ts",
     "extension/core/message-handler.ts",
     "extension/ui/ui-renderer.js",
     "extension/bilibili/video-probe.ts",
@@ -254,7 +259,7 @@ describe("D. 源码扫描：data-boc-* 属性字面量必须登记在案", () =>
     const known = new Set([...allDeclaredAttrs(), ...LOCAL_FLAG_ATTRIBUTES]);
     for (const relPath of SCANNED_FILES) {
       const source = readFileSync(resolve(process.cwd(), relPath), "utf8");
-      const found = [...new Set(source.match(ATTR_PATTERN) || [])];
+      const found: string[] = [...new Set(source.match(ATTR_PATTERN) || [])];
       for (const attr of found) {
         expect(
           known.has(attr),
@@ -265,7 +270,7 @@ describe("D. 源码扫描：data-boc-* 属性字面量必须登记在案", () =>
   });
 
   it("消费方不再手抄清单：page-state 与 init-essentials 中已无属性/监听键字面量", () => {
-    for (const relPath of ["extension/reader/page-state.js", "extension/reader/init-essentials.js"]) {
+    for (const relPath of ["extension/reader/page-state.ts", "extension/reader/init-essentials.ts"]) {
       const source = readFileSync(resolve(process.cwd(), relPath), "utf8");
       expect(source.match(ATTR_PATTERN), `${relPath} 不应再出现属性字面量`).toBe(null);
       expect(source.includes("changes.reader"), `${relPath} 不应手抄 reader 监听键`).toBe(false);
@@ -286,17 +291,17 @@ describe("E. 行为：表声明的职责与 DOM 真实读写一致", () => {
     // 非 apply 字段预置值：apply 不得清除/覆写它们
     document.documentElement.setAttribute("data-boc-reader-mode", "1");
     document.body.setAttribute("data-boc-reading-active", "1");
-    const readingView = document.getElementById(ids.readingView);
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     readingView.setAttribute("data-boc-reader-follow", "manual");
     readingView.setAttribute("data-has-chapters", "1");
 
     shell.applyReadingViewPresentation();
 
     for (const field of READER_APPLY_FIELDS) {
-      const expected = field.readValue(state.reader);
+      const expected = field.readValue!(state.reader);
       for (const target of TARGETS) {
         expect(
-          targetNode(target).getAttribute(field.targets[target]),
+          targetNode(target).getAttribute(field.targets[target]!)!,
           `${field.id} @ ${target}`
         ).toBe(expected);
       }
@@ -352,7 +357,7 @@ describe("E. 行为：表声明的职责与 DOM 真实读写一致", () => {
     });
 
     // follow 是视图内标志（watchedByGuard=false）：守卫不监听也不清理
-    const readingView = document.getElementById(ids.readingView);
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
     readingView.setAttribute("data-boc-reader-follow", "manual");
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(readingView.getAttribute("data-boc-reader-follow")).toBe("manual");

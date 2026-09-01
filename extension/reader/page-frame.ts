@@ -49,8 +49,8 @@ export { applyInlineHostPresentation } from "./presentation.js";
 //
 // mainOriginalParent / mainOriginalNextSibling 仅本域读写
 //（moveReadingMainInline 记录、restoreReadingMainInline 恢复并清空）。
-let mainOriginalParent = null;     // readingMainOriginalParent
-let mainOriginalNextSibling = null;// readingMainOriginalNextSibling
+let mainOriginalParent: Node | null = null;     // readingMainOriginalParent
+let mainOriginalNextSibling: Node | null = null;// readingMainOriginalNextSibling
 
 // Reader 私有 DOM id 表已迁往 ./ids.js（常驻微模块，供 UI 模板与总结链共享），
 // isReaderViewOpen 迁往 ./view-state.js，页面状态守卫迁往 ./page-state.js，
@@ -107,7 +107,7 @@ export function applyReaderPageFocus() {
   const video = getRuntimeVideoElement();
   const playerHostNode = findReaderPlayerHost(video);
   const titleNode = findReaderTitleContainer();
-  const keepRoots = [root, playerHostNode, titleNode].filter(Boolean);
+  const keepRoots = [root, playerHostNode, titleNode].filter((n): n is Element => Boolean(n));
 
   keepRoots.forEach((node) => {
     markReaderKeepSubtree(node);
@@ -229,7 +229,7 @@ export function updateReadingTranscriptTailSpacer() {
   spacer.style.height = `${spacerHeight}px`;
 }
 
-function pruneReaderNonKeepBranches(node) {
+function pruneReaderNonKeepBranches(node: Element) {
   if (!node?.children?.length) {
     return;
   }
@@ -248,7 +248,7 @@ function pruneReaderNonKeepBranches(node) {
   });
 }
 
-function hideReaderNoiseNodes(keepRoots = []) {
+function hideReaderNoiseNodes(keepRoots: Element[] = []) {
   const keepSet = new Set(keepRoots.filter(Boolean));
   const selectors = [
     ".strip-ad-inner",
@@ -282,7 +282,7 @@ function hideReaderNoiseNodes(keepRoots = []) {
   });
 }
 
-function markReaderKeepSubtree(node) {
+function markReaderKeepSubtree(node: Element) {
   if (!node) {
     return;
   }
@@ -292,8 +292,8 @@ function markReaderKeepSubtree(node) {
   });
 }
 
-function markReaderKeepPath(node) {
-  let current = node;
+function markReaderKeepPath(node: Element) {
+  let current: Element | null = node;
   while (current && current !== document.body) {
     current.setAttribute("data-boc-reader-keep", "1");
     current = current.parentElement;
@@ -301,7 +301,7 @@ function markReaderKeepPath(node) {
   document.body.setAttribute("data-boc-reader-keep", "1");
 }
 
-function findReaderTitleContainer() {
+function findReaderTitleContainer(): Element | null {
   const title =
     document.querySelector("h1.video-title") ||
     document.querySelector("h1") ||
@@ -312,10 +312,10 @@ function findReaderTitleContainer() {
   return title;
 }
 
-export function dismissReaderMiniPlayer(playerHostArg = getPlayerHost()) {
+export function dismissReaderMiniPlayer(playerHostArg: Element | null = getPlayerHost()) {
   const explicitClose = Array.from(document.querySelectorAll(".bpx-player-mini-close")).find(isVisibleReaderControl);
   if (explicitClose) {
-    explicitClose.click();
+    (explicitClose as HTMLElement).click();
     return true;
   }
 
@@ -324,18 +324,20 @@ export function dismissReaderMiniPlayer(playerHostArg = getPlayerHost()) {
   }
 
   const computed = window.getComputedStyle(playerHostArg);
-  const fixedLike = computed.position === "fixed" || /mini|picture|float|fixed-player/i.test(playerHostArg.className || "");
+  const fixedLike = computed.position === "fixed" || /mini|picture|float|fixed-player/i.test((playerHostArg as HTMLElement).className || "");
   if (!fixedLike) {
     return false;
   }
 
   const roots = Array.from(
-    new Set([
-      playerHostArg,
-      playerHostArg.parentElement,
-      playerHostArg.closest("#playerWrap"),
-      playerHostArg.closest("#bilibili-player")
-    ].filter(Boolean))
+    new Set(
+      [
+        playerHostArg,
+        playerHostArg.parentElement,
+        playerHostArg.closest("#playerWrap"),
+        playerHostArg.closest("#bilibili-player")
+      ].filter((n): n is Element => Boolean(n))
+    )
   );
 
   const selectors = [
@@ -357,7 +359,7 @@ export function dismissReaderMiniPlayer(playerHostArg = getPlayerHost()) {
         return rectA.width * rectA.height - rectB.width * rectB.height;
       })[0];
       if (button) {
-        button.click();
+        (button as HTMLElement).click();
         return true;
       }
     }
@@ -366,7 +368,7 @@ export function dismissReaderMiniPlayer(playerHostArg = getPlayerHost()) {
   const playerRect = playerHostArg.getBoundingClientRect();
   for (const root of roots) {
     const fallback = Array.from(root.querySelectorAll("button, [role='button'], [tabindex], div, span"))
-      .filter((node) => {
+      .filter((node): node is Element => {
         if (!isVisibleReaderControl(node)) {
           return false;
         }
@@ -386,7 +388,7 @@ export function dismissReaderMiniPlayer(playerHostArg = getPlayerHost()) {
       })[0];
 
     if (fallback) {
-      fallback.click();
+      (fallback as HTMLElement).click();
       return true;
     }
   }
