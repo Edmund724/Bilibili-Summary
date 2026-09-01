@@ -11,6 +11,10 @@ import { logInfo, logWarn } from "../shared/logging.js";
 // 不再常驻，start/stop/sync 全部走 loadPlayerAi() 的动态 import。
 import { loadPlayerAi, isPlayerAiLoaded } from "../core/lazy-player-ai.js";
 
+// Digest 工具栏按钮经加载器按需引入（统一 Digest 阅读模式 PR1）：只在非阅读
+// 模式分支装载（阅读模式直达链接上按钮无意义，生命周期不启动）。
+import { loadDigestButton } from "../core/lazy-digest-button.js";
+
 // 候选03 常驻瘦身：UI 壳构建（ensureUiReady）与 reader 静态呈现层
 //（hydrateReaderStateFromSettings / applyReadingViewPresentation / renderReadingStatus）
 // 已惰性化，只在面板打开或进入阅读模式时加载。普通页启动路径不再构建
@@ -177,6 +181,13 @@ function init(): void {
         .catch((error) => {
           renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
         });
+    } else {
+      // 统一 Digest 阅读模式 PR1：非阅读模式分支装载工具栏按钮模块。模块
+      // 自管「等 hydration 稳定 → 注入 → setInterval 自查」生命周期；阅读
+      // 视图打开后由其自查守卫摘除按钮，无需在此 stop。
+      loadDigestButton().catch((error) => {
+        logWarn("[BOC] digest-button module load failed", error);
+      });
     }
   });
 }

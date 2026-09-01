@@ -71,6 +71,19 @@ export function bindRuntimeEvents() {
   uiState.setRuntimeEventsBound(true);
 
   chrome.runtime.onMessage.addListener((rawMessage, _sender, sendResponse: SendResponse) => {
+    return dispatchContentScriptMessage(rawMessage, sendResponse);
+  });
+}
+
+// onMessage 监听器的分发主体抽成可导出函数：除 runtime 消息外，页内触发源
+//（ui/digest-button.ts 的工具栏按钮）也走同一处理器路径——content script 的
+// chrome.runtime.sendMessage 不会回环到本文档自己的监听器，页内源必须直接
+// 调用分发主体才能复用同一处理逻辑（保持 handler 单源，消息形状不变）。
+export function dispatchContentScriptMessage(
+  rawMessage: unknown,
+  sendResponse: SendResponse
+): boolean {
+  {
     if (!rawMessage || typeof rawMessage !== "object") {
       return false;
     }
@@ -293,7 +306,7 @@ export function bindRuntimeEvents() {
     }
 
     return false;
-  });
+  }
 }
 
 // ============================================================
