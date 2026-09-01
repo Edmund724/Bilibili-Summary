@@ -22,18 +22,27 @@ const storageChangeListeners = new Set();
 
 // 当前用例的内存设置引用：stubChrome 写入，emitStorageChange 更新并派发。
 let activeSettingsRef = null;
+// deferGetSettings 模式下挂起的 get-settings 回包回调（模拟 SW 冷启动未回包）。
+let pendingGetSettingsCallback = null;
 
 // 本用例期望的"当前设置"（与 DEFAULT_SETTINGS 合并后由
 // get-settings 回读返回，模拟 background 的 normalizeSettings 兜底）。
 // runtime.getURL 已由 setup.js 的通用 chrome stub 提供（S3 分层样式挂载用），
 // 这里沿用；startPlayerAiQuickAction 会触发 ensurePlayerAiStyles 挂 link。
-function stubChrome(settings) {
+// options.deferGetSettings：get-settings 不回包（缓存回调），模拟 SW 冷启动
+// 未响应，用于验证 content.js 的 storage 快路径门控不等 SW 往返。
+function stubChrome(settings, { deferGetSettings = false } = {}) {
   activeSettingsRef = { current: { ...settings } };
+  pendingGetSettingsCallback = null;
   const runtime = {
     getURL: vi.fn((path) => `chrome-extension://test/${path}`),
     lastError: null,
     sendMessage: vi.fn((message, callback) => {
       if (message?.type === "get-settings") {
+        if (deferGetSettings) {
+          pendingGetSettingsCallback = callback;
+          return undefined;
+        }
         callback?.({
           ok: true,
           settings: { ...DEFAULT_SETTINGS, ...activeSettingsRef.current }
@@ -250,6 +259,39 @@ describe("player-ai 启停守卫", () => {
     await vi.advanceTimersByTimeAsync(3000);
     expect(document.getElementById("boc-player-ai-quick-action")).toBeNull();
     expect(state.playerAi.playerAiQuickActionSyncTimer).toBe(0);
+  });
+
+  it("get-settings 未回包（SW 冷启动）时，storage 快路径已启动 observer 与 layout 监听", async () => {
+    const windowAddSpy = vi.spyOn(window, "addEventListener");
+    setLocationUrl(NORMAL_PAGE_URL);
+    stubChrome({ enablePlayerAiQuickAction: true }, { deferGetSettings: true });
+    await import("../../extension/entry/content.js");
+    const { loadPlayerAi } = await import("../../extension/core/lazy-player-ai.js");
+    await loadPlayerAi();
+    await flushMicrotasks();
+    const state = (await import("../../extension/core/state.js")).state;
+
+    // get-settings 始终未回包：以下状态全部来自 chrome.storage.sync 快路径
+    expect(pendingGetSettingsCallback).not.toBeNull();
+    expect(state.settings.enablePlayerAiQuickAction).toBe(true);
+    expect(state.playerAi.playerAiQuickActionObserver).not.toBeNull();
+    expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(true);
+    expect(windowAddSpy.mock.calls.some(([type]) => type === "resize")).toBe(true);
+  });
+
+  it("body 回退观察器带 subtree：播放器深层挂载可发现", async () => {
+    // 功能路径在 fake 时钟下会被初始 sync 定时器掩盖（动态 import 落地时机
+    // 不确定），这里直接锁机制：容器缺席时回退观察 body 必须带 subtree，
+    // 否则深层嵌套挂载（B 站播放器常见）发现不了，只能等 retry 退避兜底。
+    const observeSpy = vi.spyOn(MutationObserver.prototype, "observe");
+    await loadContentScript({ enablePlayerAiQuickAction: true });
+
+    // reader 呈现层另有针对 body 的属性观察器（attributeFilter 带 data-boc-reader-*），
+    // 按 childList 形态区分出 player-ai 的回退观察器。
+    const bodyObserveCall = observeSpy.mock.calls.find(
+      ([target, options]) => target === document.body && options?.childList === true
+    );
+    expect(bodyObserveCall?.[1]).toMatchObject({ childList: true, subtree: true });
   });
 
   it("storage.onChanged：enablePlayerAiQuickAction true→false→true 正确启停", async () => {

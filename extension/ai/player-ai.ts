@@ -92,9 +92,10 @@ export function startPlayerAiQuickActionObserver(): void {
   };
   const observer = new MutationObserver(sync);
 
-  // 优先观察播放器容器；容器不存在时退回观察 body 的 childList（不带
-  // subtree/attributes，仅用于发现播放器挂载）。发现播放器后断开 body
-  // 观察并切换到容器，避免对整个页面 DOM 变化做回调。
+  // 优先观察播放器容器；容器不存在时退回观察 body 的 childList+subtree
+  //（B 站播放器常挂进嵌套容器，不带 subtree 发现不了深层挂载，只能等
+  // retry 退避兜底，最坏拖到 2.5s 步长）。发现播放器后断开 body 观察并
+  // 切换到容器，subtree 全观察的开销只存在于启动窗口。
   const playerContainer = document.querySelector(PLAYER_CONTAINER_SELECTOR);
   if (playerContainer) {
     observer.observe(playerContainer, {
@@ -122,7 +123,7 @@ export function startPlayerAiQuickActionObserver(): void {
     playerAiState.setObserver(observer);
     sync();
   });
-  bodyObserver.observe(document.body, { childList: true });
+  bodyObserver.observe(document.body, { childList: true, subtree: true });
   playerAiState.setObserver(bodyObserver);
 }
 

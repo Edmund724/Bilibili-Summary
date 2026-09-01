@@ -140,6 +140,20 @@ function init(): void {
   // history 补丁与 boc:urlchange 广播。
   bindUrlChangeHandler();
   bindPlayerAiSettingsWatcher();
+  // 快路径门控：按钮启停只依赖 enablePlayerAiQuickAction 单键。直连
+  // chrome.storage.sync 读取（content 脚本本就有 storage 权限），绕开
+  // getSettings 的 SW 往返——SW 冷启动唤醒是按钮出现慢的主因之一。读为
+  // true 时先把该键同步进 state.settings（sync 门控读它，与
+  // bindPlayerAiSettingsWatcher 同款写法）再启动；完整设置仍由下方
+  // getSettings 水合覆盖，读失败静默回退到慢路径。
+  chrome.storage.sync.get("enablePlayerAiQuickAction").then((data) => {
+    if (Boolean((data as { enablePlayerAiQuickAction?: unknown })?.enablePlayerAiQuickAction)) {
+      if (state.settings) {
+        state.settings.enablePlayerAiQuickAction = true;
+      }
+      startPlayerAiQuickActionLazy();
+    }
+  }).catch(() => {});
   getSettings().then((settings) => {
     state.setSettings(settings);
     hydrateReaderStateFromSettings(settings);
