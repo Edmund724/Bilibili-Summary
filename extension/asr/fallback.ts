@@ -102,6 +102,14 @@ export interface CreateAsrFallbackDeps {
   broadcastSubtitleStatus: (status: string) => void;
 }
 
+// 进行中的 ASR 转写共享单元（activeAsrTranscribes Map 的值类型）。字段语义与
+// 工厂内 Map 注释的不变量一一对应：
+//   - promise：共享转写 promise——同视频并发抓取命中后等待同一成果，不重启
+//     转写；缓存写入由发起者的 promise 链负责，任务终态按自身 cacheKey 除名；
+//   - platformName：发起时激活平台名（共享命中方的收尾文案复用同一名字）；
+//   - videoKey：发起转写时的 "bvid|cid" 视频身份快照——与转写解耦的关键：
+//     切视频不取消任务，fetcher 失败兜底按"当前视频"探针/等待
+//    （hasActiveAsrTranscribe / awaitActiveAsrTranscribe 只匹配 videoKey）。
 export interface ActiveAsrTranscribe {
   promise: Promise<SubtitleItem[]>;
   platformName: string;
@@ -153,7 +161,10 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
     // 分类，UI 收尾与现状一致。
     let bvid = "";
     let cid = "";
-    let isStale = () => false;
+    // 运行守卫类型契约：isStale 恒为 () => boolean，语义是"视频键是否已切换"
+    // （bvid/cid 快照 vs 实时 clip），不是 runId 前进——runId 守卫只拦截发起前
+    // 的调用方更替（ensureRunActive），见下方赋值点与函数注释。
+    let isStale: () => boolean = () => false;
     try {
       ensureRunActive(runId);
 

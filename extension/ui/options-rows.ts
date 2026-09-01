@@ -1,11 +1,11 @@
-// extension/ui/options-rows.js
+// extension/ui/options-rows.ts
 // 选项页三类行构建器（固定属性 / 笔记段落 / AI 平台）与纯验证逻辑。
 // AI 平台行的构建本体由 ui/provider-row.js 的 createProviderRow 承担（与 ASR 行共用），
 // 本文件只提供 AI 侧真实差异：模型字段形态、模型下拉拉取、报文形状（连通性
 // 测试已改直调 ai/provider-test.js）与既有导出签名。
 // 行构建器只依赖参数与回调，不直接访问 DOM 全局；验证函数不触碰 DOM。
 
-import { PRESETS } from "../core/presets.js";
+import { PRESETS, type AiProviderPreset } from "../core/presets.js";
 import {
   normalizeFixedPropertyType,
   normalizeFixedPropertyValue,
@@ -13,25 +13,33 @@ import {
   validateFixedFrontmatterProperties,
   validateNotePlaceholderSections,
   normalizeNoteSectionPosition,
-  validateAiProviders
+  validateAiProviders,
+  type FixedFrontmatterProperty,
+  type NotePlaceholderSection
 } from "../core/validators.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { testAiProviderConnection } from "../ai/provider-test.js";
-import { createProviderRow, TRASH_ICON_PATHS } from "./provider-row.js";
+import {
+  createProviderRow,
+  TRASH_ICON_PATHS,
+  type ProviderRowElement,
+  type ProviderRowItem,
+  type ProviderRowShowStatus
+} from "./provider-row.js";
 
 const MAX_NOTE_PLACEHOLDER_SECTIONS = 5;
 
 const AI_PROVIDER_STATUS_SUCCESS_MIN_MS = 2000;
 
-export function renderFixedPropertyRows(listNode, emptyNode, items) {
+export function renderFixedPropertyRows(listNode: HTMLElement, emptyNode: HTMLElement, items: FixedFrontmatterProperty[] | null | undefined): void {
   listNode.innerHTML = "";
   const rows = Array.isArray(items) ? items : [];
   rows.forEach((item) => addFixedPropertyRow(listNode, emptyNode, item));
   updateFixedPropertyEmptyState(listNode, emptyNode);
 }
 
-export function addFixedPropertyRow(listNode, emptyNode, item = {}) {
+export function addFixedPropertyRow(listNode: HTMLElement, emptyNode: HTMLElement, item: Partial<FixedFrontmatterProperty> = {}): void {
   const type = normalizeFixedPropertyType(item.type);
   const row = document.createElement("div");
   row.className = "fixed-property-row";
@@ -59,8 +67,8 @@ export function addFixedPropertyRow(listNode, emptyNode, item = {}) {
   });
 
   const typeButton = row.querySelector(".fixed-property-type-button");
-  const typePicker = row.querySelector(".fixed-property-type-picker");
-  const typeMenu = row.querySelector(".fixed-property-type-menu");
+  const typePicker = row.querySelector(".fixed-property-type-picker") as HTMLElement | null;
+  const typeMenu = row.querySelector(".fixed-property-type-menu") as HTMLElement | null;
 
   typeButton?.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -112,16 +120,21 @@ export function addFixedPropertyRow(listNode, emptyNode, item = {}) {
   updateFixedPropertyEmptyState(listNode, emptyNode);
 }
 
-function updateFixedPropertyEmptyState(listNode, emptyNode) {
+function updateFixedPropertyEmptyState(listNode: HTMLElement, emptyNode: HTMLElement): void {
   const hasRows = listNode.children.length > 0;
   emptyNode.hidden = hasRows;
 }
 
-export function collectFixedPropertyRows(listNode, { includeRow = false } = {}) {
-  return Array.from(listNode.querySelectorAll(".fixed-property-row")).map((row) => {
+export function collectFixedPropertyRows(listNode: HTMLElement, { includeRow = false }: { includeRow?: boolean } = {}) {
+  return Array.from(listNode.querySelectorAll<HTMLElement>(".fixed-property-row")).map((row) => {
     const type = normalizeFixedPropertyType(row.querySelector(".fixed-property-type-picker")?.getAttribute("data-type"));
-    const item = {
-      key: String(row.querySelector(".fixed-property-key")?.value || "").trim(),
+    const item: {
+      key: string;
+      type: FixedFrontmatterProperty["type"];
+      value: string;
+      row?: HTMLElement;
+    } = {
+      key: String((row.querySelector(".fixed-property-key") as HTMLInputElement | null)?.value || "").trim(),
       type,
       value: readFixedPropertyValue(row, type)
     };
@@ -132,27 +145,27 @@ export function collectFixedPropertyRows(listNode, { includeRow = false } = {}) 
   });
 }
 
-export function clearFixedPropertyErrors(listNode) {
+export function clearFixedPropertyErrors(listNode: HTMLElement): void {
   listNode.querySelectorAll(".fixed-property-key, .fixed-property-value").forEach((input) => {
     input.classList.remove("input-error");
   });
   listNode.querySelectorAll(".fixed-property-type-button").forEach((input) => {
     input.classList.remove("input-error");
   });
-  listNode.querySelectorAll(".fixed-property-error").forEach((node) => {
+  listNode.querySelectorAll<HTMLElement>(".fixed-property-error").forEach((node) => {
     node.hidden = true;
     node.textContent = "";
   });
 }
 
-export function renderNoteSectionRows(listNode, emptyNode, items) {
+export function renderNoteSectionRows(listNode: HTMLElement, emptyNode: HTMLElement, items: NotePlaceholderSection[] | null | undefined): void {
   listNode.innerHTML = "";
   const rows = Array.isArray(items) ? items : [];
   rows.forEach((item) => addNoteSectionRow(listNode, emptyNode, item, { skipLimit: true }));
   updateNoteSectionEmptyState(listNode, emptyNode);
 }
 
-export function addNoteSectionRow(listNode, emptyNode, item = {}, { skipLimit = false } = {}) {
+export function addNoteSectionRow(listNode: HTMLElement, emptyNode: HTMLElement, item: Partial<NotePlaceholderSection> = {}, { skipLimit = false }: { skipLimit?: boolean } = {}): void {
   if (!skipLimit && listNode.children.length >= MAX_NOTE_PLACEHOLDER_SECTIONS) {
     emptyNode.hidden = false;
     emptyNode.textContent = `正文附加段落最多添加 ${MAX_NOTE_PLACEHOLDER_SECTIONS} 个`;
@@ -198,17 +211,22 @@ export function addNoteSectionRow(listNode, emptyNode, item = {}, { skipLimit = 
   updateNoteSectionEmptyState(listNode, emptyNode);
 }
 
-function updateNoteSectionEmptyState(listNode, emptyNode) {
+function updateNoteSectionEmptyState(listNode: HTMLElement, emptyNode: HTMLElement): void {
   const hasRows = listNode.children.length > 0;
   emptyNode.hidden = hasRows;
 }
 
-export function collectNoteSectionRows(listNode, { includeRow = false } = {}) {
-  return Array.from(listNode.querySelectorAll(".note-section-row")).map((row) => {
-    const item = {
-      title: String(row.querySelector(".note-section-title")?.value || "").trim(),
-      position: normalizeNoteSectionPosition(row.querySelector(".note-section-position")?.value),
-      content: String(row.querySelector(".note-section-content")?.value || "").trim()
+export function collectNoteSectionRows(listNode: HTMLElement, { includeRow = false }: { includeRow?: boolean } = {}) {
+  return Array.from(listNode.querySelectorAll<HTMLElement>(".note-section-row")).map((row) => {
+    const item: {
+      title: string;
+      position: NotePlaceholderSection["position"];
+      content: string;
+      row?: HTMLElement;
+    } = {
+      title: String((row.querySelector(".note-section-title") as HTMLInputElement | null)?.value || "").trim(),
+      position: normalizeNoteSectionPosition((row.querySelector(".note-section-position") as HTMLSelectElement | null)?.value),
+      content: String((row.querySelector(".note-section-content") as HTMLInputElement | null)?.value || "").trim()
     };
     if (includeRow) {
       item.row = row;
@@ -217,17 +235,17 @@ export function collectNoteSectionRows(listNode, { includeRow = false } = {}) {
   });
 }
 
-export function clearNoteSectionErrors(listNode) {
+export function clearNoteSectionErrors(listNode: HTMLElement): void {
   listNode.querySelectorAll(".note-section-title, .note-section-content, .note-section-position").forEach((input) => {
     input.classList.remove("input-error");
   });
-  listNode.querySelectorAll(".note-section-error").forEach((node) => {
+  listNode.querySelectorAll<HTMLElement>(".note-section-error").forEach((node) => {
     node.hidden = true;
     node.textContent = "";
   });
 }
 
-function buildNoteSectionPositionOptions(selectedPosition) {
+function buildNoteSectionPositionOptions(selectedPosition: unknown): string {
   const current = normalizeNoteSectionPosition(selectedPosition);
   const options = [
     { value: "before_intro", label: "简介前" },
@@ -239,11 +257,11 @@ function buildNoteSectionPositionOptions(selectedPosition) {
     .join("");
 }
 
-function readFixedPropertyValue(row, _type = normalizeFixedPropertyType(row.querySelector(".fixed-property-type")?.value)) {
-  return String(row.querySelector(".fixed-property-value")?.value || "").trim();
+function readFixedPropertyValue(row: HTMLElement, _type = normalizeFixedPropertyType((row.querySelector(".fixed-property-type") as HTMLInputElement | null)?.value)): string {
+  return String((row.querySelector(".fixed-property-value") as HTMLInputElement | null)?.value || "").trim();
 }
 
-function buildFixedPropertyValueControl(type, value) {
+function buildFixedPropertyValueControl(type: unknown, value: unknown): string {
   const normalizedType = normalizeFixedPropertyType(type);
   const placeholder =
     normalizedType === "number"
@@ -258,7 +276,7 @@ function buildFixedPropertyValueControl(type, value) {
   return `<input class="fixed-property-value" type="text" placeholder="${placeholder}" value="${escapeHtml(value)}" />`;
 }
 
-function buildFixedPropertyTypePicker(type) {
+function buildFixedPropertyTypePicker(type: unknown): string {
   const normalizedType = normalizeFixedPropertyType(type);
   return `
     <div class="fixed-property-type-picker" data-type="${normalizedType}" data-open="false">
@@ -279,7 +297,7 @@ function buildFixedPropertyTypePicker(type) {
   `;
 }
 
-function getFixedPropertyTypeLabel(type) {
+function getFixedPropertyTypeLabel(type: unknown): string {
   const normalizedType = normalizeFixedPropertyType(type);
   if (normalizedType === "number") {
     return "数字";
@@ -296,40 +314,40 @@ function getFixedPropertyTypeLabel(type) {
   return "文本";
 }
 
-function bindFixedPropertyValueEvents(row) {
+function bindFixedPropertyValueEvents(row: HTMLElement): void {
   row.querySelectorAll(".fixed-property-value").forEach((input) => {
     input.addEventListener("input", () => clearFixedPropertyErrorState(row));
     input.addEventListener("change", () => clearFixedPropertyErrorState(row));
   });
 }
 
-function clearFixedPropertyErrorState(row) {
+function clearFixedPropertyErrorState(row: HTMLElement): void {
   row.querySelectorAll(".fixed-property-key, .fixed-property-value, .fixed-property-type-button").forEach((input) => {
     input.classList.remove("input-error");
   });
-  const errorNode = row.querySelector(".fixed-property-error");
+  const errorNode = row.querySelector(".fixed-property-error") as HTMLElement | null;
   if (errorNode) {
     errorNode.hidden = true;
     errorNode.textContent = "";
   }
 }
 
-function clearNoteSectionErrorState(row) {
+function clearNoteSectionErrorState(row: HTMLElement): void {
   row.querySelectorAll(".note-section-title, .note-section-content, .note-section-position").forEach((input) => {
     input.classList.remove("input-error");
   });
-  const errorNode = row.querySelector(".note-section-error");
+  const errorNode = row.querySelector(".note-section-error") as HTMLElement | null;
   if (errorNode) {
     errorNode.hidden = true;
     errorNode.textContent = "";
   }
 }
 
-function closeAllFixedPropertyMenus(listNode) {
+function closeAllFixedPropertyMenus(listNode: HTMLElement): void {
   listNode.querySelectorAll(".fixed-property-type-picker").forEach((picker) => {
     picker.setAttribute("data-open", "false");
     const button = picker.querySelector(".fixed-property-type-button");
-    const menu = picker.querySelector(".fixed-property-type-menu");
+    const menu = picker.querySelector(".fixed-property-type-menu") as HTMLElement | null;
     if (button) {
       button.setAttribute("aria-expanded", "false");
     }
@@ -376,7 +394,7 @@ const aiProviderRow = createProviderRow({
     </div>`,
   onPresetChange: (row, _previousPreset, next) => {
     // AI 行不清空已输 Key，只随新预设更新占位符（可选 Key 平台提示"（可选）"）
-    const apikeyInput = row.querySelector(".ai-provider-apikey");
+    const apikeyInput = row.querySelector(".ai-provider-apikey") as HTMLInputElement;
     apikeyInput.placeholder = row.dataset.hasSavedKey === "1"
       ? "已保存"
       : (next.requiresKey ? "API Key" : "API Key（可选）");
@@ -397,14 +415,14 @@ const aiProviderRow = createProviderRow({
 
 // 模型下拉交互（AI 专属，经 wireRowExtras 接入工厂）：点击 toggle 从 baseUrl
 // 拉取可用模型列表，选中写回输入框；手输模型或选中选项时收起下拉。
-function wireAiModelControls(row, { showStatus }) {
+function wireAiModelControls(row: ProviderRowElement, { showStatus }: { showStatus: ProviderRowShowStatus }): void {
   row.querySelector(".ai-provider-model-toggle")?.addEventListener("click", async (e) => {
     e.stopPropagation();
-    const statusNode = row.querySelector(".ai-provider-status");
-    const baseUrl = row.querySelector(".ai-provider-baseurl").value.trim();
-    const apiKey = row.querySelector(".ai-provider-apikey").value.trim();
-    const modelInput = row.querySelector(".ai-provider-model");
-    const dropdown = row.querySelector(".ai-provider-model-dropdown");
+    const statusNode = row.querySelector(".ai-provider-status") as HTMLElement | null;
+    const baseUrl = (row.querySelector(".ai-provider-baseurl") as HTMLInputElement).value.trim();
+    const apiKey = (row.querySelector(".ai-provider-apikey") as HTMLInputElement).value.trim();
+    const modelInput = row.querySelector(".ai-provider-model") as HTMLInputElement;
+    const dropdown = row.querySelector(".ai-provider-model-dropdown") as HTMLElement;
 
     if (!baseUrl) {
       showStatus(statusNode, "请先填写 baseUrl", true);
@@ -432,12 +450,12 @@ function wireAiModelControls(row, { showStatus }) {
     dropdown.appendChild(loadingLi);
 
     try {
-      const resp = await sendRuntimeMessage({
+      const resp = (await sendRuntimeMessage({
         type: "ai-providers-models",
         baseUrl,
         apiKey,
         providerId: row.dataset.providerId || ""
-      });
+      })) as { ok?: boolean; models?: string[]; error?: string } | null;
 
       dropdown.innerHTML = "";
       if (resp?.ok && Array.isArray(resp.models) && resp.models.length > 0) {
@@ -473,48 +491,58 @@ function wireAiModelControls(row, { showStatus }) {
       dropdown.innerHTML = "";
       const li = document.createElement("li");
       li.className = "ai-provider-model-message ai-provider-model-error";
-      if (error.message && error.message.includes("port closed")) {
+      const message = (error as Error).message;
+      if (message && message.includes("port closed")) {
         li.textContent = "连接中断，请重试";
       } else {
-        li.textContent = error.message || "拉取失败";
+        li.textContent = message || "拉取失败";
       }
       dropdown.appendChild(li);
     }
   });
 
   row.querySelector(".ai-provider-model")?.addEventListener("input", () => {
-    const dropdown = row.querySelector(".ai-provider-model-dropdown");
+    const dropdown = row.querySelector(".ai-provider-model-dropdown") as HTMLElement | null;
     if (dropdown) dropdown.hidden = true;
   });
 
   row.querySelector(".ai-provider-model-dropdown")?.addEventListener("click", (e) => {
-    const option = e.target.closest(".ai-provider-model-option");
+    const option = (e.target as HTMLElement).closest(".ai-provider-model-option") as HTMLElement | null;
     if (!option) return;
     e.stopPropagation();
     const modelInput = row.querySelector(".ai-provider-model");
     if (modelInput && option.dataset.model) {
-      modelInput.value = option.dataset.model;
+      (modelInput as HTMLInputElement).value = option.dataset.model;
     }
     if (modelInput) modelInput.classList.remove("input-error");
-    const dropdown = row.querySelector(".ai-provider-model-dropdown");
+    const dropdown = row.querySelector(".ai-provider-model-dropdown") as HTMLElement | null;
     if (dropdown) dropdown.hidden = true;
   });
 }
 
-function closeAllModelDropdowns() {
-  document.querySelectorAll(".ai-provider-model-dropdown").forEach((dropdown) => {
+function closeAllModelDropdowns(): void {
+  document.querySelectorAll<HTMLElement>(".ai-provider-model-dropdown").forEach((dropdown) => {
     dropdown.hidden = true;
   });
 }
 
-export function renderAiProviders(listNode, emptyNode, items, { presets = PRESETS, defaultModel = "", onRenderDefaultModel = null } = {}) {
+export function renderAiProviders(
+  listNode: HTMLElement,
+  emptyNode: HTMLElement,
+  items: ProviderRowItem[] | null | undefined,
+  { presets = PRESETS, defaultModel = "", onRenderDefaultModel = null }: {
+    presets?: readonly AiProviderPreset[];
+    defaultModel?: string;
+    onRenderDefaultModel?: ((items: ProviderRowItem[]) => void) | null;
+  } = {}
+): void {
   const list = aiProviderRow.render(listNode, emptyNode, items, { presets });
   if (onRenderDefaultModel) {
     onRenderDefaultModel(list);
   }
 }
 
-export function renderDefaultModelSelect(selectNode, items, defaultModel = "") {
+export function renderDefaultModelSelect(selectNode: HTMLSelectElement, items: ProviderRowItem[] | null | undefined, defaultModel = ""): void {
   const list = Array.isArray(items) ? items : [];
   selectNode.innerHTML = '<option value="">未设置</option>' + list
     .map((item) => {
@@ -529,22 +557,22 @@ export function renderDefaultModelSelect(selectNode, items, defaultModel = "") {
   }
 }
 
-export function addAiProviderRow(listNode, emptyNode, item = {}, { presets = PRESETS } = {}) {
+export function addAiProviderRow(listNode: HTMLElement, emptyNode: HTMLElement, item: ProviderRowItem = {}, { presets = PRESETS }: { presets?: readonly AiProviderPreset[] } = {}): void {
   aiProviderRow.add(listNode, emptyNode, item, { presets });
 }
 
-export function collectAiProviders(listNode, { presets = PRESETS, generateId = aiProviderRow.generateId } = {}) {
-  return Array.from(listNode.querySelectorAll(".ai-provider-row")).map((row) => {
-    const presetSelect = row.querySelector(".ai-provider-preset");
+export function collectAiProviders(listNode: HTMLElement, { presets = PRESETS, generateId = aiProviderRow.generateId }: { presets?: readonly AiProviderPreset[]; generateId?: () => string } = {}) {
+  return Array.from(listNode.querySelectorAll<HTMLElement>(".ai-provider-row")).map((row) => {
+    const presetSelect = row.querySelector(".ai-provider-preset") as HTMLSelectElement;
     const preset = presets.find((p) => p.id === presetSelect.value) || presets[presets.length - 1];
-    const apiKey = row.querySelector(".ai-provider-apikey").value.trim();
-    const baseUrl = row.querySelector(".ai-provider-baseurl").value.trim().replace(/\/+$/, "");
+    const apiKey = (row.querySelector(".ai-provider-apikey") as HTMLInputElement).value.trim();
+    const baseUrl = (row.querySelector(".ai-provider-baseurl") as HTMLInputElement).value.trim().replace(/\/+$/, "");
     return {
       id: row.dataset.providerId || generateId(),
       presetId: preset.id,
       name: preset.name,
       baseUrl,
-      model: row.querySelector(".ai-provider-model").value.trim(),
+      model: (row.querySelector(".ai-provider-model") as HTMLInputElement).value.trim(),
       requiresKey: preset.requiresKey,
       enabled: true,
       apiKey,
@@ -554,11 +582,11 @@ export function collectAiProviders(listNode, { presets = PRESETS, generateId = a
 }
 
 // 测试成功后回调：重新保存设置并返回新渲染的行（由 options.js 注入，避免行构建器耦合保存流程）
-export function setTestSuccessHandler(handler) {
+export function setTestSuccessHandler(handler: Parameters<typeof aiProviderRow.setTestSuccessHandler>[0]): void {
   aiProviderRow.setTestSuccessHandler(handler);
 }
 
 // 删除动作前先执行的钩子（回收 host 权限），由 options.js 注入
-export function setAiBeforeDeleteHandler(handler) {
+export function setAiBeforeDeleteHandler(handler: Parameters<typeof aiProviderRow.setBeforeDeleteHandler>[0]): void {
   aiProviderRow.setBeforeDeleteHandler(handler);
 }

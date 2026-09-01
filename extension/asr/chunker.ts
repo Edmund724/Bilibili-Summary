@@ -1,4 +1,4 @@
-// extension/asr/chunker.js
+// extension/asr/chunker.ts
 // WAV 切片（16bit PCM / 16kHz / 单声道）。
 // WAV 字节编码本体已拆到 asr/wav-encode.js（asr-provider-store 探针只需编码
 // 不需切片，拆静态边让 chunker 其余部分退 offscreen/SW 图，见 ADR-0003），
@@ -10,8 +10,40 @@
 
 import { encodeWavBytes } from "./wav-encode.js";
 
+// 切片计划：chunkSeconds <= 0（或缺省）表示不切——整段一个片段
+export interface ChunkPlan {
+  chunkSeconds: number;
+}
+
+// 切片时间戳：startSec 连续无缝隙，最后一片短于标准片长属正常
+export interface ChunkSpec {
+  index: number;
+  startSec: number;
+  durationSec: number;
+}
+
+// buildWavChunks 的产出：切片时间戳 + 本片 WAV Blob
+export interface WavChunk extends ChunkSpec {
+  wavBlob: Blob;
+}
+
+// 解码诊断（offscreen 宿主会附带 {durationSec, peak}）
+export interface DecodedAudioDiagnostic {
+  durationSec: number;
+  peak: number;
+}
+
+// chunker 契约的 AudioBuffer 鸭子类型（{ sampleRate, length, getChannelData }，
+// 另带可选解码诊断；DOM AudioBuffer 结构兼容）
+export interface DecodedAudioBuffer {
+  sampleRate: number;
+  length: number;
+  getChannelData(channel: number): Float32Array;
+  diagnostic?: DecodedAudioDiagnostic;
+}
+
 // encodeWavBytes 的 Blob 包装（转写上传用 Blob 形态）。
-export function encodeWav(monoFloat32, sampleRate = 16000) {
+export function encodeWav(monoFloat32: Float32Array, sampleRate = 16000): Blob {
   return new Blob([encodeWavBytes(monoFloat32, sampleRate)], { type: "audio/wav" });
 }
 
@@ -20,12 +52,12 @@ export function encodeWav(monoFloat32, sampleRate = 16000) {
 // 按总时长切分片段。plan = { chunkSeconds }，chunkSeconds <= 0（或缺省）
 // 表示不切：整段一个片段。返回 [{ index, startSec, durationSec }]，
 // startSec 连续无缝隙，最后一片短于标准片长属正常；总时长为 0 返回 []。
-export function decideChunks(totalDurationSec, plan) {
+export function decideChunks(totalDurationSec: number, plan: ChunkPlan): ChunkSpec[] {
   const total = Number(totalDurationSec);
   if (!(total > 0)) return [];
   const chunkSec = plan?.chunkSeconds > 0 ? plan.chunkSeconds : total;
 
-  const chunks = [];
+  const chunks: ChunkSpec[] = [];
   let start = 0;
   let index = 0;
   while (total - start > 1e-9) {
@@ -40,7 +72,7 @@ export function decideChunks(totalDurationSec, plan) {
 // 按 provider 类型计算切片计划（分钟 → 秒）：
 //   openai-transcriptions：统一 20 分钟一片。
 // 未知类型保守按不切处理。
-export function buildChunkPlan(providerType) {
+export function buildChunkPlan(providerType: string): ChunkPlan {
   if (providerType === "openai-transcriptions") {
     return { chunkSeconds: 20 * 60 };
   }
@@ -54,7 +86,10 @@ export function buildChunkPlan(providerType) {
 // sampleRate，validateDecodedAudio 会算不出时长并误报「解码结果时长为零」——
 // 曾实际发生（采样数千万级、采样率 undefined）。decodeHost 契约与
 // buildWavChunks 共用此适配，口径一致。
-export function makeDecodedBuffer(channelData, { sampleRate = 16000, diagnostic } = {}) {
+export function makeDecodedBuffer(
+  channelData: Float32Array,
+  { sampleRate = 16000, diagnostic }: { sampleRate?: number; diagnostic?: DecodedAudioDiagnostic } = {}
+): DecodedAudioBuffer {
   return {
     sampleRate,
     length: channelData.length,
@@ -68,7 +103,7 @@ export function makeDecodedBuffer(channelData, { sampleRate = 16000, diagnostic 
 //     直接报错，避免上游把空音频转写出误导性的"未识别到语音内容"；
 //   - 时长 ≤ 0（空采样/采样率异常）→ 报错，绝不静默产出空切片。
 // buildWavChunks 与 offscreen 文档侧共用（解码产物一致，校验口径也必须一致）。
-export function validateDecodedAudio(audioBuffer) {
+export function validateDecodedAudio(audioBuffer: DecodedAudioBuffer): number {
   // 解码诊断：offscreen 宿主会附带 {durationSec, peak}
   const diag = audioBuffer?.diagnostic;
   if (diag && Number.isFinite(diag.peak) && diag.peak < 0.001 && diag.durationSec > 0) {
@@ -94,10 +129,10 @@ export function validateDecodedAudio(audioBuffer) {
 // context 内交给转写引擎上平台；解码与重采样由宿主侧完成后把结果传入）。
 // 返回 [{ index, startSec, durationSec, wavBlob }]，durationSec 由
 // decideChunks 产出（转写结果合并依赖该字段推算片边界）。
-export function buildWavChunks(audioBuffer, plan) {
+export function buildWavChunks(audioBuffer: DecodedAudioBuffer, plan: ChunkPlan): WavChunk[] {
   const totalDurationSec = validateDecodedAudio(audioBuffer);
   const channelData = audioBuffer.getChannelData(0);
-  return decideChunks(totalDurationSec, plan).map((chunk) => {
+  return decideChunks(totalDurationSec, plan).map((chunk): WavChunk => {
     const startSample = Math.round(chunk.startSec * audioBuffer.sampleRate);
     const sampleCount = Math.round(chunk.durationSec * audioBuffer.sampleRate);
     return {
@@ -111,4 +146,3 @@ export function buildWavChunks(audioBuffer, plan) {
     };
   });
 }
-

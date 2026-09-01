@@ -1,4 +1,4 @@
-// model-select-width.js — modelSelect 宽度度量（候选09 自 sidepanel.js 迁出）。
+// model-select-width.ts — modelSelect 宽度度量（候选09 自 sidepanel.js 迁出）。
 //
 // 纯 UI 度量叶子（零 import）：用离屏 canvas 按当前计算字体测量选中项文案宽，
 // 叠加 "000" 兜底宽 + 36px 装饰余量，再夹在 [92, toolbar 剩余宽度] 区间内，
@@ -8,9 +8,19 @@
 // 依赖方向：无——侧面板（sidepanel.js）在 change/resize/渲染三个调用点传入
 // 其模块级 `els` 引用包（modelSelect/toolbar/thinkingToggle/presetBtn），本
 // 模块不反向依赖任何页面模块，可在 jsdom 下直接单测。
-let modelSelectMeasureCanvas = null;
 
-export function updateModelSelectWidth(els) {
+// sidepanel 模块级 els 引用包中本模块关心的字段；均可缺省（缺省时走各自的
+// 兜底分支：无 modelSelect 直接返回，无 toolbar 用 232 默认上限）。
+export interface ModelSelectWidthEls {
+  modelSelect?: HTMLSelectElement | null;
+  toolbar?: HTMLElement | null;
+  thinkingToggle?: HTMLElement | null;
+  presetBtn?: HTMLElement | null;
+}
+
+let modelSelectMeasureCanvas: HTMLCanvasElement | null = null;
+
+export function updateModelSelectWidth(els: ModelSelectWidthEls): void {
   if (!els.modelSelect) {
     return;
   }
@@ -26,7 +36,7 @@ export function updateModelSelectWidth(els) {
   els.modelSelect.style.width = `${nextWidth}px`;
 }
 
-export function measureTextWidth(text, style) {
+export function measureTextWidth(text: string, style?: CSSStyleDeclaration | null): number {
   if (!modelSelectMeasureCanvas) {
     modelSelectMeasureCanvas = document.createElement("canvas");
   }
@@ -43,7 +53,7 @@ export function measureTextWidth(text, style) {
   return ctx.measureText(text).width;
 }
 
-function getModelSelectMaxWidth(els) {
+function getModelSelectMaxWidth(els: ModelSelectWidthEls): number {
   const toolbar = els.toolbar;
   if (!toolbar || !els.thinkingToggle || !els.presetBtn) {
     return 232;

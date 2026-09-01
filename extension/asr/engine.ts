@@ -1,4 +1,4 @@
-// extension/asr/engine.js
+// extension/asr/engine.ts
 // ASR 转写调度引擎：活队列 + 逐片重试 + 失败计数 + 中止探针。纯调度模块——
 // 不触 UI/DOM，不 import entry/pages/subtitle 与 adapters/，transcribe 由接线层
 // 注入（adapters/openai-transcriptions.js 的组装归 ②-2 的 offscreen 接线层）。
@@ -36,6 +36,77 @@ import { ASR_CONCURRENCY } from "../shared/offscreen-constants.js";
 export const DEFAULT_RETRIES = 2;
 export const DEFAULT_RETRY_DELAY_MS = 500;
 
+// 适配器单片转写结果的合并输入契约（text / segments[{start,end,text}] /
+// 可选 _asrDiag）；segments 缺省表示该平台无句级时间戳
+export interface AsrTranscribeSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface AsrTranscribeResult {
+  text: string;
+  segments?: AsrTranscribeSegment[];
+  _asrDiag?: unknown;
+}
+
+// 调度引擎消费的单片最小形状（index/durationSec 由引擎与合并逻辑使用，
+// 其余字段如 startSec/wavBlob 随对象透传给注入的 transcribe）
+export interface TranscribeChunk {
+  index: number;
+  durationSec: number;
+}
+
+// 注入的逐片转写函数：(chunk, { onProgress }) => Promise<result>（multipart/
+// adapter 组装在接线层）。onProgress thunk 由引擎组装（文案自带 chunk.index）。
+export type TranscribeFn = (
+  chunk: TranscribeChunk,
+  ctx: { onProgress: (text: string) => void }
+) => Promise<AsrTranscribeResult>;
+
+export interface TranscribeChunkOptions {
+  chunk: TranscribeChunk;
+  transcribe: TranscribeFn;
+  onProgress?: (text: string) => void;
+  retries?: number;
+  retryDelayMs?: number;
+}
+
+export interface TranscriptionEngineOptions {
+  transcribe: TranscribeFn;
+  isAborted?: () => boolean;
+  onChunkResult?: (chunk: TranscribeChunk, result: AsrTranscribeResult & { durationSec: number }) => void;
+  onProgress?: (text: string) => void;
+  concurrency?: number;
+  retries?: number;
+  retryDelayMs?: number;
+}
+
+// 单片失败明细（诊断用）
+export interface TranscriptionEngineFailure {
+  chunk: TranscribeChunk;
+  error: unknown;
+}
+
+// close() 的结算汇总：accepted = completed + failed + droppedByAbort
+export interface TranscriptionEngineSummary {
+  acceptedChunks: number;
+  completedChunks: number;
+  failedChunks: number;
+  droppedByAbort: number;
+  failures: TranscriptionEngineFailure[];
+  aborted: boolean;
+}
+
+export interface TranscriptionEngine {
+  // 活队列喂入：并发未满立即启动，否则排队；返回 false 表示拒绝
+  // （close() 已调用，或 isAborted() 已置真——断连后无需再喂）。
+  push(chunk: TranscribeChunk): boolean;
+  // 流结束标记：此后 push 一律拒绝；未中止时排队片与在途片继续消化，全部
+  // 结束后 resolve 同一个 summary（重复 close 返回同一 promise）。
+  close(): Promise<TranscriptionEngineSummary>;
+}
+
 // 逐片转写（含重试）。transcribe 为注入的转写函数：(chunk, { onProgress }) =>
 // Promise<result>（result: { text, segments?, _asrDiag? }，multipart/adapter
 // 组装在接线层）。重试耗尽仍失败 → 上抛（调度层捕获计数，不中止管线）。
@@ -45,7 +116,7 @@ export async function transcribeChunk({
   onProgress,
   retries = DEFAULT_RETRIES,
   retryDelayMs = DEFAULT_RETRY_DELAY_MS
-}) {
+}: TranscribeChunkOptions): Promise<AsrTranscribeResult & { durationSec: number }> {
   if (typeof transcribe !== "function") {
     throw new Error("transcribeChunk 需要注入 transcribe 函数");
   }
@@ -84,25 +155,25 @@ export function createTranscriptionEngine({
   concurrency = ASR_CONCURRENCY,
   retries = DEFAULT_RETRIES,
   retryDelayMs = DEFAULT_RETRY_DELAY_MS
-} = {}) {
+}: TranscriptionEngineOptions = {} as TranscriptionEngineOptions): TranscriptionEngine {
   if (typeof transcribe !== "function") {
     throw new Error("createTranscriptionEngine 需要注入 transcribe 函数");
   }
-  const aborted = typeof isAborted === "function" ? isAborted : () => false;
+  const aborted: () => boolean = typeof isAborted === "function" ? isAborted : () => false;
   const limit = Number(concurrency) > 0 ? Math.floor(Number(concurrency)) : ASR_CONCURRENCY;
 
-  const queue = [];
-  const failures = [];
+  const queue: TranscribeChunk[] = [];
+  const failures: TranscriptionEngineFailure[] = [];
   let inFlight = 0;
   let closed = false;
-  let closePromise = null;
-  let closeResolve = null;
+  let closePromise: Promise<TranscriptionEngineSummary> | null = null;
+  let closeResolve: ((summary: TranscriptionEngineSummary) => void) | null = null;
   let acceptedChunks = 0;
   let completedChunks = 0;
   let failedChunks = 0;
   let droppedByAbort = 0;
 
-  function buildSummary() {
+  function buildSummary(): TranscriptionEngineSummary {
     return {
       acceptedChunks,
       completedChunks,
@@ -116,21 +187,21 @@ export function createTranscriptionEngine({
   // 调度循环：并发有空位且队列非空就启动下一片；已中止则剩余排队片全部
   // 丢弃并清点（acceptedChunks 不回退——close 汇总经 droppedByAbort 如实
   // 报告差额：accepted = completed + failed + droppedByAbort）。
-  function drain() {
+  function drain(): void {
     while (inFlight < limit && queue.length > 0) {
       if (aborted()) {
         droppedByAbort += queue.length;
         queue.length = 0;
         break;
       }
-      const chunk = queue.shift();
+      const chunk = queue.shift()!;
       inFlight += 1;
       runChunk(chunk);
     }
   }
 
   // close 已调用且无在途 → 结算（closeResolve 置空防重复 resolve）。
-  function settleIfDone() {
+  function settleIfDone(): void {
     if (!closeResolve || inFlight > 0) {
       return;
     }
@@ -139,7 +210,7 @@ export function createTranscriptionEngine({
     resolve(buildSummary());
   }
 
-  async function runChunk(chunk) {
+  async function runChunk(chunk: TranscribeChunk): Promise<void> {
     try {
       const result = await transcribeChunk({ chunk, transcribe, onProgress, retries, retryDelayMs });
       completedChunks += 1;
@@ -161,7 +232,7 @@ export function createTranscriptionEngine({
 
   // 逐片交付：成功即回调。回调异常（如 port 已断开时 postMessage 抛错）
   // 不影响调度与计数——片本身已转写成功。
-  function deliver(chunk, result) {
+  function deliver(chunk: TranscribeChunk, result: AsrTranscribeResult & { durationSec: number }): void {
     if (typeof onChunkResult !== "function") {
       return;
     }
@@ -172,7 +243,7 @@ export function createTranscriptionEngine({
     }
   }
 
-  function push(chunk) {
+  function push(chunk: TranscribeChunk): boolean {
     if (closed || aborted()) {
       return false;
     }
@@ -182,7 +253,7 @@ export function createTranscriptionEngine({
     return true;
   }
 
-  function close() {
+  function close(): Promise<TranscriptionEngineSummary> {
     if (closePromise) {
       return closePromise;
     }

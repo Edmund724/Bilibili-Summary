@@ -1,4 +1,4 @@
-// extension/asr/pipeline.js
+// extension/asr/pipeline.ts
 // ASR 管线编排（页面侧，只做编排不碰音频字节）：取音轨 → offscreen 下载/
 // 解码/切片/逐片转写（转写引擎与解码同 context，跨 port 只传文本结果）→
 // 时间戳加片偏移合并为 B 站字幕格式 [{from,to,content}]。
@@ -14,14 +14,20 @@
 
 import { getSourceAudioUrl } from "./audio-source.js";
 import { createOffscreenChunkHost } from "./offscreen-bridge.page.js";
+import type { OffscreenChunkHost, AsrChunkRecord, AsrChunkResult } from "./offscreen-bridge.page.js";
+import type { SubtitleItem } from "./fallback.js";
 
 // 把单片的转写结果合成 {from,to,content}[]：
 //   有 segments → 每条 = startSec + seg.start/end；
 //   无 → 整片一条粗粒度字幕 {from:startSec, to:startSec+durationSec}。
 // to 不超过片末边界（chunk.durationSec 由 offscreen 按实际解码时长交付，
 // 此处兜底取入参 durationSec）；content trim。
-function synthesizeChunk({ startSec, durationSec, result }) {
-  const out = [];
+function synthesizeChunk({ startSec, durationSec, result }: {
+  startSec: number;
+  durationSec: number;
+  result: AsrChunkResult | null;
+}): SubtitleItem[] {
+  const out: SubtitleItem[] = [];
   const chunkDur = Number(result?.durationSec || 0) || Number(durationSec) || 0;
   if (result?.segments && result.segments.length > 0) {
     for (const seg of result.segments) {
@@ -53,8 +59,8 @@ function synthesizeChunk({ startSec, durationSec, result }) {
 // "未识别到语音内容"）。chunkResults 为按片 index 对齐的单片记录
 // [{ index, startSec, durationSec, result }]（offscreen 桥 done 后已排序）；
 // 转写失败片 / 解码失败段不在其中（offscreen 引擎跳过并计数），不参与合并。
-function mergeChunkResults(chunkResults) {
-  const merged = [];
+function mergeChunkResults(chunkResults: AsrChunkRecord[]): SubtitleItem[] {
+  const merged: SubtitleItem[] = [];
   for (const record of chunkResults) {
     if (!record?.result) {
       continue;
@@ -67,13 +73,24 @@ function mergeChunkResults(chunkResults) {
 
 // ===== 主入口 =====
 
+// runAsrPipeline 的入参：bvid/cid 取音轨；onProgress 中继状态文案；
+// chunkHost 为可选注入的任务宿主（测试传合成宿主，生产默认走
+// createOffscreenChunkHost）；onEmptyDiagnostic 承接空结果诊断文案。
+export interface RunAsrPipelineArgs {
+  bvid: string;
+  cid: string;
+  onProgress?: (message: string) => void;
+  chunkHost?: OffscreenChunkHost;
+  onEmptyDiagnostic?: (diagText: string) => void;
+}
+
 // runAsrPipeline({ bvid, cid, onProgress, chunkHost, onEmptyDiagnostic })
 // → [{from,to,content}]（空数组表示未识别到语音内容）。
 // 不做任何过期守卫（runId/视频键复核均已移除）：调用方（asr/fallback）自行
 // 决定 UI 应用时机，转写本身与视频切换解耦，跑完即返回。chunkHost 为可选
 // 注入的任务宿主（测试传合成宿主，生产默认走 createOffscreenChunkHost：
 // offscreen 文档内下载+解码+切片+逐片转写，每片完成即回传文本结果）。
-export async function runAsrPipeline({ bvid, cid, onProgress, chunkHost, onEmptyDiagnostic }) {
+export async function runAsrPipeline({ bvid, cid, onProgress, chunkHost, onEmptyDiagnostic }: RunAsrPipelineArgs): Promise<SubtitleItem[]> {
   const host = chunkHost || createOffscreenChunkHost();
 
   // 取音轨（页面同域能力：playurl 依赖 B 站页面 cookie，走 contentFetchJson）
@@ -104,7 +121,7 @@ export async function runAsrPipeline({ bvid, cid, onProgress, chunkHost, onEmpty
     if (diagnostics[0]) {
       diagText += `；事件诊断 ${JSON.stringify(diagnostics[0])}`;
     }
-    const failureParts = [];
+    const failureParts: string[] = [];
     if (Number(failedChunks) > 0) {
       failureParts.push(`${Number(failedChunks)} 片转写失败`);
     }

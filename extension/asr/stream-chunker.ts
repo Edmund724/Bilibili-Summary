@@ -1,4 +1,4 @@
-// extension/asr/stream-chunker.js
+// extension/asr/stream-chunker.ts
 // 流式切片编排：逐段解码出的 16kHz mono Float32Array 追加进「当前片」，
 // 每满 chunkSeconds 即编码为 WAV 经 onChunk 交出，随即释放该片——绝不同时
 // 持有全部片。与 chunker.buildWavChunks（全量切片语义）输出一致：
@@ -14,8 +14,32 @@
 // 本模块不碰 AudioContext，Node/vitest 下可独立测试。
 
 import { encodeWav } from "./chunker.js";
+import type { WavChunk } from "./chunker.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { logWarn } from "../shared/logging.js";
+
+export interface StreamWavChunksOptions {
+  // 片长（秒）；<=0 表示不切（整段一片，内存随全长——调用方负责）
+  chunkSeconds: number;
+  sampleRate?: number;
+  // async (segment) => Float32Array（16k mono 采样）
+  decodeSegment: (segment: unknown) => Promise<Float32Array>;
+  // async ({ index, startSec, durationSec, wavBlob }) => void
+  onChunk: (chunk: WavChunk) => void | Promise<void>;
+  // 单段解码失败的额外重试次数（0 = 失败即抛，默认）
+  decodeRetries?: number;
+  // true 时重试耗尽仍失败的段跳过并计数，继续后续段（Q8a 解码降级）
+  skipFailedSegments?: boolean;
+  // (error) => boolean，命中即不重试不跳过、直接向上传播
+  isAbortError?: (error: unknown) => boolean;
+}
+
+export interface StreamWavChunksResult {
+  totalChunks: number;
+  totalDurationSec: number;
+  peak: number;
+  skippedSegments: number;
+}
 
 // streamWavChunks(segments, { chunkSeconds, sampleRate?, decodeSegment, onChunk,
 //   decodeRetries?, skipFailedSegments?, isAbortError? })
@@ -31,26 +55,29 @@ import { logWarn } from "../shared/logging.js";
 // 完成时全静音（peak < 0.001 且时长 > 0）抛与 chunker.validateDecodedAudio
 // 同口径的错误；异常中途 onChunk 抛错则向上传播（调用方决定中止）。
 // 返回 { totalChunks, totalDurationSec, peak, skippedSegments }。
-export async function streamWavChunks(segments, {
-  chunkSeconds,
-  sampleRate = 16000,
-  decodeSegment,
-  onChunk,
-  decodeRetries = 0,
-  skipFailedSegments = false,
-  isAbortError
-} = {}) {
+export async function streamWavChunks(
+  segments: Iterable<unknown> | AsyncIterable<unknown>,
+  {
+    chunkSeconds,
+    sampleRate = 16000,
+    decodeSegment,
+    onChunk,
+    decodeRetries = 0,
+    skipFailedSegments = false,
+    isAbortError
+  }: StreamWavChunksOptions = {} as StreamWavChunksOptions
+): Promise<StreamWavChunksResult> {
   const chunkSamples = Number(chunkSeconds) > 0 ? Math.round(Number(chunkSeconds) * sampleRate) : 0;
 
   // 当前片累积：段视图数组（不复制段数据，满片时一次性拼接成连续数组再编码）
-  const parts = [];
+  const parts: Array<Float32Array | null> = [];
   let partsLen = 0;
   let emitted = 0;
   let totalLen = 0;
   let peak = 0;
   let skippedSegments = 0;
 
-  const emitPart = async (part, durationSamples) => {
+  const emitPart = async (part: Float32Array, durationSamples: number): Promise<void> => {
     const index = emitted;
     emitted += 1;
     await onChunk({
@@ -62,13 +89,13 @@ export async function streamWavChunks(segments, {
   };
 
   // 从 parts 头部消费 need 个采样，拼成连续数组返回（消费掉的段视图置 null 释放）
-  const takeSamples = (need) => {
+  const takeSamples = (need: number): Float32Array => {
     const out = new Float32Array(need);
     let off = 0;
     let remaining = need;
     let i = 0;
     for (; i < parts.length && remaining > 0; i += 1) {
-      const head = parts[i];
+      const head = parts[i]!;
       const take = Math.min(remaining, head.length);
       out.set(head.subarray(0, take), off);
       off += take;
@@ -91,8 +118,11 @@ export async function streamWavChunks(segments, {
   // 段级解码降级（Q8a）：decodeRetries 次额外重试，重试耗尽仍失败时按
   // skipFailedSegments 决定跳过（返回 mono:null）或抛出；isAbortError 命中的
   // 中止错误不重试不跳过，立即向上传播（断连取消语义优先于降级）。
-  const decodeWithDowngrade = async (segment, segmentIndex) => {
-    let lastError = null;
+  const decodeWithDowngrade = async (
+    segment: unknown,
+    segmentIndex: number
+  ): Promise<{ mono: Float32Array | null }> => {
+    let lastError: unknown = null;
     for (let attempt = 0; attempt <= decodeRetries; attempt += 1) {
       try {
         return { mono: await decodeSegment(segment) };

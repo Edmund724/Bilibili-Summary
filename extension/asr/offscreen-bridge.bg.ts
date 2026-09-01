@@ -4,24 +4,27 @@
 // offload-task 消息路由），顶层不触碰 worker-only API——chrome.declarativeNetRequest /
 // chrome.offscreen 只在 handler 函数体内访问（保持既有习惯）。协议常量与
 // 契约注释唯一地址见 asr/protocol.js。
+// chrome.declarativeNetRequest / chrome.offscreen.createDocument 的最小表面
+// 声明见本目录 chrome-asr-types.d.ts（共享 chrome-types.d.ts 未覆盖）。
 
 import { OFFSCREEN_URL, OFFSCREEN_CREATE_REASON } from "../shared/offscreen-constants.js";
+import type { MessageSender, SendResponse } from "../shared/messaging-protocol.js";
 
 // 防盗链会话规则 id 池下界：id 按任务独立分配（一个任务一条规则，多任务
 // 并发时规则并存、cleanup 只删自己的），自此单调递增；任务结束归还空闲池
 // 复用，防止长会话 id 无限增长。上界之外的活跃任务按错误路径上报。
-export const ASR_AUDIO_SESSION_RULE_ID_BASE = 32001;
-const ASR_AUDIO_SESSION_RULE_ID_MAX = 32100;
+export const ASR_AUDIO_SESSION_RULE_ID_BASE: number = 32001;
+const ASR_AUDIO_SESSION_RULE_ID_MAX: number = 32100;
 
 // 防盗链规则 id 分配器（模块级，仅 background 执行器触碰）：prepare 分配、
 // cleanup 归还。单调计数器 + 空闲池复用，防止长会话 id 无限增长；活跃集
 // 记账保证重复/未知 id 的 cleanup 幂等忽略、不污染池状态。账本随 SW 实例
 // 生灭而会话规则生命周期更长，冷启动后首次分配前按平台对账重建（见下）。
-let nextSessionRuleId = ASR_AUDIO_SESSION_RULE_ID_BASE;
-const activeSessionRuleIds = new Set();
-const freeSessionRuleIds = [];
+let nextSessionRuleId: number = ASR_AUDIO_SESSION_RULE_ID_BASE;
+const activeSessionRuleIds = new Set<number>();
+const freeSessionRuleIds: number[] = [];
 
-function allocateSessionRuleId() {
+function allocateSessionRuleId(): number {
   let ruleId = freeSessionRuleIds.pop();
   if (ruleId === undefined) {
     if (nextSessionRuleId > ASR_AUDIO_SESSION_RULE_ID_MAX) {
@@ -33,7 +36,7 @@ function allocateSessionRuleId() {
   return ruleId;
 }
 
-function releaseSessionRuleId(ruleId) {
+function releaseSessionRuleId(ruleId: number): void {
   const id = Number(ruleId) || 0;
   // 活跃集守卫：未分配/已归还的 id（重复 cleanup、陈旧 id）不动池状态
   if (!activeSessionRuleIds.delete(id)) {
@@ -51,9 +54,9 @@ function releaseSessionRuleId(ruleId) {
 // 区分是否上一实例崩溃遗留的死规则，宁可让 id 缓慢向耗尽漂移也不复用可能
 // 正被依赖的 id）、计数器越过平台最大 id、空闲池清空（池只服务本实例内
 // 借还，跨实例回收由对账按平台事实源完成）。
-let sessionRuleIdsReconcilePromise = null;
+let sessionRuleIdsReconcilePromise: Promise<void> | null = null;
 
-function ensureSessionRuleIdsReconciled() {
+function ensureSessionRuleIdsReconciled(): Promise<void> {
   if (!sessionRuleIdsReconcilePromise) {
     sessionRuleIdsReconcilePromise = reconcileSessionRuleIds().catch((error) => {
       // 失败不缓存且账本分文未动（赋值在查询成功后一次完成）：下次 prepare
@@ -66,7 +69,15 @@ function ensureSessionRuleIdsReconciled() {
   return sessionRuleIdsReconcilePromise;
 }
 
-async function reconcileSessionRuleIds() {
+// offscreen 文档列表项的最小形状（self.clients 在 ServiceWorkerGlobalScope
+// 上，DOM lib 的 self 未覆盖，访问处按此断言）
+type ServiceWorkerScopeLike = {
+  clients: {
+    matchAll(options: { includeUncontrolled: boolean }): Promise<Array<{ url?: string }>>;
+  };
+};
+
+async function reconcileSessionRuleIds(): Promise<void> {
   const rules = await chrome.declarativeNetRequest.getSessionRules();
   let maxSessionRuleId = ASR_AUDIO_SESSION_RULE_ID_BASE - 1;
   for (const rule of rules) {
@@ -86,7 +97,7 @@ async function reconcileSessionRuleIds() {
 // 任务准备：创建（或复用）offscreen 文档 + 分配一个独立 id 并按它加防盗链
 // 下载规则。页面侧连 "asr-decode" 端口前调用，保证文档与规则就绪；ruleId
 // 随响应带回，页面侧 cleanup 时原样带回，只删自己这条。
-export async function handleAsrDecodePrepare(message, sender, sendResponse) {
+export async function handleAsrDecodePrepare(message: unknown, sender: MessageSender, sendResponse: SendResponse): Promise<void> {
   let ruleId = 0;
   try {
     // 首次分配前对账一次（实例内幂等缓存），避免与上一 SW 实例残留的会话
@@ -102,7 +113,7 @@ export async function handleAsrDecodePrepare(message, sender, sendResponse) {
     if (ruleId) {
       releaseSessionRuleId(ruleId);
     }
-    sendResponse({ ok: false, error: String(error?.message || error) });
+    sendResponse({ ok: false, error: String((error as { message?: string })?.message || error) });
   }
 }
 
@@ -110,28 +121,28 @@ export async function handleAsrDecodePrepare(message, sender, sendResponse) {
 // try/finally 或 .finally 兜底）。只删消息携带的 ruleId，不影响并发任务
 // 的规则；删除不存在的 id 由 Chrome 忽略，重复/未知 id 的 cleanup 幂等不抛。
 // 会话规则随浏览器重启自动清空，无需持久化。
-export async function handleAsrDecodeCleanup(message, sender, sendResponse) {
+export async function handleAsrDecodeCleanup(message: unknown, sender: MessageSender, sendResponse: SendResponse): Promise<void> {
   try {
-    const ruleId = Number(message?.ruleId) || 0;
+    const ruleId = Number((message as { ruleId?: number } | null)?.ruleId) || 0;
     if (ruleId > 0) {
       await removeDownloadRules(ruleId);
       releaseSessionRuleId(ruleId);
     }
     sendResponse({ ok: true });
   } catch (error) {
-    sendResponse({ ok: false, error: String(error?.message || error) });
+    sendResponse({ ok: false, error: String((error as { message?: string })?.message || error) });
   }
 }
 
 // 有活跃文档就复用，没有则创建一个（offscreen 文档常驻 sidepanel 创建的
 // "offscreen-chat" 实例，新端口与之并存互不干扰）。
-async function ensureAsrOffscreenDocument() {
+async function ensureAsrOffscreenDocument(): Promise<boolean> {
   try {
     // 注意：SW 标准全局是 self.clients（ServiceWorkerGlobalScope.clients），
     // 没有 chrome.clients 这个命名空间。曾误用 chrome.clients 导致 TypeError
     // 被外层 catch 吞掉、无文档时从不创建 offscreen 文档，页面侧 asr-decode
     // 端口因找不到接收端 ~2ms 断连（「音频解码中断：后台连接已断开」）。
-    const clients = await self.clients.matchAll({ includeUncontrolled: true });
+    const clients = await (self as unknown as ServiceWorkerScopeLike).clients.matchAll({ includeUncontrolled: true });
     const hasDoc = clients.some((client) => client.url?.includes(OFFSCREEN_URL));
     if (!hasDoc) {
       await chrome.offscreen.createDocument({
@@ -156,7 +167,7 @@ async function ensureAsrOffscreenDocument() {
 // 为单个解码任务添加 Referer/Origin 会话规则（offscreen 文档 fetch 音轨时
 // 绕防盗链；规则内容与旧固定 id 版本一致，仅 id 按任务独立）。保留先删后加
 // 的幂等：同 id 已有规则时覆盖写为新内容，而非因 id 已存在而报错。
-export async function addDownloadRules(ruleId) {
+export async function addDownloadRules(ruleId: number): Promise<void> {
   const id = Number(ruleId) || 0;
   if (id <= 0) {
     throw new Error("缺少防盗链规则 id");
@@ -184,7 +195,7 @@ export async function addDownloadRules(ruleId) {
 }
 
 // 清掉指定任务 id 的规则（updateSessionRules 同时支持移除与添加）
-export async function removeDownloadRules(ruleId) {
+export async function removeDownloadRules(ruleId: number): Promise<void> {
   const id = Number(ruleId) || 0;
   if (id <= 0) {
     return;

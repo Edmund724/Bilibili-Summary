@@ -29,13 +29,22 @@ import { logWarn } from "../shared/logging.js";
 import { ensureSummarizeChain } from "../subtitle/lazy.js";
 import { ensureReaderDomain } from "../core/lazy-reader.js";
 
+// ensureReaderDomain 的返回类型在 core/lazy-reader.ts 只声明了启动期窄接口
+//（enterReaderMode/closeReadingView/waitForVideoMetadata/seekReadingTarget）；
+// 本模块经 ensure 转发的交互回调落在 reader/index.ts facade 的完整导出面上
+//（syncReadingViewPlayback/updateReaderPreferences/renderReaderPanels 等）。
+// 此处以 facade 模块类型交叉收口，运行时对象不变（与原调用完全一致）。
+type ReaderFacade = typeof import("../reader/index.js");
+type UiReaderDomain = Awaited<ReturnType<typeof ensureReaderDomain>> & ReaderFacade;
+const loadReaderDomain = ensureReaderDomain as () => Promise<UiReaderDomain>;
+
 // 打开设置页（原 core/runtime.js 提供；因 runtime 不得依赖 ui 域，且本模块是
 // 唯一使用方，搬到此处）。成功无提示；失败按扩展上下文是否失效给出对应文案。
-function requestOpenOptions() {
+function requestOpenOptions(): void {
   sendRuntimeMessage({ type: "open-options" })
     .then((resp) => {
-      if (!resp?.ok) {
-        setMessage(`打开设置失败：${toReadableText(resp?.error, "未知错误")}`);
+      if (!(resp as { ok?: boolean } | null)?.ok) {
+        setMessage(`打开设置失败：${toReadableText((resp as { error?: unknown } | null)?.error, "未知错误")}`);
       }
     })
     .catch((error) => {
@@ -47,7 +56,7 @@ function requestOpenOptions() {
     });
 }
 
-export function buildUiHtml() {
+export function buildUiHtml(): string {
   return `
     <aside id="${ids.panel}" aria-hidden="true">
       <header class="boc-header">
@@ -181,7 +190,7 @@ export function buildUiHtml() {
   `;
 }
 
-export function bindUiEvents() {
+export function bindUiEvents(): void {
   const panel = byId(ids.panel);
   const closeBtn = byId(ids.closeBtn);
   const refreshBtn = byId(ids.refreshBtn);
@@ -235,16 +244,16 @@ export function bindUiEvents() {
     if (isReaderMode()) {
       replaceReaderModeUrl(stripReaderModeUrl(location.href));
     }
-    ensureReaderDomain()
+    loadReaderDomain()
       .then((reader) => reader.closeReadingView())
       .catch((error) => logWarn("[BOC] close reading view failed", error));
   });
   readingAutoScroll.addEventListener("change", (event) => {
-    state.reader.setAutoScroll(Boolean(event.target.checked));
+    state.reader.setAutoScroll(Boolean((event.target as HTMLInputElement).checked));
     if (state.reader.readingAutoScroll) {
       resetManualScrollPause();
     }
-    ensureReaderDomain()
+    loadReaderDomain()
       .then((reader) => {
         if (state.reader.readingAutoScroll) {
           reader.syncReadingViewPlayback(true);
@@ -256,12 +265,12 @@ export function bindUiEvents() {
   readingTranscriptVisible.addEventListener("change", (event) => {
     // 候选02：updateReaderPreferences 属 reader 动态 chunk（视图开着 ⇒ 已装载），
     // 经 ensure 转发；手动兜底的 main 显隐写在偏好应用之后（与旧顺序一致）。
-    ensureReaderDomain()
+    loadReaderDomain()
       .then((reader) => {
-        reader.updateReaderPreferences({ readerTranscriptVisible: Boolean(event.target.checked) }, { persist: true });
-        const main = document.querySelector(".boc-reading-main");
+        reader.updateReaderPreferences({ readerTranscriptVisible: Boolean((event.target as HTMLInputElement).checked) }, { persist: true });
+        const main = document.querySelector(".boc-reading-main") as HTMLElement | null;
         if (main) {
-          main.style.display = event.target.checked ? "" : "none";
+          main.style.display = (event.target as HTMLInputElement).checked ? "" : "none";
         }
       })
       .catch((error) => logWarn("[BOC] reader transcript visibility failed", error));
@@ -269,9 +278,9 @@ export function bindUiEvents() {
   const readingChapterVisible = byId(ids.readingChapterVisible);
   if (readingChapterVisible) {
     readingChapterVisible.addEventListener("change", (event) => {
-      ensureReaderDomain()
+      loadReaderDomain()
         .then((reader) =>
-          reader.updateReaderPreferences({ readerChapterVisible: Boolean(event.target.checked) }, { persist: true })
+          reader.updateReaderPreferences({ readerChapterVisible: Boolean((event.target as HTMLInputElement).checked) }, { persist: true })
         )
         .catch((error) => logWarn("[BOC] reader chapter visibility failed", error));
     });
@@ -280,7 +289,7 @@ export function bindUiEvents() {
     const themes = ["light", "dark", "paper"];
     const current = state.reader.readingTheme || "light";
     const nextIndex = (themes.indexOf(current) + 1) % themes.length;
-    ensureReaderDomain()
+    loadReaderDomain()
       .then((reader) => {
         reader.updateReaderPreferences({ readerTheme: themes[nextIndex] }, { persist: true });
         readingThemeSelect.classList.add("is-active");
@@ -291,13 +300,13 @@ export function bindUiEvents() {
   readingSettingsToggleBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     state.reader.setSettingsExpanded(!state.reader.readingSettingsExpanded);
-    ensureReaderDomain()
+    loadReaderDomain()
       .then((reader) => reader.renderReaderPanels())
       .catch((error) => logWarn("[BOC] reader panels render failed", error));
   });
   readingDescriptionBtn.addEventListener("click", () => {
     state.reader.setDescriptionExpanded(!state.reader.readingDescriptionExpanded);
-    ensureReaderDomain()
+    loadReaderDomain()
       .then((reader) => reader.renderReadingInfoPanel())
       .catch((error) => logWarn("[BOC] reader info panel render failed", error));
   });
@@ -308,7 +317,8 @@ export function bindUiEvents() {
 
   const readingSubtitleSelect = byId(ids.readingSubtitleSelect);
   readingSubtitleSelect.addEventListener("change", (event) => {
-    const option = event.target.options[event.target.selectedIndex];
+    const selectTarget = event.target as HTMLSelectElement;
+    const option = selectTarget.options[selectTarget.selectedIndex];
     const url = String(option?.value || "");
     if (!url) return;
     // 候选02：loadSubtitle 属总结链、renderReadingView/sync 属 reader 域——
@@ -317,7 +327,7 @@ export function bindUiEvents() {
       .then((chain) =>
         chain.loadSubtitle(url, String(option.dataset.lang || "unknown"), state.clip.fetchRunId, String(option.dataset.id || ""))
       )
-      .then(() => ensureReaderDomain())
+      .then(() => loadReaderDomain())
       .then((reader) => {
         reader.renderReadingView();
         reader.syncReadingViewPlayback(true);
@@ -336,9 +346,9 @@ export function bindUiEvents() {
       if (!settingsPanel || !settingsBtnEl) {
         return;
       }
-      if (!settingsPanel.contains(e.target) && !settingsBtnEl.contains(e.target)) {
+      if (!settingsPanel.contains(e.target as Node | null) && !settingsBtnEl.contains(e.target as Node | null)) {
         state.reader.setSettingsExpanded(false);
-        ensureReaderDomain()
+        loadReaderDomain()
           .then((reader) => reader.renderReaderPanels())
           .catch(() => {});
       }
@@ -352,7 +362,7 @@ export function bindUiEvents() {
     }
     // 高频路径：首次交互装载 reader 域，其后命中缓存 promise；装载失败静默
     // （下次交互自然重试，避免滚动期间刷日志）。
-    ensureReaderDomain()
+    loadReaderDomain()
       .then((reader) => reader.noteManualReaderInteraction())
       .catch(() => {});
   };
@@ -360,35 +370,35 @@ export function bindUiEvents() {
   transcriptList.addEventListener("wheel", handleReaderManualScroll, { passive: true });
   chapterList.addEventListener("wheel", handleReaderManualScroll, { passive: true });
   chapterList.addEventListener("pointerdown", () => {
-    ensureReaderDomain()
+    loadReaderDomain()
       .then((reader) => reader.noteManualReaderInteraction(3500))
       .catch(() => {});
   });
   transcriptList.addEventListener("pointerdown", () => {
-    ensureReaderDomain()
+    loadReaderDomain()
       .then((reader) => reader.noteManualReaderInteraction(3500))
       .catch(() => {});
   });
   chapterList.addEventListener("click", (event) => {
-    ensureReaderDomain()
+    loadReaderDomain()
       .then((reader) => reader.onReadingChapterClick(event))
       .catch(() => {});
   });
   transcriptList.addEventListener("click", (event) => {
-    ensureReaderDomain()
+    loadReaderDomain()
       .then((reader) => reader.onReadingTranscriptClick(event))
       .catch(() => {});
   });
   readingView.addEventListener("transitionend", () => {
     if (!isReaderViewOpen()) {
-      ensureReaderDomain()
+      loadReaderDomain()
         .then((reader) => reader.stopReadingViewSync())
         .catch(() => {});
     }
   });
 }
 
-export function ensureUiReady({ forceRecreate = false } = {}) {
+export function ensureUiReady({ forceRecreate = false }: { forceRecreate?: boolean } = {}): void {
   const existingRoot = document.getElementById(ids.root);
   if (existingRoot && forceRecreate) {
     existingRoot.remove();
@@ -410,12 +420,12 @@ export function ensureUiReady({ forceRecreate = false } = {}) {
   }
 }
 
-export function setBusyState(disabled) {
-  byId(ids.copyBtn).disabled = disabled;
-  byId(ids.downloadBtn).disabled = disabled;
-  byId(ids.refreshBtn).disabled = disabled;
-  byId(ids.settingsBtn).disabled = disabled;
-  byId(ids.subtitleSelect).disabled = disabled || state.clip.subtitles.length === 0;
+export function setBusyState(disabled: boolean): void {
+  (byId(ids.copyBtn) as HTMLButtonElement).disabled = disabled;
+  (byId(ids.downloadBtn) as HTMLButtonElement).disabled = disabled;
+  (byId(ids.refreshBtn) as HTMLButtonElement).disabled = disabled;
+  (byId(ids.settingsBtn) as HTMLButtonElement).disabled = disabled;
+  (byId(ids.subtitleSelect) as HTMLSelectElement).disabled = disabled || state.clip.subtitles.length === 0;
 }
 
 // renderMeta / renderSubtitleSelect 已移往 subtitle/ui.js（候选02 分层惰性）：
@@ -425,12 +435,12 @@ export function setBusyState(disabled) {
 // selection.js（isAiSubtitle）及其依赖 cache/cache-lru 拖回常驻。
 // setStatus/setMessage 保留：URL 变化编排与本模块自身的错误提示在启动期使用。
 
-export function setStatus(text) {
+export function setStatus(text: string): void {
   uiState.setStatusText(String(text || ""));
   byId(ids.status).textContent = state.ui.statusText;
 }
 
-export function setMessage(text) {
+export function setMessage(text: string): void {
   uiState.setMessageText(String(text || ""));
   byId(ids.message).textContent = state.ui.messageText;
 }

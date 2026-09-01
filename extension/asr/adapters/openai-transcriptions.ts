@@ -1,4 +1,4 @@
-// extension/asr/adapters/openai-transcriptions.js
+// extension/asr/adapters/openai-transcriptions.ts
 // OpenAI 兼容语音转写适配器：POST {baseUrl}/audio/transcriptions。
 // 适用 SiliconFlow（免费，只返回纯文本）/ 本地 Whisper（verbose_json
 // 句级时间戳）/ 自定义（自动探测时间戳能力）。
@@ -17,11 +17,50 @@
 //     retryAsync 按状态码判定（408/429/5xx 可重试，其余 4xx 不重试），避免
 //     38MB 级 wav 对注定失败的请求做第二次全量重传。
 
+import type { AsrProvider } from "../asr-provider-store.js";
+
+// 句级时间戳条目（verbose_json segments 归一化后的形状）
+export interface TranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+// 单片转写结果：segments 缺省表示该平台无时间戳，调用方（pipeline）据此
+// 合成整片粗粒度字幕。带索引签名：结果以「未知字段的 JSON 记录」视角跨
+// port/接线层透传（entry/offscreen-asr 的 transcribe 闭包以
+// Promise<Record<string, unknown>> 承接）。
+export interface TranscriptionResult {
+  text: string;
+  segments?: TranscriptSegment[];
+  [key: string]: unknown;
+}
+
+// transcribe 的入参契约（startSec/durationSec 随注入面统一携带，本适配器
+// POST 本体不使用；signal 透传给 fetch，onProgress 在每次请求成功后触发）
+export interface TranscribeArgs {
+  wavBlob: Blob;
+  startSec?: number;
+  durationSec?: number;
+  provider: AsrProvider;
+  signal?: AbortSignal | null;
+  onProgress?: (text: string) => void;
+}
+
+// 单次 POST 的归一化结果：status=0 表示 2xx 且 JSON 解析成功；status=HTTP 码
+// 表示非 2xx；status=-1 表示响应体解析失败。detail 为错误上下文片段。
+interface PostTranscriptionResult {
+  status: number;
+  detail: string;
+  text: string;
+  segments?: TranscriptSegment[];
+}
+
 // 把识别语言转成平台查询参数：?language=zh / ?language=english。
 // SiliconFlow 辰星 / SenseVoice 系列的英文识别依赖 ?language=english（multipart
 // 字段不生效），只有显式选择 zh/en 才附带；auto 省略让服务端自动检测
 // （本地 Whisper 也无此参数，其语言自动识别）。
-export function buildTranscriptionUrl(baseUrl, language) {
+export function buildTranscriptionUrl(baseUrl: string, language?: string): string {
   const normalized = String(baseUrl || "").trim().replace(/\/+$/, "");
   const lang = String(language || "").trim().toLowerCase();
   if (lang !== "zh" && lang !== "en") {
@@ -31,7 +70,7 @@ export function buildTranscriptionUrl(baseUrl, language) {
 }
 
 // 构造 FormData（纯函数便于单测断言字段）
-function buildTranscriptionForm(wavBlob, provider, responseFormat) {
+function buildTranscriptionForm(wavBlob: Blob, provider: AsrProvider, responseFormat: string): FormData {
   const form = new FormData();
   form.append("file", wavBlob, "chunk.wav");
   form.append("model", provider?.model || "");
@@ -44,12 +83,13 @@ function buildTranscriptionForm(wavBlob, provider, responseFormat) {
 
 // 归一化 segments 列表：只保留 { start, end, text } 且 text 非空白，
 // start/end 转数字；无有效 segments 返回 undefined（调用方按无时间戳处理）。
-function normalizeSegments(segments) {
+function normalizeSegments(segments: unknown): TranscriptSegment[] | undefined {
   if (!Array.isArray(segments) || segments.length === 0) {
     return undefined;
   }
-  const normalized = [];
-  for (const seg of segments) {
+  const list = segments as Array<{ start?: unknown; end?: unknown; text?: unknown }>;
+  const normalized: TranscriptSegment[] = [];
+  for (const seg of list) {
     const start = Number(seg?.start);
     const end = Number(seg?.end);
     const text = String(seg?.text || "").trim();
@@ -64,19 +104,24 @@ function normalizeSegments(segments) {
 // 单次 POST 请求。HTTP 2xx 且 JSON 解析成功 → status=0 并带 text/segments；
 // 否则 status=HTTP 码（-1 表示响应体解析失败）并附响应体片段 detail。
 // 不抛错，交给调用方决定降级或重试（网络错误/Abort 除外）。
-async function postTranscription({ wavBlob, provider, signal, responseFormat }) {
+async function postTranscription({ wavBlob, provider, signal, responseFormat }: {
+  wavBlob: Blob;
+  provider: AsrProvider;
+  signal?: AbortSignal | null;
+  responseFormat: string;
+}): Promise<PostTranscriptionResult> {
   const baseUrl = String(provider?.baseUrl || "").trim().replace(/\/+$/, "");
   if (!baseUrl) {
     throw new Error("平台 baseUrl 未配置");
   }
   const form = buildTranscriptionForm(wavBlob, provider, responseFormat);
-  const headers = {};
+  const headers: Record<string, string> = {};
   const apiKey = String(provider?.apiKey || "").trim();
   if (apiKey) {
     headers["Authorization"] = `Bearer ${apiKey}`;
   }
 
-  let response;
+  let response: Response;
   try {
     response = await fetch(buildTranscriptionUrl(baseUrl, provider?.language), {
       method: "POST",
@@ -104,7 +149,7 @@ async function postTranscription({ wavBlob, provider, signal, responseFormat }) 
   }
 
   try {
-    const data = await response.json();
+    const data: { text?: unknown; segments?: unknown } = await response.json();
     return {
       status: 0,
       detail: "",
@@ -127,11 +172,14 @@ async function postTranscription({ wavBlob, provider, signal, responseFormat }) 
 //     带状态码，消息格式与降级失败路径一致），不发第二次 POST；
 //   - fetch 抛错（网络层）→ 原样上抛，保持可被 isRetryableNetworkError
 //     消息启发式命中的形态（如 "Failed to fetch"）。
-export async function transcribe({ wavBlob, startSec, durationSec, provider, signal, onProgress }) {
+export async function transcribe({ wavBlob, startSec, durationSec, provider, signal, onProgress }: TranscribeArgs): Promise<TranscriptionResult> {
+  // 进度通知：引擎注入的 onProgress thunk 自带文案闭包，适配器仅以零参触发
+  //（注入面签名见 entry/offscreen-asr 的 TranscriptionEngineOptions）。
+  const notifyProgress = onProgress as (() => void) | undefined;
   // 首次尝试 verbose_json：平台支持则带句级时间戳。
   const first = await postTranscription({ wavBlob, provider, signal, responseFormat: "verbose_json" });
   if (first.status === 0 && first.segments) {
-    onProgress?.();
+    notifyProgress?.();
     return { text: first.text, segments: first.segments };
   }
 
@@ -139,7 +187,7 @@ export async function transcribe({ wavBlob, startSec, durationSec, provider, sig
   // 对 401/403/400 这类重试也注定失败的请求是纯浪费）。可重试性（408/429/5xx）
   // 由调用方 retryAsync 按 err.status 判定。
   if (first.status > 0) {
-    const err = new Error(`HTTP ${first.status}${first.detail ? `: ${first.detail}` : ""}`);
+    const err: Error & { status?: number } = new Error(`HTTP ${first.status}${first.detail ? `: ${first.detail}` : ""}`);
     err.status = first.status;
     throw err;
   }
@@ -148,13 +196,13 @@ export async function transcribe({ wavBlob, startSec, durationSec, provider, sig
   // verbose_json，如 SiliconFlow 只回 { text }），或 2xx 但响应体不是合法
   // JSON（status=-1，体不符）→ 以 response_format=json 重试一次，只取 text。
   const second = await postTranscription({ wavBlob, provider, signal, responseFormat: "json" });
-  onProgress?.();
+  notifyProgress?.();
   if (second.status === 0) {
     return { text: second.text };
   }
 
   // json 降级也失败：抛 HTTP 错误（5xx/网络错误由调用方 retryAsync 重试）。
-  const err = new Error(second.status > 0 ? `HTTP ${second.status}${second.detail ? `: ${second.detail}` : ""}` : (second.detail || "转写请求失败"));
+  const err: Error & { status?: number } = new Error(second.status > 0 ? `HTTP ${second.status}${second.detail ? `: ${second.detail}` : ""}` : (second.detail || "转写请求失败"));
   err.status = second.status;
   throw err;
 }

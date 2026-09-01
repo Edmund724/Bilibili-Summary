@@ -1,4 +1,4 @@
-// extension/asr/adts.js
+// extension/asr/adts.ts
 // 把 B 站 DASH 音轨的 fragmented MP4（fMP4，moof/mdat 分片）里的 AAC 裸帧
 // 提取出来，包上 ADTS 头拼成 ADTS 流。Chrome 的 decodeAudioData 不支持
 // fragmented MP4（报 "Unable to decode audio data"），但支持 ADTS（.aac）——
@@ -16,8 +16,31 @@
 //
 // 本模块是纯函数，不碰 AudioContext / DOM，Node/vitest 下可独立测试。
 
+// esds.AudioSpecificConfig 解析结果（ADTS 头组装所需的编码参数）
+export interface AudioSpecificConfig {
+  profile: number;
+  freqIdx: number;
+  chCfg: number;
+}
+
+// createAdtsExtractor 的编码参数（缺省 AAC-LC / 48kHz / 双声道，
+// 与 B 站常规音轨一致，供 moov 里 ASC 解析失败时兜底）
+export interface AdtsExtractorConfig {
+  profile?: number;
+  freqIdx?: number;
+  chCfg?: number;
+}
+
+// 增量解析器：push 交付已完成段（Uint8Array 数组），flush 收尾，
+// frameCount 为累计提取的音帧数（调用方据此判定 fMP4 零帧失败）
+export interface AdtsExtractor {
+  push(bytes: Uint8Array | ArrayBuffer): Uint8Array[];
+  flush(): Uint8Array[];
+  readonly frameCount: number;
+}
+
 // 判断一个 MP4 容器是否为 fragmented（顶层存在 moof，且 moov 极小）
-export function isFragmentedMp4(bytes) {
+export function isFragmentedMp4(bytes: Uint8Array | ArrayBuffer): boolean {
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   if (u8.length < 12) return false;
   // 快速路径：ftyp 后直接找 moov / moof
@@ -44,7 +67,7 @@ export function isFragmentedMp4(bytes) {
 // 解析逻辑（顶层 box 序列、moof 的 trun sample sizes、mdat 切帧、ADTS 7 字节
 // 头）与 adtsFromFmp4 原实现逐字节一致——adtsFromFmp4 现在就是用本函数实现
 // 的薄包装，两者输出保证相同。
-export function createAdtsExtractor(config = {}) {
+export function createAdtsExtractor(config: AdtsExtractorConfig = {}): AdtsExtractor {
   const profile = Number(config.profile ?? 1); // AAC-LC = 1
   const freqIdx = Number(config.freqIdx ?? 3); // 48kHz
   const chCfg = Number(config.chCfg ?? 2); // 双声道
@@ -54,17 +77,17 @@ export function createAdtsExtractor(config = {}) {
   // 可正常解码——每段限制在约 1MB 内。
   const SEGMENT_MOOFS = 10;
 
-  let buf = null; // 跨 push 的残包：未收完的尾部 box 字节（≤ 单个 box 大小）
-  let pendingSizes = null; // 最近一个完整 moof 解析出的 sample sizes（等后续 mdat 配对）
+  let buf: Uint8Array | null = null; // 跨 push 的残包：未收完的尾部 box 字节（≤ 单个 box 大小）
+  let pendingSizes: number[] | null = null; // 最近一个完整 moof 解析出的 sample sizes（等后续 mdat 配对）
   let lastSeqTyp = ""; // 顶层序列中上一个 moof/mdat box 的类型（mdat 须紧跟 moof 才配对）
-  let cur = []; // 当前段累积字节
+  let cur: number[] = []; // 当前段累积字节
   let moofsInSegment = 0;
   let frames = 0;
-  let out = null; // 本次 push/flush 收集已完成段的数组（调用方取走）
+  let out: Uint8Array[] | null = null; // 本次 push/flush 收集已完成段的数组（调用方取走）
 
   // 处理一个 (moof, mdat) 配对：为每个 sample 写 7 字节 ADTS 头 + raw AAC 帧，
   // 满 SEGMENT_MOOFS 个 moof 即封段。sizes 为空时不产帧也不计数（与原实现对齐）。
-  const emitMdatFrames = (data, dataStart, dataEnd, sizes) => {
+  const emitMdatFrames = (data: Uint8Array, dataStart: number, dataEnd: number, sizes: number[]): void => {
     let off = dataStart;
     for (const sampleSize of sizes) {
       if (off + sampleSize > dataEnd) break;
@@ -85,7 +108,7 @@ export function createAdtsExtractor(config = {}) {
     }
     moofsInSegment += 1;
     if (moofsInSegment >= SEGMENT_MOOFS) {
-      out.push(new Uint8Array(cur));
+      out!.push(new Uint8Array(cur));
       cur = [];
       moofsInSegment = 0;
     }
@@ -93,7 +116,7 @@ export function createAdtsExtractor(config = {}) {
 
   // 走一遍（残包 + 新字节拼成的）顶层 box 序列：moof 记 sample sizes 待配对，
   // mdat 与紧邻的前一个 moof 配对切帧；尾部不完整的 box 留作残包。
-  const parse = (data) => {
+  const parse = (data: Uint8Array): void => {
     let p = 0;
     while (p + 8 <= data.length) {
       const sz = readU32(data, p);
@@ -114,16 +137,16 @@ export function createAdtsExtractor(config = {}) {
   };
 
   return {
-    push(bytes) {
-      const segments = [];
+    push(bytes: Uint8Array | ArrayBuffer): Uint8Array[] {
+      const segments: Uint8Array[] = [];
       out = segments;
       const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
       parse(buf ? concatBytes(buf, u8) : u8);
       out = null;
       return segments;
     },
-    flush() {
-      const segments = [];
+    flush(): Uint8Array[] {
+      const segments: Uint8Array[] = [];
       out = segments;
       if (cur.length > 0) segments.push(new Uint8Array(cur));
       cur = [];
@@ -131,7 +154,7 @@ export function createAdtsExtractor(config = {}) {
       out = null;
       return segments;
     },
-    get frameCount() {
+    get frameCount(): number {
       return frames;
     }
   };
@@ -145,7 +168,7 @@ export function createAdtsExtractor(config = {}) {
 // 不是 fMP4 或无可解析样本时返回 []。
 // bytes 为完整音轨字节；config 可选 { profile, freqIdx, chCfg }（默认
 // AAC-LC / 48kHz / 双声道，与 B 站常规音轨一致），供 moov 里 ASC 解析失败时兜底。
-export function adtsFromFmp4(bytes, config = {}) {
+export function adtsFromFmp4(bytes: Uint8Array | ArrayBuffer, config: AdtsExtractorConfig = {}): Uint8Array[] {
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   const extractor = createAdtsExtractor(config);
   const segments = [...extractor.push(u8), ...extractor.flush()];
@@ -155,7 +178,7 @@ export function adtsFromFmp4(bytes, config = {}) {
 
 // 从 moov 里解析 esds 的 AudioSpecificConfig 提取 { profile, freqIdx, chCfg }。
 // 失败返回 null（调用方用默认配置兜底）。
-export function parseAudioSpecificConfig(bytes) {
+export function parseAudioSpecificConfig(bytes: Uint8Array | ArrayBuffer): AudioSpecificConfig | null {
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   // 递归搜 moov → trak → mdia → minf → stbl → stsd → mp4a → esds
   const found = findBoxDeep(u8, 0, u8.length, "esds", 0);
@@ -185,19 +208,19 @@ export function parseAudioSpecificConfig(bytes) {
 
 // ===== 底层工具 =====
 
-function readU32(u8, p) {
+function readU32(u8: Uint8Array, p: number): number {
   return (u8[p] << 24) | (u8[p + 1] << 16) | (u8[p + 2] << 8) | u8[p + 3];
 }
 
 // 拼接两段字节（增量解析器跨 push 的残包缓冲拼接用，仅小缓冲）
-function concatBytes(a, b) {
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
   const out = new Uint8Array(a.length + b.length);
   out.set(a, 0);
   out.set(b, a.length);
   return out;
 }
 
-function readAscii(u8, p, len) {
+function readAscii(u8: Uint8Array, p: number, len: number): string {
   let s = "";
   for (let i = 0; i < len; i += 1) s += String.fromCharCode(u8[p + i]);
   return s;
@@ -209,8 +232,8 @@ function readAscii(u8, p, len) {
 //   bit8 (0x100): 每 sample 有 sample_duration(4)
 //   bit9 (0x200): 每 sample 有 sample_size(4) —— B 站音轨必设
 // 返回 [] 表示无 sizes（调用方按 mdat 全量处理或跳过）。
-function parseTrunSampleSizes(u8, moofStart, moofSize) {
-  const sizes = [];
+function parseTrunSampleSizes(u8: Uint8Array, moofStart: number, moofSize: number): number[] {
+  const sizes: number[] = [];
   const moofEnd = moofStart + moofSize;
   let q = moofStart + 8;
   let sawTrun = false;
@@ -259,7 +282,7 @@ function parseTrunSampleSizes(u8, moofStart, moofSize) {
 // （6 reserved + 2 data_ref_index + 8 reserved + 2 channel_count + 2 sample_size
 //   + 4 reserved + 4 sample_rate），之后才是子 box（esds/wave 等），
 // 直接按 +8 扫会错位读不出 esds。
-function findBoxDeep(u8, start, end, target, depth) {
+function findBoxDeep(u8: Uint8Array, start: number, end: number, target: string, depth: number): number {
   if (depth > 8) return -1;
   let q = start;
   while (q + 8 <= end) {

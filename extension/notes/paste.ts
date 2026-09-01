@@ -1,4 +1,4 @@
-// paste.js — "assistant answer as note section" paste normalization, extracted
+// paste.ts — "assistant answer as note section" paste normalization, extracted
 // out of extension/pages/sidepanel.js (ticket 06 of sidepanel-split).
 //
 // Domain: notes (same dir as render.js). Pure: no DOM/chrome access, no
@@ -12,10 +12,10 @@
 // (ticket 04); it is imported below.
 import { unwrapTimestampInlineCode } from "../ui/timestamp-nav.js";
 
-export function normalizeMarkdownForSectionPaste(raw, baseLevel = 2) {
+export function normalizeMarkdownForSectionPaste(raw: unknown, baseLevel: number = 2): string {
   const shift = Math.max(0, Number(baseLevel) || 0);
   const lines = String(raw || "").split("\n");
-  const normalized = [];
+  const normalized: string[] = [];
   let inFence = false;
 
   lines.forEach((line) => {

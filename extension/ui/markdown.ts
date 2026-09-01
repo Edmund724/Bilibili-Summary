@@ -1,4 +1,4 @@
-// markdown.js — pure deep module for the custom markdown rendering logic
+// markdown.ts — pure deep module for the custom markdown rendering logic
 // extracted out of extension/pages/sidepanel.js (ticket 03 of sidepanel-split).
 //
 // Domain: ui (same dir as ui-renderer.js). Pure: no DOM, no chrome, no window,
@@ -14,7 +14,7 @@ import { escapeHtml } from "../shared/string-utils.js";
 export const TIMESTAMP_PATTERN = /\b\d{1,3}:\d{2}(?::\d{2})?\b/g;
 const TIMESTAMP_INLINE_CODE_REST_PATTERN = /^[\s,，、;；:：\-–—~～至到]+$/;
 
-export function isTimestampOnlyInlineCode(value) {
+export function isTimestampOnlyInlineCode(value: unknown): boolean {
   const text = String(value || "").trim();
   if (!text) {
     return false;
@@ -30,19 +30,19 @@ export function isTimestampOnlyInlineCode(value) {
   return !rest || TIMESTAMP_INLINE_CODE_REST_PATTERN.test(rest);
 }
 
-export function renderMarkdown(text) {
+export function renderMarkdown(text: string): string {
   let escaped = escapeHtml(stripThinkBlocks(text));
-  const codeBlocks = [];
-  escaped = escaped.replace(/```([\s\S]*?)```/g, (_, code) => {
+  const codeBlocks: string[] = [];
+  escaped = escaped.replace(/```([\s\S]*?)```/g, (_, code: string) => {
     codeBlocks.push(code);
     return `\u0001BOC_CODE_${codeBlocks.length - 1}\u0001`;
   });
 
   const lines = escaped.split("\n");
-  const out = [];
+  const out: string[] = [];
   let listType = "";
   let listStartNumber = 1;
-  let paraBuf = [];
+  let paraBuf: string[] = [];
 
   const flushPara = () => {
     if (paraBuf.length) {
@@ -58,7 +58,7 @@ export function renderMarkdown(text) {
     listType = "";
     listStartNumber = 1;
   };
-  const openList = (nextType, startNumber = 1) => {
+  const openList = (nextType: string, startNumber = 1) => {
     if (listType === nextType && (nextType !== "ol" || listStartNumber === startNumber)) {
       return;
     }
@@ -71,7 +71,7 @@ export function renderMarkdown(text) {
     }
     out.push(startNumber > 1 ? `<ol start="${startNumber}">` : "<ol>");
   };
-  const getNextListType = (startIndex) => {
+  const getNextListType = (startIndex: number) => {
     for (let index = startIndex; index < lines.length; index += 1) {
       const nextLine = lines[index].trim();
       if (!nextLine) {
@@ -87,9 +87,9 @@ export function renderMarkdown(text) {
     }
     return "";
   };
-  const isTableSeparatorLine = (value) => /^\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?$/.test(value);
-  const isTableRowLine = (value) => /^\|.+\|$/.test(value);
-  const splitTableCells = (value) =>
+  const isTableSeparatorLine = (value: string) => /^\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?$/.test(value);
+  const isTableRowLine = (value: string) => /^\|.+\|$/.test(value);
+  const splitTableCells = (value: string) =>
     value
       .trim()
       .replace(/^\|/, "")
@@ -126,7 +126,7 @@ export function renderMarkdown(text) {
       flushPara();
       closeList();
       const headers = splitTableCells(line);
-      const bodyRows = [];
+      const bodyRows: string[][] = [];
       index += 2;
       while (index < lines.length) {
         const tableLine = lines[index].trim();
@@ -196,7 +196,7 @@ export function renderMarkdown(text) {
 // 切点落在空行上，而 markdown 的块级结构（标题/表格/列表/段落）都以空行或
 // 单换行为界且不跨空行延续成块，因此 renderMarkdown(stable) 与
 // renderMarkdown(tail) 堆叠渲染与 renderMarkdown(全文) 等价。
-export function splitMarkdownTail(text) {
+export function splitMarkdownTail(text: unknown): { stableText: string; tailText: string } {
   const source = String(text || "");
   const lines = source.split("\n");
   let lastNonBlank = -1;
@@ -231,18 +231,18 @@ export function splitMarkdownTail(text) {
   };
 }
 
-function renderInline(text) {
+function renderInline(text: string): string {
   return text
-    .replace(/`([^`]+)`/g, (_, c) => (isTimestampOnlyInlineCode(c) ? c : `<code>${c}</code>`))
-    .replace(/\*\*([^*\n]+)\*\*/g, (_, c) => `<strong>${c}</strong>`)
-    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, (_, pre, c) => `${pre}<em>${c}</em>`)
-    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, u) => {
+    .replace(/`([^`]+)`/g, (_, c: string) => (isTimestampOnlyInlineCode(c) ? c : `<code>${c}</code>`))
+    .replace(/\*\*([^*\n]+)\*\*/g, (_, c: string) => `<strong>${c}</strong>`)
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, (_, pre: string, c: string) => `${pre}<em>${c}</em>`)
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t: string, u: string) => {
       const safeUrl = /^(https?:|mailto:|#)/i.test(u) ? u : "#";
       return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${t}</a>`;
     });
 }
 
-export function stripThinkBlocks(text) {
+export function stripThinkBlocks(text: unknown): string {
   return String(text || "")
     .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "")
     .replace(/<think\b[^>]*>[\s\S]*$/gi, "")

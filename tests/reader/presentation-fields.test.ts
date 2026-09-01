@@ -249,7 +249,7 @@ describe("D. 源码扫描：data-boc-* 属性字面量必须登记在案", () =>
     "extension/reader/init-essentials.ts",
     "extension/entry/content.ts",
     "extension/core/message-handler.ts",
-    "extension/ui/ui-renderer.js",
+    "extension/ui/ui-renderer.ts",
     "extension/bilibili/video-probe.ts",
     "extension/entry/styles/reader-gate.css"
   ];

@@ -1,4 +1,4 @@
-// extension/asr/wav-encode.js
+// extension/asr/wav-encode.ts
 // 最小 WAV 字节编码微模块（16bit PCM / 单声道）。
 // 从 asr/chunker.js 拆出：asr-provider-store 的连通性探针只需要「把静音采样
 // 编码成 WAV 字节」，此前却要静态 import 整个 chunker.js（切片计划 / 解码
@@ -11,7 +11,9 @@
 
 // Float32 单声道采样（[-1,1]）→ 16bit PCM WAV 字节（Uint8Array）。
 // 44 字节 RIFF/WAVE header + PCM little-endian。16k 单声道 ≈ 1.9MB/分钟。
-export function encodeWavBytes(monoFloat32, sampleRate = 16000) {
+// 返回类型取 Uint8Array<ArrayBuffer>：字节总是落在函数新建的 ArrayBuffer 上
+// （可直接作 BlobPart 上传，无需二次断言）。
+export function encodeWavBytes(monoFloat32: Float32Array, sampleRate = 16000): Uint8Array<ArrayBuffer> {
   const numChannels = 1;
   const bitsPerSample = 16;
   const blockAlign = (numChannels * bitsPerSample) / 8;
@@ -52,7 +54,7 @@ export function encodeWavBytes(monoFloat32, sampleRate = 16000) {
 }
 
 // 写入 ASCII 字符串（RIFF/WAVE/fmt /data 标识）
-function writeAscii(view, offset, str) {
+function writeAscii(view: DataView, offset: number, str: string): void {
   for (let i = 0; i < str.length; i++) {
     view.setUint8(offset + i, str.charCodeAt(i));
   }
