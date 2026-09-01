@@ -965,3 +965,295 @@
   line-height: 1.6;
   color: var(--boc-reader-muted, #6f675c);
 }
+
+/* ===== PR4 概览 tab：总结 / 章节 / 金句 / 笔记一节 =====
+ * 视觉基准：prototype/final-概览.jpg——总结段 → 章节列表（时间戳 pill + 标题 +
+ * 小结）→ 金句卡（白底 + 左 3px accent 边 + 右下角时间戳）→ 笔记一节（预览卡 +
+ * 查看完整笔记）。色值全部走 --boc-reader-* token（gate 段三主题定义），
+ * 暗色主题自动跟随；时间戳 pill 复用 .boc-reading-time 母题。 */
+.boc-reading-overview {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+.boc-reading-ov-section {
+  margin-bottom: 20px;
+}
+
+.boc-reading-ov-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--boc-reader-faint, #a39a8d);
+  margin-bottom: 9px;
+}
+
+/* 「AI 生成 / AI 精选」小标注：accent 软底 pill，仅在 AI 分章/金句标头出现 */
+.boc-reading-ov-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--boc-reader-accent, #fb7299);
+  background: var(--boc-reader-accent-soft, #fce0ea);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.boc-reading-ov-summary {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--boc-reader-text, #2b2620);
+  word-break: break-word;
+}
+
+.boc-reading-ov-empty {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--boc-reader-faint, #a39a8d);
+}
+
+/* 章节列表：时间戳 pill + 标题 + 小结（点击跳播） */
+.boc-reading-ov-chapter {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 0;
+  background: transparent;
+  border-radius: 12px;
+  padding: 7px 8px;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.boc-reading-ov-chapter:hover {
+  background: var(--boc-reader-surface-2, #f5efe6);
+}
+
+.boc-reading-ov-chapter-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.boc-reading-ov-chapter-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--boc-reader-text, #2b2620);
+  word-break: break-word;
+}
+
+.boc-reading-ov-chapter-desc {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--boc-reader-muted, #6f675c);
+  word-break: break-word;
+}
+
+/* 金句卡：白底 + 左 3px accent 边 + 右下角时间戳（点击跳播） */
+.boc-reading-ov-quote {
+  width: 100%;
+  display: block;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-left: 3px solid var(--boc-reader-accent, #fb7299);
+  background: var(--boc-reader-card, #ffffff);
+  border-radius: 10px;
+  padding: 10px 12px 8px;
+  margin-bottom: 10px;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.boc-reading-ov-quote:hover {
+  border-color: var(--boc-reader-accent, #fb7299);
+  border-left-width: 3px;
+}
+
+.boc-reading-ov-quote-text {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--boc-reader-text, #2b2620);
+  word-break: break-word;
+}
+
+.boc-reading-ov-quote-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+/* 状态条（生成中 / 部分失败 / 失败）+ 不确定进度细条 */
+.boc-reading-ov-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 12px;
+  padding: 9px 12px;
+  margin-bottom: 12px;
+}
+
+.boc-reading-ov-strip.is-generating {
+  border-color: transparent;
+  background: var(--boc-reader-accent-soft, #fce0ea);
+}
+
+.boc-reading-ov-strip.is-partial,
+.boc-reading-ov-strip.is-error {
+  background: var(--boc-reader-highlight, #fdeeda);
+}
+
+.boc-reading-ov-strip-text {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--boc-reader-text, #2b2620);
+}
+
+.boc-reading-ov-progress {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--boc-reader-muted, #6f675c);
+  white-space: nowrap;
+}
+
+.boc-reading-ov-track {
+  height: 4px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+.boc-reading-ov-fill {
+  height: 100%;
+  width: 38%;
+  background: var(--boc-reader-accent, #fb7299);
+  border-radius: 99px;
+  animation: boc-asr-pulse 1.6s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boc-reading-ov-fill {
+    animation: none;
+  }
+}
+
+/* 笔记一节：预览卡（标题 + 首行摘要 + 查看完整笔记）与未成稿引导卡 */
+.boc-reading-ov-note-preview {
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  background: var(--boc-reader-card, #ffffff);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.boc-reading-ov-note-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--boc-reader-text, #2b2620);
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+
+.boc-reading-ov-note-excerpt {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--boc-reader-muted, #6f675c);
+  word-break: break-word;
+}
+
+.boc-reading-ov-note-hint {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--boc-reader-muted, #6f675c);
+}
+
+.boc-reading-ov-note-hint.is-error {
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+.boc-reading-ov-note-btn {
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  background: var(--boc-reader-card, #ffffff);
+  color: var(--boc-reader-text, #2b2620);
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.boc-reading-ov-note-btn:hover {
+  border-color: var(--boc-reader-accent, #fb7299);
+  background: var(--boc-reader-accent-soft, #fce0ea);
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+/* 完整笔记展开区：复用 ui/markdown 的 renderMarkdown 产物（h3-h5/p/列表/表格） */
+.boc-reading-ov-note-full {
+  border-top: 1px solid var(--boc-reader-border, #e7dfd4);
+  margin-top: 10px;
+  padding-top: 10px;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: var(--boc-reader-text, #2b2620);
+  word-break: break-word;
+}
+
+.boc-reading-ov-note-full:first-child {
+  border-top: none;
+  margin-top: 2px;
+  padding-top: 0;
+}
+
+.boc-reading-ov-note-full h3,
+.boc-reading-ov-note-full h4,
+.boc-reading-ov-note-full h5 {
+  margin: 12px 0 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--boc-reader-text, #2b2620);
+}
+
+.boc-reading-ov-note-full p {
+  margin: 0 0 8px;
+}
+
+.boc-reading-ov-note-full ul,
+.boc-reading-ov-note-full ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.boc-reading-ov-note-full li {
+  margin-bottom: 3px;
+}
+
+.boc-reading-ov-note-full table {
+  border-collapse: collapse;
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
+.boc-reading-ov-note-full th,
+.boc-reading-ov-note-full td {
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  padding: 4px 8px;
+  text-align: left;
+}

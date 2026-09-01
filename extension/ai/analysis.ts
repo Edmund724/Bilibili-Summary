@@ -322,6 +322,8 @@ export interface SubtitleSignatureInput {
   subtitleId?: unknown;
   subtitleUrl?: unknown;
   body?: unknown;
+  /** 自带章节（模式位）：非空切换只挑金句短路径，产物形态不同，签名须区分。 */
+  chapters?: unknown;
 }
 
 /**
@@ -331,7 +333,7 @@ export interface SubtitleSignatureInput {
  * 文本量变化即签名变化，概览缓存自然 miss，不做主动失效（07 票决议）。
  * 模式位（有无自带章节）一并纳入：章节出现/消失会切换短路径，产物形态不同。
  */
-export function buildSubtitleSignature({ lang, subtitleId, subtitleUrl, body }: SubtitleSignatureInput = {}): string {
+export function buildSubtitleSignature({ lang, subtitleId, subtitleUrl, body, chapters }: SubtitleSignatureInput = {}): string {
   const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
   let count = 0;
   let totalChars = 0;
@@ -354,7 +356,9 @@ export function buildSubtitleSignature({ lang, subtitleId, subtitleUrl, body }: 
     String(count),
     String(firstFrom),
     String(lastTo),
-    String(totalChars)
+    String(totalChars),
+    // 模式位：自带章节非空（短路径）与空（AI 分章）产物不同构，签名必须区分
+    String(Array.isArray(chapters) && chapters.length > 0)
   ].join("|");
   return `sig${fnv1a32(basis).toString(36)}`;
 }
@@ -1033,7 +1037,8 @@ export function runOverviewAnalysis(
     lang: ctx.subtitleLang,
     subtitleId: ctx.selectedSubtitleId,
     subtitleUrl: ctx.selectedSubtitleUrl,
-    body
+    body,
+    chapters: manuscriptChapters
   });
   const finalKey = buildAnalysisFinalCacheKey(ctx, signature);
 

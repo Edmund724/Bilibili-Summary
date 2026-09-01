@@ -72,3 +72,15 @@ export { resumeReaderFollowPlayback } from "./sync.js";
 export { refreshReadingSubtitleSearch, moveReadingSubtitleSearch, clearReadingSubtitleSearch } from "./subtitle-search.js";
 // 转写中间态横幅：渲染尾部/tick 收敛（update）与转写中判定
 export { updateReadingTranscribeBanner, isReaderTranscribing } from "./transcribe-banner.js";
+
+// ===== PR4 概览 tab：状态机触达入口（ui-renderer 调用面） =====
+
+// 概览 tab 切换入口（未生成自动触发 + 笔记快照刷新）、章节/金句点击与重试/
+// 笔记按钮的事件委托、显式触发生成（重试走 forceRefresh 参数）、渲染收敛。
+// 渲染尾部/打开触发/关闭清理由 lifecycle 直接 import overview.js，不经此处。
+export {
+  ensureReaderOverviewTab,
+  onReadingOverviewClick,
+  triggerReaderOverviewGeneration,
+  renderReadingOverview
+} from "./overview.js";

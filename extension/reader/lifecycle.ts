@@ -113,6 +113,13 @@ import {
 } from "./subtitle-search.js";
 import { bindReadingTranscribeBanner, updateReadingTranscribeBanner } from "./transcribe-banner.js";
 import { clearPendingExplainIntent } from "./explain-intent.js";
+// PR4 概览 tab：状态机触达——打开即自动生成（enter/subtitle-ready）、渲染尾部
+// 收敛（renderReadingView 尾调用）、关闭清理（不取消进行中生成）。
+import {
+  renderReadingOverview,
+  resetReaderOverviewState,
+  triggerReaderOverviewGeneration
+} from "./overview.js";
 
 // playerRetryTimer（readingPlayerRetryTimer）自 reader-impl.js 闭包迁入：属主启动
 //（scheduleReaderPlayerRetry）与清除（closeReadingView、presenter reset）都在本
@@ -190,6 +197,9 @@ export function handleReaderPresenterNotification(kind: string, text?: string | 
         startReadingViewSync();
         startReaderPlayerObserver();
         syncReadingViewPlayback(true);
+        // PR4：字幕就绪即自动生成概览（基线决议「打开即自动生成并缓存」）。
+        // 无字幕时保持诚实空态不触发；生成中重复触发被状态机与管线 promise 复用去重。
+        triggerReaderOverviewGeneration();
       }
       break;
     case "rerender":
@@ -252,6 +262,10 @@ export async function enterReaderMode() {
   openReaderViewShell(readingView);
   applyReaderPageFocus();
   renderReadingView();
+  // PR4：打开阅读模式即自动生成概览（基线决议；字幕已就绪的直接生成，缓存命中
+  // 免重付费。字幕未就绪时为诚实空态，subtitle-ready 通知到达后再触发；切到
+  // 概览 tab 也有兜底触发。生成中重复触发被状态机与管线 promise 复用去重）。
+  triggerReaderOverviewGeneration();
 
   const earlyPlayerHost = findReaderPlayerHost(getRuntimeVideoElement());
   if (earlyPlayerHost) {
@@ -398,6 +412,9 @@ export function closeReadingView() {
   // 与句上「解释」的待处理意图（不跨会话残留；下次打开按空态渲染）。
   clearReadingSubtitleSearch();
   clearPendingExplainIntent();
+  // PR4：概览 tab 的会话态一并归位（状态机回 idle、产物引用丢弃；进行中的
+  // 生成不取消——管线后台跑完落缓存，重开阅读模式读缓存命中）。
+  resetReaderOverviewState();
   stopReadingViewSync();
   unbindReaderLayout();
   cleanupReaderPlayerHost();
@@ -497,6 +514,9 @@ export function renderReadingView() {
   //   - 转写横幅（视图打开晚于转写发起时，经进程内相位镜像恢复呈现）。
   refreshReadingSubtitleSearch({ scroll: false });
   updateReadingTranscribeBanner();
+  // PR4：概览 tab 内容按当前状态机收敛（渲染只反映、不触发生成；触发电由
+  // enterReaderMode / subtitle-ready / 概览 tab 切换三路负责）。
+  renderReadingOverview();
   state.reader.setActiveSubtitleIndex(-1);
   state.reader.setActiveChapterIndex(-1);
 }

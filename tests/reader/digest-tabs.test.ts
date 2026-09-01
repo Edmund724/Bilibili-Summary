@@ -4,8 +4,8 @@
 // 覆盖：
 //   A. 壳结构契约：面板壳/三 tab 按钮/三 tab body 存在，字幕列表挂在字幕
 //      tab body 内（分批渲染的目标容器随搬家保持可用）；
-//   B. 概览 / AI 对话 tab 是诚实占位：只有「即将上线」空态文案，无假数据、
-//      无假输入框（PR4/PR5 前不假装可用）；
+//   B. 概览 tab（PR4 状态机宿主）初始为「未生成」诚实态、AI 对话 tab 保持
+//      「即将上线」占位：无假数据、无假输入框；
 //   C. tab 切换：点击 tab 按钮 → is-active/aria-selected/hidden 三通道一致，
 //      字幕 tab 与概览/AI 对话互斥显示；
 //   D. 进入阅读模式重置到默认「字幕」tab（概览停留状态不跨会话保留）；
@@ -92,13 +92,19 @@ describe("统一 Digest 面板三标签", () => {
     expectTabActive("Chat", false);
   });
 
-  it("B. 概览 / AI 对话是诚实占位：空态文案，无假数据与假输入框", () => {
+  it("B. 概览 tab（PR4 状态机宿主）与 AI 对话 tab（PR5 占位）初始都是诚实空态", () => {
+    // 概览（PR4 落地）：初始为「未生成」诚实态，无假数据；渲染宿主节点存在。
+    const overviewBody = document.getElementById(ids.readingOverviewBody) as HTMLElement;
+    expect(overviewBody).not.toBe(null);
     const overviewCopy = tabBody("Overview").textContent || "";
+    expect(overviewCopy).toContain("概览还未生成");
+    expect(overviewBody.querySelector(".boc-reading-ov-chapter, .boc-reading-ov-quote")).toBe(null);
+
+    // AI 对话（PR5 占位）：保持「即将上线」空态文案。
     const chatCopy = tabBody("Chat").textContent || "";
-    expect(overviewCopy).toContain("概览即将上线");
     expect(chatCopy).toContain("AI 对话即将上线");
 
-    // 不假装可用：占位 body 内没有输入框/按钮/假消息列表
+    // 不假装可用：初始态 body 内没有输入框/按钮/假消息列表
     for (const body of [tabBody("Overview"), tabBody("Chat")]) {
       expect(body.querySelector("input, textarea, button, select")).toBe(null);
       expect(body.querySelectorAll(".boc-reading-item, .boc-reading-chapter").length).toBe(0);

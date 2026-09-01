@@ -61,6 +61,9 @@ export const ids = {
   readingTabBodySubtitle: "boc-reading-tabbody-subtitle",
   readingTabBodyOverview: "boc-reading-tabbody-overview",
   readingTabBodyChat: "boc-reading-tabbody-chat",
+  // PR4 概览 tab 渲染宿主：reader/overview.ts 按状态机整块重建其内容
+  //（idle/generating/ready/partial/error/empty，全诚实态）。
+  readingOverviewBody: "boc-reading-overview-body",
   // PR3 字幕 tab 五件事：句内搜索、Copy/Export、Follow 悬浮按钮、转写中间态
   // 横幅、句上「解释」浮层与 AI 对话 tab 占位期的待解释意图卡。
   readingSearchInput: "boc-reading-search-input",

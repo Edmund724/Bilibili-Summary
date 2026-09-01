@@ -260,11 +260,15 @@ export function buildUiHtml(): string {
               </div>
             </div>
 
-            <!-- 概览 tab：诚实占位（PR4 落地概览管线，不放假数据） -->
+            <!-- 概览 tab（PR4）：状态机渲染宿主（reader/overview.ts），内容由
+                 lifecycle/ui 触发路径按阶段整块重建——idle/generating/ready/
+                 partial/error/empty 全诚实态，不放假数据。此为未生成初值。 -->
             <div id="${ids.readingTabBodyOverview}" class="boc-reading-tab-body" role="tabpanel" aria-label="概览" hidden>
-              <div class="boc-reading-placeholder">
-                <div class="boc-reading-placeholder-title">概览即将上线</div>
-                <p class="boc-reading-placeholder-copy">视频的段落总结、章节与金句将在这里呈现。当前版本可先在「字幕」页阅读和跳转。</p>
+              <div id="${ids.readingOverviewBody}" class="boc-reading-overview">
+                <div class="boc-reading-placeholder">
+                  <div class="boc-reading-placeholder-title">概览还未生成</div>
+                  <p class="boc-reading-placeholder-copy">切到概览标签页会自动开始生成全片总结、章节与金句。</p>
+                </div>
               </div>
             </div>
 
@@ -380,11 +384,19 @@ export function bindUiEvents(): void {
   // Digest 面板三标签切换（纯壳交互，见上方 setReaderDigestTab 注释）。
   // 切到 AI 对话 tab 时按当前 pending 意图刷新待解释意图卡（句上「解释」写入
   // 意图后也会主动切过来，两条路径都保证卡片与意图一致）。
+  // 切到概览 tab（PR4）：未生成则自动触发生成并刷新笔记一节快照（idle 才触发，
+  // 生成中复用进行中 promise，已生成不重跑）；reader 域交互按惯例经
+  // loadReaderDomain 装载后转发。
   for (const def of DIGEST_TAB_DEFS) {
     byId(def.buttonId).addEventListener("click", () => {
       setReaderDigestTab(def.name);
       if (def.name === "chat") {
         renderReadingChatIntent();
+      }
+      if (def.name === "overview") {
+        loadReaderDomain()
+          .then((reader) => reader.ensureReaderOverviewTab())
+          .catch((error) => logWarn("[BOC] overview tab enter failed", error));
       }
     });
   }
@@ -695,6 +707,17 @@ export function bindUiEvents(): void {
       .then((reader) => reader.onReadingSubtitleClick(event))
       .catch(() => {});
   });
+  // ===== PR4 概览 tab：章节/金句点击跳播 + 重试/笔记按钮 =====
+  // 事件委托挂概览渲染宿主（内容被状态机整块重建，容器不换）；逻辑在
+  // reader/overview.js（跳播复用 seekReadingTarget 通道），经 loadReaderDomain
+  // 装载后转发，与章节 rail / 字幕句点击同款接线。
+  const readingOverviewBody = byId(ids.readingOverviewBody);
+  readingOverviewBody.addEventListener("click", (event) => {
+    loadReaderDomain()
+      .then((reader) => reader.onReadingOverviewClick(event))
+      .catch((error) => logWarn("[BOC] overview click failed", error));
+  });
+
   readingView.addEventListener("transitionend", () => {
     if (!isReaderViewOpen()) {
       loadReaderDomain()

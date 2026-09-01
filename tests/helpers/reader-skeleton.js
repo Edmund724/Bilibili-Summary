@@ -132,6 +132,13 @@ export function mountReaderSkeleton(ids) {
   tabBodyChat.setAttribute("hidden", "");
   digestPanel.appendChild(tabBodyChat);
 
+  // PR4 概览 tab 渲染宿主（真实模板同构：reader/overview.js 按状态机整块重建）。
+  // renderReadingView 尾部经 renderReadingOverview 收敛概览内容，骨架必须齐。
+  const overviewBody = doc.createElement("div");
+  overviewBody.id = ids.readingOverviewBody;
+  overviewBody.className = "boc-reading-overview";
+  tabBodyOverview.appendChild(overviewBody);
+
   // PR3 字幕 tab 工具条（搜索 + 复制/导出）：与 ui-renderer 真实模板同构，
   // bindUiEvents 对这些节点直接 byId 绑定（缺节点会抛错，骨架必须齐）。
   const subToolbar = doc.createElement("div");
