@@ -17,6 +17,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState, setLocationUrl, NORMAL_PAGE_URL } from "../setup.js";
 import { DEFAULT_SETTINGS } from "../../extension/core/defaults.js";
+// playerAiState 须按用例动态获取：beforeEach 的 vi.resetModules() 会换模块
+// 纪元，静态 import 拿到的实例与生产代码（动态 import 加载）不是同一对象。
+let playerAiState = null;
+async function getPlayerAiState() {
+  playerAiState = (await import("../../extension/ai/player-ai-state.js")).playerAiState;
+  return playerAiState;
+}
 
 const storageChangeListeners = new Set();
 
@@ -119,6 +126,7 @@ async function loadContentScript(settings) {
     await loadPlayerAi();
   }
   await flushMicrotasks();
+  await getPlayerAiState();
   return (await import("../../extension/core/state.js")).state;
 }
 
@@ -148,8 +156,8 @@ describe("player-ai 启停守卫", () => {
     const windowAddSpy = vi.spyOn(window, "addEventListener");
     const state = await loadContentScript({ enablePlayerAiQuickAction: false });
 
-    expect(state.playerAi.playerAiQuickActionObserver).toBeNull();
-    expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(false);
+    expect(playerAiState.playerAiQuickActionObserver).toBeNull();
+    expect(playerAiState.playerAiQuickActionLayoutBound).toBe(false);
     expect(windowAddSpy.mock.calls.some(([type]) => type === "resize")).toBe(false);
     expect(document.getElementById("boc-player-ai-quick-action")).toBeNull();
   });
@@ -159,8 +167,8 @@ describe("player-ai 启停守卫", () => {
     const documentAddSpy = vi.spyOn(document, "addEventListener");
     const state = await loadContentScript({ enablePlayerAiQuickAction: true });
 
-    expect(state.playerAi.playerAiQuickActionObserver).not.toBeNull();
-    expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(true);
+    expect(playerAiState.playerAiQuickActionObserver).not.toBeNull();
+    expect(playerAiState.playerAiQuickActionLayoutBound).toBe(true);
     expect(windowAddSpy.mock.calls.some(([type]) => type === "resize")).toBe(true);
     expect(windowAddSpy.mock.calls.some(([type]) => type === "pageshow")).toBe(true);
     expect(documentAddSpy.mock.calls.some(([type]) => type === "fullscreenchange")).toBe(true);
@@ -172,12 +180,12 @@ describe("player-ai 启停守卫", () => {
     // 已加载模块的重复 import 返回缓存（诊断实测），此处拿真实命名空间（非
     // doMock 产物，后者的依赖图会被 doMock 的 import 拦截带偏）
     const { startPlayerAiQuickAction } = await import("../../extension/ai/player-ai.js");
-    const observerBefore = state.playerAi.playerAiQuickActionObserver;
+    const observerBefore = playerAiState.playerAiQuickActionObserver;
     const windowAddSpy = vi.spyOn(window, "addEventListener");
 
     startPlayerAiQuickAction();
 
-    expect(state.playerAi.playerAiQuickActionObserver).toBe(observerBefore);
+    expect(playerAiState.playerAiQuickActionObserver).toBe(observerBefore);
     expect(windowAddSpy.mock.calls.some(([type]) => type === "resize")).toBe(false);
   });
 
@@ -209,8 +217,8 @@ describe("player-ai 启停守卫", () => {
 
     expect(document.getElementById("boc-player-ai-quick-action")).toBeNull();
     expect(document.querySelector(".boc-player-ai-wrap")).toBeNull();
-    expect(state.playerAi.playerAiQuickActionObserver).toBeNull();
-    expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(false);
+    expect(playerAiState.playerAiQuickActionObserver).toBeNull();
+    expect(playerAiState.playerAiQuickActionLayoutBound).toBe(false);
     // 4 个游标 handler 均以绑定时的同一引用被 removeEventListener 摘除
     for (const [type, handler] of cursorBinds) {
       expect(hostRemoveSpy.mock.calls.some(([t, h]) => t === type && h === handler)).toBe(true);
@@ -235,7 +243,7 @@ describe("player-ai 启停守卫", () => {
 
     const mousemoveBinds = hostAddSpy.mock.calls.filter(([type]) => type === "mousemove");
     expect(mousemoveBinds.length).toBe(1);
-    expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(true);
+    expect(playerAiState.playerAiQuickActionLayoutBound).toBe(true);
   });
 
   it("stop → retry 定时器清理，stop 后不再触发挂载", async () => {
@@ -250,15 +258,15 @@ describe("player-ai 启停守卫", () => {
 
     // 挂载失败已进入 retry：sync 定时器为 260ms 退避定时器
     expect(document.getElementById("boc-player-ai-quick-action")).toBeNull();
-    expect(state.playerAi.playerAiQuickActionSyncTimer).not.toBe(0);
+    expect(playerAiState.playerAiQuickActionSyncTimer).not.toBe(0);
 
     stopPlayerAiQuickAction();
-    expect(state.playerAi.playerAiQuickActionSyncTimer).toBe(0);
+    expect(playerAiState.playerAiQuickActionSyncTimer).toBe(0);
 
     // 推进 3 秒：retry 定时器已清，不会再触发挂载
     await vi.advanceTimersByTimeAsync(3000);
     expect(document.getElementById("boc-player-ai-quick-action")).toBeNull();
-    expect(state.playerAi.playerAiQuickActionSyncTimer).toBe(0);
+    expect(playerAiState.playerAiQuickActionSyncTimer).toBe(0);
   });
 
   it("get-settings 未回包（SW 冷启动）时，storage 快路径已启动 observer 与 layout 监听", async () => {
@@ -270,12 +278,13 @@ describe("player-ai 启停守卫", () => {
     await loadPlayerAi();
     await flushMicrotasks();
     const state = (await import("../../extension/core/state.js")).state;
+    await getPlayerAiState();
 
     // get-settings 始终未回包：以下状态全部来自 chrome.storage.sync 快路径
     expect(pendingGetSettingsCallback).not.toBeNull();
     expect(state.settings.enablePlayerAiQuickAction).toBe(true);
-    expect(state.playerAi.playerAiQuickActionObserver).not.toBeNull();
-    expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(true);
+    expect(playerAiState.playerAiQuickActionObserver).not.toBeNull();
+    expect(playerAiState.playerAiQuickActionLayoutBound).toBe(true);
     expect(windowAddSpy.mock.calls.some(([type]) => type === "resize")).toBe(true);
   });
 
@@ -302,8 +311,8 @@ describe("player-ai 启停守卫", () => {
     const { loadPlayerAi } = await import("../../extension/core/lazy-player-ai.js");
 
     // 初始关闭：已 stop
-    expect(state.playerAi.playerAiQuickActionObserver).toBeNull();
-    expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(false);
+    expect(playerAiState.playerAiQuickActionObserver).toBeNull();
+    expect(playerAiState.playerAiQuickActionLayoutBound).toBe(false);
 
     // false → true：启动 observer 与监听，并同步 state.settings
     // （懒加载接线：start 经 loadPlayerAi().then 异步执行，先等模块在位、
@@ -312,8 +321,8 @@ describe("player-ai 启停守卫", () => {
     await loadPlayerAi();
     await flushMicrotasks();
     expect(state.settings.enablePlayerAiQuickAction).toBe(true);
-    expect(state.playerAi.playerAiQuickActionObserver).not.toBeNull();
-    expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(true);
+    expect(playerAiState.playerAiQuickActionObserver).not.toBeNull();
+    expect(playerAiState.playerAiQuickActionLayoutBound).toBe(true);
     const resizeBinds = windowAddSpy.mock.calls.filter(([type]) => type === "resize");
     expect(resizeBinds.length).toBe(1);
 
@@ -321,8 +330,8 @@ describe("player-ai 启停守卫", () => {
     emitStorageChange("enablePlayerAiQuickAction", false);
     await flushMicrotasks();
     expect(state.settings.enablePlayerAiQuickAction).toBe(false);
-    expect(state.playerAi.playerAiQuickActionObserver).toBeNull();
-    expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(false);
+    expect(playerAiState.playerAiQuickActionObserver).toBeNull();
+    expect(playerAiState.playerAiQuickActionLayoutBound).toBe(false);
     const [, resizeHandler] = resizeBinds[0];
     expect(
       windowRemoveSpy.mock.calls.some(([type, handler]) => type === "resize" && handler === resizeHandler)
@@ -331,8 +340,8 @@ describe("player-ai 启停守卫", () => {
     // false → true：再次启动
     emitStorageChange("enablePlayerAiQuickAction", true);
     await flushMicrotasks();
-    expect(state.playerAi.playerAiQuickActionObserver).not.toBeNull();
-    expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(true);
+    expect(playerAiState.playerAiQuickActionObserver).not.toBeNull();
+    expect(playerAiState.playerAiQuickActionLayoutBound).toBe(true);
     expect(windowAddSpy.mock.calls.filter(([type]) => type === "resize").length).toBe(2);
   });
 });

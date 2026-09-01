@@ -4,7 +4,8 @@ import { DEFAULT_SETTINGS, type Settings } from "./defaults.js";
  * State namespace objects.
  *
  * Access patterns:
- * - Structured: state.reader.X, state.clip.X, state.playerAi.X, state.ui.X
+ * - Structured: state.reader.X, state.clip.X, state.ui.X
+ * (the playerAi namespace has moved to ai/player-ai-state.ts)
  *
  * The structured namespaces expose the sub-state objects directly.
  * Flat sub-state property access (e.g. state.readingViewOpen) is no longer
@@ -255,52 +256,6 @@ const clipState: ClipStateWritable = {
   setCurrentClipSignature(value) { this.currentClipSignature = value; }
 };
 
-// ===== Player-AI namespace =====
-
-type PlayerAiBusinessState = {
-  playerAiQuickActionObserver: MutationObserver | null;
-  playerAiQuickActionLayoutBound: boolean;
-  playerAiQuickActionSyncTimer: number;
-  playerAiQuickActionRevealTimer: number;
-  playerAiQuickActionHideTimer: number;
-  playerAiQuickActionCursorHideTimer: number;
-  playerAiQuickActionSubmitting: boolean;
-  playerAiQuickActionSuppressedUntil: number;
-};
-
-type PlayerAiSetters = {
-  setObserver(value: MutationObserver | null): void;
-  setLayoutBound(value: boolean): void;
-  setSyncTimer(value: number): void;
-  setRevealTimer(value: number): void;
-  setHideTimer(value: number): void;
-  setCursorHideTimer(value: number): void;
-  setSubmitting(value: boolean): void;
-  setSuppressedUntil(value: number): void;
-};
-
-export type PlayerAiState = Readonly<PlayerAiBusinessState> & PlayerAiSetters;
-type PlayerAiStateWritable = PlayerAiBusinessState & PlayerAiSetters;
-
-const playerAiState: PlayerAiStateWritable = {
-  playerAiQuickActionObserver: null,
-  playerAiQuickActionLayoutBound: false,
-  playerAiQuickActionSyncTimer: 0,
-  playerAiQuickActionRevealTimer: 0,
-  playerAiQuickActionHideTimer: 0,
-  playerAiQuickActionCursorHideTimer: 0,
-  playerAiQuickActionSubmitting: false,
-  playerAiQuickActionSuppressedUntil: 0,
-  setObserver(value) { this.playerAiQuickActionObserver = value; },
-  setLayoutBound(value) { this.playerAiQuickActionLayoutBound = value; },
-  setSyncTimer(value) { this.playerAiQuickActionSyncTimer = value; },
-  setRevealTimer(value) { this.playerAiQuickActionRevealTimer = value; },
-  setHideTimer(value) { this.playerAiQuickActionHideTimer = value; },
-  setCursorHideTimer(value) { this.playerAiQuickActionCursorHideTimer = value; },
-  setSubmitting(value) { this.playerAiQuickActionSubmitting = value; },
-  setSuppressedUntil(value) { this.playerAiQuickActionSuppressedUntil = value; }
-};
-
 // ===== UI namespace =====
 
 type UiBusinessState = {
@@ -349,11 +304,9 @@ export interface State {
   settings: Settings;
   readerState: ReaderState;
   clipState: ClipState;
-  playerAiState: PlayerAiState;
   uiState: UiState;
   reader: ReaderState;
   clip: ClipState;
-  playerAi: PlayerAiState;
   ui: UiState;
   setSettings(next: Settings): void;
 }
@@ -362,14 +315,12 @@ const stateTarget: State = {
   settings: { ...DEFAULT_SETTINGS },
   readerState,
   clipState,
-  playerAiState,
   uiState,
   reader: readerState,
   clip: clipState,
-  playerAi: playerAiState,
   ui: uiState,
   setSettings(next) { this.settings = next; }
 };
 
 export const state: State = stateTarget;
-export { clipState, playerAiState, uiState };
+export { clipState, uiState };

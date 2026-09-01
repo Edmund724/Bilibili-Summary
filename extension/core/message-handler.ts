@@ -1,4 +1,5 @@
-import { state, uiState, playerAiState, clipState } from "./state.js";
+import { state, uiState, clipState } from "./state.js";
+import { suppressUntil } from "../ai/player-ai-state.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
 
 // sidepanel-get-context 的 payload 形状 + 签名投影单源（纯模块）：字段清单、
@@ -140,7 +141,7 @@ export function bindRuntimeEvents() {
     }
 
     if (message.type === "popup-trigger-reading-view") {
-      playerAiState.setSuppressedUntil(Date.now() + 2500);
+      suppressUntil(Date.now() + 2500);
       // 原为同步 remove；懒加载后「未加载 ⇒ 无按钮」可直接跳过，已加载时经
       // promise 移除（延后一个 tick，视觉无差异）。失败静默：移除按钮失败
       // 不应阻断阅读模式打开，且 suppressedUntil 已保证按钮短期不再弹出。

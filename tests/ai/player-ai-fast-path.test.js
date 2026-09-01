@@ -9,6 +9,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState, setLocationUrl, NORMAL_PAGE_URL } from "../setup.js";
 import { DEFAULT_SETTINGS } from "../../extension/core/defaults.js";
+// playerAiState 须按用例动态获取：beforeEach 的 vi.resetModules() 会换模块
+// 纪元，静态 import 拿到的实例与生产代码（动态 import 加载）不是同一对象。
+let playerAiState = null;
+async function getPlayerAiState() {
+  playerAiState = (await import("../../extension/ai/player-ai-state.js")).playerAiState;
+  return playerAiState;
+}
 
 // 候选03：把惰性 UI 壳与 reader 呈现层 mock 为永不 resolve。若 AI 快路径依赖
 // 它们，player-ai 启动就会挂死。
@@ -96,10 +103,11 @@ describe("player-ai 快路径与惰性装载解耦", () => {
     await loadPlayerAi();
     await flushMicrotasks();
     const state = (await import("../../extension/core/state.js")).state;
+    await getPlayerAiState();
 
     expect(state.settings.enablePlayerAiQuickAction).toBe(true);
-    expect(state.playerAi.playerAiQuickActionObserver).not.toBeNull();
-    expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(true);
+    expect(playerAiState.playerAiQuickActionObserver).not.toBeNull();
+    expect(playerAiState.playerAiQuickActionLayoutBound).toBe(true);
 
     // 红线：AI 按钮快路径不等待 ui-renderer / reader 呈现层。
     expect(ensureUiReady).not.toHaveBeenCalled();
@@ -125,10 +133,11 @@ describe("player-ai 快路径与惰性装载解耦", () => {
     await loadPlayerAi();
     await flushMicrotasks(40);
     const state = (await import("../../extension/core/state.js")).state;
+    await getPlayerAiState();
 
     expect(state.settings.enablePlayerAiQuickAction).toBe(true);
-    expect(state.playerAi.playerAiQuickActionObserver).not.toBeNull();
-    expect(state.playerAi.playerAiQuickActionLayoutBound).toBe(true);
+    expect(playerAiState.playerAiQuickActionObserver).not.toBeNull();
+    expect(playerAiState.playerAiQuickActionLayoutBound).toBe(true);
 
     expect(ensureUiReady).not.toHaveBeenCalled();
     expect(hydrateReaderStateFromSettings).not.toHaveBeenCalled();

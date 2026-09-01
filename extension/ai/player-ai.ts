@@ -7,7 +7,9 @@ import { sendRuntimeMessage } from "../shared/messaging.js";
 import { getSettings } from "../core/runtime.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { getRuntimeVideoElement } from "../bilibili/video-probe.js";
-import { state, playerAiState } from "../core/state.js";
+import { state } from "../core/state.js";
+// playerAi 状态微模块（随 ai 域内聚）：本模块独占读写，不再经 core/state。
+import { playerAiState } from "./player-ai-state.js";
 import { isVisibleReaderControl } from "../shared/dom-utils.js";
 // isReaderViewOpen 位于 reader 状态微模块（候选04 结构归并）：纯 state 读取。
 // 原先经 reader/index.js facade 静态转发，会把整个 reader 域拖进本模块的动态
@@ -67,17 +69,17 @@ export function stopPlayerAiQuickAction(): void {
   // S3：先摘样式再移除按钮——按钮在样式摘除的瞬间仍按旧规则渲染，摘除后
   // 节点立即被移除，无可见中间态；下次 start 重挂（mounted Map 幂等）。
   removePlayerAiStyles();
-  if (state.playerAi.playerAiQuickActionObserver) {
+  if (playerAiState.playerAiQuickActionObserver) {
     // 容器 observer 与 body 回退 observer 共用同一 state 槽位，统一断开
-    state.playerAi.playerAiQuickActionObserver.disconnect();
+    playerAiState.playerAiQuickActionObserver.disconnect();
     playerAiState.setObserver(null);
   }
   unbindPlayerAiQuickActionLayoutEvents();
   unbindPlayerAiQuickActionCursorSync();
   // retry 复用 sync 定时器（schedulePlayerAiQuickActionRetry → scheduleSync），
   // 清掉定时器与计数，避免 stop 后残留回调再次尝试挂按钮。
-  if (state.playerAi.playerAiQuickActionSyncTimer) {
-    window.clearTimeout(state.playerAi.playerAiQuickActionSyncTimer);
+  if (playerAiState.playerAiQuickActionSyncTimer) {
+    window.clearTimeout(playerAiState.playerAiQuickActionSyncTimer);
     playerAiState.setSyncTimer(0);
   }
   resetPlayerAiQuickActionRetryCount();
@@ -85,7 +87,7 @@ export function stopPlayerAiQuickAction(): void {
 }
 
 export function startPlayerAiQuickActionObserver(): void {
-  if (state.playerAi.playerAiQuickActionObserver || !document.body) {
+  if (playerAiState.playerAiQuickActionObserver || !document.body) {
     return;
   }
 
@@ -130,7 +132,7 @@ export function startPlayerAiQuickActionObserver(): void {
 }
 
 export function bindPlayerAiQuickActionLayoutEvents(): void {
-  if (state.playerAi.playerAiQuickActionLayoutBound) {
+  if (playerAiState.playerAiQuickActionLayoutBound) {
     return;
   }
   // handler 提升为模块级引用：stop 时必须用同一引用才能成对摘除监听
@@ -163,8 +165,8 @@ function unbindPlayerAiQuickActionLayoutEvents(): void {
 }
 
 export function schedulePlayerAiQuickActionSync(delayMs = 120): void {
-  if (state.playerAi.playerAiQuickActionSyncTimer) {
-    window.clearTimeout(state.playerAi.playerAiQuickActionSyncTimer);
+  if (playerAiState.playerAiQuickActionSyncTimer) {
+    window.clearTimeout(playerAiState.playerAiQuickActionSyncTimer);
   }
   playerAiState.setSyncTimer(window.setTimeout(() => {
     playerAiState.setSyncTimer(0);
@@ -230,16 +232,16 @@ function syncPlayerAiQuickActionButton(): void {
 }
 
 export function removePlayerAiQuickActionButton(): void {
-  if (state.playerAi.playerAiQuickActionRevealTimer) {
-    window.clearTimeout(state.playerAi.playerAiQuickActionRevealTimer);
+  if (playerAiState.playerAiQuickActionRevealTimer) {
+    window.clearTimeout(playerAiState.playerAiQuickActionRevealTimer);
     playerAiState.setRevealTimer(0);
   }
-  if (state.playerAi.playerAiQuickActionHideTimer) {
-    window.clearTimeout(state.playerAi.playerAiQuickActionHideTimer);
+  if (playerAiState.playerAiQuickActionHideTimer) {
+    window.clearTimeout(playerAiState.playerAiQuickActionHideTimer);
     playerAiState.setHideTimer(0);
   }
-  if (state.playerAi.playerAiQuickActionCursorHideTimer) {
-    window.clearTimeout(state.playerAi.playerAiQuickActionCursorHideTimer);
+  if (playerAiState.playerAiQuickActionCursorHideTimer) {
+    window.clearTimeout(playerAiState.playerAiQuickActionCursorHideTimer);
     playerAiState.setCursorHideTimer(0);
   }
   document.getElementById("boc-player-ai-quick-action")?.closest(".boc-player-ai-wrap")?.remove();
@@ -274,14 +276,14 @@ function bindPlayerAiQuickActionCursorSync(wrap: HTMLElement): void {
       return;
     }
     wrap.classList.add("is-active");
-    if (state.playerAi.playerAiQuickActionCursorHideTimer) {
-      window.clearTimeout(state.playerAi.playerAiQuickActionCursorHideTimer);
+    if (playerAiState.playerAiQuickActionCursorHideTimer) {
+      window.clearTimeout(playerAiState.playerAiQuickActionCursorHideTimer);
     }
     playerAiState.setCursorHideTimer(window.setTimeout(hideForIdle, 1900));
   };
   const hideImmediately = () => {
-    if (state.playerAi.playerAiQuickActionCursorHideTimer) {
-      window.clearTimeout(state.playerAi.playerAiQuickActionCursorHideTimer);
+    if (playerAiState.playerAiQuickActionCursorHideTimer) {
+      window.clearTimeout(playerAiState.playerAiQuickActionCursorHideTimer);
       playerAiState.setCursorHideTimer(0);
     }
     wrap.classList.remove("is-active");
@@ -400,10 +402,10 @@ async function handlePlayerAiQuickActionClick(event: MouseEvent): Promise<void> 
   event.preventDefault();
   event.stopPropagation();
   if (
-    state.playerAi.playerAiQuickActionSubmitting ||
+    playerAiState.playerAiQuickActionSubmitting ||
     isReaderViewOpen() ||
     isReaderMode() ||
-    Date.now() < state.playerAi.playerAiQuickActionSuppressedUntil
+    Date.now() < playerAiState.playerAiQuickActionSuppressedUntil
   ) {
     return;
   }
