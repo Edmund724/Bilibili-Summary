@@ -685,24 +685,62 @@ function assertReconciliation(point, expectedFields, label) {
 describe("消费方对账锚点：SP 读取字段 ⊆ payload ∪ {signature, hotComments, isVideoContext}", () => {
   it("pages/sidepanel.js 直接读取的快照字段", () => {
     const source = readSource("../../extension/pages/sidepanel.js");
-    // contextData：chip 文案/跳转（title/url）、非视频页判定（isVideoContext）、
-    // 无字幕发送拦截（noSubtitleReason）
+    // contextData：非视频页判定（isVideoContext）、时间戳跳转（url）、
+    // 无字幕发送拦截（noSubtitleReason）；chip 文案（title）已随候选5 拆分
+    // 迁往 sidepanel-context-load.js（见下一用例）
     assertReconciliation(
       scanFields(source, "contextData"),
-      ["title", "url", "isVideoContext", "noSubtitleReason"],
+      ["url", "isVideoContext", "noSubtitleReason"],
       "sidepanel.js contextData"
     );
-    // liveContextData：ifSignature 回传（signature）+ 历史列表 live 匹配（isVideoContext）
+    // liveContextData：整对象存取（轮询数据源 / 新对话快照应用），无字段级读取
+    //（signature 回传与历史列表 live 匹配已随候选5 拆分迁出，见后两个用例）
     assertReconciliation(
       scanFields(source, "liveContextData"),
-      ["signature", "isVideoContext"],
+      [],
       "sidepanel.js liveContextData"
     );
-    // liveVideoRef = liveContextData 的局部别名（renderHistoryList）
-    assertReconciliation(scanFields(source, "liveVideoRef"), ["url"], "sidepanel.js liveVideoRef");
+    // liveVideoRef 局部别名已随 renderHistoryList 迁往 sidepanel-lists.js
+    assertReconciliation(scanFields(source, "liveVideoRef"), [], "sidepanel.js liveVideoRef");
     // resp.payload 整体落地 liveContextData，无字段级读取（unchanged 判定已
-    // 抽到 sidepanel-context-policy.js，见下一个用例）
+    // 抽到 sidepanel-context-policy.js，见后面的用例）
     assertReconciliation(scanFields(source, "payload"), [], "sidepanel.js resp.payload");
+  });
+
+  it("pages/sidepanel-context-load.js：上下文加载读 title/url（chip）与 signature（回传）", () => {
+    const source = readSource("../../extension/pages/sidepanel-context-load.js");
+    // updateContextChip 文案/跳转提示（title/url）+ isBoundConversationMismatched
+    // / openCurrentContextUrl 的目标 URL 读取（url）
+    assertReconciliation(
+      scanFields(source, "contextData"),
+      ["title", "url"],
+      "context-load contextData"
+    );
+    // ifSignature 回传来源：上次全量快照的签名
+    assertReconciliation(
+      scanFields(source, "liveContextData"),
+      ["signature"],
+      "context-load liveContextData"
+    );
+    // resp.payload 整体落地 liveContextData / 传入 applyContextPayload，无字段级读取
+    assertReconciliation(scanFields(source, "payload"), [], "context-load resp.payload");
+  });
+
+  it("pages/sidepanel-lists.js：列表渲染读 isVideoContext 与 live 匹配 url", () => {
+    const source = readSource("../../extension/pages/sidepanel-lists.js");
+    // renderSuggestions 的建议区清空判定（isVideoContext）
+    assertReconciliation(
+      scanFields(source, "contextData"),
+      ["isVideoContext"],
+      "lists contextData"
+    );
+    // renderHistoryList 的 live 匹配判定：liveVideoRef 有效性（isVideoContext）+ url
+    assertReconciliation(
+      scanFields(source, "liveContextData"),
+      ["isVideoContext"],
+      "lists liveContextData"
+    );
+    assertReconciliation(scanFields(source, "liveVideoRef"), ["url"], "lists liveVideoRef");
   });
 
   it("pages/sidepanel-context-policy.js：unchanged 短路判定读响应信封字段", () => {

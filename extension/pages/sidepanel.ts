@@ -5,12 +5,6 @@
 // 对话持久化到 ./sidepanel-conversation-store.ts（05）、笔记粘贴归一化到
 // ../notes/paste.js（06）、chat 流状态机到 ./sidepanel-chat-runtime.ts（07）。
 //
-// 本文件只剩四类东西：
-//   1. init / bindEvents（启动编排、事件绑定）
-//   2. 上下文 chip、各列表（历史/建议/预设）与消息区渲染
-//   3. 滚动与布局更新、popover toggle、autosizeInput、通知显示
-//   4. 对 02-07 模块的编排调用（loadContextState、上下文同步调度、新对话/
-//      刷新等页面级流程）
 // 候选09 又自本文件迁出三块：player AI 快捷动作消费 →
 // ./sidepanel-player-ai-requests.ts、预设提示词 CRUD + 双存储同步 →
 // ./sidepanel-presets.ts、modelSelect 宽度度量 → ../ui/model-select-width.js
@@ -18,44 +12,34 @@
 // 候选08 再把 loadContextState 的四态分支判定抽到 ./sidepanel-context-policy.ts
 //（纯函数「输入 → 动作」映射，可直测），loadContextState /
 // ensureCurrentContextForSend 只负责拉数据、按动作执行编排副作用。
+// 候选5 再迁出六块（本文件收敛为纯组合根：init / bindEvents 剩余部分 / 实例
+// 组装 / 页面级编排）：
+//   - 三列表渲染 + insertPresetPrompt   → ./sidepanel-lists.ts
+//   - 消息区通知/错误/建议区清理/近底   → ./sidepanel-notices.ts
+//   - AI 平台加载渲染 + 思考档位        → ./sidepanel-providers.ts
+//   - 实时上下文同步调度 + 触发处理体   → ./sidepanel-context-sync.ts
+//   - 上下文状态加载 + context chip     → ./sidepanel-context-load.ts
+//   - 预设/历史 popover 开合            → ./sidepanel-popovers.ts
 // 跨子模块共享的可变状态（上下文/会话/AI 偏好等 13 个字段）收拢在
-// ./sidepanel-state.ts 的 sidepanelState，本文件与 conversation-store /
-// chat-runtime 直接 import 读写，deps 只剩回调与 DOM/storage。
-// 页面级 transport 辅助（delay / waitForTabComplete / sendMessageToActiveTab）
-// 由 ../shared/tab-utils.js 提供（08 新增共享模块，同时供
-// ui/timestamp-nav.js 的 seek 流程复用）；truncate 由 ../shared/string-utils.js
-// 提供；sendRuntimeMessage 由 ../shared/messaging.js 提供（shared 传输层）。
+// ./sidepanel-state.ts 的 sidepanelState，本文件与各子模块直接 import 读写，
+// deps 只剩回调与 DOM/storage。页面级 transport 辅助（delay / waitForTabComplete
+// / sendMessageToActiveTab）由 ../shared/tab-utils.js 提供（08 新增共享模块，
+// 同时供 ui/timestamp-nav.js 的 seek 流程复用）；sendRuntimeMessage 由
+// ../shared/messaging.js 提供（shared 传输层）。
+// 随候选5 清理孤儿 import：renderMarkdown / stripThinkBlocks（ui/markdown）、
+// linkifyAssistantTimestamps（ui/timestamp-nav）在本文件已无使用点。
 
-import {
-  DEFAULT_PRESET_PROMPTS,
-  PLAYER_AI_QUICK_ACTION_STORAGE_KEY
-} from "../core/defaults.js";
-import type { Settings } from "../core/defaults.js";
-import {
-  normalizeAiInitialQuickPrompts,
-  normalizeAiPresetPrompts,
-  normalizeAiThinkingLevel
-} from "../core/validators.js";
+import { PLAYER_AI_QUICK_ACTION_STORAGE_KEY } from "../core/defaults.js";
 
-import {
-  buildContextKey,
-  doesConversationMatchCurrentContext,
-  doesTabMatchContextUrl,
-  formatConversationTimestamp,
-  buildConversationTitleDisplay,
-  MAX_SAVED_CONVERSATIONS
-} from "../ai/conversation.js";
-import { escapeHtml, truncate } from "../shared/string-utils.js";
-import { sendMessageToActiveTab, sendMessageToTab, waitForTabComplete } from "../shared/tab-utils.js";
-import { sendRuntimeMessage } from "../shared/messaging.js";
-import { renderMarkdown, stripThinkBlocks } from "../ui/markdown.js";
+import { buildContextKey, doesTabMatchContextUrl, MAX_SAVED_CONVERSATIONS } from "../ai/conversation.js";
+import { escapeHtml } from "../shared/string-utils.js";
+import { sendMessageToActiveTab } from "../shared/tab-utils.js";
 import { ensureReaderContentReady } from "../core/content-orchestration-wiring.js";
 import {
   getAiSidepanelState,
   resolveAiSidepanelContext,
   resolveAiSidepanelPageRef
 } from "../ai/context-resolver.js";
-import { linkifyAssistantTimestamps } from "../ui/timestamp-nav.js";
 import { normalizeMarkdownForSectionPaste } from "../notes/paste.js";
 import { createChatRuntime } from "./sidepanel-chat-runtime.js";
 import { createSubtitleWaiter, isContextPending } from "./sidepanel-subtitle-wait.js";
@@ -65,39 +49,28 @@ import {
   isNoSubtitleEmptyContext,
   type NoSubtitleReason
 } from "./sidepanel-no-subtitle.js";
-import { createConversationStore, type CreateConversationStoreDeps } from "./sidepanel-conversation-store.js";
+import { createConversationStore } from "./sidepanel-conversation-store.js";
 import { ensureChatOffscreenDocument } from "./sidepanel-offscreen-ensure.js";
 import { sidepanelState } from "./sidepanel-state.js";
-import type { SidepanelContextSnapshot, SidepanelProvider } from "./sidepanel-state.js";
-// 候选09：player AI 快捷动作消费 / 预设提示词 CRUD / modelSelect 宽度度量
-// 三块实现迁出，本文件只组装 deps 与调用。
+// ensureChatOffscreenDocument / context-load 的 content 就绪探针（带顶层
+// chrome 副作用，仅在组合根 import）。
+import { sendMessageToTab } from "../shared/tab-utils.js";
+// 候选09：player AI 快捷动作消费 / 预设提示词 CRUD；候选5：六块 UI/编排子模块。
+// 各工厂的 deps 组装见下文对应段落。
 import { createPlayerAiQuickActions } from "./sidepanel-player-ai-requests.js";
 import { createPresetPrompts } from "./sidepanel-presets.js";
+import { createSidepanelLists } from "./sidepanel-lists.js";
+import { createConversationFeedback } from "./sidepanel-notices.js";
+import { createProviderPrefs, SELECTED_PROVIDER_KEY } from "./sidepanel-providers.js";
+import { createLiveContextSync } from "./sidepanel-context-sync.js";
+import { createContextLoad } from "./sidepanel-context-load.js";
+import { createPopovers } from "./sidepanel-popovers.js";
 import { updateModelSelectWidth } from "../ui/model-select-width.js";
-// 上下文加载策略：no-tab / skip-unchanged / error / apply-pinned /
-// blocked-streaming / apply-live 的「输入 → 动作」映射与失败文案常量。
-import {
-  CONTEXT_READ_FAILED_MESSAGE,
-  LOAD_CONTEXT_ACTION,
-  isPinnedContextStrict,
-  isPinnedContextTruthy,
-  resolveLoadContextAction,
-  resolveNoTabPlan
-} from "./sidepanel-context-policy.js";
-import type { LoadContextStateOptions } from "./sidepanel-conversation-store.js";
+// 上下文加载失败文案：ensureCurrentContextForSend 的失败闸共用策略模块常量。
+import { CONTEXT_READ_FAILED_MESSAGE, isPinnedContextTruthy } from "./sidepanel-context-policy.js";
 
-const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
-const THINKING_LEVEL_KEY = "boc_ai_thinking_level";
 const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
 const NON_VIDEO_CONTEXT_MESSAGE = "当前页非 B 站视频页面，<br>无法获取当前页面信息作为对话上下文，<br>仅支持 AI 对话。";
-
-// getAiSidepanelState 的响应信封（payload 为 content 侧上下文快照；缺省
-// 字段由运行时真值判定兜底，这里断言 payload 不为 undefined）
-interface SidepanelStateResponse {
-  ok?: boolean;
-  error?: unknown;
-  payload: SidepanelContextSnapshot | null;
-}
 
 const els = {
   header: document.querySelector<HTMLElement>(".sp-header"),
@@ -122,34 +95,6 @@ const els = {
   input: document.getElementById("spInput") as HTMLTextAreaElement,
   stopBtn: document.getElementById("spStopBtn") as HTMLButtonElement | null,
 };
-
-// 抓取/音频转写进行中（content 的 subtitleFetchState 为 loading 且字幕体为空）
-// 时等待其完成再放行发送流程，状态机本体在 ./sidepanel-subtitle-wait.ts（可测）。
-// 这里只组装 deps：轮询读当前上下文、提示走消息区 notice、定时器用 window。
-// 引用的 loadContextState / 通知函数都是函数声明（有提升），回调执行时才读
-// contextData，放在广播监听之前只为保证监听触发时组装已完成。
-// asr-transcribing 广播活跃标志：content 侧转写进行中的兜底信号。快照的
-// subtitleFetchState 可能在转写中因辅助抓取失败被 content 清掉（resetClipState），
-// 此时靠这个标志继续等待，不放行空字幕。标志本体在 sidepanelState.
-// asrTranscribingActive（./sidepanel-state.ts，广播监听与轮询双侧读写）。
-const SUBTITLE_WAIT_POLL_MS = 4000;
-const subtitleWaiter = createSubtitleWaiter({
-  pollIntervalMs: SUBTITLE_WAIT_POLL_MS,
-  pollContext: async () => {
-    const ok = await loadContextState({ forceRefresh: false, silent: true }).catch(() => false);
-    // loadContextState 无论走哪个分支都会先更新 liveContextData；等待期间
-    // 可能有流式守卫冻结 contextData，读 liveContextData 保证数据不断供。
-    const snapshot = ok ? (sidepanelState.liveContextData || sidepanelState.contextData) : null;
-    return {
-      ok: Boolean(snapshot),
-      pending: isContextPending(snapshot, { asrTranscribingActive: sidepanelState.asrTranscribingActive })
-    };
-  },
-  showWaitingNotice: () => showConversationContextNotice("正在等待音频转写完成，完成后自动开始总结…", 0),
-  removeNotice: removeConversationContextNotice,
-  setTimer: (fn, ms) => window.setTimeout(fn, ms),
-  clearTimer: (handle) => window.clearTimeout(handle)
-});
 
 // 无字幕视频做音频转写时，content 会广播阶段；刷新键转圈等待期间据此显示
 // 一行转写提示，替代仅有图标旋转却没有说明的状态。只在转写阶段展示，其余
@@ -176,25 +121,43 @@ chrome.runtime.onMessage.addListener((message) => {
 // 跨模块共享状态（contextData / currentContextKey / providers / chatHistory /
 // savedConversations / currentConversationId / currentConversationMeta /
 // liveContextData / liveContextKey / liveTabUrl / aiPrefs / asrTranscribingActive /
-// aiThinkingLevel）收拢在 ./sidepanel-state.ts 的 sidepanelState，本文件与
-// conversation-store / chat-runtime 直接 import 读写。以下为纯局部单例。
+// aiThinkingLevel）收拢在 ./sidepanel-state.ts 的 sidepanelState，本文件与各
+// 子模块直接 import 读写。以下为纯局部单例。
 let suggestionsNode: HTMLElement | null = null;
-let contextNoticeTimer = 0;
-let liveContextSyncTimer = 0;
-let liveContextSyncForceRefresh = false;
 let initCompleted = false;
+
+// 消息区反馈（通知条/居中错误/建议区清理/近底判定）：contextNoticeTimer 是
+// notices 模块闭包私有状态；定时器用 window（测试可注入 fake）。
+const feedback = createConversationFeedback({
+  messages: els.messages,
+  setTimer: (fn, ms) => window.setTimeout(fn, ms),
+  clearTimer: (handle) => window.clearTimeout(handle),
+  scrollToBottom: () => chatRuntime.scrollToBottom(),
+  getSuggestionsNode: () => suggestionsNode,
+  setSuggestionsNode: (node) => {
+    suggestionsNode = node;
+  }
+});
+const {
+  showConversationContextNotice,
+  removeConversationContextNotice,
+  showConversationContextError,
+  removeCenteredState,
+  removeSuggestions,
+  isMessagesNearBottom
+} = feedback;
 
 // 会话状态（会话列表/当前会话/上下文）已收拢至 sidepanelState，store 直接
 // import 读写；deps 只剩 UI/transport 回调、storage 抽象与常量。
 const conversationStore = createConversationStore({
-  renderHistoryList,
+  renderHistoryList: () => lists.renderHistoryList(),
   renderInitialState,
-  updateContextChip,
+  updateContextChip: () => contextLoad.updateContextChip(),
   showConversationContextNotice,
   showConversationContextError,
   removeConversationContextNotice,
-  hideHistoryPopover,
-  loadContextState,
+  hideHistoryPopover: () => popovers.hideHistoryPopover(),
+  loadContextState: (opts) => contextLoad.loadContextState(opts),
   resolveAiSidepanelContext,
   resolveAiSidepanelPageRef,
   // 流式中删除当前会话 / 清空全部 / restoreLatest 无匹配时由 store 同步调用：
@@ -210,6 +173,54 @@ const conversationStore = createConversationStore({
   conversationsStorageKey: CONVERSATIONS_STORAGE_KEY,
   maxSavedConversations: MAX_SAVED_CONVERSATIONS
 });
+
+// 三列表渲染（建议/预设/历史）+ 预设提示词插入。insertPresetPrompt /
+// hidePresetPopover / hideHistoryPopover 与本实例/popovers 实例互引，惰性
+// 箭头接线（回调执行时实例已存在）。
+const lists = createSidepanelLists({
+  presetList: els.presetList,
+  historyList: els.historyList,
+  historyClearBtn: els.historyClearBtn,
+  input: els.input,
+  applyById: (id) => conversationStore.applyById(id),
+  deleteById: (id) => conversationStore.deleteById(id),
+  removePresetPrompt: (index) => presets.removePresetPrompt(index),
+  autosizeInput,
+  onSuggestionClick: () => chatRuntime.sendMessage(),
+  getSuggestionsNode: () => suggestionsNode,
+  insertPresetPrompt: (prompt) => lists.insertPresetPrompt(prompt),
+  hidePresetPopover: () => popovers.hidePresetPopover(),
+  hideHistoryPopover: () => popovers.hideHistoryPopover()
+});
+
+// 预设/历史 popover 开合与文档级外点关闭。
+const popovers = createPopovers({
+  presetPopover: els.presetPopover,
+  historyPopover: els.historyPopover,
+  presetBtn: els.presetBtn,
+  historyBtn: els.historyBtn,
+  presetInput: els.presetInput,
+  renderPresetPrompts: () => lists.renderPresetPrompts(),
+  renderHistoryList: () => lists.renderHistoryList()
+});
+
+// 上下文状态加载（读标签页状态 → 按策略动作执行编排副作用）+ context chip。
+// 流式守卫判定惰性取 chatRuntime（回调执行时实例已存在）。
+const contextLoad = createContextLoad({
+  getActiveTab,
+  ensureReaderContentReady: (tabId) => ensureReaderContentReady(tabId),
+  sendMessageToTab: (tabId, message) => sendMessageToTab(tabId, message),
+  contextChip: els.contextChip,
+  renderHistoryList: () => lists.renderHistoryList(),
+  renderInitialState,
+  renderSuggestions: () => lists.renderSuggestions(),
+  resetConversationView,
+  restartChat: (opts) => restartChat(opts),
+  restoreLatest: () => conversationStore.restoreLatest(),
+  isStreaming: () => chatRuntime.isStreaming(),
+  hasPendingUserPrompt: () => chatRuntime.hasPendingUserPrompt()
+});
+const { loadContextState, updateContextChip, openCurrentContextUrl } = contextLoad;
 
 // chat 流状态机：自身流状态（activePort 等）与自动滚动标志（shouldAutoScroll-
 // Messages）都在 runtime 闭包内；会话状态读 sidepanelState；deps 只剩 DOM
@@ -227,8 +238,8 @@ const chatRuntime = createChatRuntime({
     setStreamingUiState,
     showConversationContextNotice,
     removeConversationContextNotice,
-    hidePresetPopover,
-    hideHistoryPopover,
+    hidePresetPopover: () => popovers.hidePresetPopover(),
+    hideHistoryPopover: () => popovers.hideHistoryPopover(),
     removeCenteredState,
     removeSuggestions,
     resetConversationView,
@@ -258,11 +269,54 @@ const playerAiQuickActions = createPlayerAiQuickActions({
 });
 const presets = createPresetPrompts({
   presetInput: els.presetInput,
-  renderPresetPrompts
+  renderPresetPrompts: () => lists.renderPresetPrompts()
+});
+
+// AI 平台加载渲染 + 思考档位（widthEls 即本文件模块级 `els`，含度量所需的
+// toolbar/thinkingToggle/presetBtn）；persistAiPresetPrompts 惰性互引 presets。
+const providerPrefs = createProviderPrefs({
+  modelSelect: els.modelSelect,
+  thinkingBtns: els.thinkingBtns,
+  widthEls: els,
+  renderPresetPrompts: () => lists.renderPresetPrompts(),
+  persistAiPresetPrompts: () => presets.persistAiPresetPrompts()
+});
+const { loadProvidersAndPrefs, renderModelSelect, setThinkingLevel } = providerPrefs;
+
+// 实时上下文同步调度（防抖 + 强刷合并 + 触发处理体；post-sync 分支编排
+// syncLiveContextState 留在组合根——流式守卫与三个渲染回调的组合是页面级职责）。
+const liveContextSync = createLiveContextSync({
+  sync: (forceRefresh = false) => syncLiveContextState(forceRefresh),
+  setTimer: (fn, ms) => window.setTimeout(fn, ms),
+  clearTimer: (handle) => window.clearTimeout(handle)
 });
 
 init().catch((err) => {
   resetConversationView(`初始化失败：${escapeHtml((err as Error)?.message || err)}`);
+});
+
+// 抓取/音频转写进行中（content 的 subtitleFetchState 为 loading 且字幕体为空）
+// 时等待其完成再放行发送流程，状态机本体在 ./sidepanel-subtitle-wait.ts（可测）。
+// 这里只组装 deps：轮询读当前上下文、提示走消息区 notice、定时器用 window。
+// 引用的 loadContextState / 通知函数都是组装后的实例方法（惰性接线），放在
+// 广播监听之前只为保证监听触发时组装已完成。
+const SUBTITLE_WAIT_POLL_MS = 4000;
+const subtitleWaiter = createSubtitleWaiter({
+  pollIntervalMs: SUBTITLE_WAIT_POLL_MS,
+  pollContext: async () => {
+    const ok = await loadContextState({ forceRefresh: false, silent: true }).catch(() => false);
+    // loadContextState 无论走哪个分支都会先更新 liveContextData；等待期间
+    // 可能有流式守卫冻结 contextData，读 liveContextData 保证数据不断供。
+    const snapshot = ok ? (sidepanelState.liveContextData || sidepanelState.contextData) : null;
+    return {
+      ok: Boolean(snapshot),
+      pending: isContextPending(snapshot, { asrTranscribingActive: sidepanelState.asrTranscribingActive })
+    };
+  },
+  showWaitingNotice: () => showConversationContextNotice("正在等待音频转写完成，完成后自动开始总结…", 0),
+  removeNotice: removeConversationContextNotice,
+  setTimer: (fn, ms) => window.setTimeout(fn, ms),
+  clearTimer: (handle) => window.clearTimeout(handle)
 });
 
 async function init(): Promise<void> {
@@ -307,8 +361,8 @@ function bindEvents(): void {
     void startNewConversation();
   });
   els.refreshBtn.addEventListener("click", () => refreshContextManually());
-  els.presetBtn.addEventListener("click", togglePresetPopover);
-  els.historyBtn.addEventListener("click", toggleHistoryPopover);
+  els.presetBtn.addEventListener("click", popovers.togglePresetPopover);
+  els.historyBtn.addEventListener("click", popovers.toggleHistoryPopover);
   els.historyClearBtn?.addEventListener("click", () => {
     void conversationStore.clearAll();
   });
@@ -340,35 +394,13 @@ function bindEvents(): void {
     });
   });
   window.addEventListener("resize", () => updateModelSelectWidth(els));
-  document.addEventListener("click", handleDocumentClick);
-  // 候选5：可见性/聚焦/切签恢复这三类高频同步一律 forceRefresh=false——
-  // 全网络重拉（content 侧 popup-refresh → refreshClip 全量重抓字幕）不是
-  // 它们的语义，状态是否有变交给签名短路判定：content 侧未变时一次往返即
-  // 返回 unchanged，不再有任何字幕/热评网络开销。
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) {
-      scheduleLiveContextSync(false);
-    }
-  });
-  window.addEventListener("focus", () => {
-    scheduleLiveContextSync(false);
-  });
-  chrome.tabs.onActivated.addListener(() => {
-    scheduleLiveContextSync(false);
-  });
-  chrome.tabs.onUpdated.addListener((tabId: number, changeInfo: { status?: string; url?: string }, tab) => {
-    if (!tab?.active) {
-      return;
-    }
-    if (!changeInfo.url && changeInfo.status !== "complete") {
-      return;
-    }
-    // URL 变化保持 forceRefresh=true：切 P/切视频必须全网络重拉（会与
-    // debounce 里已挂起的 false 合并取强）。status==="complete" 保持 false：
-    // 若 content 已随加载重建了状态，签名必然不同会走全量；相同则短路，
-    // 不再借完成事件做无谓的强制重拉。
-    scheduleLiveContextSync(Boolean(changeInfo.url));
-  });
+  document.addEventListener("click", popovers.handleDocumentClick);
+  // 候选5：可见性/聚焦/切签恢复的触发处理体在 ./sidepanel-context-sync.ts
+  //（handlers，语义与迁移前一致），本文件只负责监听挂载。
+  document.addEventListener("visibilitychange", liveContextSync.handlers.onVisibilityChange);
+  window.addEventListener("focus", liveContextSync.handlers.onFocus);
+  chrome.tabs.onActivated.addListener(liveContextSync.handlers.onTabActivated);
+  chrome.tabs.onUpdated.addListener(liveContextSync.handlers.onTabUpdated);
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (
       (areaName === "sync" &&
@@ -399,87 +431,17 @@ function setStreamingUiState(isStreaming: boolean, { stopping = false }: { stopp
   }
 }
 
-// ============================================================
-// AI 平台 / 预设（providers + aiPrefs 加载，settings 获取走 core 域）
-// ============================================================
-async function loadProvidersAndPrefs({ preferredProviderId = "" }: { preferredProviderId?: string } = {}): Promise<void> {
-  const [providersResp, settingsResp] = await Promise.all([
-    sendRuntimeMessage({ type: "ai-providers-list" }),
-    sendRuntimeMessage({ type: "get-settings" }).catch(() => ({ ok: false }))
-  ]) as [
-    { providers?: SidepanelProvider[] },
-    { ok?: boolean; settings?: Partial<Settings> }
-  ];
-  sidepanelState.providers = Array.isArray(providersResp?.providers)
-    ? providersResp.providers.filter((p) => p.enabled)
-    : [];
-  sidepanelState.aiPrefs = {
-    aiSystemPrompt: String(settingsResp?.settings?.aiSystemPrompt || "").trim(),
-    aiInitialQuickPrompts: normalizeAiInitialQuickPrompts(settingsResp?.settings?.aiInitialQuickPrompts),
-    aiPresetPrompts: normalizeAiPresetPrompts(settingsResp?.settings?.aiPresetPrompts),
-    defaultModel: String(settingsResp?.settings?.defaultModel || "").trim()
-  };
-  sidepanelState.aiThinkingLevel = normalizeAiThinkingLevel(
-    settingsResp?.settings?.aiThinkingLevel ?? localStorage.getItem(THINKING_LEVEL_KEY)
-  );
-  if (!sidepanelState.aiPrefs.aiPresetPrompts.length) {
-    sidepanelState.aiPrefs.aiPresetPrompts = DEFAULT_PRESET_PROMPTS.slice();
-    void presets.persistAiPresetPrompts();
-  }
-  renderModelSelect(preferredProviderId);
-  renderThinkingLevel();
-  renderPresetPrompts();
-}
-
-// ai-providers-list 响应里的平台条目由 SidepanelProvider（sidepanel-state.ts）
-// 描述：id 必填，name/model/enabled 宽松可选。
-
-function renderModelSelect(preferredProviderId = ""): void {
-  if (!sidepanelState.providers.length) {
-    els.modelSelect.innerHTML = '<option value="">未配置平台</option>';
-    els.modelSelect.disabled = true;
-    els.modelSelect.style.width = "96px";
-    return;
-  }
-
-  els.modelSelect.innerHTML = sidepanelState.providers
-    .map((p) => {
-      const label = String(p.model || p.name || "").trim();
-      return `<option value="${escapeHtml(p.id)}">${escapeHtml(label)}</option>`;
-    })
-    .join("");
-
-  const savedProviderId = String(preferredProviderId || sidepanelState.aiPrefs.defaultModel || localStorage.getItem(SELECTED_PROVIDER_KEY) || "").trim();
-  const matchedProvider = sidepanelState.providers.find((item) => item.id === savedProviderId) || sidepanelState.providers[0];
-  els.modelSelect.value = matchedProvider?.id || "";
-  els.modelSelect.disabled = false;
-  updateModelSelectWidth(els);
-}
-
-// ============================================================
-// 思考档位（off / low / high）— 三档分段按钮，选中态持久化到 sync 设置
-// ============================================================
-function renderThinkingLevel(): void {
-  els.thinkingBtns.forEach((btn) => {
-    btn.classList.toggle("is-active", btn.dataset.level === sidepanelState.aiThinkingLevel);
-    btn.setAttribute("aria-pressed", btn.dataset.level === sidepanelState.aiThinkingLevel ? "true" : "false");
-  });
-}
-
-async function setThinkingLevel(level: string): Promise<void> {
-  sidepanelState.aiThinkingLevel = normalizeAiThinkingLevel(level);
-  renderThinkingLevel();
-  localStorage.setItem(THINKING_LEVEL_KEY, sidepanelState.aiThinkingLevel);
-  await sendRuntimeMessage({ type: "save-settings", settings: { aiThinkingLevel: sidepanelState.aiThinkingLevel } }).catch(() => null);
-}
-
+// AI 平台 / 预设：实现在 ./sidepanel-providers.ts（候选5 迁出），本文件只
+// 组装 deps 并保留「外部设置变更 → 刷新」编排（流式守卫 + 重渲染留在组合根）。
+// SELECTED_PROVIDER_KEY（localStorage 键，change 监听与编排读写）从 providers
+// 模块 import。
 async function refreshProvidersAndPrefsAfterExternalChange(): Promise<void> {
   const previousProviderId = String(els.modelSelect?.value || localStorage.getItem(SELECTED_PROVIDER_KEY) || "").trim();
   await loadProvidersAndPrefs({ preferredProviderId: previousProviderId });
   if (chatRuntime.isStreaming()) {
     return;
   }
-  renderHistoryList();
+  lists.renderHistoryList();
   renderInitialState();
 }
 
@@ -489,173 +451,9 @@ async function refreshProvidersAndPrefsAfterExternalChange(): Promise<void> {
 // playerAiQuickActions 在文件头组装。
 
 // ============================================================
-// 上下文状态加载（侧面板编排核心：读标签页状态 → 应用上下文 → 恢复对话）
-// 分支判定收敛在 ./sidepanel-context-policy.ts（纯函数），本函数只按动作执行。
+// 上下文状态加载 / context chip：实现在 ./sidepanel-context-load.ts（候选5
+// 迁出，分支判定仍在 ./sidepanel-context-policy.ts）。
 // ============================================================
-async function loadContextState({ forceRefresh = false, silent = false }: LoadContextStateOptions = {}): Promise<boolean> {
-  const hasPinnedConversation = isPinnedContextStrict(sidepanelState.currentConversationMeta);
-  const tab = await getActiveTab();
-  if (!tab?.id) {
-    // 决策点一（消息往返之前）：无可用标签页，按计划做失败清理（文案/清上下文/
-    // 重置视图的取舍全部来自策略计划）。
-    const plan = resolveNoTabPlan({ hasPinnedConversation, silent });
-    sidepanelState.liveContextData = null;
-    sidepanelState.liveContextKey = "";
-    sidepanelState.liveTabUrl = "";
-    if (plan.clearContext) {
-      sidepanelState.contextData = null;
-      sidepanelState.currentContextKey = "";
-    }
-    updateContextChip();
-    if (plan.resetView) {
-      resetConversationView(plan.message as string);
-    }
-    return plan.returnValue;
-  }
-
-  const resp = await getAiSidepanelState(
-    tab.id,
-    {
-      forceRefresh,
-      // 候选5：带上次全量快照的签名，content 侧状态未变时一次往返即短路返回
-      //（不重发整份字幕体、不拉热评）。forceRefresh=true 时 content 忽略签名，
-      // 手动刷新语义不变。liveContextData 为空（首次/此前失败）时签名为空串，
-      // content 必走全量。
-      ifSignature: String(sidepanelState.liveContextData?.signature || "")
-    },
-    { ensureReaderContentReady, sendMessageToTab }
-  )
-    .then((payload) => ({ ok: true, payload }) as SidepanelStateResponse)
-    .catch((error: unknown) => ({ ok: false, error: (error as Error).message }) as SidepanelStateResponse);
-  sidepanelState.liveTabUrl = String(tab.url || "").trim();
-
-  // 决策点二（消息往返之后）：「输入 → 动作」映射全部交给策略模块。forceRefresh
-  // 只随消息透传给 content，不参与动作判定；isStreaming / hasPendingUserPrompt
-  // 是 chat-runtime 的纯闭包读取，此处取值时点不改变可观察行为。
-  const plan = resolveLoadContextAction({
-    response: resp,
-    hasPinnedConversation,
-    silent,
-    isStreaming: chatRuntime.isStreaming(),
-    hasPendingUserPrompt: chatRuntime.hasPendingUserPrompt()
-  });
-
-  // 候选5：content 状态未变 → 保持现状不动（不 applyContextPayload、不重渲染、
-  // 不刷新 live 快照、不转 spinner）。liveContextData 仍持有带 signature 的
-  // 上次全量 payload：既是下一轮 ifSignature 的来源，也是等待轮询
-  // （subtitle-wait）的判定数据源——返回 true 让轮询按旧快照继续判 pending，
-  // ASR 完成时签名必然变化（subtitleFetchState/body.length），全量快照自然到位。
-  if (plan.action === LOAD_CONTEXT_ACTION.SKIP_UNCHANGED) {
-    return plan.returnValue;
-  }
-
-  if (plan.action === LOAD_CONTEXT_ACTION.ERROR) {
-    sidepanelState.liveContextData = null;
-    sidepanelState.liveContextKey = "";
-    if (plan.clearContext) {
-      sidepanelState.contextData = null;
-      sidepanelState.currentContextKey = "";
-    }
-    updateContextChip();
-    if (plan.resetView) {
-      resetConversationView(plan.message as string);
-    }
-    return plan.returnValue;
-  }
-
-  // 三个成功动作（pinned / 流式守卫 / live）的公共前缀：live 快照照常落地，
-  // 保证轮询与补水的数据源不断供。
-  sidepanelState.liveContextData = resp.payload;
-  sidepanelState.liveContextKey = buildContextKey(resp.payload);
-
-  // pinned 与流式守卫的执行体逐字节相同：只落地 live 快照，不进主上下文。
-  if (
-    plan.action === LOAD_CONTEXT_ACTION.APPLY_PINNED ||
-    plan.action === LOAD_CONTEXT_ACTION.BLOCKED_STREAMING
-  ) {
-    renderHistoryList();
-    updateContextChip();
-    return plan.returnValue;
-  }
-
-  // apply-live：正常路径，上下文变化时恢复最近对话并重渲染初始态。
-  const contextChanged = applyContextPayload(resp.payload);
-  renderHistoryList();
-  if (contextChanged) {
-    await conversationStore.restoreLatest();
-    renderInitialState();
-  }
-  return plan.returnValue;
-}
-
-function applyContextPayload(payload: SidepanelContextSnapshot | null): boolean {
-  const nextContext = payload && typeof payload === "object" ? payload : null;
-  const nextKey = buildContextKey(nextContext);
-  const contextChanged = Boolean(sidepanelState.currentContextKey && nextKey && nextKey !== sidepanelState.currentContextKey);
-
-  sidepanelState.contextData = nextContext;
-  sidepanelState.currentContextKey = nextKey;
-  updateContextChip();
-
-  if (contextChanged && !chatRuntime.isStreaming() && !chatRuntime.hasPendingUserPrompt()) {
-    restartChat({ keepContext: true });
-  } else {
-    renderSuggestions();
-  }
-  return contextChanged;
-}
-
-function updateContextChip(): void {
-  if (!sidepanelState.contextData) {
-    els.contextChip.textContent = "无上下文";
-    els.contextChip.title = "";
-    els.contextChip.disabled = true;
-    els.contextChip.classList.remove("is-mismatch");
-    return;
-  }
-
-  const shortTitle = sidepanelState.contextData.title ? truncate(sidepanelState.contextData.title, 19) : "未知视频";
-  els.contextChip.textContent = shortTitle;
-  const mismatch = isBoundConversationMismatched();
-  els.contextChip.classList.toggle("is-mismatch", mismatch);
-  els.contextChip.title = sidepanelState.contextData.url
-    ? `${sidepanelState.contextData.title || ""}${mismatch ? "\n当前页不是这个对话绑定的视频" : ""}\n点击跳转目标视频，或开启新对话`
-    : sidepanelState.contextData.title || "";
-  els.contextChip.disabled = !String(sidepanelState.contextData.url || "").trim();
-}
-
-function isBoundConversationMismatched(): boolean {
-  if (sidepanelState.currentConversationMeta?.pinnedContext !== true) {
-    return false;
-  }
-  const targetUrl = String(sidepanelState.currentConversationMeta?.contextUrl || sidepanelState.contextData?.url || "").trim();
-  if (!targetUrl) {
-    return false;
-  }
-  if (!sidepanelState.liveTabUrl) {
-    return true;
-  }
-  return !doesTabMatchContextUrl(sidepanelState.liveTabUrl, targetUrl);
-}
-
-async function openCurrentContextUrl(): Promise<void> {
-  const targetUrl = String(sidepanelState.contextData?.url || sidepanelState.currentConversationMeta?.contextUrl || "").trim();
-  if (!targetUrl) {
-    return;
-  }
-  const tab = await getActiveTab().catch(() => null);
-  if (!tab?.id) {
-    return;
-  }
-  try {
-    const sameVideo = doesTabMatchContextUrl(tab.url || "", targetUrl);
-    if (!sameVideo) {
-      await chrome.tabs.update(tab.id, { url: targetUrl });
-      await waitForTabComplete(tab.id);
-    }
-    await loadContextState({ forceRefresh: true, silent: true });
-  } catch {}
-}
 
 function renderInitialState(): void {
   updateSidepanelLayoutState();
@@ -695,199 +493,18 @@ function resetConversationView(stateHtml = ""): void {
   suggestionsNode.className = "sp-suggestions";
   suggestionsNode.id = "spSuggestions";
   els.messages.appendChild(suggestionsNode);
-  renderSuggestions();
-  renderPresetPrompts();
+  lists.renderSuggestions();
+  lists.renderPresetPrompts();
   chatRuntime.setAutoScroll(true);
   chatRuntime.scrollToBottom(true);
 }
 
-function renderSuggestions(): void {
-  if (!suggestionsNode) {
-    return;
-  }
-  if (!sidepanelState.contextData || !sidepanelState.providers.length || sidepanelState.chatHistory.length || sidepanelState.contextData.isVideoContext === false) {
-    suggestionsNode.innerHTML = "";
-    return;
-  }
-  const prompts = normalizeAiInitialQuickPrompts(sidepanelState.aiPrefs.aiInitialQuickPrompts).filter(Boolean);
-  suggestionsNode.innerHTML = prompts
-    .map((prompt) => `<button type="button" class="sp-chip">${escapeHtml(prompt)}</button>`)
-    .join("");
-  suggestionsNode.querySelectorAll(".sp-chip").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      els.input.value = btn.textContent || "";
-      autosizeInput();
-      chatRuntime.sendMessage();
-    });
-  });
-}
+// 三列表渲染 / 预设插入：实现在 ./sidepanel-lists.ts（候选5 迁出）。
 
-function renderPresetPrompts(): void {
-  if (!els.presetList) {
-    return;
-  }
-  const prompts = Array.isArray(sidepanelState.aiPrefs.aiPresetPrompts) ? sidepanelState.aiPrefs.aiPresetPrompts : [];
-  if (!prompts.length) {
-    els.presetList.innerHTML = '<span class="sp-preset-empty">还没有预设提示词</span>';
-    return;
-  }
-  els.presetList.innerHTML = prompts
-    .map((prompt, index) => `
-      <span class="sp-preset-item">
-        <button type="button" class="sp-preset-chip" data-index="${index}" title="${escapeHtml(prompt)}">${escapeHtml(prompt)}</button>
-        <button type="button" class="sp-preset-remove" data-index="${index}" aria-label="删除预设提示词">×</button>
-      </span>
-    `)
-    .join("");
-  els.presetList.querySelectorAll(".sp-preset-chip").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const index = Number(btn.getAttribute("data-index") || -1);
-      insertPresetPrompt(prompts[index] || "");
-      hidePresetPopover();
-    });
-  });
-  els.presetList.querySelectorAll(".sp-preset-remove").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const index = Number(btn.getAttribute("data-index") || -1);
-      await presets.removePresetPrompt(index);
-    });
-  });
-}
+// 预设/历史 popover 开合：实现在 ./sidepanel-popovers.ts（候选5 迁出）。
 
-function renderHistoryList(): void {
-  if (!els.historyList) {
-    return;
-  }
-  if (els.historyClearBtn) {
-    els.historyClearBtn.hidden = sidepanelState.savedConversations.length === 0;
-  }
-  if (!sidepanelState.savedConversations.length) {
-    els.historyList.innerHTML = '<span class="sp-history-empty">还没有历史对话</span>';
-    return;
-  }
-
-  const liveVideoRef = sidepanelState.liveContextData?.isVideoContext ? sidepanelState.liveContextData : null;
-  const canHighlightLiveMatches = Boolean(
-    liveVideoRef &&
-    sidepanelState.currentConversationMeta?.pinnedContext &&
-    sidepanelState.currentConversationMeta?.contextUrl &&
-    !doesTabMatchContextUrl(liveVideoRef.url || sidepanelState.liveTabUrl, sidepanelState.currentConversationMeta.contextUrl || "")
-  );
-
-  els.historyList.innerHTML = sidepanelState.savedConversations
-    .map((conversation) => {
-      const isActive = conversation.id === sidepanelState.currentConversationId;
-      const isLiveMatch = Boolean(
-        !isActive &&
-        canHighlightLiveMatches &&
-        doesConversationMatchCurrentContext(conversation, liveVideoRef, sidepanelState.liveContextKey)
-      );
-      const metaText = formatConversationTimestamp(conversation.updatedAt || conversation.createdAt);
-      const titleDisplay = buildConversationTitleDisplay(conversation.title, 30);
-      return `
-        <div class="sp-history-item ${isActive ? "is-active" : ""} ${isLiveMatch ? "is-live-match" : ""}" data-id="${escapeHtml(conversation.id)}">
-          <button type="button" class="sp-history-open" data-id="${escapeHtml(conversation.id)}">
-            <span class="sp-history-title" title="${escapeHtml(conversation.title)}">
-              <span class="sp-history-title-main">${escapeHtml(titleDisplay.main)}</span>
-              ${titleDisplay.suffix ? `<span class="sp-history-title-suffix">${escapeHtml(titleDisplay.suffix)}</span>` : ""}
-            </span>
-            <span class="sp-history-meta" title="${escapeHtml(metaText)}">${escapeHtml(metaText)}</span>
-          </button>
-          <button type="button" class="sp-history-remove" data-id="${escapeHtml(conversation.id)}" aria-label="删除历史对话">×</button>
-        </div>
-      `;
-    })
-    .join("");
-
-  els.historyList.querySelectorAll(".sp-history-open").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = String(btn.getAttribute("data-id") || "");
-      conversationStore.applyById(id);
-      hideHistoryPopover();
-    });
-  });
-
-  els.historyList.querySelectorAll(".sp-history-remove").forEach((btn) => {
-    btn.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      const id = String(btn.getAttribute("data-id") || "");
-      await conversationStore.deleteById(id);
-    });
-  });
-}
-
-function insertPresetPrompt(prompt: string): void {
-  const text = String(prompt || "").trim();
-  if (!text) {
-    return;
-  }
-  const current = els.input.value.trim();
-  els.input.value = current ? `${current}\n${text}` : text;
-  els.input.focus();
-  autosizeInput();
-}
-
-function togglePresetPopover(event?: Event): void {
-  event?.stopPropagation();
-  hideHistoryPopover();
-  const willShow = els.presetPopover.hidden;
-  els.presetPopover.hidden = !willShow;
-  if (willShow) {
-    renderPresetPrompts();
-    els.presetInput.value = "";
-    els.presetInput.focus();
-  }
-}
-
-function hidePresetPopover(): void {
-  els.presetPopover.hidden = true;
-}
-
-function toggleHistoryPopover(event?: Event): void {
-  event?.stopPropagation();
-  hidePresetPopover();
-  const willShow = els.historyPopover.hidden;
-  els.historyPopover.hidden = !willShow;
-  if (willShow) {
-    renderHistoryList();
-  }
-}
-
-function hideHistoryPopover(): void {
-  els.historyPopover.hidden = true;
-}
-
-function handleDocumentClick(event: MouseEvent): void {
-  if (els.presetPopover.hidden && els.historyPopover.hidden) {
-    return;
-  }
-  if (!(event.target instanceof Element)) {
-    hidePresetPopover();
-    hideHistoryPopover();
-    return;
-  }
-  if (event.target.closest("#spPresetPopover") || event.target.closest("#spPresetBtn")) {
-    return;
-  }
-  if (event.target.closest("#spHistoryPopover") || event.target.closest("#spHistoryBtn")) {
-    return;
-  }
-  hidePresetPopover();
-  hideHistoryPopover();
-}
-
-function scheduleLiveContextSync(forceRefresh = false): void {
-  liveContextSyncForceRefresh = liveContextSyncForceRefresh || forceRefresh;
-  if (liveContextSyncTimer) {
-    window.clearTimeout(liveContextSyncTimer);
-  }
-  liveContextSyncTimer = window.setTimeout(() => {
-    const nextForceRefresh = liveContextSyncForceRefresh;
-    liveContextSyncTimer = 0;
-    liveContextSyncForceRefresh = false;
-    void syncLiveContextState(nextForceRefresh);
-  }, forceRefresh ? 120 : 220);
-}
+// 实时上下文同步调度：实现在 ./sidepanel-context-sync.ts（候选5 迁出，
+// syncLiveContextState 的 post-sync 分支编排留在下方组合根）。
 
 async function syncLiveContextState(forceRefresh = false): Promise<void> {
   const ok = await loadContextState({ forceRefresh, silent: true }).catch(() => false);
@@ -899,7 +516,7 @@ async function syncLiveContextState(forceRefresh = false): Promise<void> {
     renderInitialState();
     return;
   }
-  renderSuggestions();
+  lists.renderSuggestions();
 }
 
 // 候选09：预设提示词 CRUD + 双存储同步（addPresetPrompt / removePresetPrompt /
@@ -929,7 +546,7 @@ async function refreshContextManually(): Promise<void> {
       if (!sidepanelState.contextData || !sidepanelState.providers.length || !sidepanelState.chatHistory.length) {
         renderInitialState();
       } else {
-        renderSuggestions();
+        lists.renderSuggestions();
       }
     }
   } finally {
@@ -953,8 +570,8 @@ function setRefreshing(isRefreshing: boolean): void {
 }
 
 async function startNewConversation(): Promise<void> {
-  hidePresetPopover();
-  hideHistoryPopover();
+  popovers.hidePresetPopover();
+  popovers.hideHistoryPopover();
   setRefreshing(true);
   try {
     await loadContextState({ forceRefresh: true, silent: true });
@@ -1074,73 +691,9 @@ function restartChat({ keepContext = false }: { keepContext?: boolean } = {}): v
   autosizeInput();
 }
 
-function removeCenteredState(): void {
-  els.messages.querySelectorAll(".sp-center-error").forEach((node) => node.remove());
-}
+// 消息区提示 / 近底判定：实现在 ./sidepanel-notices.ts（候选5 迁出）。
 
-// ============================================================
-// 消息区提示 / 滚动（通知显示、自动滚动判定，纯 UI 杂项）
-// ============================================================
-function removeSuggestions(): void {
-  suggestionsNode?.remove();
-  suggestionsNode = null;
-}
-
-function showConversationContextError(message: string): void {
-  if (!String(message || "").trim()) {
-    return;
-  }
-  removeConversationContextNotice();
-  removeCenteredState();
-  const stateNode = document.createElement("div");
-  stateNode.className = "sp-center-error";
-  stateNode.textContent = String(message);
-  els.messages.appendChild(stateNode);
-  chatRuntime.scrollToBottom();
-}
-
-// 消息区通知条。第三参 options.openSettingsAction 为 true 时在文案末尾附
-// 「前往设置」链接（打开方式与 .sp-center-error 里的设置链接一致：
-// chrome.runtime.openOptionsPage）。文本走 textContent（不受文案内容影响），
-// 链接为静态文案、单独 createElement 挂载。
-function showConversationContextNotice(message: string, autoHideMs = 0, { openSettingsAction = false }: { openSettingsAction?: boolean } = {}): void {
-  removeConversationContextNotice();
-  const notice = document.createElement("div");
-  notice.className = "sp-context-notice";
-  notice.textContent = String(message || "").trim();
-  if (openSettingsAction) {
-    const link = document.createElement("a");
-    link.href = "#";
-    link.textContent = "前往设置";
-    link.addEventListener("click", (e) => {
-      e.preventDefault();
-      chrome.runtime.openOptionsPage();
-    });
-    notice.appendChild(document.createTextNode(" "));
-    notice.appendChild(link);
-  }
-  els.messages.prepend(notice);
-  if (autoHideMs > 0) {
-    contextNoticeTimer = window.setTimeout(() => {
-      removeConversationContextNotice();
-    }, autoHideMs);
-  }
-}
-
-function removeConversationContextNotice(): void {
-  if (contextNoticeTimer) {
-    window.clearTimeout(contextNoticeTimer);
-    contextNoticeTimer = 0;
-  }
-  els.messages.querySelectorAll(".sp-context-notice").forEach((node) => node.remove());
-}
-
-function isMessagesNearBottom(threshold = 56): boolean {
-  const { scrollTop, scrollHeight, clientHeight } = els.messages;
-  return scrollHeight - (scrollTop + clientHeight) <= threshold;
-}
-
-// 获取当前活动标签页（transport 辅助，注入 store/timestamp-nav）
+// 获取当前活动标签页（transport 辅助，注入 store/timestamp-nav/context-load）
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab || null;
