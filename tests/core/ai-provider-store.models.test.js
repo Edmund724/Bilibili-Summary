@@ -48,7 +48,7 @@ describe("handleAiProvidersModels 的 host 权限预检", () => {
 
     expect(resp).toEqual({ ok: true, models: ["gpt-4o", "gpt-4o-mini"] });
     expect(globalThis.chrome.permissions.contains).toHaveBeenCalledWith({
-      origins: ["https://api.openai.com"]
+      origins: ["https://api.openai.com/*"]
     });
     expect(fetchMock.mock.calls[0][0]).toBe("https://api.openai.com/v1/models");
   });

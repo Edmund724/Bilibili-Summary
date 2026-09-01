@@ -172,7 +172,7 @@ describe("host 权限预检（S2：optional_host_permissions 未授权时的可�
     const resp = await testAsrConnection(baseProvider({ apiKey: "sk-1" }));
     expect(resp).toEqual({ ok: false, error: "该平台域名未授权，请在保存时允许权限" });
     expect(globalThis.chrome.permissions.contains).toHaveBeenCalledWith({
-      origins: ["https://example.com"]
+      origins: ["https://example.com/*"]
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });

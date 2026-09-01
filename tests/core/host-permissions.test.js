@@ -27,12 +27,12 @@ beforeEach(() => {
 });
 
 describe("extractOriginFromBaseUrl", () => {
-  it("http(s) baseUrl 提取 origin（含路径、尾斜杠、query 归一）", () => {
-    expect(extractOriginFromBaseUrl("https://api.openai.com/v1")).toBe("https://api.openai.com");
-    expect(extractOriginFromBaseUrl("https://api.openai.com/v1/")).toBe("https://api.openai.com");
-    expect(extractOriginFromBaseUrl("http://localhost:11434/v1")).toBe("http://localhost:11434");
-    expect(extractOriginFromBaseUrl(" https://api.siliconflow.cn/v1 ")).toBe("https://api.siliconflow.cn");
-    expect(extractOriginFromBaseUrl("https://api.example.com/v1?x=1")).toBe("https://api.example.com");
+  it("http(s) baseUrl 提取 match pattern（含路径、尾斜杠、query 归一，补 /* 路径）", () => {
+    expect(extractOriginFromBaseUrl("https://api.openai.com/v1")).toBe("https://api.openai.com/*");
+    expect(extractOriginFromBaseUrl("https://api.openai.com/v1/")).toBe("https://api.openai.com/*");
+    expect(extractOriginFromBaseUrl("http://localhost:11434/v1")).toBe("http://localhost:11434/*");
+    expect(extractOriginFromBaseUrl(" https://api.siliconflow.cn/v1 ")).toBe("https://api.siliconflow.cn/*");
+    expect(extractOriginFromBaseUrl("https://api.example.com/v1?x=1")).toBe("https://api.example.com/*");
   });
 
   it("非法/边界输入返回 null", () => {
@@ -58,7 +58,7 @@ describe("collectOrigins", () => {
         "oops",
         undefined
       ])
-    ).toEqual(["https://api.openai.com", "https://api.siliconflow.cn"]);
+    ).toEqual(["https://api.openai.com/*", "https://api.siliconflow.cn/*"]);
   });
 
   it("非数组入参按空处理", () => {
@@ -74,9 +74,9 @@ describe("requestProviderOrigins（保存手势链上的批量申请）", () => 
       request
     );
     expect(resp.ok).toBe(true);
-    expect(resp.origins).toEqual(["https://api.openai.com", "https://api.siliconflow.cn"]);
+    expect(resp.origins).toEqual(["https://api.openai.com/*", "https://api.siliconflow.cn/*"]);
     expect(request).toHaveBeenCalledWith({
-      origins: ["https://api.openai.com", "https://api.siliconflow.cn"]
+      origins: ["https://api.openai.com/*", "https://api.siliconflow.cn/*"]
     });
   });
 
@@ -123,7 +123,7 @@ describe("hasHostPermission（探针/模型列表的权限预检）", () => {
   it("已授权 → true，contains 收到该 origin", async () => {
     const contains = vi.fn(async () => true);
     expect(await hasHostPermission("https://api.openai.com/v1", contains)).toBe(true);
-    expect(contains).toHaveBeenCalledWith({ origins: ["https://api.openai.com"] });
+    expect(contains).toHaveBeenCalledWith({ origins: ["https://api.openai.com/*"] });
   });
 
   it("未授权 → false", async () => {
@@ -150,8 +150,8 @@ describe("collectOrphanOrigins（删除时的 origin 回收判定）", () => {
   const remainingAsr = [{ id: "s1", baseUrl: "https://api.siliconflow.cn/v1" }];
 
   it("无任何剩余 provider 使用该 origin → 回收", () => {
-    expect(collectOrphanOrigins("https://api.openai.com/v1", [])).toEqual(["https://api.openai.com"]);
-    expect(collectOrphanOrigins("https://api.openai.com/v1", remainingAsr)).toEqual(["https://api.openai.com"]);
+    expect(collectOrphanOrigins("https://api.openai.com/v1", [])).toEqual(["https://api.openai.com/*"]);
+    expect(collectOrphanOrigins("https://api.openai.com/v1", remainingAsr)).toEqual(["https://api.openai.com/*"]);
   });
 
   it("AI 或 ASR 组仍有 provider 使用同一 origin → 不回收", () => {
@@ -162,7 +162,7 @@ describe("collectOrphanOrigins（删除时的 origin 回收判定）", () => {
 
   it("同 host 不同端口算不同 origin（互不影响）", () => {
     expect(collectOrphanOrigins("http://localhost:11434/v1", [{ id: "a", baseUrl: "http://localhost:8000/v1" }])).toEqual([
-      "http://localhost:11434"
+      "http://localhost:11434/*"
     ]);
   });
 
@@ -172,8 +172,8 @@ describe("collectOrphanOrigins（删除时的 origin 回收判定）", () => {
   });
 
   it("非数组剩余列表按空列表处理", () => {
-    expect(collectOrphanOrigins("https://x/v1", null)).toEqual(["https://x"]);
-    expect(collectOrphanOrigins("https://x/v1", undefined)).toEqual(["https://x"]);
+    expect(collectOrphanOrigins("https://x/v1", null)).toEqual(["https://x/*"]);
+    expect(collectOrphanOrigins("https://x/v1", undefined)).toEqual(["https://x/*"]);
   });
 });
 
@@ -185,8 +185,8 @@ describe("revokeOrphanOrigin（删除时的 origin 回收执行）", () => {
   it("列表含被删行自身也照常回收（按 id 剔除，不自锁）", async () => {
     const remove = vi.fn(async () => true);
     const resp = await revokeOrphanOrigin(deleted, [deleted], { contains: containsGranted, remove });
-    expect(resp).toEqual({ origins: ["https://api.openai.com"], revoked: true });
-    expect(remove).toHaveBeenCalledWith({ origins: ["https://api.openai.com"] });
+    expect(resp).toEqual({ origins: ["https://api.openai.com/*"], revoked: true });
+    expect(remove).toHaveBeenCalledWith({ origins: ["https://api.openai.com/*"] });
   });
 
   it("另一组（ASR）仍用同一 origin → 不回收、不发 remove", async () => {
@@ -209,7 +209,7 @@ describe("revokeOrphanOrigin（删除时的 origin 回收执行）", () => {
   it("remove 返回 false / 抛错 → 回报失败 origin 供提示", async () => {
     expect(
       await revokeOrphanOrigin(deleted, [], { contains: containsGranted, remove: vi.fn(async () => false) })
-    ).toEqual({ origins: ["https://api.openai.com"], revoked: false });
+    ).toEqual({ origins: ["https://api.openai.com/*"], revoked: false });
     expect(
       await revokeOrphanOrigin(deleted, [], {
         contains: containsGranted,
@@ -217,7 +217,7 @@ describe("revokeOrphanOrigin（删除时的 origin 回收执行）", () => {
           throw new Error("remove failed");
         })
       })
-    ).toEqual({ origins: ["https://api.openai.com"], revoked: false });
+    ).toEqual({ origins: ["https://api.openai.com/*"], revoked: false });
   });
 
   it("被删项 baseUrl 非法 → 什么都不做", async () => {

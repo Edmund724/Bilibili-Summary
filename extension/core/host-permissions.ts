@@ -6,7 +6,9 @@
 //
 // 不变式：
 // - baseUrl 必须是 http(s):// 开头的合法 URL（与 validators.ts 的
-//   validateAiProviders 同型校验），origin 一律取 new URL(baseUrl).origin；
+//   validateAiProviders 同型校验），origin 一律取 new URL(baseUrl).origin 并补上
+//   "/*" 路径——Chrome match pattern 要求非空 path，裸 origin（如
+//   https://api.stepfun.com）会被 request/contains/remove 判为 "Empty path"；
 // - 交互式授权（chrome.permissions.request）必须落在用户手势的同步调用链上，
 //   且一次手势只够一次弹窗：所有待申请 origin 合并成单次 request，request 之前
 //   不得有先行 await，否则从第二个 origin 起会被 Chrome 以「缺少用户手势」拒绝；
@@ -22,7 +24,7 @@
 // 探针/权限缺失时的统一可操作文案（AI 探针、ASR 探针共享）
 export const HOST_PERMISSION_HINT = "该平台域名未授权，请在保存时允许权限";
 
-// 从 baseUrl 提取申请权限所需的 origin（https://host[:port]）。非法/边界
+// 从 baseUrl 提取申请权限所需的 match pattern（https://host[:port]/*）。非法/边界
 // 输入（空串、非 http(s) 协议、URL 解析失败）返回 null，由调用方跳过申请。
 export function extractOriginFromBaseUrl(baseUrl: unknown): string | null {
   const text = String(baseUrl || "").trim();
@@ -32,13 +34,13 @@ export function extractOriginFromBaseUrl(baseUrl: unknown): string | null {
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       return null;
     }
-    return url.origin;
+    return `${url.origin}/*`;
   } catch {
     return null;
   }
 }
 
-// 一组 baseUrl → 去重后的 origin 列表（保持首次出现顺序，非法项丢弃）。
+// 一组 baseUrl → 去重后的 match pattern 列表（保持首次出现顺序，非法项丢弃）。
 export function collectOrigins(baseUrls: unknown): string[] {
   const origins: string[] = [];
   for (const baseUrl of Array.isArray(baseUrls) ? baseUrls : []) {

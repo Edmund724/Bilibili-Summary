@@ -241,7 +241,7 @@ describe("testAiProviderConnection 的 host 权限预检", () => {
 
     expect(resp).toEqual({ ok: false, error: "该平台域名未授权，请在保存时允许权限" });
     expect(globalThis.chrome.permissions.contains).toHaveBeenCalledWith({
-      origins: ["https://api.openai.com"]
+      origins: ["https://api.openai.com/*"]
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
