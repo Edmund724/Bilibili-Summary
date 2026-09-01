@@ -6,10 +6,11 @@
 
 import { REDUCE_GROUP_INPUT_CHARS, REDUCE_TRIGGER_CHARS } from "./budgeter.js";
 import { makeAbortedError } from "../shared/error-helpers.js";
+import type { BudgetPlan } from "./types.js";
 
 // 合计字符数：非数组按 0 处理，null/undefined 条目按空串计。
-function sumChars(list) {
-  return (Array.isArray(list) ? list : []).reduce(
+function sumChars(list: unknown[]): number {
+  return (Array.isArray(list) ? list : []).reduce<number>(
     (acc, s) => acc + String(s == null ? "" : s).length,
     0
   );
@@ -20,22 +21,26 @@ function sumChars(list) {
  * 段数 ≥11 是「>500k / 单段 50k」的推论，不是独立触发条件——章节对齐可能切出
  * 多个短段（总字符 ≤500k 却 ≥11 段），此时不应误触归并、多花调用。
  */
-export function shouldReduce(plan) {
+export function shouldReduce(plan: BudgetPlan | null | undefined): boolean {
   if (!plan) {
     return false;
   }
   return Number(plan.totalChars) > REDUCE_TRIGGER_CHARS || plan.needsReduce === true;
 }
 
+interface BuildReduceGroupsOptions {
+  groupInputChars?: number | string;
+}
+
 /**
  * 把若干条小结贪心分组为归并组：按输入顺序累积，每组合计字符数 ≤ groupInputChars；
  * 单条超过预算也自成一组（不拆条）；空数组 / 非数组返回 []。
  */
-export function buildReduceGroups(summaries, { groupInputChars = REDUCE_GROUP_INPUT_CHARS } = {}) {
+export function buildReduceGroups(summaries: unknown[], { groupInputChars = REDUCE_GROUP_INPUT_CHARS }: BuildReduceGroupsOptions = {}): unknown[][] {
   const list = Array.isArray(summaries) ? summaries : [];
   const maxChars = Number(groupInputChars) > 0 ? Number(groupInputChars) : REDUCE_GROUP_INPUT_CHARS;
-  const groups = [];
-  let current = [];
+  const groups: unknown[][] = [];
+  let current: unknown[] = [];
   let size = 0;
   for (const summary of list) {
     const chars = String(summary == null ? "" : summary).length;
@@ -54,12 +59,20 @@ export function buildReduceGroups(summaries, { groupInputChars = REDUCE_GROUP_IN
   return groups;
 }
 
+interface BuildReducePromptInput {
+  title: string;
+  level: number;
+  groupIndex: number;
+  groupCount: number;
+  group: unknown[];
+}
+
 /**
  * 构造归并 prompt：对齐蓝本 _merge_prompt 措辞——视频标题 + 第 level 层第 groupIndex/groupCount 组
  * + 去重但保留观点、依据、例子、时间点与前后关系，不做评价、不补外部知识，只输出连续材料。
  * group 内各条目以 `\n\n` 拼接。
  */
-export function buildReducePrompt({ title, level, groupIndex, groupCount, group }) {
+export function buildReducePrompt({ title, level, groupIndex, groupCount, group }: BuildReducePromptInput): string {
   const material = (Array.isArray(group) ? group : [])
     .map((s) => String(s == null ? "" : s))
     .join("\n\n");
@@ -73,6 +86,25 @@ export function buildReducePrompt({ title, level, groupIndex, groupCount, group 
 ${material}`;
 }
 
+interface RunPromptsInput {
+  prompt?: string;
+  messages?: unknown[];
+}
+
+interface ReduceSummariesInput {
+  summaries: unknown[];
+  title: string;
+  runPrompts: (input: RunPromptsInput) => Promise<unknown>;
+  signal?: AbortSignal | null;
+  onProgress?: (notice: string) => void;
+  groupInputChars?: number | string;
+}
+
+interface ReduceSummariesResult {
+  merged: string[];
+  levels: number;
+}
+
 /**
  * 多层归并：while 所有小结合计 > 归并组输入时，按归并组输入贪心分组、逐组调模型归并，
  * 直到合计 ≤ 归并组输入（或组数不减少，防止单条超预算等不收敛死循环）。
@@ -80,9 +112,16 @@ ${material}`;
  * 重跑时由编排层传入收紧后的值）。每组调用前检查 signal.aborted，中止即抛带
  * aborted 标记的错误。返回 { merged, levels }；merged 按组的原始顺序排列。
  */
-export async function reduceSummaries({ summaries, title, runPrompts, signal, onProgress, groupInputChars = REDUCE_GROUP_INPUT_CHARS }) {
+export async function reduceSummaries({
+  summaries,
+  title,
+  runPrompts,
+  signal,
+  onProgress,
+  groupInputChars = REDUCE_GROUP_INPUT_CHARS
+}: ReduceSummariesInput): Promise<ReduceSummariesResult> {
   const maxChars = Number(groupInputChars) > 0 ? Number(groupInputChars) : REDUCE_GROUP_INPUT_CHARS;
-  let merged = Array.isArray(summaries) ? summaries : [];
+  let merged: string[] = Array.isArray(summaries) ? summaries.map((s) => String(s == null ? "" : s)) : [];
   let levels = 0;
 
   while (sumChars(merged) > maxChars) {
@@ -95,7 +134,7 @@ export async function reduceSummaries({ summaries, title, runPrompts, signal, on
       break;
     }
     levels += 1;
-    const next = [];
+    const next: string[] = [];
     for (let g = 0; g < groups.length; g += 1) {
       if (signal?.aborted) {
         throw makeAbortedError();

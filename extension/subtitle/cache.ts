@@ -1,17 +1,35 @@
 import { logWarn, logError } from "../shared/logging.js";
-import { parseBvidFromCacheKey, readLruIndex, writeWithEviction } from "../core/cache-lru.js";
+import { parseBvidFromCacheKey, readLruIndex, writeWithEviction, type EvictionResult, type EvictionFailure } from "../core/cache-lru.js";
+import type { SubtitleTrack } from "../bilibili/gateway.js";
+
+interface LruIndexEntry {
+  ts: number;
+  keys: string[];
+}
+
+type LruFamilyEntry = Record<string, LruIndexEntry | number | unknown>;
 
 const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
 // ASR 变体 source key 前缀：fetcher 以 subtitleId "asr:<providerId>:<model>:<lang>"
 // 组键（经 buildSubtitleSourceKey 的 id_ 分支），用于识别/清理过期 ASR 转写变体。
 const ASR_SOURCE_KEY_PREFIX = "id_asr:";
 
-export function getSubtitleCacheKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "" }) {
+export interface SubtitleCacheKeyOptions {
+  bvid: string;
+  cid: string;
+  subtitleId?: string;
+  subtitleUrl?: string;
+  lang?: string;
+}
+
+export type SaveSubtitleResult = EvictionResult | EvictionFailure;
+
+export function getSubtitleCacheKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "" }: SubtitleCacheKeyOptions): string {
   const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
   return `${CACHE_KEY_PREFIX}${bvid}_${cid}_${sourceKey}`;
 }
 
-export function normalizeSubtitleUrlForCache(url) {
+export function normalizeSubtitleUrlForCache(url: unknown): string {
   const text = String(url || "").trim();
   if (!text) {
     return "";
@@ -26,16 +44,17 @@ export function normalizeSubtitleUrlForCache(url) {
   }
 }
 
-export async function loadSubtitleFromCache(cacheKey) {
+export async function loadSubtitleFromCache(cacheKey: string): Promise<unknown[] | null> {
   try {
     const result = await chrome.storage.local.get(cacheKey);
-    return result[cacheKey]?.body || null;
+    const cached = result[cacheKey] as { body?: unknown[] } | undefined;
+    return cached?.body || null;
   } catch {
     return null;
   }
 }
 
-export async function saveSubtitleToCache(cacheKey, body) {
+export async function saveSubtitleToCache(cacheKey: string, body: unknown[]): Promise<SaveSubtitleResult> {
   const result = await writeWithEviction({
     family: CACHE_KEY_PREFIX,
     bvid: parseBvidFromCacheKey(cacheKey, CACHE_KEY_PREFIX),
@@ -57,6 +76,12 @@ export async function saveSubtitleToCache(cacheKey, body) {
   return result;
 }
 
+interface AsrCacheCleanupOptions {
+  bvid: string;
+  cid: string;
+  keepKey?: string;
+}
+
 /**
  * ASR 孤儿清理：删除同 (bvid, cid) 下除 keepKey 外的 ASR 变体缓存键
  * （不同 provider/model/language 的旧转写，键含 "id_asr:" source key）。
@@ -65,15 +90,19 @@ export async function saveSubtitleToCache(cacheKey, body) {
  * 回退 get(null) 前缀扫描（镜像 pruneToRecentVideos 的兜底模式）。
  * 返回删除的键数组；失败 logWarn 并返回 []，不抛异常。
  */
-export async function clearStaleAsrSubtitleCache({ bvid, cid, keepKey = "" } = {}) {
+export async function clearStaleAsrSubtitleCache({ bvid, cid, keepKey = "" }: AsrCacheCleanupOptions): Promise<string[]> {
   try {
     const keyPrefix = `${CACHE_KEY_PREFIX}${bvid}_${cid}_${ASR_SOURCE_KEY_PREFIX}`;
     const index = await readLruIndex();
-    const familyEntry = index[CACHE_KEY_PREFIX] && typeof index[CACHE_KEY_PREFIX] === "object" ? index[CACHE_KEY_PREFIX] : {};
-    const bvidEntry = familyEntry[bvid];
-    const all = Array.isArray(bvidEntry?.keys) && bvidEntry.keys.length > 0
+    const familyEntry = (index[CACHE_KEY_PREFIX] && typeof index[CACHE_KEY_PREFIX] === "object" ? index[CACHE_KEY_PREFIX] : {}) as LruFamilyEntry;
+    const bvidEntry = familyEntry[bvid] as LruIndexEntry | number | unknown;
+    const normalizedBvidEntry =
+      bvidEntry && typeof bvidEntry === "object" && Array.isArray((bvidEntry as LruIndexEntry).keys)
+        ? (bvidEntry as LruIndexEntry)
+        : null;
+    const all = normalizedBvidEntry && normalizedBvidEntry.keys.length > 0
       ? await chrome.storage.local.get(
-          bvidEntry.keys.filter((key) => typeof key === "string" && key.startsWith(keyPrefix))
+          normalizedBvidEntry.keys.filter((key): key is string => typeof key === "string" && key.startsWith(keyPrefix))
         )
       : await chrome.storage.local.get(null);
     const staleKeys = Object.keys(all || {}).filter(
@@ -89,7 +118,7 @@ export async function clearStaleAsrSubtitleCache({ bvid, cid, keepKey = "" } = {
   }
 }
 
-export async function clearSubtitleCacheByKey(cacheKey) {
+export async function clearSubtitleCacheByKey(cacheKey: string): Promise<void> {
   try {
     await chrome.storage.local.remove(cacheKey);
   } catch (error) {
@@ -97,7 +126,7 @@ export async function clearSubtitleCacheByKey(cacheKey) {
   }
 }
 
-export function buildSubtitleSourceKey(subtitleId, subtitleUrl, lang) {
+export function buildSubtitleSourceKey(subtitleId: unknown, subtitleUrl: unknown, lang: unknown): string {
   const id = String(subtitleId || "").trim();
   if (id) {
     return `id_${id}`;
@@ -111,12 +140,12 @@ export function buildSubtitleSourceKey(subtitleId, subtitleUrl, lang) {
   return `lang_${String(lang || "").trim().toLowerCase() || "unknown"}`;
 }
 
-export function buildSubtitleCandidates(subtitles, preferred) {
+export function buildSubtitleCandidates(subtitles: SubtitleTrack[] | null | undefined, preferred: SubtitleTrack | null | undefined): SubtitleTrack[] {
   const tracks = subtitles || [];
-  const seen = new Set();
-  const list = [];
+  const seen = new Set<string>();
+  const list: SubtitleTrack[] = [];
 
-  const pushUnique = (item) => {
+  const pushUnique = (item: SubtitleTrack | null | undefined) => {
     if (!item) {
       return;
     }

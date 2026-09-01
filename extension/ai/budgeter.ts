@@ -3,6 +3,8 @@
 // 不接 UI、不发请求、不依赖 Chrome API，供 Map-Reduce 编排与预算内单次路径共用。
 // 常量（素材预算 / 单段输入 / 分段小结 / 归并组输入 / 成稿输出 / 系数）集中在此作为单一事实来源。
 
+import type { BudgetPlan, BudgetPlanSegment, ChapterItem, SubtitleBodyItem } from "./types.js";
+
 // 字符 → token 系数：每字符≈1 token（保守，宁可早进 Map-Reduce，溢出兜底保证正确性）。
 export const CHAR_PER_TOKEN = 1.0;
 // 素材预算（100k token × 1.0）：预算内一次成稿，超出即进入分段 + 归并。
@@ -18,20 +20,39 @@ export const FINAL_OUTPUT_CHARS = 16000;
 // 归并触发线：原始字幕 >500k 时才触发归并层（此时段数 ≥11）。
 export const REDUCE_TRIGGER_CHARS = 500000;
 
+interface BudgeterInputItem {
+  from: number;
+  to: number;
+  content: string;
+  chars: number;
+}
+
+interface RawSegment {
+  from: number;
+  to: number;
+  chars: number;
+  items: SubtitleBodyItem[];
+}
+
+interface BuildBudgetPlanOptions {
+  segmentInputChars?: number | string;
+  reduceGroupInputChars?: number | string;
+}
+
 // 每个归并组最多容纳的段数：归并组输入 / 单条小结上限。
 // 随归并组输入参数化（溢出放宽预算重跑时组输入减半，每组条数相应减半）。
-function segmentsPerReduceGroup(reduceGroupInputChars) {
+function segmentsPerReduceGroup(reduceGroupInputChars: number): number {
   return Math.floor(reduceGroupInputChars / SEGMENT_SUMMARY_CHARS);
 }
 
 // 保守地把时间戳转成数值；非有限值（undefined/NaN 等）回落到 0。
-function toSeconds(value) {
+function toSeconds(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
 
 // 估 token：非字符串 / 空串返回 0；其余 = 字符数 × CHAR_PER_TOKEN。
-export function estimateTokens(text) {
+export function estimateTokens(text: unknown): number {
   if (typeof text !== "string" || text.length === 0) {
     return 0;
   }
@@ -40,7 +61,7 @@ export function estimateTokens(text) {
 
 // 归并调用数估算：每层把 ≤ 每组段数条小结归并为一条，累加各层的分组数
 // （即实际归并调用次数）。例：11 段 → 第 1 层 ceil(11/10)=2 组(2 次) → 第 2 层 ceil(2/10)=1 组(1 次)，共 3 次。
-function estimateReduceCalls(segmentCount, reduceGroupInputChars) {
+function estimateReduceCalls(segmentCount: number, reduceGroupInputChars: number): number {
   let calls = 0;
   let n = segmentCount;
   while (n > 1) {
@@ -52,20 +73,25 @@ function estimateReduceCalls(segmentCount, reduceGroupInputChars) {
 
 // 沿字幕项顺序累积字符到单段输入预算；遇到章节边界（上一条在上一章、本条已进入
 // chapter.from 之后）时在前一条处收段，让新段对齐到章节起点——不要求字幕与章节时间戳逐秒相等。
-function splitByBudget(items, chapterStarts, segmentInputChars) {
-  const segments = [];
-  let current = null;
-  let prevFrom = null;
+function splitByBudget(
+  items: BudgeterInputItem[],
+  chapterStarts: number[],
+  segmentInputChars: number
+): BudgetPlanSegment[] {
+  const segments: RawSegment[] = [];
+  let current: RawSegment | null = null;
+  let prevFrom: number | null = null;
 
   for (const item of items) {
     // 跨入新章节：prevFrom < chapter.from <= item.from 时，在前一条处切开对齐。
+    const prevFromValue = prevFrom;
     const crossesIntoChapter =
       current !== null &&
       current.items.length > 0 &&
-      prevFrom !== null &&
-      chapterStarts.some((start) => prevFrom < start && item.from >= start);
+      prevFromValue !== null &&
+      chapterStarts.some((start) => prevFromValue < start && item.from >= start);
 
-    if (crossesIntoChapter) {
+    if (crossesIntoChapter && current) {
       segments.push(current);
       current = null;
     }
@@ -106,7 +132,10 @@ function splitByBudget(items, chapterStarts, segmentInputChars) {
 //   随 plan.reduceGroupInputChars 带出，供归并层（reduceSummaries）消费。
 // 模式判定（100k 线）与归并触发线（500k 线）不随 options 变：二者本质是
 // 「材料体量 ≈ 输入 20%」的出口侧语义，与单段/单组输入多大（入口侧）无关。
-export function buildBudgetPlan({ body = [], chapters = [] } = {}, options = {}) {
+export function buildBudgetPlan(
+  { body = [], chapters = [] }: { body?: unknown[]; chapters?: unknown[] } = {},
+  options: BuildBudgetPlanOptions = {}
+): BudgetPlan {
   const segmentInputChars =
     Number(options.segmentInputChars) > 0 ? Number(options.segmentInputChars) : SEGMENT_INPUT_CHARS;
   const reduceGroupInputChars =
@@ -117,30 +146,32 @@ export function buildBudgetPlan({ body = [], chapters = [] } = {}, options = {})
   const chapterItems = Array.isArray(chapters) ? chapters : [];
 
   // 规整字幕项：跳过 trim 后为空的 content；只累计 content 文本长度（不含时间戳/标题）。
-  const items = [];
+  const items: BudgeterInputItem[] = [];
   let totalChars = 0;
   for (const item of bodyItems) {
-    const content = String(item && item.content != null ? item.content : "");
+    const content = String(item && (item as { content?: unknown }).content != null
+      ? (item as { content?: unknown }).content
+      : "");
     const chars = content.trim().length;
     if (chars === 0) {
       continue;
     }
     items.push({
-      from: toSeconds(item && item.from),
-      to: toSeconds(item && item.to),
+      from: toSeconds(item && (item as { from?: unknown }).from),
+      to: toSeconds(item && (item as { to?: unknown }).to),
       content,
       chars
     });
     totalChars += chars;
   }
 
-  const mode = totalChars > MATERIAL_BUDGET_CHARS ? "map-reduce" : "single";
+  const mode: BudgetPlan["mode"] = totalChars > MATERIAL_BUDGET_CHARS ? "map-reduce" : "single";
 
-  let segments = [];
+  let segments: BudgetPlanSegment[] = [];
   if (mode === "map-reduce") {
-    const chapterStarts = [];
+    const chapterStarts: number[] = [];
     for (const chapter of chapterItems) {
-      const start = Number(chapter && chapter.from);
+      const start = Number(chapter && (chapter as { from?: unknown }).from);
       if (Number.isFinite(start) && start >= 0) {
         chapterStarts.push(start);
       }

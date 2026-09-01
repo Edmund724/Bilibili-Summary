@@ -1,4 +1,4 @@
-// extension/subtitle/commit.js
+// extension/subtitle/commit.ts
 // 「字幕接受」事务的唯一入口（CONTEXT.md 域词条）。
 //
 // 一段字幕成为当前视频生效字幕的六步序列——稳定排序（from 升序，读路径
@@ -8,7 +8,7 @@
 // "subtitle-ready"。历史上该序列在 fetcher.js（CC 缓存命中/网络新抓）与
 // asr/fallback.js（ASR 缓存命中/转写完成）手抄了 4 处，逆操作（无字幕出口）
 // 又在 subtitle/ui.js 的 applyNoSubtitleState + 两处调用点手抄——不变量的依据
-// （selection.js 的排序注释）活在第三个文件里。本模块收口后一处持有事务：
+//（selection.js 的排序注释）活在第三个文件里。本模块收口后一处持有事务：
 // bug 只会发生在一个地方、也只修一个地方。
 //
 // 静态图无环约束（本设计的核心）：本模块禁止静态 import ui/ui-renderer.js 与
@@ -20,6 +20,7 @@
 // 模块，纯 state 读取）、shared/dom-utils、reader/ids（纯常量表）、shared/logging。
 
 import { clipState } from "../core/state.js";
+import type { NoSubtitleReason, SubtitleBodyItem } from "../core/state.js";
 import { sortSubtitleBodyByFrom } from "./selection.js";
 import { refreshDerivedContent } from "./core.js";
 import { notifyReaderPresenter } from "../reader/presenter.js";
@@ -27,17 +28,30 @@ import { isReaderViewOpen } from "../reader/view-state.js";
 import { byId } from "../shared/dom-utils.js";
 import { ids } from "../reader/ids.js";
 
+export interface CommitUiCallbacks {
+  renderMeta(): void;
+  renderSubtitleSelect(): void;
+  setStatus(message: string): void;
+}
+
 // 渲染/状态栏回调（fetcher 注入，见模块头注）。接受事务本身不渲染（历史行为：
 // loadSubtitle / fallback 的四个接受点均不调 renderMeta，渲染由调用方编排负责）；
 // 无字幕出口需要 renderMeta / renderSubtitleSelect（轨道/元信息落空态）与
 // setStatus（skip 分支的引导文案）。
-let commitUi = null;
+let commitUi: CommitUiCallbacks | null = null;
 
 // 由 fetcher 在模块求值期注入一次（取自 subtitle/ui.js 的 renderMeta /
 // renderSubtitleSelect 与 ui-renderer 的 setStatus）。重复调用以最后一次为准
 //（测试换纪元时随 fetcher 重新求值，天然幂等）。
-export function configureCommitUi({ renderMeta, renderSubtitleSelect, setStatus }) {
+export function configureCommitUi({ renderMeta, renderSubtitleSelect, setStatus }: CommitUiCallbacks) {
   commitUi = { renderMeta, renderSubtitleSelect, setStatus };
+}
+
+export interface AcceptSubtitleArgs {
+  body: unknown[] | null | undefined;
+  selectedSubtitleId: string;
+  selectedSubtitleUrl: string;
+  selectedSubtitleLang: string;
 }
 
 // 字幕接受（四个写入点的唯一实现）：幂等稳定排序在写 state 前完成——
@@ -51,12 +65,12 @@ export async function acceptSubtitle({
   selectedSubtitleId,
   selectedSubtitleUrl,
   selectedSubtitleLang
-}) {
+}: AcceptSubtitleArgs): Promise<unknown[] | null | undefined> {
   const sortedBody = sortSubtitleBodyByFrom(body);
   clipState.setSelectedSubtitleId(selectedSubtitleId);
   clipState.setSelectedSubtitleUrl(selectedSubtitleUrl);
   clipState.setSelectedSubtitleLang(selectedSubtitleLang);
-  clipState.setSubtitleBody(sortedBody);
+  clipState.setSubtitleBody(sortedBody as SubtitleBodyItem[]);
   clipState.setSubtitleFetchState("ready");
   clipState.setNoSubtitleReason(null);
   await refreshDerivedContent();
@@ -64,6 +78,11 @@ export async function acceptSubtitle({
     notifyReaderPresenter("subtitle-ready");
   }
   return sortedBody;
+}
+
+export interface CommitNoSubtitleArgs {
+  noSubtitleReason?: NoSubtitleReason;
+  asrResult?: string;
 }
 
 // 无字幕出口（逆事务，applyNoSubtitleState + 两处收尾段的唯一实现）：清空选中
@@ -77,7 +96,7 @@ export async function acceptSubtitle({
 //
 // maybeRunAsrFallback → done 即 return 的守卫属抓取编排（fallback 内部已走
 // 接受事务收尾），留在 fetcher 的 finishNoSubtitle，不进本事务。
-export async function commitNoSubtitle({ noSubtitleReason, asrResult } = {}) {
+export async function commitNoSubtitle({ noSubtitleReason, asrResult }: CommitNoSubtitleArgs = {}): Promise<void> {
   if (!commitUi) {
     throw new Error("字幕接受事务的 UI 回调未注入（configureCommitUi），无字幕出口拒绝执行。");
   }
@@ -90,7 +109,7 @@ export async function commitNoSubtitle({ noSubtitleReason, asrResult } = {}) {
   clipState.setMarkdown("");
   clipState.setSrt("");
   clipState.setTxt("");
-  byId(ids.preview).value = "";
+  (byId(ids.preview) as HTMLTextAreaElement).value = "";
   if (noSubtitleReason !== undefined) {
     clipState.setNoSubtitleReason(noSubtitleReason);
   }
@@ -105,11 +124,14 @@ export async function commitNoSubtitle({ noSubtitleReason, asrResult } = {}) {
 }
 
 // 无字幕提示（skip 分支）：基础文案 + 引导句。reason 取 clipState.noSubtitleReason
-// （可显式传参覆盖）：未配置语音识别平台（no-asr-config）时引导用户去硅基流动
+//（可显式传参覆盖）：未配置语音识别平台（no-asr-config）时引导用户去硅基流动
 // 免费申请 API Key 并填入设置页；其余维持通用引导句。返回完整提示文案。
 // 自 fetcher.js 随迁：文案是无字幕出口事务的一部分，唯一消费点在上面的
 // commitNoSubtitle。
-export function buildNoSubtitleStatusMessage(base = "当前视频无字幕。", reason = clipState.noSubtitleReason) {
+export function buildNoSubtitleStatusMessage(
+  base = "当前视频无字幕。",
+  reason: NoSubtitleReason = clipState.noSubtitleReason
+): string {
   if (reason === "no-asr-config") {
     return `${base} 可免费申请硅基流动 API Key 并填入设置页，自动生成字幕。`;
   }

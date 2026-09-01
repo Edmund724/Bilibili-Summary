@@ -1,4 +1,4 @@
-// extension/ai/context-resolver.js
+// extension/ai/context-resolver.ts
 // AI 侧边栏上下文解析：拉取视频元信息 + 字幕 + 热评，构建 Markdown 字幕上下文。
 // 从 extension/entry/background.js 提取的深模块，只暴露 background.js 消息处理器
 // 需要调用的函数；B站抓取统一走 bilibili/gateway.js 的 bgFetchJson 传输层。
@@ -10,7 +10,10 @@ import {
   fetchSubtitleBody,
   fetchHotComments,
   bgFetchJson,
-  isBiliUrl
+  type VideoMeta,
+  type VideoPage,
+  type SubtitleTrack,
+  type Chapter
 } from "../bilibili/gateway.js";
 import {
   extractPageIndexFromUrl,
@@ -24,13 +27,25 @@ import {
 import { getMergedSettings } from "../core/settings-store.js";
 import { withTimeout } from "../shared/error-helpers.js";
 import { buildAiContextRef } from "./conversation.js";
+import type { AiContext, HotComment, SubtitleBodyItem } from "./types.js";
 
 // ===== 页内状态（由 background.js 注入：ensureReaderContentReady / sendMessageToTab）=====
 // 在消息路由中直接读取，避免把注入生命周期耦合进本模块。
 
+interface SidepanelContextResponse {
+  ok?: boolean;
+  unchanged?: boolean;
+  payload?: Record<string, unknown>;
+  error?: string;
+  comments?: unknown[];
+}
+
+type SendMessageToTab = (tabId: number, message: Record<string, unknown>) => Promise<SidepanelContextResponse>;
+type EnsureReaderContentReady = (tabId: number) => Promise<void>;
+
 // ===== 上下文解析 =====
 
-function pickPageForAiContext(pages, ref) {
+function pickPageForAiContext(pages: VideoPage[], ref: AiContext): VideoPage | undefined {
   const safePages = Array.isArray(pages) ? pages : [];
   const targetCid = String(ref?.cid || "").trim();
   if (targetCid) {
@@ -47,7 +62,7 @@ function pickPageForAiContext(pages, ref) {
   }
 }
 
-export async function resolveAiSidepanelContext(contextRef) {
+export async function resolveAiSidepanelContext(contextRef: unknown): Promise<AiContext> {
   const ref = buildAiContextRef(contextRef);
   if (!ref.isVideoContext || !ref.bvid) {
     return {
@@ -87,15 +102,22 @@ export async function resolveAiSidepanelContext(contextRef) {
     lang: selectedTrack.lanDoc || selectedTrack.lan
   });
   const cachedBody = await loadSubtitleFromCache(cacheKey);
+  // 旧 JS 调用点传了 transport + url 且期望返回字幕数组；gateway.ts 的导出签名
+  // 已变为只接受 url 并返回 { body }，但本模块仍按旧契约消费（测试 mock 与实际
+  // 历史行为均返回数组）。通过函数类型断言保留原调用以维持运行时行为不变。
+  const fetchSubtitleBodyLegacy = fetchSubtitleBody as unknown as (transport: unknown, url: string) => Promise<unknown[]>;
   const body = Array.isArray(cachedBody) && cachedBody.length > 0
     ? cachedBody
-    : await fetchSubtitleBody(bgFetchJson, selectedTrack.subtitleUrl);
+    : await fetchSubtitleBodyLegacy(bgFetchJson, selectedTrack.subtitleUrl);
   if (!body.length) {
     throw new Error("原视频字幕为空");
   }
 
-  const pageIndex = Number(page?.page || extractPageIndexFromUrl(ref.url) || 1) || 1;
-  const hotComments = await fetchHotComments(bgFetchJson, aid);
+  const pageIndex = Number(page?.page || extractPageIndexFromUrl(ref.url || "") || 1) || 1;
+  // 旧 JS 调用点传了 transport + aid；gateway.ts 的导出签名已变为只接受 count，
+  // 多余参数被忽略。通过函数类型断言保留原调用以维持运行时行为不变。
+  const fetchHotCommentsLegacy = fetchHotComments as unknown as (transport: unknown, aid: string) => Promise<HotComment[]>;
+  const hotComments = await fetchHotCommentsLegacy(bgFetchJson, aid);
   const title = String(videoMeta.title || ref.title || "").trim();
   const author = String(videoMeta.author || ref.author || "").trim();
   const uploadDate = String(videoMeta.uploadDate || ref.uploadDate || "").trim();
@@ -120,41 +142,47 @@ export async function resolveAiSidepanelContext(contextRef) {
     // subtitleBundle.chapters）：供侧边栏回传 offscreen 后做章节对齐切段
     // （budgeter）与追问章节名检索（raw-retrieval）。旧持久化会话 ref 无此
     // 字段时为 undefined，下游 Array.isArray 守卫均已容忍。
-    chapters: Array.isArray(subtitleBundle.chapters) ? subtitleBundle.chapters : [],
+    chapters: Array.isArray(subtitleBundle.chapters) ? (subtitleBundle.chapters as unknown as AiContext["chapters"]) : [],
     // 视频时长（分 P duration，缺省回退全片 defaultDuration）：发模型前由
     // ai/subtitle-prompt.js 的 buildSubtitlePrompt 用于 withHours（小时级时间戳）判定。
     videoDuration,
     // 字幕时间戳开关透传：offscreen 渲染 prompt 时沿用同一设置，保证与预算判定
     // 同源的渲染产物和笔记样式一致；旧数据缺失时消费方按默认 true 处理。
     includeTimestampInBody: settings?.includeTimestampInBody !== false,
-    subtitleBody: body,
-    subtitleOptions: tracks.map((item) => ({
+    subtitleBody: body as SubtitleBodyItem[],
+    subtitleOptions: tracks.map((item: SubtitleTrack) => ({
       id: String(item.id || "").trim(),
       url: String(item.subtitleUrl || "").trim(),
       lang: String(item.lanDoc || item.lan || "").trim()
     })),
-    hotComments,
+    hotComments: hotComments as HotComment[],
     isVideoContext: true
   };
 }
 
-export async function resolveAiSidepanelPageRef(contextRef) {
+export async function resolveAiSidepanelPageRef(contextRef: unknown): Promise<{
+  url: string;
+  bvid: string;
+  cid: string;
+  pageIndex: number;
+  pageTitle: string;
+}> {
   const ref = buildAiContextRef(contextRef);
   if (!ref.isVideoContext || !ref.bvid) {
     return {
-      url: ref.url,
-      bvid: ref.bvid,
-      cid: ref.cid,
+      url: ref.url || "",
+      bvid: ref.bvid || "",
+      cid: ref.cid || "",
       pageIndex: Number(ref.pageIndex) > 0 ? Number(ref.pageIndex) : 1,
-      pageTitle: ref.pageTitle
+      pageTitle: ref.pageTitle || ""
     };
   }
 
   const videoMeta = await fetchVideoMeta(bgFetchJson, ref.bvid);
   const page = pickPageForAiContext(videoMeta.pages, ref);
-  const pageIndex = Number(page?.page || ref.pageIndex || extractPageIndexFromUrl(ref.url) || 1) || 1;
+  const pageIndex = Number(page?.page || ref.pageIndex || extractPageIndexFromUrl(ref.url || "") || 1) || 1;
   return {
-    url: buildCanonicalVideoUrl(ref.bvid, pageIndex) || ref.url,
+    url: buildCanonicalVideoUrl(ref.bvid, pageIndex) || ref.url || "",
     bvid: ref.bvid,
     cid: String(page?.cid || ref.cid || "").trim(),
     pageIndex,
@@ -170,21 +198,37 @@ export async function resolveAiSidepanelPageRef(contextRef) {
 // 后台进行"，回退读取当前快照（subtitleFetchState 会告知转写进行中）。
 const REFRESH_WAIT_MS = 10000;
 
-export async function getAiSidepanelState(tabId, { forceRefresh = false, ifSignature = "" } = {}, tabOps = {}) {
+interface GetAiSidepanelStateOptions {
+  forceRefresh?: boolean;
+  ifSignature?: string;
+}
+
+interface AiSidepanelStateResult extends Record<string, unknown> {
+  unchanged?: boolean;
+  hotComments?: unknown[];
+  isVideoContext?: boolean;
+}
+
+export async function getAiSidepanelState(
+  tabId: number | string | unknown,
+  { forceRefresh = false, ifSignature = "" }: GetAiSidepanelStateOptions = {},
+  tabOps: { ensureReaderContentReady?: EnsureReaderContentReady; sendMessageToTab?: SendMessageToTab } = {}
+): Promise<AiSidepanelStateResult> {
   const { ensureReaderContentReady, sendMessageToTab } = tabOps;
   if (!tabId) {
     throw new Error("缺少标签页信息");
   }
 
-  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const tab = await chrome.tabs.get(Number(tabId)).catch(() => null);
   if (!tab?.id) {
     throw new Error("找不到当前标签页。");
   }
 
   if (!isSupportedBilibiliPage(tab.url)) {
+    const tabLike = tab as chrome.tabs.Tab & { title?: string; url?: string };
     return {
-      title: String(tab.title || "").trim(),
-      url: String(tab.url || "").trim(),
+      title: String(tabLike.title || "").trim(),
+      url: String(tabLike.url || "").trim(),
       author: "",
       uploadDate: "",
       subtitleBody: [],
@@ -193,9 +237,9 @@ export async function getAiSidepanelState(tabId, { forceRefresh = false, ifSigna
     };
   }
 
-  await ensureReaderContentReady(tab.id);
+  await ensureReaderContentReady!(tab.id);
 
-  let contextResp = await sendMessageToTab(tab.id, {
+  let contextResp = await sendMessageToTab!(tab.id, {
     type: "sidepanel-get-context",
     forceRefresh,
     // 候选5：透传 SP 上次全量快照的签名；content 判定状态未变时整份省略。
@@ -220,23 +264,23 @@ export async function getAiSidepanelState(tabId, { forceRefresh = false, ifSigna
   const needsRefresh =
     forceRefresh ||
     !hasPayload ||
-    (!hasLoadedClip && (!Array.isArray(contextResp.payload.subtitleBody) || !contextResp.payload.subtitleBody.length));
+    (!hasLoadedClip && (!Array.isArray(contextResp!.payload!.subtitleBody) || !contextResp!.payload!.subtitleBody.length));
 
   if (needsRefresh) {
     const refreshResp = await withTimeout(
-      sendMessageToTab(tab.id, { type: "popup-refresh" }),
+      sendMessageToTab!(tab.id, { type: "popup-refresh" }),
       REFRESH_WAIT_MS
     );
     if (!refreshResp?.ok) {
       // 超时（无响应）或 content 报错：不整体失败，回退读取当前快照。
       // 无字幕长视频的 ASR 转写以分钟/小时计，这里必须立刻返回"转写中"的
       // 可用快照，由 sidepanel 决定等待策略。
-      contextResp = await sendMessageToTab(tab.id, { type: "sidepanel-get-context" });
+      contextResp = await sendMessageToTab!(tab.id, { type: "sidepanel-get-context" });
       if (!contextResp?.ok || !contextResp?.payload) {
         throw new Error(refreshResp?.error || "当前视频上下文加载失败");
       }
     } else {
-      contextResp = await sendMessageToTab(tab.id, { type: "sidepanel-get-context" });
+      contextResp = await sendMessageToTab!(tab.id, { type: "sidepanel-get-context" });
     }
   }
 
@@ -246,9 +290,9 @@ export async function getAiSidepanelState(tabId, { forceRefresh = false, ifSigna
 
   // 候选5：热评网络拉取只发生在全量路径——unchanged 已在上方提前返回，走到
   // 这里必然是全量（或 forceRefresh 后的复查），为热评多一次往返才值得。
-  let hotComments = [];
+  let hotComments: unknown[] = [];
   try {
-    const commentsResp = await sendMessageToTab(tab.id, { type: "sidepanel-get-hot-comments" });
+    const commentsResp = await sendMessageToTab!(tab.id, { type: "sidepanel-get-hot-comments" });
     if (commentsResp?.ok && Array.isArray(commentsResp.comments)) {
       hotComments = commentsResp.comments;
     }

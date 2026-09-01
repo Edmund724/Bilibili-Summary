@@ -3,11 +3,19 @@
 // 中按需挑出命中的段原样返回，供集成步骤把 items 渲染成注入文本；全部未命中返回 []，
 // 维持压缩摘要上下文，不额外取段（对齐 ADR-0001 的追问注入策略）。
 // 纯函数、无 side effect、不碰 chrome/DOM、不发请求；加载原始段是集成步骤的职责，
-// 本模块只做「给定原始段后的匹配」，故不依赖 segment-cache.js。
+// 本模块只做「给定原始段后的匹配」，故不依赖 segment-cache.ts。
 
 import { STOP_WORDS } from "./stop-words.js";
+import type { ChapterItem, SubtitleBodyItem } from "./types.js";
 
-// 停用词集合：来自 ./stop-words.js（数据与算法分离），关键词命中时过滤并兼作伪分词切分点。
+export interface RawSegment {
+  index?: number;
+  from?: number;
+  to?: number;
+  items?: SubtitleBodyItem[];
+}
+
+// 停用词集合：来自 ./stop-words.ts（数据与算法分离），关键词命中时过滤并兼作伪分词切分点。
 const STOP_WORDS_SET = new Set(STOP_WORDS);
 // 伪分词切分正则：长词优先（如「讲解」先于「讲」），用捕获组保留停用词以便过滤。
 const STOP_SPLIT_RE = new RegExp(
@@ -16,7 +24,7 @@ const STOP_SPLIT_RE = new RegExp(
 );
 
 // 匹配用规整：小写 + 去空白 + 去标点/符号（中日文标点、ASCII 标点、符号均去除）。
-function normalizeForMatch(text) {
+function normalizeForMatch(text: unknown): string {
   return String(text == null ? "" : text)
     .toLowerCase()
     .replace(/[\s\u3000]+/g, "")
@@ -29,11 +37,11 @@ function normalizeForMatch(text) {
  * 拒绝明显非时间：MM/SS < 60、HH < 24（比分「2:0」因秒段必须两位也不匹配）。
  * 返回升序去重的 number[]；无命中 → []。永不抛错。
  */
-export function parseTimestampSeconds(text) {
+export function parseTimestampSeconds(text: unknown): number[] {
   try {
     const s = String(text == null ? "" : text);
-    const out = [];
-    const seen = new Set();
+    const out: number[] = [];
+    const seen = new Set<number>();
     for (const match of s.matchAll(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g)) {
       const parts = match[0].split(":").map(Number);
       const three = parts.length === 3;
@@ -57,16 +65,16 @@ export function parseTimestampSeconds(text) {
  * 章节名命中：prompt 规整后包含某章节 title（忽略大小写、去空白、去标点）即命中。
  * 返回命中的 chapters 项数组（原样引用输入元素）；空/无效输入 → []。永不抛错。
  */
-export function matchChapterByTitle(prompt, chapters) {
+export function matchChapterByTitle(prompt: unknown, chapters: unknown[]): ChapterItem[] {
   try {
     const needle = normalizeForMatch(prompt);
     if (!needle || !Array.isArray(chapters)) return [];
-    const hits = [];
+    const hits: ChapterItem[] = [];
     for (const chapter of chapters) {
       if (!chapter || typeof chapter !== "object") continue;
-      const title = normalizeForMatch(chapter.title);
+      const title = normalizeForMatch((chapter as ChapterItem).title);
       if (!title) continue;
-      if (needle.includes(title)) hits.push(chapter);
+      if (needle.includes(title)) hits.push(chapter as ChapterItem);
     }
     return hits;
   } catch {
@@ -76,8 +84,8 @@ export function matchChapterByTitle(prompt, chapters) {
 
 // 从规整后的 prompt 里抽检索词：拉丁/数字词（≥2 字符，避免单字母噪声）+
 // CJK 连续段按停用词伪分词出的内容块；全被过滤且 prompt 很短时回退用 prompt 整体。
-function extractKeywordNeedles(normalizedText) {
-  const needles = [];
+function extractKeywordNeedles(normalizedText: string): string[] {
+  const needles: string[] = [];
   const latin = normalizedText.match(/[a-z0-9]{2,}/g);
   if (latin) needles.push(...latin);
 
@@ -98,22 +106,23 @@ function extractKeywordNeedles(normalizedText) {
  * （或 prompt 很短时包含 prompt 整体）即命中该段。返回命中的段数组（原样引用）。
  * 空/无效输入 → []。永不抛错。
  */
-export function matchByKeyword(prompt, rawSegments) {
+export function matchByKeyword(prompt: unknown, rawSegments: unknown[]): RawSegment[] {
   try {
     if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
     const normalized = normalizeForMatch(prompt);
     if (!normalized) return [];
     const needles = extractKeywordNeedles(normalized);
     if (needles.length === 0) return [];
-    const hits = [];
+    const hits: RawSegment[] = [];
     for (const seg of rawSegments) {
       if (!seg || typeof seg !== "object") continue;
-      const items = Array.isArray(seg.items) ? seg.items : [];
+      const segItems = (seg as RawSegment).items;
+      const items = Array.isArray(segItems) ? segItems : [];
       const segText = normalizeForMatch(
         items.map((item) => (item && item.content != null ? item.content : "")).join(" ")
       );
       if (!segText) continue;
-      if (needles.some((needle) => needle && segText.includes(needle))) hits.push(seg);
+      if (needles.some((needle) => needle && segText.includes(needle))) hits.push(seg as RawSegment);
     }
     return hits;
   } catch {
@@ -122,8 +131,14 @@ export function matchByKeyword(prompt, rawSegments) {
 }
 
 // 命中段去重（按输入数组下标升序返回，保持原样引用）。
-function dedupeByIndex(segs, indices) {
+function dedupeByIndex(segs: RawSegment[], indices: number[]): RawSegment[] {
   return [...new Set(indices)].sort((a, b) => a - b).map((i) => segs[i]);
+}
+
+interface RetrieveRawSegmentsInput {
+  prompt?: unknown;
+  chapters?: unknown[];
+  rawSegments?: unknown[];
 }
 
 /**
@@ -135,7 +150,7 @@ function dedupeByIndex(segs, indices) {
  *   3. 关键词命中：段 items 的 content 拼接文本包含任一非停用词。
  * 永不抛错（含空 prompt / 空段 / 空章节 / 非数组输入）。
  */
-export function retrieveRawSegments({ prompt = "", chapters = [], rawSegments = [] } = {}) {
+export function retrieveRawSegments({ prompt = "", chapters = [], rawSegments = [] }: RetrieveRawSegmentsInput = {}): RawSegment[] {
   try {
     const text = String(prompt == null ? "" : prompt);
     const segs = Array.isArray(rawSegments) ? rawSegments : [];
@@ -145,31 +160,31 @@ export function retrieveRawSegments({ prompt = "", chapters = [], rawSegments = 
     // 1. 时间戳命中。
     const stamps = parseTimestampSeconds(text);
     if (stamps.length > 0) {
-      const indices = [];
+      const indices: number[] = [];
       for (const t of stamps) {
         for (let i = 0; i < segs.length; i++) {
-          const from = Number(segs[i]?.from);
-          const to = Number(segs[i]?.to);
+          const from = Number((segs[i] as RawSegment)?.from);
+          const to = Number((segs[i] as RawSegment)?.to);
           if (Number.isFinite(from) && Number.isFinite(to) && from <= t && t < to) indices.push(i);
         }
       }
-      if (indices.length > 0) return dedupeByIndex(segs, indices);
+      if (indices.length > 0) return dedupeByIndex(segs as RawSegment[], indices);
     }
 
     // 2. 章节名命中。
     const matchedChapters = matchChapterByTitle(text, chs);
     if (matchedChapters.length > 0) {
-      const indices = [];
+      const indices: number[] = [];
       for (const chapter of matchedChapters) {
         const cf = Number(chapter?.from);
         const ct = Number(chapter?.to);
         if (!Number.isFinite(cf) || !Number.isFinite(ct)) continue;
         for (let i = 0; i < segs.length; i++) {
-          const from = Number(segs[i]?.from);
+          const from = Number((segs[i] as RawSegment)?.from);
           if (Number.isFinite(from) && from >= cf && from < ct) indices.push(i);
         }
       }
-      if (indices.length > 0) return dedupeByIndex(segs, indices);
+      if (indices.length > 0) return dedupeByIndex(segs as RawSegment[], indices);
     }
 
     // 3. 关键词命中。

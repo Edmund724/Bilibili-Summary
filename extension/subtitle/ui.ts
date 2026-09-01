@@ -10,12 +10,11 @@ import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import { normalizeDownloadFormat } from "../core/validators.js";
 import { state } from "../core/state.js";
-import { setMessage } from "../ui/ui-renderer.js";
+import { setMessage, setStatus } from "../ui/ui-renderer.js";
 // ids 为常驻微模块（候选02 分层惰性）：纯常量表，不经 reader/index.js facade
 // 转发（否则总结链会静态拖起整个 reader 域）。
 import { ids } from "../reader/ids.js";
 import { refreshDerivedContent, rebuildDerivedContent } from "./core.js";
-import { setStatus } from "../ui/ui-renderer.js";
 
 // ===== 抓取结果渲染（候选02 分层惰性：自 ui/ui-renderer.js 移入） =====
 //
@@ -24,15 +23,15 @@ import { setStatus } from "../ui/ui-renderer.js";
 // 的交互回调——留在 ui-renderer（常驻）会把它对 selection.js（isAiSubtitle）及
 // cache/cache-lru 的依赖一并拖回常驻。setStatus/setMessage 仍在 ui-renderer：
 // URL 变化编排与本模块错误提示在启动期使用。
-export function setBusyState(disabled) {
-  byId(ids.copyBtn).disabled = disabled;
-  byId(ids.downloadBtn).disabled = disabled;
-  byId(ids.refreshBtn).disabled = disabled;
-  byId(ids.settingsBtn).disabled = disabled;
-  byId(ids.subtitleSelect).disabled = disabled || state.clip.subtitles.length === 0;
+export function setBusyState(disabled: boolean): void {
+  (byId(ids.copyBtn) as HTMLButtonElement).disabled = disabled;
+  (byId(ids.downloadBtn) as HTMLButtonElement).disabled = disabled;
+  (byId(ids.refreshBtn) as HTMLButtonElement).disabled = disabled;
+  (byId(ids.settingsBtn) as HTMLButtonElement).disabled = disabled;
+  (byId(ids.subtitleSelect) as HTMLSelectElement).disabled = disabled || state.clip.subtitles.length === 0;
 }
 
-export function renderMeta() {
+export function renderMeta(): void {
   const meta = byId(ids.meta);
   if (!state.clip.bvid) {
     meta.innerHTML = '<div class="boc-meta-item">尚未抓取视频信息</div>';
@@ -49,8 +48,8 @@ export function renderMeta() {
   `;
 }
 
-export function renderSubtitleSelect() {
-  const select = byId(ids.subtitleSelect);
+export function renderSubtitleSelect(): void {
+  const select = byId(ids.subtitleSelect) as HTMLSelectElement;
   const subtitles = state.clip.subtitles || [];
 
   if (subtitles.length === 0) {
@@ -62,7 +61,7 @@ export function renderSubtitleSelect() {
   select.innerHTML = subtitles
     .map((item) => {
       const selectedById =
-        state.clip.selectedSubtitleId && String(item.id) === String(state.clip.selectedSubtitleId);
+        state.clip.selectedSubtitleId && String(item.id || "") === String(state.clip.selectedSubtitleId);
       const selectedByUrl = item.subtitleUrl === state.clip.selectedSubtitleUrl;
       const selected = selectedById || selectedByUrl ? "selected" : "";
       const label = item.lanDoc || item.lan || "unknown";
@@ -79,9 +78,10 @@ export function renderSubtitleSelect() {
   select.disabled = false;
 }
 
-export async function onSubtitleChange(event) {
-  const value = event.target.value;
-  const option = event.target.options[event.target.selectedIndex];
+export async function onSubtitleChange(event: Event): Promise<void> {
+  const target = event.target as HTMLSelectElement;
+  const value = target.value;
+  const option = target.options[target.selectedIndex];
   const lang = option?.dataset.lang || "unknown";
   const subtitleId = option?.dataset.id || "";
   if (!value) {
@@ -104,7 +104,7 @@ export async function onSubtitleChange(event) {
   }
 }
 
-export async function copyMarkdown() {
+export async function copyMarkdown(): Promise<void> {
   state.setSettings(await getSettings());
   await refreshDerivedContent();
   if (!state.clip.markdown) {
@@ -120,7 +120,7 @@ export async function copyMarkdown() {
   }
 }
 
-export async function downloadSubtitle() {
+export async function downloadSubtitle(): Promise<void> {
   state.setSettings(await getSettings());
   rebuildDerivedContent();
   const format = normalizeDownloadFormat(state.settings?.downloadFormat);
@@ -147,12 +147,12 @@ export async function downloadSubtitle() {
   setMessage(`已下载：${filename}`);
 }
 
-export function getPopupPayload() {
+export function getPopupPayload(): Record<string, unknown> {
   const subtitleOptions = (state.clip.subtitles || []).map((item) => {
     const label = item.lanDoc || item.lan || "unknown";
     const isAi = isAiSubtitle(item);
     const selectedById =
-      state.clip.selectedSubtitleId && String(item.id) === String(state.clip.selectedSubtitleId);
+      state.clip.selectedSubtitleId && String(item.id || "") === String(state.clip.selectedSubtitleId);
     const selectedByUrl = item.subtitleUrl === state.clip.selectedSubtitleUrl;
     return {
       id: String(item.id || ""),
@@ -186,7 +186,7 @@ export function getPopupPayload() {
 // 与预览 DOM 属该事务，调用点（fetcher 的 finishNoSubtitle、asr/fallback 的
 // 失败出口）一律改走 commit。
 
-export function readVideoDescription() {
+export function readVideoDescription(): string {
   const descNode = document.querySelector(
     ".desc-info-text, .video-desc .desc-info-text, .video-info-detail .text, .basic-desc-info"
   );

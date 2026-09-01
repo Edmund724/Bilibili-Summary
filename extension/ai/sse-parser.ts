@@ -3,16 +3,20 @@
 // 输出：{ type: "reasoning" | "content", data: string }[]。
 // 不依赖任何 Chrome API、port、signal 或 fetch，可同时在 ES module 与 classic script 中使用。
 
-export function parseSsePayload(text) {
+import type { SseEvent } from "./types.js";
+
+export function parseSsePayload(text: unknown): SseEvent[] {
   const trimmed = String(text || "").trim();
   if (!trimmed || trimmed === "[DONE]") {
     return [];
   }
 
   try {
-    const json = JSON.parse(trimmed);
+    const json = JSON.parse(trimmed) as {
+      choices?: Array<{ delta?: { reasoning_content?: unknown; content?: unknown } }>;
+    };
     const delta = json?.choices?.[0]?.delta || {};
-    const events = [];
+    const events: SseEvent[] = [];
 
     if (delta.reasoning_content) {
       events.push({ type: "reasoning", data: String(delta.reasoning_content) });

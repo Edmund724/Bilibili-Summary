@@ -24,6 +24,7 @@ import {
   saveSegmentSummary,
   saveRawSegments
 } from "./segment-cache.js";
+import type { BudgetPlan, BudgetPlanSegment, StreamChatEvent } from "./types.js";
 
 // 单条字幕项渲染上限（防御性截断，避免个别超长项撑爆小结请求）。
 const MAX_ITEM_CHARS = 4000;
@@ -33,10 +34,23 @@ const OVERFLOW_RETRY_BUDGET_SCALE = 0.5;
 const OVERFLOW_RETRY_NOTICE = "模型上下文不足，已自动调低单段素材量并重试";
 const OVERFLOW_STILL_MESSAGE = "该视频素材在调低分段量后仍超出模型上下文，请更换上下文窗口更大的模型后重试";
 
+interface ChatPort {
+  postMessage(message: StreamChatEvent | { type: string; data?: string; reason?: string }): void;
+}
+
+interface ChatCompletionImpl {
+  (input: {
+    provider: { baseUrl?: string; apiKey?: string; model?: string };
+    messages: Array<{ role: string; content: string }>;
+    thinkingLevel?: string;
+    signal?: AbortSignal | null;
+  }): Promise<unknown>;
+}
+
 /**
  * 进度文案纯函数：percent = round(index / total * 100)。
  */
-export function buildProgressNotice(index, total) {
+export function buildProgressNotice(index: number | unknown, total: number | unknown): string {
   const safeTotal = Math.max(1, Number(total) || 1);
   const safeIndex = Math.min(Math.max(1, Number(index) || 1), safeTotal);
   const percent = Math.round((safeIndex / safeTotal) * 100);
@@ -46,10 +60,10 @@ export function buildProgressNotice(index, total) {
 /**
  * 把一条字幕项渲染成 `[起点-终点] 内容`（时间点格式对齐蓝本 segments_to_prompt）。
  */
-export function formatSegmentItem(item) {
-  const content = String(item && item.content != null ? item.content : "").trim();
-  const from = Number(item && item.from) || 0;
-  const to = Number(item && item.to) || from;
+export function formatSegmentItem(item: unknown): string {
+  const content = String(item && (item as { content?: unknown }).content != null ? (item as { content?: unknown }).content : "").trim();
+  const from = Number(item && (item as { from?: unknown }).from) || 0;
+  const to = Number(item && (item as { to?: unknown }).to) || from;
   const withHours = from >= 3600 || to >= 3600;
   return `[${formatCompactTimestamp(from, withHours)}-${formatCompactTimestamp(to, withHours)}] ${content}`;
 }
@@ -59,7 +73,7 @@ export function formatSegmentItem(item) {
  * 对齐蓝本 _chunk_prompt 措辞——视频标题 + 第 index/N 个连续片段 +
  * 忠实压缩（保留重要事实、例子、论证关系与原有时间点），不做评价、不补外部知识。
  */
-function buildSegmentPrompt({ title, index, total, items }) {
+function buildSegmentPrompt({ title, index, total, items }: { title: string; index: number; total: number; items: unknown[] }): string {
   const segmentLines = (Array.isArray(items) ? items : []).map((item) => {
     const text = formatSegmentItem(item);
     return text.length > MAX_ITEM_CHARS ? text.slice(0, MAX_ITEM_CHARS) + "…" : text;
@@ -79,7 +93,7 @@ ${segmentLines.join("\n")}`;
  * 忠实复原脉络/观点/依据/时间点，不补外部知识，标题 `# 视频笔记：《{title}》`。
  * 材料中每条小结以 `### 片段 i` 标注。
  */
-function buildNotePrompt({ title, material }) {
+function buildNotePrompt({ title, material }: { title: string; material: string }): string {
   return `写一份翔实、自然的 Markdown 视频笔记。完整复原内容脉络、具体例子、核心观点及其依据，
 并在有帮助时加入关键时间点。不要加入外部知识或评价。
 
@@ -95,11 +109,23 @@ ${material}`;
 /**
  * 把所有分段小结汇总为一份成稿材料：每条前面 `### 片段 i` 标注。
  */
-function buildMaterial(summaries) {
+function buildMaterial(summaries: unknown[]): string {
   const list = Array.isArray(summaries) ? summaries : [];
   return list
     .map((summary, i) => `### 片段 ${i + 1}\n${String(summary || "")}`)
     .join("\n\n");
+}
+
+interface SummarizeSegmentInput {
+  provider: { baseUrl?: string; apiKey?: string; model?: string };
+  context: Record<string, unknown>;
+  segment: BudgetPlanSegment;
+  total: number;
+  signal?: AbortSignal | null;
+  thinkingLevel?: string;
+  chatCompletionImpl: ChatCompletionImpl;
+  notifyCacheWriteError: () => void;
+  budgetScale?: number | unknown;
 }
 
 /**
@@ -121,7 +147,7 @@ async function summarizeSegment({
   chatCompletionImpl,
   notifyCacheWriteError,
   budgetScale = 1
-}) {
+}: SummarizeSegmentInput): Promise<string> {
   const rawKey = buildRawSegmentCacheKey(context, segment.index, budgetScale);
   const summaryKey = buildSegmentSummaryCacheKey(context, segment.index, budgetScale);
 
@@ -145,7 +171,7 @@ async function summarizeSegment({
   }
 
   const prompt = buildSegmentPrompt({
-    title: context?.title || "未知",
+    title: String(context?.title || "未知"),
     index: segment.index,
     total,
     items: segment.items || []
@@ -170,6 +196,23 @@ async function summarizeSegment({
   return clamped;
 }
 
+interface OrchestrateMapReduceInput {
+  provider: { baseUrl?: string; apiKey?: string; model?: string };
+  context?: Record<string, unknown> | null;
+  plan?: BudgetPlan | null;
+  port?: ChatPort | null;
+  signal?: AbortSignal | null;
+  thinkingLevel?: string;
+  onProgress?: (notice: string) => void;
+  chatCompletion?: ChatCompletionImpl;
+}
+
+interface MapReduceResult {
+  draft: string;
+  segmentSummaries: string[];
+  aborted: boolean;
+}
+
 /**
  * 编排主函数（签名固定，04/07/08 只换内部实现）：
  * 切片 → 逐段小结（串行 runMapBounded）→ 成稿（shouldReduce 为真先归并）→ 回吐正文。
@@ -187,10 +230,10 @@ export async function orchestrateMapReduce({
   signal,
   thinkingLevel,
   onProgress,
-  chatCompletion: chatCompletionImpl = chatCompletion
-}) {
+  chatCompletion: chatCompletionImpl = chatCompletion as unknown as ChatCompletionImpl
+}: OrchestrateMapReduceInput): Promise<MapReduceResult> {
   const ctx = context || {};
-  const post = (message) => {
+  const post = (message: StreamChatEvent | { type: string; data?: string; reason?: string }) => {
     if (port && typeof port.postMessage === "function") {
       port.postMessage(message);
     }
@@ -198,7 +241,7 @@ export async function orchestrateMapReduce({
 
   // 中止收束：回吐 stopped（对齐 streamChat 的停止 UX），不 post done，不抛错误；
   // 已完成的小结（部分结果）随 aborted 结果带出。
-  const abortReturn = (segmentSummaries = []) => {
+  const abortReturn = (segmentSummaries: string[] = []): MapReduceResult => {
     post({ type: "stopped", reason: "已停止生成" });
     return { draft: "", segmentSummaries, aborted: true };
   };
@@ -214,13 +257,18 @@ export async function orchestrateMapReduce({
     post({ type: "notice", data: "本地字幕缓存写入失败（已自动清理旧视频缓存仍失败），本次结果可能无法跨会话复用。" });
   };
 
+  interface RunOnceInput {
+    budgetScale: number;
+    injectedPlan: BudgetPlan | null | undefined;
+  }
+
   /**
    * 单轮编排：按 budgetScale 切段 → 逐段小结 → 归并 → 成稿 → 回吐。
    * injectedPlan：首轮用调用方注入的 plan（ladder 按常态预算预生成，成本护栏
    * 文案与其一致）；重跑必须重算（预算已收紧，段边界与调用数都变了）。
    * abort 返回 { aborted: true }；溢出与其他错误 throw，由外层分流。
    */
-  const runOnce = async ({ budgetScale, injectedPlan }) => {
+  const runOnce = async ({ budgetScale, injectedPlan }: RunOnceInput): Promise<MapReduceResult> => {
     const resolvedPlan =
       injectedPlan ||
       buildBudgetPlan(
@@ -238,10 +286,13 @@ export async function orchestrateMapReduce({
 
     // 按原始下标累积的小结（并发完成序可乱，写回位置不乱）；中止时随 aborted
     // 结果带出已完成的部分。
-    const segmentSummaries = [];
+    const segmentSummaries: string[] = [];
 
-    const emitProgress = (index) => {
+    const emitProgress = (index: number) => {
       const notice = buildProgressNotice(index, total);
+      emitNotice(notice);
+    };
+    const emitNotice = (notice: string) => {
       if (typeof onProgress === "function") {
         onProgress(notice);
       } else {
@@ -249,7 +300,7 @@ export async function orchestrateMapReduce({
       }
     };
 
-    const worker = async (segment) => {
+    const worker = async (segment: BudgetPlanSegment): Promise<{ segment: BudgetPlanSegment; summary: string }> => {
       const summary = await summarizeSegment({
         provider,
         context: ctx,
@@ -264,7 +315,7 @@ export async function orchestrateMapReduce({
       return { segment, summary };
     };
 
-    let done;
+    let done: { segment: BudgetPlanSegment; summary: string }[];
     try {
       done = await runMapBounded({
         items: segments,
@@ -277,7 +328,7 @@ export async function orchestrateMapReduce({
         }
       });
     } catch (e) {
-      if (e?.aborted || signal?.aborted) {
+      if ((e as { aborted?: boolean })?.aborted || signal?.aborted) {
         return abortReturn(segmentSummaries);
       }
       throw e;
@@ -294,14 +345,14 @@ export async function orchestrateMapReduce({
       try {
         merged = await reduceSummaries({
           summaries: materialSummaries,
-          title: ctx.title || "未知",
+          title: String(ctx.title || "未知"),
           groupInputChars: resolvedPlan.reduceGroupInputChars,
-          runPrompts: async ({ prompt, messages }) => {
+          runPrompts: async ({ prompt, messages }: { prompt?: string; messages?: unknown[] }) => {
             const text = await chatCompletionImpl({
               provider,
-              messages: messages || [
+              messages: (messages as Array<{ role: string; content: string }> | undefined) || [
                 { role: "system", content: "你是视频笔记编辑。" },
-                { role: "user", content: prompt }
+                { role: "user", content: prompt || "" }
               ],
               thinkingLevel,
               signal
@@ -309,11 +360,11 @@ export async function orchestrateMapReduce({
             return String(text || "");
           },
           signal,
-          onProgress: emitProgress
+          onProgress: emitNotice
         });
       } catch (e) {
         // 归并阶段的中止同样收束为 stopped（此前该阶段 abort 会漏成 port error）。
-        if (e?.aborted || signal?.aborted) {
+        if ((e as { aborted?: boolean })?.aborted || signal?.aborted) {
           return abortReturn(segmentSummaries);
         }
         throw e;
@@ -325,7 +376,7 @@ export async function orchestrateMapReduce({
     }
 
     const material = buildMaterial(materialSummaries);
-    const notePrompt = buildNotePrompt({ title: ctx.title || "未知", material });
+    const notePrompt = buildNotePrompt({ title: String(ctx.title || "未知"), material });
 
     let draft = "";
     try {
@@ -341,7 +392,7 @@ export async function orchestrateMapReduce({
         }) || ""
       ).trim();
     } catch (e) {
-      if (e?.aborted || signal?.aborted) {
+      if ((e as { aborted?: boolean })?.aborted || signal?.aborted) {
         return abortReturn(segmentSummaries);
       }
       throw e;
@@ -364,21 +415,21 @@ export async function orchestrateMapReduce({
   try {
     return await runOnce({ budgetScale: 1, injectedPlan: plan });
   } catch (e) {
-    if (e?.aborted || signal?.aborted) {
+    if ((e as { aborted?: boolean })?.aborted || signal?.aborted) {
       return abortReturn();
     }
-    if (!e?.overflow) {
+    if (!(e as { overflow?: boolean })?.overflow) {
       throw e;
     }
     // 溢出兜底：放宽预算（收紧单段/归并组输入至 0.5 倍）整轮重跑一次。
     post({ type: "notice", data: OVERFLOW_RETRY_NOTICE });
     try {
-      return await runOnce({ budgetScale: OVERFLOW_RETRY_BUDGET_SCALE });
+      return await runOnce({ budgetScale: OVERFLOW_RETRY_BUDGET_SCALE, injectedPlan: null });
     } catch (e2) {
-      if (e2?.aborted || signal?.aborted) {
+      if ((e2 as { aborted?: boolean })?.aborted || signal?.aborted) {
         return abortReturn();
       }
-      if (e2?.overflow) {
+      if ((e2 as { overflow?: boolean })?.overflow) {
         throw new Error(OVERFLOW_STILL_MESSAGE);
       }
       throw e2;

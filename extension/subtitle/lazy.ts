@@ -1,5 +1,5 @@
-// 总结链（subtitle/fetcher.js 抓取编排 + subtitle/ui.js + notes/render.js 及
-// 其独占依赖）的按需加载器（候选02 分层惰性）。
+// 总结链（subtitle/fetcher.js 抓取编排 + subtitle/ui.js + notes/render.js 及其
+// 独占依赖）的按需加载器（候选02 分层惰性）。
 //
 // 为什么惰性：抓字幕/笔记渲染链（~20KB）只在首次抓字幕（popup-refresh、刷新
 // 抓取按钮、URL 变化自动刷新、阅读模式进入后的后台刷新）时才有职责。候选02
@@ -28,7 +28,25 @@
 
 import { createLazyLoader } from "../shared/lazy-import.js";
 
-async function loadSummarizeChain() {
+export interface SummarizeChain {
+  refreshClip(): Promise<void>;
+  loadSubtitle(
+    url: string,
+    lang: string,
+    runId?: number,
+    subtitleId?: string,
+    forceRefresh?: boolean
+  ): Promise<void>;
+  resetClipState(options?: { keepFetchState?: boolean }): void;
+  onSubtitleChange(event: Event): Promise<void>;
+  copyMarkdown(): Promise<void>;
+  downloadSubtitle(): Promise<void>;
+  getPopupPayload(): Record<string, unknown>;
+  renderMeta(): void;
+  renderSubtitleSelect(): void;
+}
+
+async function loadSummarizeChain(): Promise<SummarizeChain> {
   // fetcher（抓取编排 + resetClipState）与 ui（popup payload / 复制下载回调）
   // 同属链层，一次 ensure 全部就位；两文件间本就互相引用（ui → fetcher），
   // 并行装载只是把等待重叠。
@@ -37,14 +55,14 @@ async function loadSummarizeChain() {
   // 该注册依赖「fetcher 总在启动时装载」的假设。链改为按需装载后，注册时机
   // 与装载绑定——ensure 成功路径上执行一次（subscribeSubtitleRefresh 自带
   // 去重，重复调用安全）。
-  fetcher.initSummarizeChain();
+  (fetcher as { initSummarizeChain(): void }).initSummarizeChain();
   // 合并成单一 chain 门面：两模块导出无重名（fetcher=抓取编排，ui=payload/交互）。
-  return { ...fetcher, ...chainUi };
+  return { ...fetcher, ...chainUi } as SummarizeChain;
 }
 
 const chainLoader = createLazyLoader(loadSummarizeChain);
 
 // 按需装载总结链，同一文档内重复调用共享同一 promise。
-export function ensureSummarizeChain() {
+export function ensureSummarizeChain(): Promise<SummarizeChain> {
   return chainLoader.load();
 }

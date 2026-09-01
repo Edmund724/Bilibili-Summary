@@ -1,4 +1,4 @@
-// extension/ai/subtitle-prompt.js
+// extension/ai/subtitle-prompt.ts
 // 「字幕 → 模型可读文本」的唯一渲染收口：消息协议只携带 subtitleBody（原始字幕
 // 条目数组）+ chapters + videoDuration + includeTimestampInBody，markdown 一律在
 // 发 prompt 前由本模块从 body 现场渲染，保证「预算按 body 判定、发送物由同一份
@@ -12,18 +12,34 @@
 
 import { formatCompactTimestamp } from "../shared/string-utils.js";
 import { buildSubtitleSectionLines, shouldShowHoursInNote } from "../notes/render.js";
+import type { ChapterItem, SubtitleBodyItem } from "./types.js";
+
+interface AiConversationMeta {
+  chapters?: ChapterItem[] | unknown[];
+  videoDuration?: number | unknown;
+}
+
+interface AiConversationSettings {
+  includeTimestampInBody?: boolean;
+}
 
 // 笔记场景：按设置（章节占位/时间戳开关）把字幕体渲染成带章节分桶的 markdown。
-export function buildAiConversationMarkdown(meta, body, settings) {
+export function buildAiConversationMarkdown(
+  meta: AiConversationMeta,
+  body: unknown[],
+  settings: AiConversationSettings
+): string {
   const includeTimestampInBody = settings?.includeTimestampInBody !== false;
   const withHours = shouldShowHoursInNote(meta, body);
-  const lines = [];
+  const lines: string[] = [];
   const chapters = Array.isArray(meta?.chapters) ? meta.chapters : [];
   if (chapters.length) {
     lines.push("## 章节", "");
-    chapters.forEach((item) => {
-      const stamp = includeTimestampInBody ? `\`${formatCompactTimestamp(item.from, withHours)}\` ` : "";
-      lines.push(`- ${stamp}${item.title}`);
+    chapters.forEach((item: unknown) => {
+      const from = Number((item as { from?: unknown }).from) || 0;
+      const title = String((item as { title?: unknown }).title || "");
+      const stamp = includeTimestampInBody ? `\`${formatCompactTimestamp(from, withHours)}\` ` : "";
+      lines.push(`- ${stamp}${title}`);
     });
     lines.push("");
   }
@@ -35,13 +51,25 @@ export function buildAiConversationMarkdown(meta, body, settings) {
   return lines.join("\n");
 }
 
+interface BuildSubtitlePromptInput {
+  body?: unknown[];
+  chapters?: unknown[];
+  videoDuration?: number | unknown;
+  includeTimestampInBody?: boolean | unknown;
+}
+
 /**
  * 发模型场景：从字幕体（而非渲染产物）渲染模型可读文本。
  * 输入与素材预算判定（buildBudgetPlan 的 body + chapters）同源；withHours 由
  * shouldShowHoursInNote 按 body/chapters/videoDuration 判定，与笔记渲染一致。
  * body 为空/缺失时返回空串（调用方按「暂无字幕」兜底），不虚构内容。
  */
-export function buildSubtitlePrompt({ body, chapters, videoDuration, includeTimestampInBody } = {}) {
+export function buildSubtitlePrompt({
+  body,
+  chapters,
+  videoDuration,
+  includeTimestampInBody
+}: BuildSubtitlePromptInput = {}): string {
   const items = Array.isArray(body) ? body : [];
   if (items.length === 0) {
     return "";

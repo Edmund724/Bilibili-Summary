@@ -9,8 +9,28 @@ import {
   buildSrt,
   buildTxt
 } from "../notes/render.js";
+import type { State } from "../core/state.js";
 
-export function readVideoTitle() {
+export interface ReadingTranscriptItem {
+  index: number;
+  from: number;
+  to: number;
+  content: string;
+}
+
+interface SubtitleBodyItemLike {
+  from?: unknown;
+  to?: unknown;
+  content?: unknown;
+}
+
+interface ChapterItemLike {
+  from?: unknown;
+  to?: unknown;
+  title?: string;
+}
+
+export function readVideoTitle(): string {
   const h1 = document.querySelector("h1.video-title");
   if (h1?.textContent?.trim()) {
     return h1.textContent.trim();
@@ -18,13 +38,13 @@ export function readVideoTitle() {
 
   const metaTitle = document.querySelector('meta[property="og:title"]');
   if (metaTitle?.getAttribute("content")) {
-    return metaTitle.getAttribute("content").trim();
+    return metaTitle.getAttribute("content")!.trim();
   }
 
   return document.title.replace(/_哔哩哔哩_bilibili/i, "").trim();
 }
 
-export function readVideoAuthor() {
+export function readVideoAuthor(): string {
   const owner = document.querySelector(".up-name");
   if (owner?.textContent?.trim()) {
     return owner.textContent.trim();
@@ -34,10 +54,10 @@ export function readVideoAuthor() {
   return author?.getAttribute("content")?.trim() || "";
 }
 
-export function readUploadDate() {
+export function readUploadDate(): string {
   const publishNode = document.querySelector('meta[itemprop="uploadDate"]');
   if (publishNode?.getAttribute("content")) {
-    return publishNode.getAttribute("content").trim();
+    return publishNode.getAttribute("content")!.trim();
   }
 
   const dateText = document.querySelector(".pubdate-ip-text")?.textContent?.trim();
@@ -48,7 +68,7 @@ export function readUploadDate() {
   return formatLocalDate();
 }
 
-export function getReadingTranscriptItems(body = state.clip.subtitleBody) {
+export function getReadingTranscriptItems(body: SubtitleBodyItemLike[] = state.clip.subtitleBody): ReadingTranscriptItem[] {
   return (Array.isArray(body) ? body : [])
     .map((item, index) => ({
       index,
@@ -59,7 +79,7 @@ export function getReadingTranscriptItems(body = state.clip.subtitleBody) {
     .filter((item) => item.content);
 }
 
-export function getReadingTranscriptPlaceholderText() {
+export function getReadingTranscriptPlaceholderText(): string {
   if (state.clip.subtitleFetchState === "loading") {
     return "正在加载字幕...";
   }
@@ -78,13 +98,13 @@ export function getReadingTranscriptPlaceholderText() {
 const ACTIVE_SUBTITLE_BACKWARD_SCAN_LIMIT = 8;
 
 // to 缺省/非法时视为 from + 2（与旧线性扫描逐字一致）。
-function subtitleActiveRange(item) {
+function subtitleActiveRange(item: SubtitleBodyItemLike): { from: number; to: number } {
   const from = Number(item?.from || 0) || 0;
   const rawTo = Number(item?.to || 0) || 0;
   return { from, to: rawTo > from ? rawTo : from + 2 };
 }
 
-export function findActiveSubtitleIndex(currentTime) {
+export function findActiveSubtitleIndex(currentTime: number): number {
   const items = Array.isArray(state.clip.subtitleBody) ? state.clip.subtitleBody : [];
   // 二分定位最后一个 from <= currentTime 的条目（subtitleBody 按 from 升序，
   // 由写入端 sortSubtitleBodyByFrom 保证）。旧实现为线性扫描，长视频 1500+
@@ -113,7 +133,7 @@ export function findActiveSubtitleIndex(currentTime) {
   return -1;
 }
 
-export function findActiveChapterIndex(currentTime) {
+export function findActiveChapterIndex(currentTime: number): number {
   const chapters = normalizeChapters(state.clip.chapters || []);
   for (let index = 0; index < chapters.length; index += 1) {
     const item = chapters[index];
@@ -129,12 +149,12 @@ export function findActiveChapterIndex(currentTime) {
   return -1;
 }
 
-export function rebuildDerivedContent() {
+export function rebuildDerivedContent(): void {
   const body = Array.isArray(state.clip.subtitleBody) ? state.clip.subtitleBody : [];
-  clipState.setMarkdown(body.length ? buildMarkdown(state, body, state.settings) : "");
+  clipState.setMarkdown(body.length ? buildMarkdown(state as State, body, state.settings) : "");
   clipState.setSrt(body.length ? buildSrt(body) : "");
   clipState.setTxt(body.length ? buildTxt(body, state.settings) : "");
-  const previewNode = document.getElementById("boc-preview");
+  const previewNode = document.getElementById("boc-preview") as HTMLTextAreaElement | null;
   if (!previewNode) {
     throw new Error(`Missing node: boc-preview`);
   }
@@ -142,7 +162,7 @@ export function rebuildDerivedContent() {
 }
 
 // 原 extension/notes/build.js 的 refreshDerivedContent，浅模块合并后内联于此。
-export async function refreshDerivedContent({ refreshComments = false } = {}) {
+export async function refreshDerivedContent({ refreshComments = false } = {}): Promise<void> {
   if (state.settings?.includeHotCommentsInNote) {
     const shouldFetchComments =
       refreshComments || !Array.isArray(state.clip.hotComments) || state.clip.hotComments.length === 0;

@@ -2,21 +2,25 @@ import { setMessage, setStatus } from "../ui/ui-renderer.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import { normalizeDownloadFormat } from "../core/validators.js";
 import { state, clipState } from "../core/state.js";
+import type { SubtitleOption } from "../core/state.js";
 import { extractBvid, computeCurrentClipSignature } from "../bilibili/video-id-shared.js";
 import { getSettings } from "../core/runtime.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { byId } from "../shared/dom-utils.js";
-import { ensureRunActive, isStaleRunError, getErrorMessage, toReadableText, isRetryableNetworkError, retryAsync } from "../shared/error-helpers.js";
+import {
+  ensureRunActive,
+  isStaleRunError,
+  getErrorMessage,
+  toReadableText,
+  isRetryableNetworkError,
+  retryAsync
+} from "../shared/error-helpers.js";
 import { logInfo, logWarn } from "../shared/logging.js";
 import { createLazyLoader } from "../shared/lazy-import.js";
 // isReaderViewOpen 位于常驻微模块（候选02 分层惰性）：纯 state 读取，不再经
 // reader/index.js facade 静态转发（否则整条 reader 域会被拖进本链闭包）。
 import { isReaderViewOpen } from "../reader/view-state.js";
-import {
-  readVideoTitle,
-  readVideoAuthor,
-  readUploadDate
-} from "./core.js";
+import { readVideoTitle, readVideoAuthor, readUploadDate } from "./core.js";
 import {
   normalizeChapters,
   normalizeSubtitleTracks,
@@ -24,6 +28,7 @@ import {
   sortSubtitleBodyByFrom,
   validateSubtitleByDuration
 } from "./selection.js";
+import type { DurationValidationResult } from "./selection.js";
 import {
   buildSubtitleCandidates,
   clearSubtitleCacheByKey,
@@ -54,6 +59,14 @@ import {
   readRuntimeVideoDuration,
   contentFetchJson
 } from "../bilibili/gateway.js";
+import type { SubtitleTrack, Chapter, VideoMeta } from "../bilibili/gateway.js";
+import type { AsrFallback, AsrProviderMeta, CreateAsrFallbackDeps } from "../asr/fallback.js";
+
+interface SubtitleDurationMismatchError extends Error {
+  code: "SUBTITLE_DURATION_MISMATCH";
+  details: DurationValidationResult;
+}
+
 // ASR 域（pipeline + fallback 及其专属依赖 audio-source/offscreen-bridge.page）
 // 经动态 import 按需加载（候选4 分包）：只有视频无 CC 字幕时才需要语音转写。
 // runAsrPipeline 仅作为注入实参传给 asr/fallback 工厂（回退策略簇本体已迁出；
@@ -70,7 +83,7 @@ import {
 // ensureSummarizeChain() success path (subscribeSubtitleRefresh 自带去重，
 // 重复调用安全), so the reader side can trigger a re-fetch through the
 // presenter seam's requestSubtitleRefresh() as soon as the chain is loaded.
-export function initSummarizeChain() {
+export function initSummarizeChain(): void {
   subscribeSubtitleRefresh(refreshClip);
 }
 
@@ -83,7 +96,7 @@ configureCommitUi({
   setStatus
 });
 
-export async function fetchVideoMeta(bvid) {
+export async function fetchVideoMeta(bvid: string): Promise<VideoMeta> {
   logInfo("[BOC] fetch video meta", {
     url: `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`,
     bvid
@@ -91,7 +104,11 @@ export async function fetchVideoMeta(bvid) {
   return gatewayFetchVideoMeta(contentFetchJson, bvid);
 }
 
-export async function fetchSubtitleBundle(bvid, cid, aid = "") {
+export async function fetchSubtitleBundle(
+  bvid: string,
+  cid: string,
+  aid = ""
+): Promise<{ tracks: SubtitleTrack[]; chapters: Chapter[] }> {
   logInfo("[BOC] fetch subtitles list", { bvid, cid, aid });
   try {
     return await gatewayFetchSubtitleBundle(contentFetchJson, { bvid, cid, aid });
@@ -106,8 +123,12 @@ export async function fetchSubtitleBundle(bvid, cid, aid = "") {
   }
 }
 
-export async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh) {
-  let lastError = null;
+export async function tryLoadSubtitleCandidates(
+  candidates: SubtitleTrack[],
+  runId: number,
+  forceRefresh: boolean
+): Promise<SubtitleTrack> {
+  let lastError: unknown = null;
   for (const item of candidates || []) {
     try {
       logInfo("[BOC] try subtitle track", {
@@ -126,7 +147,7 @@ export async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh)
       return item;
     } catch (error) {
       lastError = error;
-      const reasonCode = toReadableText(error?.code, "");
+      const reasonCode = toReadableText((error as { code?: unknown }).code, "");
       const reasonMessage = getErrorMessage(error, "unknown");
       const meta = {
         id: item.id,
@@ -155,7 +176,7 @@ export async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh)
 // "非转写中"提前放行空字幕。错误路径传 true 保留调用方随后覆写的 "error"
 //（见 refreshClip catch），其余调用方（message-handler 的 URL 变化等）默认
 // 全清，语义不变。
-export function resetClipState({ keepFetchState = false } = {}) {
+export function resetClipState({ keepFetchState = false }: { keepFetchState?: boolean } = {}): void {
   clipState.setBvid("");
   clipState.setAid("");
   clipState.setCid("");
@@ -190,7 +211,7 @@ export function resetClipState({ keepFetchState = false } = {}) {
 
   renderMeta();
   renderSubtitleSelect();
-  byId("boc-preview").value = "";
+  (byId("boc-preview") as HTMLTextAreaElement).value = "";
   setMessage("");
   if (isReaderViewOpen()) {
     notifyReaderPresenter("rerender");
@@ -198,7 +219,7 @@ export function resetClipState({ keepFetchState = false } = {}) {
   }
 }
 
-export async function refreshClip() {
+export async function refreshClip(): Promise<void> {
   const runId = state.clip.fetchRunId + 1;
   clipState.setFetchRunId(runId);
   try {
@@ -240,9 +261,9 @@ export async function refreshClip() {
     const resolvedPageIndex = pageContext.pageIndex;
     clipState.setPageIndex(resolvedPageIndex);
     clipState.setPageTitle(pageContext.pageTitle);
-    clipState.setCid(pageContext.cid);
+    clipState.setCid(String(pageContext.cid || ""));
     clipState.setCidSource(pageContext.cidSource);
-    clipState.setVideoDuration(pageContext.duration);
+    clipState.setVideoDuration(Number(pageContext.duration || 0));
     if (!(state.clip.videoDuration > 0)) {
       clipState.setVideoDuration(readRuntimeVideoDuration());
     }
@@ -267,8 +288,8 @@ export async function refreshClip() {
       500
     );
     ensureRunActive(runId);
-    clipState.setSubtitles(normalizeSubtitleTracks(subtitleBundle.tracks));
-    clipState.setChapters(normalizeChapters(subtitleBundle.chapters));
+    clipState.setSubtitles(normalizeSubtitleTracks(subtitleBundle.tracks) as unknown as SubtitleOption[]);
+    clipState.setChapters(normalizeChapters(subtitleBundle.chapters) as import("../core/state.js").ChapterItem[]);
     logInfo(
       "[BOC] chapters",
       state.clip.chapters.map((item) => ({
@@ -305,14 +326,14 @@ export async function refreshClip() {
       return finishNoSubtitle(runId);
     }
 
-    const candidates = buildSubtitleCandidates(state.clip.subtitles, preferred);
-    let selected = null;
+    const candidates = buildSubtitleCandidates(state.clip.subtitles as unknown as SubtitleTrack[], preferred);
+    let selected: SubtitleTrack | null = null;
 
     try {
       selected = await tryLoadSubtitleCandidates(candidates, runId, forceRefresh);
     } catch (error) {
       const message = getErrorMessage(error, "");
-      if (!message.includes("HTTP") && error?.code !== "SUBTITLE_DURATION_MISMATCH") {
+      if (!message.includes("HTTP") && (error as { code?: string }).code !== "SUBTITLE_DURATION_MISMATCH") {
         throw error;
       }
 
@@ -349,7 +370,7 @@ export async function refreshClip() {
     // ASR 域懒加载（候选4 分包）：加载失败按「无活动转写」降级继续原错误
     // 处理——chunk 加载失败绝不能掩盖原始抓取错误。加载成功后与原同步调用
     // 语义一致（awaitActiveAsrTranscribe 的异常保持原样向上抛）。
-    let asrFallbackInstance = null;
+    let asrFallbackInstance: AsrFallback | null = null;
     try {
       asrFallbackInstance = await loadAsrFallback();
     } catch (asrLoadError) {
@@ -368,7 +389,7 @@ export async function refreshClip() {
     if (isReaderViewOpen()) {
       notifyReaderPresenter("rerender");
     }
-    if (error?.code === "SUBTITLE_DURATION_MISMATCH") {
+    if ((error as { code?: string }).code === "SUBTITLE_DURATION_MISMATCH") {
       setStatus("抓取失败：未找到与当前视频时长匹配的字幕轨，可能该视频无可用字幕。");
       return;
     }
@@ -382,11 +403,11 @@ export async function refreshClip() {
 
 // 无字幕出口编排（refreshClip 两处守卫分支共用，原为逐行相同的两段手抄）：
 // 先给 ASR 回退一个机会——done 时转写成果已在 fallback 内经字幕接受事务
-// （commit.acceptSubtitle）收尾，这里直接 return；skip / empty / error 三种
+//（commit.acceptSubtitle）收尾，这里直接 return；skip / empty / error 三种
 // 都落回无字幕状态（逆事务 commit.commitNoSubtitle；状态栏失败/空结果文案
 // 已由 fallback 各终态分支写好，事务只在 skip 分支补引导句）。STALE_RUN
-// （发起前被顶掉 / 切走视频）原样上抛，由 refreshClip 的 catch 静默吞掉。
-async function finishNoSubtitle(runId) {
+//（发起前被顶掉 / 切走视频）原样上抛，由 refreshClip 的 catch 静默吞掉。
+async function finishNoSubtitle(runId: number): Promise<void> {
   const asrResult = await (await loadAsrFallback()).maybeRunAsrFallback({ runId });
   if (asrResult === "done") {
     return;
@@ -399,15 +420,25 @@ async function finishNoSubtitle(runId) {
 // 路径重复的 normalizeSubtitleTracks/normalizeChapters/setSubtitles/
 // setChapters 四步收拢于此，避免双抄。无合适轨时抛出触发重试的原始错误，
 // 交由 refreshClip 的错误路径统一收尾。
-async function retryWithFreshBundle({ retryReason, preferred, runId, forceRefresh }) {
+async function retryWithFreshBundle({
+  retryReason,
+  preferred,
+  runId,
+  forceRefresh
+}: {
+  retryReason: unknown;
+  preferred: SubtitleTrack;
+  runId: number;
+  forceRefresh: boolean;
+}): Promise<SubtitleTrack> {
   const bundle = await retryAsync(
     () => fetchSubtitleBundle(state.clip.bvid, state.clip.cid, state.clip.aid),
     2,
     500
   );
   ensureRunActive(runId);
-  clipState.setSubtitles(normalizeSubtitleTracks(bundle.tracks));
-  clipState.setChapters(normalizeChapters(bundle.chapters));
+  clipState.setSubtitles(normalizeSubtitleTracks(bundle.tracks) as unknown as SubtitleOption[]);
+  clipState.setChapters(normalizeChapters(bundle.chapters) as import("../core/state.js").ChapterItem[]);
   const retryPreferred = pickPreferredSubtitle(state.clip.subtitles, {
     previousId: preferred.id,
     previousUrl: preferred.subtitleUrl,
@@ -416,11 +447,17 @@ async function retryWithFreshBundle({ retryReason, preferred, runId, forceRefres
   if (!retryPreferred) {
     throw retryReason;
   }
-  const retryCandidates = buildSubtitleCandidates(state.clip.subtitles, retryPreferred);
+  const retryCandidates = buildSubtitleCandidates(state.clip.subtitles as unknown as SubtitleTrack[], retryPreferred);
   return tryLoadSubtitleCandidates(retryCandidates, runId, forceRefresh);
 }
 
-export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, subtitleId = "", forceRefresh = false) {
+export async function loadSubtitle(
+  url: string,
+  lang: string,
+  runId: number = state.clip.fetchRunId,
+  subtitleId: string = "",
+  forceRefresh: boolean = false
+): Promise<void> {
   if (!url) {
     throw new Error("字幕 URL 为空。");
   }
@@ -466,13 +503,13 @@ export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, sub
   ensureRunActive(runId);
   // 候选10 批1：B站 CC 接口返回的 body 实践上有序但接口并不承诺；在这里
   // （写入端）稳定排序一次，落缓存与落 state 都是有序副本，读路径不做排序。
-  const body = sortSubtitleBodyByFrom(Array.isArray(subtitle.body) ? subtitle.body : []);
+  const body = sortSubtitleBodyByFrom(Array.isArray(subtitle.body) ? subtitle.body : []) as unknown[];
   if (body.length === 0) {
     throw new Error("字幕文件为空。");
   }
   const durationCheck = validateSubtitleByDuration(body, state.clip.videoDuration);
   if (!durationCheck.ok) {
-    const mismatchError = new Error("字幕时长与当前视频不匹配。");
+    const mismatchError = new Error("字幕时长与当前视频不匹配。") as SubtitleDurationMismatchError;
     mismatchError.code = "SUBTITLE_DURATION_MISMATCH";
     mismatchError.details = durationCheck;
     throw mismatchError;
@@ -502,7 +539,7 @@ export async function loadSubtitle(url, lang, runId = state.clip.fetchRunId, sub
 // 把耗时阶段的变更广播给 popup / AI 侧边栏，让它们在各自等待抓取响应、
 // 无法实时读取页内状态栏的情况下也能区分“抓取本地字幕”和“音频转写”。
 // 仅广播阶段标记，文案由各端自行渲染；失败（扩展上下文关闭等）静默忽略。
-function broadcastSubtitleStatus(phase) {
+function broadcastSubtitleStatus(phase: string): void {
   try {
     const promise = chrome.runtime.sendMessage({ type: "boc-subtitle-status", phase });
     if (promise && typeof promise.catch === "function") {
@@ -517,10 +554,10 @@ function broadcastSubtitleStatus(phase) {
 // 读取：asrProviders 已从 settings 快照摘除（save-settings 白名单不再落盘该键，
 // 写回收口在 asr-providers-save），页面侧不碰 chrome.storage provider 存储。
 // 消息失败按空列表降级：回退入口据此走 no-asr-config skip，与旧行为一致。
-async function loadAsrProviderList() {
+async function loadAsrProviderList(): Promise<AsrProviderMeta[]> {
   try {
     const resp = await sendRuntimeMessage({ type: "asr-providers-list" });
-    return Array.isArray(resp?.providers) ? resp.providers : [];
+    return Array.isArray((resp as { providers?: unknown }).providers) ? (resp as { providers: AsrProviderMeta[] }).providers : [];
   } catch {
     return [];
   }
@@ -550,17 +587,16 @@ const asrFallbackLoader = createLazyLoader(() =>
       setMessage,
       acceptSubtitle,
       commitNoSubtitle,
-      runAsrPipeline,
+      runAsrPipeline: runAsrPipeline as unknown as import("../asr/fallback.js").CreateAsrFallbackDeps["runAsrPipeline"],
       broadcastSubtitleStatus
     })
   )
 );
 
-function loadAsrFallback() {
+function loadAsrFallback(): Promise<AsrFallback> {
   return asrFallbackLoader.load();
 }
 
 // ASR 回退入口见 asr/fallback.js（createAsrFallback 工厂，本模块经
 // loadAsrFallback() 惰性获取单例）。refreshClip 的无字幕出口与失败兜底经
 // 实例方法调用。
-

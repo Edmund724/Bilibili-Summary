@@ -6,7 +6,7 @@
 // 注入这个极小的经典脚本，由它用 chrome.runtime.getURL 拼出「绝对路径」拉起
 // 真正的 ESM 主包 entry/content-main.mjs。主包进入 ESM 模块图之后，模块内部
 // 后续相对路径的动态 import() 都按扩展自身 URL 解析，合法且共享同一模块实例
-// （不存在 split-brain 状态）——这是 WXT 同款的成熟方案。
+//（不存在 split-brain 状态）——这是 WXT 同款的成熟方案。
 //
 // 本文件以 ESM 源码形态入库，由 scripts/build-content.js 打包成
 // entry/content-bootstrap.iife.js（classic IIFE，产物已 gitignore）。
@@ -22,8 +22,17 @@ import { BOC_VERSION } from "../core/version.js";
 // 误识别为可静态分析的字符串字面量而尝试内联打包。
 export const CONTENT_MAIN_MODULE_PATH = "entry/content-main.mjs";
 
+interface BootstrapOptions {
+  getExtensionUrl?: (modulePath: string) => string;
+  importModule?: (url: string) => Promise<unknown>;
+}
+
+interface BootstrapResult {
+  loadContentMain(): Promise<unknown>;
+}
+
 // 注入点：getExtensionUrl / importModule 仅测试使用，生产走真实实现。
-export function startContentBootstrap({ getExtensionUrl, importModule } = {}) {
+export function startContentBootstrap(options: BootstrapOptions = {}): BootstrapResult | null {
   // 防重复注入：B 站是 SPA，扩展更新/重载时浏览器可能对同一文档再次执行
   // classic content script。主包 init 自带幂等守卫，这里挡的是重复的模块
   // 加载请求与重复的哨兵写入。
@@ -43,14 +52,14 @@ export function startContentBootstrap({ getExtensionUrl, importModule } = {}) {
   globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
 
   const resolveMainModuleUrl =
-    getExtensionUrl ?? ((modulePath) => chrome.runtime.getURL(modulePath));
-  const importMainModule = importModule ?? ((url) => import(url));
+    options.getExtensionUrl ?? ((modulePath) => chrome.runtime.getURL(modulePath));
+  const importMainModule = options.importModule ?? ((url) => import(url));
 
   // 缓存加载 promise：同一文档内任何后续触发（重复注入、调试调用）共享同一
   // 次模块加载，避免主包顶层副作用被执行两次。
-  let mainPromise = null;
+  let mainPromise: Promise<unknown> | null = null;
 
-  function loadContentMain() {
+  function loadContentMain(): Promise<unknown> {
     if (!mainPromise) {
       // 外面包一层 Promise.resolve().then：getExtensionUrl 的同步异常（如
       // 扩展上下文已失效）也统一进入 catch，维持「失败即清空」的可重试语义。
@@ -84,7 +93,8 @@ export function startContentBootstrap({ getExtensionUrl, importModule } = {}) {
 // 跳过——S3 分层后 setup.js 的通用 chrome stub 提供 getURL（样式挂载用），
 // 守卫若只看 getURL 会在测试导入本模块时真的发起主包加载（vite 模块运行器
 // 对不存在的 chrome-extension:// URL 报错并上报 unhandled rejection）。
+declare const process: { env?: Record<string, string | undefined> } | undefined;
 const isTestEnv = typeof process !== "undefined" && Boolean(process.env?.VITEST);
 if (!isTestEnv && typeof chrome?.runtime?.getURL === "function") {
-  startContentBootstrap().loadContentMain();
+  startContentBootstrap()?.loadContentMain();
 }

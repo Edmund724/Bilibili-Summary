@@ -43,6 +43,19 @@ import { bindRuntimeEvents, bindUrlChangeHandler } from "../core/message-handler
 // 挂载器；此处 handle 启动直开路径与页内跳转路径）
 import { ensureReaderStyles, removeReaderStyles } from "../shared/style-injector.js";
 
+// lazy-player-ai.ts 的接口未覆盖 content 侧实际调用的全部方法；用局部接口
+// 精确描述本文件消费的 API，避免把调用点退化成 any。
+interface PlayerAiApi {
+  startPlayerAiQuickAction(): void;
+  stopPlayerAiQuickAction(): void;
+  resetPlayerAiQuickActionRetryCount(): void;
+  schedulePlayerAiQuickActionSync(delayMs?: number): void;
+}
+
+// reader/presenter.js 仍是 .js，无导出类型；本文件精确描述 seam 回调签名。
+// delayMs 透传给 schedulePlayerAiQuickActionSync；options.resetRetry 重置重试计数。
+type PlayerAiSyncHandler = (delayMs?: number, options?: { resetRetry?: boolean }) => void;
+
 globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
 
 // 播放器 AI 开关监听只注册一次：init 在模块加载时同步执行，声明必须位于
@@ -51,14 +64,14 @@ let playerAiSettingsWatcherBound = false;
 
 init();
 
-function isSupportedUrl() {
+function isSupportedUrl(): boolean {
   if (isReaderMode()) return true;
   if (isWatchlaterPage()) return true;
   if (/\/video\//.test(location.pathname)) return true;
   return false;
 }
 
-function init() {
+function init(): void {
   logInfo(`[BOC] content script loaded, version=${BOC_VERSION}`);
   if (!isSupportedUrl()) {
     return;
@@ -100,7 +113,7 @@ function init() {
   // default 120ms delay. options.resetRetry mirrors the original
   // __BOC_FORCE_SYNC_PLAYER_AI__ behavior (only the debug helper resets the
   // retry counter before syncing).
-  subscribePlayerAiSync((delayMs, options) => {
+  subscribePlayerAiSync(((delayMs, options) => {
     // 未加载 = 快捷开关关闭态：按钮不存在，无需同步（start 自带初始 sync，
     // 开启后 reader 的同步请求自然恢复语义）。
     if (!isPlayerAiLoaded()) {
@@ -108,15 +121,16 @@ function init() {
     }
     loadPlayerAi()
       .then((playerAi) => {
+        const api = playerAi as unknown as PlayerAiApi;
         if (options && options.resetRetry) {
-          playerAi.resetPlayerAiQuickActionRetryCount();
+          api.resetPlayerAiQuickActionRetryCount();
         }
-        playerAi.schedulePlayerAiQuickActionSync(delayMs);
+        api.schedulePlayerAiQuickActionSync(delayMs);
       })
       .catch((error) => {
         logWarn("[BOC] player-ai sync via lazy loader failed", error);
       });
-  });
+  }) as PlayerAiSyncHandler);
   bindNormalPageStateGuard();
   // 播放器 AI 按钮的 layout 监听与 observer 改由 startPlayerAiQuickAction
   // 显式启动（见 getSettings().then 与 bindPlayerAiSettingsWatcher），
@@ -154,19 +168,20 @@ function init() {
 
 // 播放器 AI 开关存放在 chrome.storage.sync：监听该键变更动态启停，设置切换
 // 无需刷新页面即可生效。
-function bindPlayerAiSettingsWatcher() {
+function bindPlayerAiSettingsWatcher(): void {
   if (playerAiSettingsWatcherBound) {
     return;
   }
   playerAiSettingsWatcherBound = true;
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (
-      areaName !== "sync" ||
-      !Object.prototype.hasOwnProperty.call(changes, "enablePlayerAiQuickAction")
-    ) {
+    if (areaName !== "sync") {
       return;
     }
-    const enabled = Boolean(changes.enablePlayerAiQuickAction.newValue);
+    const change = changes["enablePlayerAiQuickAction"];
+    if (!change) {
+      return;
+    }
+    const enabled = Boolean(change.newValue);
     // syncPlayerAiQuickActionButton 读 state.settings，先同步该键再启停，
     // 不依赖 reader watcher（bindSettingsWatcher）的异步全量回读时序
     if (state.settings) {
@@ -184,23 +199,23 @@ function bindPlayerAiSettingsWatcher() {
 // 加载器语义：模块未加载时 stop/remove 都是 no-op（按钮只可能由该模块创建，
 // 未加载 ⇒ 无残留），因此「关闭设置」分支只在已加载时才需要真正执行 stop。
 
-function startPlayerAiQuickActionLazy() {
+function startPlayerAiQuickActionLazy(): void {
   loadPlayerAi()
     .then((playerAi) => {
-      playerAi.startPlayerAiQuickAction();
+      (playerAi as unknown as PlayerAiApi).startPlayerAiQuickAction();
     })
     .catch((error) => {
       logWarn("[BOC] player-ai module load failed (quick action not started)", error);
     });
 }
 
-function stopPlayerAiQuickActionLazy() {
+function stopPlayerAiQuickActionLazy(): void {
   if (!isPlayerAiLoaded()) {
     return;
   }
   loadPlayerAi()
     .then((playerAi) => {
-      playerAi.stopPlayerAiQuickAction();
+      (playerAi as unknown as PlayerAiApi).stopPlayerAiQuickAction();
     })
     .catch((error) => {
       logWarn("[BOC] player-ai stop after lazy load failed", error);

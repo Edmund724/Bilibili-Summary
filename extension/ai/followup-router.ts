@@ -4,8 +4,9 @@
 // 命中时间戳/章节/关键词注入的原始段」+ 单次调用，token 随追问近乎常数。
 // 首轮 / 尚未成稿（无笔记或无分段小结）→ 返回 null，交给上层跑完整 Map-Reduce。
 // 纯逻辑 + 注入的 loader，无 DOM/chrome 直接依赖（默认 loader 走 segment-cache）。
+
 import { hasFinalNote, buildFollowupSubtitleMarkdown } from "./followup-context.js";
-import { retrieveRawSegments } from "./raw-retrieval.js";
+import { retrieveRawSegments, type RawSegment } from "./raw-retrieval.js";
 import { formatSegmentItem } from "./map-reduce.js";
 import {
   buildSegmentSummaryCacheKey,
@@ -13,14 +14,25 @@ import {
   loadSegmentSummary as loadSegmentSummaryFromCache,
   loadStoredRawSegments as loadStoredRawSegmentsFromCache
 } from "./segment-cache.js";
+import type { BudgetPlan, BudgetPlanSegment } from "./types.js";
+
+interface LoadSegmentSummariesInput {
+  context?: Record<string, unknown>;
+  plan?: { segments?: BudgetPlanSegment[] } | null;
+  loadSummary?: (key: string) => Promise<string | null>;
+}
 
 /**
  * 从段缓存按段顺序加载全部分段小结（跳过 null/空，保持段序）。
  * loader 可注入以便单测；缺省用 segment-cache 的真实加载器。
  */
-export async function loadSegmentSummaries({ context = {}, plan = null, loadSummary = loadSegmentSummaryFromCache } = {}) {
+export async function loadSegmentSummaries({
+  context = {},
+  plan = null,
+  loadSummary = loadSegmentSummaryFromCache
+}: LoadSegmentSummariesInput = {}): Promise<string[]> {
   const segments = Array.isArray(plan?.segments) ? plan.segments : [];
-  const out = [];
+  const out: string[] = [];
   for (const segment of segments) {
     const key = buildSegmentSummaryCacheKey(context, segment?.index);
     const summary = await loadSummary(key);
@@ -32,17 +44,22 @@ export async function loadSegmentSummaries({ context = {}, plan = null, loadSumm
 }
 
 // 单条命中的原始段渲染成注入文本块：逐条字幕项按 [起点-终点] 内容 拼行。
-function renderRawSegment(segment) {
+function renderRawSegment(segment: RawSegment): string {
   const items = Array.isArray(segment?.items) ? segment.items : [];
   return items
     .map((item) => formatSegmentItem(item))
-    .filter((line) => line.length > 0)
+    .filter((line): line is string => typeof line === "string" && line.length > 0)
     .join("\n");
+}
+
+interface BuildRetrieveRawInput {
+  context?: Record<string, unknown>;
+  plan?: { segments?: BudgetPlanSegment[] } | null;
 }
 
 // 构造一个「按需检索」函数：基于 plan.segments（已在内存的原始字幕段，与 04 缓存的段同构），
 // 每次调用 06 的 retrieveRawSegments 命中后，把命中段渲染成文本块数组返回（同步，供 05 注入）。
-export function buildRetrieveRaw({ context = {}, plan = null } = {}) {
+export function buildRetrieveRaw({ context = {}, plan = null }: BuildRetrieveRawInput = {}) {
   const rawSegments = (Array.isArray(plan?.segments) ? plan.segments : []).map((seg) => ({
     index: seg.index,
     from: seg.from,
@@ -50,7 +67,7 @@ export function buildRetrieveRaw({ context = {}, plan = null } = {}) {
     items: Array.isArray(seg.items) ? seg.items : []
   }));
 
-  return function retrieveRaw(prompt) {
+  return function retrieveRaw(prompt: unknown): string[] {
     const hits = retrieveRawSegments({
       prompt,
       chapters: Array.isArray(context?.chapters) ? context.chapters : [],
@@ -61,15 +78,24 @@ export function buildRetrieveRaw({ context = {}, plan = null } = {}) {
 }
 
 // 取最近一条 assistant 消息正文（作为「成稿笔记」候选）；无则返回空串。
-export function lastAssistantContent(history = []) {
+export function lastAssistantContent(history: unknown = []): string {
   const list = Array.isArray(history) ? history : [];
   for (let i = list.length - 1; i >= 0; i--) {
-    const message = list[i];
+    const message = list[i] as { role?: unknown; content?: unknown };
     if (message && message.role === "assistant" && typeof message.content === "string" && message.content.trim()) {
       return message.content;
     }
   }
   return "";
+}
+
+interface ResolveFollowupContextInput {
+  context?: Record<string, unknown>;
+  plan?: BudgetPlan | null;
+  history?: unknown[];
+  userPrompt?: string;
+  loadSummaries?: typeof loadSegmentSummaries;
+  loadStoredSegments?: typeof loadStoredRawSegmentsFromCache;
 }
 
 /**
@@ -91,7 +117,7 @@ export async function resolveFollowupContext({
   userPrompt = "",
   loadSummaries = loadSegmentSummaries,
   loadStoredSegments = loadStoredRawSegmentsFromCache
-} = {}) {
+}: ResolveFollowupContextInput = {}): Promise<Record<string, unknown> | null> {
   if (plan?.mode !== "map-reduce") {
     return null;
   }
@@ -106,11 +132,18 @@ export async function resolveFollowupContext({
 
   // 段来源：内存优先，空缺时跨会话回退（仅此处触达段缓存）。
   const inMemorySegments = Array.isArray(plan?.segments) ? plan.segments : [];
-  let segments = inMemorySegments;
+  let segments: BudgetPlanSegment[] = inMemorySegments;
   if (segments.length === 0) {
-    const stored = await loadStoredSegments(segmentCacheKeyFields(context));
+    const fields = segmentCacheKeyFields(context);
+    const stored = await loadStoredSegments({
+      bvid: String(fields.bvid || ""),
+      cid: String(fields.cid || ""),
+      subtitleId: String(fields.subtitleId || ""),
+      subtitleUrl: String(fields.subtitleUrl || ""),
+      lang: String(fields.lang || "")
+    });
     if (Array.isArray(stored) && stored.length > 0) {
-      segments = stored;
+      segments = stored as BudgetPlanSegment[];
     }
   }
 

@@ -1,4 +1,4 @@
-// extension/ai/provider-test.js
+// extension/ai/provider-test.ts
 // AI 平台连通性测试探针（候选 04 拆链）。
 // 从 core/ai-provider-store.js 移出：探针依赖 ai/completion.js（→ sse-parser.js），
 // 留在 ai-provider-store 里会把整条 completion 链拖进 Service Worker 静态图，
@@ -19,17 +19,29 @@ import { HOST_PERMISSION_HINT, hasHostPermission } from "../core/host-permission
 // - HTTP 失败（err.status / err.overflow）：接缝 message 与 formatProbeHttpError 同型，直接透传；
 // - 连接失败（原始抛出物挂 err.cause）：复用「无法连接：…」文案（AI/ASR 逐字一致）；
 // - 其余（接缝 baseUrl/model 守卫等）：message 已是清晰文案，直接透传。
-function formatProbeSeamError(error) {
-  if (error?.status != null || error?.overflow) {
-    return error.message;
+function formatProbeSeamError(error: unknown): string {
+  const err = error as { status?: unknown; overflow?: boolean; cause?: unknown; message?: string };
+  if (err?.status != null || err?.overflow) {
+    return String(err.message || "");
   }
-  if (error?.cause) {
-    return formatProbeConnectionError(error.cause);
+  if (err?.cause) {
+    return formatProbeConnectionError(err.cause);
   }
-  return error.message;
+  return String(err.message || "");
 }
 
-export async function testAiConnection({ baseUrl, apiKey, model }) {
+export interface TestAiConnectionInput {
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+}
+
+export interface TestAiConnectionResult {
+  ok: boolean;
+  error?: string;
+}
+
+export async function testAiConnection({ baseUrl, apiKey, model }: TestAiConnectionInput): Promise<TestAiConnectionResult> {
   const normalizedBaseUrl = String(baseUrl || "").trim().replace(/\/+$/, "");
   const normalizedModel = String(model || "").trim();
   if (!normalizedBaseUrl) {
@@ -47,8 +59,15 @@ export async function testAiConnection({ baseUrl, apiKey, model }) {
   });
 }
 
-export async function probeAiChatCompletion({ baseUrl, apiKey, model, headers }) {
-  const requestHeaders = { ...(headers || { Accept: "application/json" }) };
+interface ProbeAiChatCompletionInput {
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+  headers?: Record<string, string>;
+}
+
+export async function probeAiChatCompletion({ baseUrl, apiKey, model, headers }: ProbeAiChatCompletionInput): Promise<TestAiConnectionResult> {
+  const requestHeaders: Record<string, string> = { ...(headers || { Accept: "application/json" }) };
   if (apiKey && !requestHeaders.Authorization) {
     requestHeaders.Authorization = `Bearer ${apiKey}`;
   }
@@ -71,7 +90,7 @@ export async function probeAiChatCompletion({ baseUrl, apiKey, model, headers })
 // 消息在 SW 侧的输入装配（provider-handlers.js pickFlatTestProvider 的契约）——
 // Key 解析优先用户重输的 apiKey，否则按 providerId 从已存 Key 代查，都没有为空串。
 // 返回 { ok, error? }，UX 语义与原消息往返完全一致。
-export async function testAiProviderConnection({ providerId, baseUrl, apiKey, model }) {
+export async function testAiProviderConnection({ providerId, baseUrl, apiKey, model }: { providerId?: string; baseUrl?: string; apiKey?: string; model?: string }): Promise<TestAiConnectionResult> {
   // S2 收紧 host_permissions：域名未授权时跨域 fetch 只会以 CORS 失败，探针原样
   // 抛出是「无法连接：Failed to fetch」这类看不出原因的文案，所以先把权限缺失换成
   // 可操作提示，不再发起注定失败的请求，也不读一次 Key 存储。

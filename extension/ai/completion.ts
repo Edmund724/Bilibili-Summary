@@ -1,4 +1,4 @@
-// ai/completion.js — OpenAI 兼容 /chat/completions 的纯协议接缝（候选 03）。
+// ai/completion.ts — OpenAI 兼容 /chat/completions 的纯协议接缝（候选 03）。
 // 请求构造（baseUrl 归一 / Bearer 头 / reasoning_effort / max_tokens 探针）、
 // SSE 解析、context-length 溢出判定、参数化重试策略，全部收口于此；
 // 三份历史实现（client 流式 port 回吐 / map-reduce 非流式 / provider 探针）
@@ -15,6 +15,7 @@
 //   （及流式读流中断）都重试，与状态码无关。
 import { parseSsePayload } from "./sse-parser.js";
 import { makeAbortedError, isRetryableNetworkError } from "../shared/error-helpers.js";
+import type { ChatMessage, StreamChatEvent } from "./types.js";
 
 // OpenAI 兼容协议 chat 路径。
 // 覆盖 OpenAI / DeepSeek / Qwen / Zhipu / Kimi / MiniMax / Mimo / Opencode Go / OpenRouter / Stepfun / Ollama（OpenAI 兼容模式）等。
@@ -24,16 +25,32 @@ export const OPENAI_CHAT_PATH = "/chat/completions";
 // 思考档位：off 不发任何参数；low / high 映射到 OpenAI 兼容的 reasoning_effort。
 const AI_THINKING_LEVELS = ["off", "low", "high"];
 
-export function normalizeThinkingLevel(value) {
-  return AI_THINKING_LEVELS.includes(value) ? value : "off";
+export function normalizeThinkingLevel(value: unknown): string {
+  return AI_THINKING_LEVELS.includes(String(value)) ? String(value) : "off";
+}
+
+interface BuildChatRequestBodyInput {
+  model: string;
+  messages: ChatMessage[];
+  stream?: boolean;
+  thinkingLevel?: string;
+  maxTokens?: number | null;
+}
+
+interface ChatRequestBody {
+  model: string;
+  messages: ChatMessage[];
+  stream: boolean;
+  reasoning_effort?: string;
+  max_tokens?: number;
 }
 
 /**
  * 构造 chat/completions 请求体（纯函数，便于单测；请求构造单点）。
  * stream 显式传递（流式 true / 非流式 false）；maxTokens 供探针传 1。
  */
-export function buildChatRequestBody({ model, messages, stream = false, thinkingLevel, maxTokens }) {
-  const body = { model, messages, stream };
+export function buildChatRequestBody({ model, messages, stream = false, thinkingLevel, maxTokens }: BuildChatRequestBodyInput): ChatRequestBody {
+  const body: ChatRequestBody = { model, messages, stream };
   const level = normalizeThinkingLevel(thinkingLevel);
   if (level !== "off") {
     body.reasoning_effort = level;
@@ -44,13 +61,17 @@ export function buildChatRequestBody({ model, messages, stream = false, thinking
   return body;
 }
 
+interface OverflowError extends Error {
+  overflow: true;
+}
+
 /**
  * 溢出错误工厂：err.overflow = true 的唯一写点。
  * message 沿用触发场景的原始文案（HTTP 详情 / 预算回落提示），供日志排查；
  * 消费方按 err.overflow 标记分流（ladder 转 Map-Reduce 或报错），不读 message。
  */
-export function makeOverflowError(message = "上下文超出模型限制") {
-  const error = new Error(message);
+export function makeOverflowError(message = "上下文超出模型限制"): OverflowError {
+  const error = new Error(message) as OverflowError;
   error.overflow = true;
   return error;
 }
@@ -60,7 +81,7 @@ export function makeOverflowError(message = "上下文超出模型限制") {
  * 粗判：命中常见溢出子串，或「长度/上下文/令牌」语义 + 「超限」语义同时出现。
  * 非溢出错误（401/404/500/网络错误/限流等）返回 false，仍走既有重试/报错路径。
  */
-export function isContextLengthOverflow(detailOrError) {
+export function isContextLengthOverflow(detailOrError: unknown): boolean {
   const text = String(detailOrError ?? "").toLowerCase();
   if (!text) return false;
 
@@ -96,19 +117,30 @@ export function isContextLengthOverflow(detailOrError) {
   return subjectPattern.test(text) && overflowPattern.test(text);
 }
 
+interface HttpError extends Error {
+  status: number;
+  retryable: boolean;
+}
+
 // HTTP 非 2xx 错误：文案与 formatProbeHttpError 同型（detail 截前 200 字符），
 // 附 status 结构化字段与 retryable 语义（408/429/≥500 可重试）。
-function makeHttpError(status, detail) {
-  const error = new Error(`HTTP ${status}${detail ? `: ${detail}` : ""}`);
+function makeHttpError(status: number, detail: string): HttpError {
+  const error = new Error(`HTTP ${status}${detail ? `: ${detail}` : ""}`) as HttpError;
   error.status = status;
   error.retryable = isRetryableNetworkError(error);
   return error;
 }
 
+interface NetworkError extends Error {
+  cause: unknown;
+  retryable: boolean;
+}
+
 // 网络层（fetch 抛错）错误：文案对齐旧实现的「网络错误：」前缀；
 // 原始抛出物挂 cause（探针适配层据此拼「无法连接：…」），retryable 语义同上。
-function makeNetworkError(cause) {
-  const error = new Error(`网络错误：${cause?.message || cause}`);
+function makeNetworkError(cause: unknown): NetworkError {
+  const causeLike = cause as { message?: unknown } | undefined;
+  const error = new Error(`网络错误：${causeLike?.message || cause}`) as NetworkError;
   error.cause = cause;
   error.retryable = isRetryableNetworkError(error);
   return error;
@@ -116,8 +148,14 @@ function makeNetworkError(cause) {
 
 // 重试默认策略：流式 2 次（保持旧 client MAX_STREAM_RETRIES=2 现状）；
 // 非流式/探针 0（map-reduce 与探针现状无重试；是否给归并链路开重试是后续独立决定）。
-function defaultRetries(stream) {
+function defaultRetries(stream: boolean): number {
   return stream ? 2 : 0;
+}
+
+interface DrainSseStreamInput {
+  response: Response;
+  signal?: AbortSignal | null;
+  onEvent?: (event: StreamChatEvent) => void;
 }
 
 /**
@@ -126,8 +164,8 @@ function defaultRetries(stream) {
  * 归一为 { type: "token" | "reasoning", data }（port 协议词表，适配层可直透）。
  * 中止时抛 makeAbortedError，由调用方统一收束。
  */
-async function drainSseStream({ response, signal, onEvent }) {
-  const reader = response.body.getReader();
+async function drainSseStream({ response, signal, onEvent }: DrainSseStreamInput): Promise<void> {
+  const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
 
@@ -141,7 +179,7 @@ async function drainSseStream({ response, signal, onEvent }) {
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
-    buffer = lines.length ? lines.pop() : "";
+    buffer = lines.length ? lines.pop()! : "";
 
     for (const rawLine of lines) {
       const line = rawLine.trim();
@@ -158,6 +196,30 @@ async function drainSseStream({ response, signal, onEvent }) {
       }
     }
   }
+}
+
+interface RetryPayload {
+  attempt: number;
+  maxRetries: number;
+  kind: "fetch" | "http" | "stream";
+  error: Error;
+}
+
+interface ChatCompletionInput {
+  provider: { baseUrl?: string; apiKey?: string; model?: string };
+  messages: ChatMessage[];
+  stream?: boolean;
+  signal?: AbortSignal | null;
+  thinkingLevel?: string;
+  retries?: number;
+  probe?: boolean;
+  maxTokens?: number | null;
+  headers?: Record<string, string>;
+  onEvent?: (event: StreamChatEvent) => void;
+  onRetry?: (payload: RetryPayload) => void;
+  onStreamReset?: () => void;
+  retryDelayMs?: number;
+  fetchImpl?: typeof fetch;
 }
 
 /**
@@ -196,7 +258,7 @@ export async function chatCompletion({
   onStreamReset,
   retryDelayMs = 800,
   fetchImpl = globalThis.fetch
-}) {
+}: ChatCompletionInput): Promise<string | { done: true }> {
   const baseUrl = String(provider?.baseUrl || "").trim().replace(/\/+$/, "");
   if (!baseUrl) {
     throw new Error("baseUrl 未配置");
@@ -208,7 +270,7 @@ export async function chatCompletion({
 
   const maxRetries = retries ?? defaultRetries(stream);
 
-  const headers = { ...extraHeaders, "Content-Type": "application/json" };
+  const headers: Record<string, string> = { ...extraHeaders, "Content-Type": "application/json" };
   if (provider.apiKey && !headers.Authorization) {
     headers["Authorization"] = `Bearer ${provider.apiKey}`;
   }
@@ -222,7 +284,7 @@ export async function chatCompletion({
   });
 
   // 上一次失败（kind + 错误）：attempt > 0 时经 onRetry 上报后再退避重试。
-  let lastFailure = null;
+  let lastFailure: { kind: "fetch" | "http" | "stream"; error: Error } | null = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (lastFailure) {
       onRetry?.({ attempt, maxRetries, kind: lastFailure.kind, error: lastFailure.error });
@@ -235,7 +297,7 @@ export async function chatCompletion({
       lastFailure = null;
     }
 
-    let response;
+    let response: Response;
     try {
       response = await fetchImpl(`${baseUrl}${OPENAI_CHAT_PATH}`, {
         method: "POST",
@@ -245,7 +307,7 @@ export async function chatCompletion({
       });
     } catch (e) {
       // 中止（真实 signal 中止 / 注入实现抛出的中止标记 / AbortError）统一收束。
-      if (signal?.aborted || e?.aborted || e?.name === "AbortError") {
+      if (signal?.aborted || (e as { aborted?: boolean })?.aborted || (e as { name?: string }).name === "AbortError") {
         throw makeAbortedError();
       }
       const error = makeNetworkError(e);
@@ -282,10 +344,10 @@ export async function chatCompletion({
       try {
         await drainSseStream({ response, signal, onEvent });
       } catch (e) {
-        if (e?.aborted || signal?.aborted) {
+        if ((e as { aborted?: boolean })?.aborted || signal?.aborted) {
           throw makeAbortedError();
         }
-        const error = e instanceof Error ? e : new Error(String(e?.message ?? e));
+        const error = e instanceof Error ? e : new Error(String((e as { message?: unknown })?.message ?? e));
         if (attempt >= maxRetries) {
           throw error;
         }
@@ -299,9 +361,9 @@ export async function chatCompletion({
     try {
       json = await response.json();
     } catch (e) {
-      throw new Error(`响应解析失败：${e?.message || e}`);
+      throw new Error(`响应解析失败：${(e as { message?: unknown })?.message || e}`);
     }
-    const content = json?.choices?.[0]?.message?.content;
+    const content = (json as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content;
     return typeof content === "string" ? content : "";
   }
   // 循环内最后一次失败必 throw，此处不可达；防御性兜底满足控制流分析。

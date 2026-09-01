@@ -10,7 +10,7 @@ export const COST_GUARD_MIN_CALLS = 5;
 /**
  * 是否应弹成本护栏：estimatedCalls 为 ≥5 的有限数 → true；非数 / 负 / <5 → false。
  */
-export function shouldPromptCostGuard(estimatedCalls) {
+export function shouldPromptCostGuard(estimatedCalls: unknown): boolean {
   const n = Number(estimatedCalls);
   return Number.isFinite(n) && n >= COST_GUARD_MIN_CALLS;
 }
@@ -18,7 +18,7 @@ export function shouldPromptCostGuard(estimatedCalls) {
 /**
  * 千分位格式化数字（如 1234567 → "1,234,567"）；非有限值回落到 "0"。
  */
-function formatThousands(value) {
+function formatThousands(value: unknown): string {
   const n = Number(value);
   if (!Number.isFinite(n)) return "0";
   const [intPart, fracPart] = String(Math.trunc(Math.abs(n))).split(".");
@@ -27,12 +27,22 @@ function formatThousands(value) {
   return fracPart ? `${sign}${digits}.${fracPart}` : `${sign}${digits}`;
 }
 
+interface CostGuardInput {
+  estimatedCalls?: number | string;
+  estimatedTokens?: number | string;
+}
+
+interface CostGuardNotice {
+  shouldPrompt: boolean;
+  message: string;
+}
+
 /**
  * 构建成本护栏通知：{ shouldPrompt, message }。
  * message 形如「预计约 N 次调用 / 约 X token，可取消」（X 千分位）；
  * 与 shouldPromptCostGuard 同判，shouldPrompt 为 false 时 message 为空串。
  */
-export function buildCostGuardNotice({ estimatedCalls, estimatedTokens } = {}) {
+export function buildCostGuardNotice({ estimatedCalls, estimatedTokens }: CostGuardInput = {}): CostGuardNotice {
   if (!shouldPromptCostGuard(estimatedCalls)) {
     return { shouldPrompt: false, message: "" };
   }

@@ -1,16 +1,10 @@
 import { setMessage } from "../ui/ui-renderer.js";
 import { buildPlayerAiQuickActionIconSvg } from "../ui/icons.js";
-import {
-  isReaderMode
-} from "../bilibili/video-id-shared.js";
+import { isReaderMode } from "../bilibili/video-id-shared.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { getSettings } from "../core/runtime.js";
-import {
-  getErrorMessage
-} from "../shared/error-helpers.js";
-import {
-  getRuntimeVideoElement
-} from "../bilibili/video-probe.js";
+import { getErrorMessage } from "../shared/error-helpers.js";
+import { getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import { state, playerAiState } from "../core/state.js";
 import { isVisibleReaderControl } from "../shared/dom-utils.js";
 // isReaderViewOpen 位于常驻微模块（候选02 分层惰性）：纯 state 读取。原先经
@@ -39,11 +33,17 @@ let playerAiQuickActionRetryCount = 0;
 
 // layout 监听与游标监听的引用缓存：removeEventListener 必须用绑定时的同一
 // 引用才能摘除，stop 生命周期与游标监听的防泄漏清理都依赖这里保存的引用。
-let playerAiQuickActionLayoutHandler = null;
+let playerAiQuickActionLayoutHandler: (() => void) | null = null;
 // 结构：{ host, wrap, showForCursorActivity, hideImmediately }
-let playerAiQuickActionCursorSync = null;
+interface CursorSync {
+  host: HTMLElement;
+  wrap: HTMLElement;
+  showForCursorActivity: () => void;
+  hideImmediately: () => void;
+}
+let playerAiQuickActionCursorSync: CursorSync | null = null;
 
-export function resetPlayerAiQuickActionRetryCount() {
+export function resetPlayerAiQuickActionRetryCount(): void {
   playerAiQuickActionRetryCount = 0;
 }
 
@@ -51,7 +51,7 @@ const PLAYER_CONTAINER_SELECTOR = ".bpx-player-container, #bilibili-player";
 
 // 显式启动入口：绑定 layout 监听并挂 observer。bind/observe 各自带幂等守卫
 // （layoutBound / observer 槽位），重复调用不会重复绑。
-export function startPlayerAiQuickAction() {
+export function startPlayerAiQuickAction(): void {
   bindPlayerAiQuickActionLayoutEvents();
   startPlayerAiQuickActionObserver();
   // observer 只在 DOM 变化时回调，初始挂载需要主动 sync 一次（与搬迁前
@@ -61,7 +61,7 @@ export function startPlayerAiQuickAction() {
 
 // 显式停止入口：断开 observer、摘除全部本模块监听（含挂在宿主元素上的游标
 // 监听，修复移除→重建时的泄漏）、清理 retry 定时器与计数并移除按钮。
-export function stopPlayerAiQuickAction() {
+export function stopPlayerAiQuickAction(): void {
   // S3：先摘样式再移除按钮——按钮在样式摘除的瞬间仍按旧规则渲染，摘除后
   // 节点立即被移除，无可见中间态；下次 start 重挂（mounted Map 幂等）。
   removePlayerAiStyles();
@@ -82,7 +82,7 @@ export function stopPlayerAiQuickAction() {
   removePlayerAiQuickActionButton();
 }
 
-export function startPlayerAiQuickActionObserver() {
+export function startPlayerAiQuickActionObserver(): void {
   if (state.playerAi.playerAiQuickActionObserver || !document.body) {
     return;
   }
@@ -126,7 +126,7 @@ export function startPlayerAiQuickActionObserver() {
   playerAiState.setObserver(bodyObserver);
 }
 
-export function bindPlayerAiQuickActionLayoutEvents() {
+export function bindPlayerAiQuickActionLayoutEvents(): void {
   if (state.playerAi.playerAiQuickActionLayoutBound) {
     return;
   }
@@ -142,7 +142,7 @@ export function bindPlayerAiQuickActionLayoutEvents() {
   playerAiState.setLayoutBound(true);
 }
 
-function unbindPlayerAiQuickActionLayoutEvents() {
+function unbindPlayerAiQuickActionLayoutEvents(): void {
   if (!playerAiQuickActionLayoutHandler) {
     return;
   }
@@ -159,7 +159,7 @@ function unbindPlayerAiQuickActionLayoutEvents() {
   playerAiState.setLayoutBound(false);
 }
 
-export function schedulePlayerAiQuickActionSync(delayMs = 120) {
+export function schedulePlayerAiQuickActionSync(delayMs = 120): void {
   if (state.playerAi.playerAiQuickActionSyncTimer) {
     window.clearTimeout(state.playerAi.playerAiQuickActionSyncTimer);
   }
@@ -169,13 +169,13 @@ export function schedulePlayerAiQuickActionSync(delayMs = 120) {
   }, delayMs));
 }
 
-function schedulePlayerAiQuickActionRetry() {
+function schedulePlayerAiQuickActionRetry(): void {
   const delay = Math.min(260 * (playerAiQuickActionRetryCount + 1), 2500);
   playerAiQuickActionRetryCount += 1;
   schedulePlayerAiQuickActionSync(delay);
 }
 
-function syncPlayerAiQuickActionButton() {
+function syncPlayerAiQuickActionButton(): void {
   const existing = document.getElementById("boc-player-ai-quick-action");
   const existingWrap = existing?.closest(".boc-player-ai-wrap");
   if (!state.settings?.enablePlayerAiQuickAction || isReaderViewOpen() || isReaderMode()) {
@@ -197,7 +197,7 @@ function syncPlayerAiQuickActionButton() {
     return;
   }
 
-  let button = existing;
+  let button: HTMLButtonElement | null = existing instanceof HTMLButtonElement ? existing : null;
   let wrap = existingWrap instanceof HTMLElement ? existingWrap : null;
   if (!wrap) {
     wrap = document.createElement("div");
@@ -226,7 +226,7 @@ function syncPlayerAiQuickActionButton() {
   playerAiQuickActionRetryCount = 0;
 }
 
-export function removePlayerAiQuickActionButton() {
+export function removePlayerAiQuickActionButton(): void {
   if (state.playerAi.playerAiQuickActionRevealTimer) {
     window.clearTimeout(state.playerAi.playerAiQuickActionRevealTimer);
     playerAiState.setRevealTimer(0);
@@ -242,7 +242,7 @@ export function removePlayerAiQuickActionButton() {
   document.getElementById("boc-player-ai-quick-action")?.closest(".boc-player-ai-wrap")?.remove();
 }
 
-function bindPlayerAiQuickActionCursorSync(wrap) {
+function bindPlayerAiQuickActionCursorSync(wrap: HTMLElement): void {
   if (!(wrap instanceof HTMLElement)) {
     return;
   }
@@ -288,10 +288,10 @@ function bindPlayerAiQuickActionCursorSync(wrap) {
   host.addEventListener("mouseleave", hideImmediately, { passive: true });
   host.addEventListener("pointermove", showForCursorActivity, { passive: true });
   playerAiQuickActionCursorSync = { host, wrap, showForCursorActivity, hideImmediately };
-  wrap.__bocPlayerAiCursorHost = host;
+  (wrap as HTMLElement & { __bocPlayerAiCursorHost?: HTMLElement }).__bocPlayerAiCursorHost = host;
 }
 
-function unbindPlayerAiQuickActionCursorSync() {
+function unbindPlayerAiQuickActionCursorSync(): void {
   if (!playerAiQuickActionCursorSync) {
     return;
   }
@@ -303,11 +303,11 @@ function unbindPlayerAiQuickActionCursorSync() {
   playerAiQuickActionCursorSync = null;
 }
 
-function hasPlayerSubtitleControl() {
+function hasPlayerSubtitleControl(): boolean {
   return Boolean(findPlayerSubtitleControlNode());
 }
 
-function findPlayerSubtitleControlNode() {
+function findPlayerSubtitleControlNode(): Element | null {
   const controlRoots = Array.from(
     document.querySelectorAll(
       "#bilibili-player .bpx-player-control-wrap, #playerWrap .bpx-player-control-wrap, .bpx-player-container .bpx-player-control-wrap, #bilibili-player, #playerWrap, .bpx-player-container, .player-wrap"
@@ -329,7 +329,7 @@ function findPlayerSubtitleControlNode() {
   return null;
 }
 
-function isPlayerSubtitleControlNode(node) {
+function isPlayerSubtitleControlNode(node: unknown): boolean {
   if (!(node instanceof Element)) {
     return false;
   }
@@ -340,12 +340,12 @@ function isPlayerSubtitleControlNode(node) {
     node.textContent,
     typeof node.className === "string" ? node.className : ""
   ]
-    .filter((item) => typeof item === "string" && item.trim())
+    .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
     .join(" ");
   return /字幕|subtitle/i.test(text);
 }
 
-function findPlayerAiQuickActionHost() {
+function findPlayerAiQuickActionHost(): HTMLElement | null {
   const candidates = [
     document.querySelector(".bpx-player-container"),
     document.querySelector(".bpx-player-video-area"),
@@ -353,7 +353,7 @@ function findPlayerAiQuickActionHost() {
     document.getElementById("playerWrap"),
     document.querySelector(".player-wrap")
   ];
-  const direct = candidates.find((node) => node instanceof HTMLElement && isVisibleReaderControl(node)) || null;
+  const direct = candidates.find((node): node is HTMLElement => node instanceof HTMLElement && isVisibleReaderControl(node)) || null;
   if (direct) {
     return direct;
   }
@@ -377,7 +377,7 @@ function findPlayerAiQuickActionHost() {
   return null;
 }
 
-function syncPlayerAiQuickActionVisuals(button) {
+function syncPlayerAiQuickActionVisuals(button: HTMLElement): void {
   if (!(button instanceof HTMLElement)) {
     return;
   }
@@ -385,7 +385,7 @@ function syncPlayerAiQuickActionVisuals(button) {
   const hitSize = 36;
   const iconSize = 24;
   const baseColor = "#f6f7f8";
-  [wrap, button].filter(Boolean).forEach((node) => {
+  [wrap, button].filter((node): node is HTMLElement => Boolean(node)).forEach((node) => {
     node.style.setProperty("--boc-player-ai-action-hit-size", `${hitSize}px`);
     node.style.setProperty("--boc-player-ai-action-color", baseColor);
     node.style.setProperty("--boc-player-ai-action-hover-color", baseColor);
@@ -393,7 +393,7 @@ function syncPlayerAiQuickActionVisuals(button) {
   button.style.setProperty("--boc-player-ai-action-icon-size", `${iconSize}px`);
 }
 
-async function handlePlayerAiQuickActionClick(event) {
+async function handlePlayerAiQuickActionClick(event: MouseEvent): Promise<void> {
   event.preventDefault();
   event.stopPropagation();
   if (
@@ -417,8 +417,8 @@ async function handlePlayerAiQuickActionClick(event) {
       throw new Error("AI 按钮未开启");
     }
     const resp = await sendRuntimeMessage({ type: "player-ai-quick-action" });
-    if (!resp?.ok) {
-      throw new Error(resp?.error || "打开 AI 侧边栏失败");
+    if (!resp || typeof resp !== "object" || !(resp as { ok?: unknown }).ok) {
+      throw new Error((resp as { error?: string })?.error || "打开 AI 侧边栏失败");
     }
     setMessage("已打开 AI 侧边栏并发送快捷提示词。");
   } catch (error) {

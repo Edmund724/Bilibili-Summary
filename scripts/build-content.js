@@ -8,7 +8,7 @@
 //
 // 产物清单（均 gitignore）：
 //   entry/content-bootstrap.iife.js  经典 IIFE，manifest.content_scripts 指向它
-//   entry/content-main.mjs           ESM 主包（entry/content.js 的模块图）
+//   entry/content-main.mjs           ESM 主包（entry/content.ts 的模块图）
 //   entry/chunks/chunk-<hash>.mjs    splitting 为动态 import 边切出的 chunk
 //
 // web_accessible_resources 必须覆盖 content-main.mjs 与 chunks/*（见
@@ -20,8 +20,8 @@ const { execFileSync } = require("child_process");
 const { build } = require("esbuild");
 
 const extensionRoot = path.join(__dirname, "..", "extension");
-const entry = path.join(extensionRoot, "entry", "content.js");
-const bootstrapEntry = path.join(extensionRoot, "entry", "content-bootstrap.js");
+const entry = path.join(extensionRoot, "entry", "content.ts");
+const bootstrapEntry = path.join(extensionRoot, "entry", "content-bootstrap.ts");
 const outDir = path.join(extensionRoot, "entry");
 const mainOutfile = path.join(outDir, "content-main.mjs");
 const bootstrapOutfile = path.join(outDir, "content-bootstrap.iife.js");
@@ -36,7 +36,7 @@ const legacyOutfile = path.join(outDir, "content-classic.js");
 // chrome.runtime.getManifest().version.
 const manifestPath = path.join(__dirname, "..", "extension", "manifest.json");
 // 版本实体在 core/version.ts（bootstrap 专用拆分，defaults.ts re-export）；
-// defaults.ts 若丢了 re-export，主包构建会因 content.js 的 import 失败而报错，
+// defaults.ts 若丢了 re-export，主包构建会因 content.ts 的 import 失败而报错，
 // 天然兜底。
 const versionTsPath = path.join(__dirname, "..", "extension", "core", "version.ts");
 
@@ -102,7 +102,7 @@ function sizeInBytes(file) {
 async function buildMainPackage() {
   await build({
     // 对象形式 entryPoints：key 直接决定输出文件名（相对 outdir、不含扩展名），
-    // 源 entry/content.js 保持模块形态不动。
+    // 源 entry/content.ts 保持模块形态不动。
     entryPoints: { "content-main": entry },
     outdir: outDir,
     entryNames: "[name]",

@@ -7,7 +7,7 @@
 // mock 模式沿 tests/core/message-handler-chapters.test.js：重依赖全 mock，
 // state 走真实模块，单纪元导入。
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -634,7 +634,12 @@ const ALLOWED_SNAPSHOT_FIELDS = new Set([
 // 读消费方源码（相对本测试文件的路径）；剔除整行注释与块注释，让扫描只看
 // 代码——注释里的字段名举例不应参与对账，也不应因措辞变化造成误报。
 function readSource(relativePath) {
-  const raw = readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
+  // TS 渐进迁移期间源文件可能是 .js 或 .ts，缺失时回退到另一扩展名。
+  const jsUrl = new URL(relativePath, import.meta.url);
+  const url = existsSync(fileURLToPath(jsUrl))
+    ? jsUrl
+    : new URL(relativePath.replace(/\.js$/, ".ts"), import.meta.url);
+  const raw = readFileSync(fileURLToPath(url), "utf8");
   return raw
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^[ \t]*\/\/.*$/gm, "");
@@ -642,8 +647,9 @@ function readSource(relativePath) {
 
 // 扫描源码中 `<receiver>?.field` / `<receiver>.field` 形式的属性访问字段名。
 // lookbehind 防子串误配（如 liveContextData 内含 contextData）。
+// 允许 TS 非空断言 `receiver!.field`（迁移期 .ts 源码常见）。
 function scanFields(source, receiver) {
-  const pattern = new RegExp(`(?<![A-Za-z0-9_$])${receiver}\\??\\.([A-Za-z_$][\\w$]*)`, "g");
+  const pattern = new RegExp(`(?<![A-Za-z0-9_$])${receiver}[?!]*\\.([A-Za-z_$][\\w$]*)`, "g");
   return new Set([...source.matchAll(pattern)].map((match) => match[1]));
 }
 

@@ -13,32 +13,52 @@ export const DEFAULT_MAP_CONCURRENCY = 3;
 // 单段小结失败重试次数（对齐 ai/completion.js 流式重试默认 2：1 次初始 + 2 次重试，共至多 3 次尝试）。
 export const MAX_MAP_RETRIES = 2;
 
+interface MarkedError extends Error {
+  aborted?: boolean;
+  overflow?: boolean;
+}
+
+interface RunMapBoundedOptions<T, R> {
+  items: T[];
+  worker: (item: T, index: number) => Promise<R>;
+  concurrency?: number;
+  signal?: AbortSignal | null;
+  onItemDone?: (result: R, index: number) => void;
+}
+
 /**
  * 以受限并发执行 map worker，产出按原始下标排布的结果数组。
  * worker(item, index) → Promise<result>；每完成一项调用 onItemDone(result, index)。
  * signal 中止时停止启动后续项；带 aborted / overflow 标记的错误立即 rethrow（不重试）。
  */
-export async function runMapBounded({ items, worker, concurrency = DEFAULT_MAP_CONCURRENCY, signal, onItemDone }) {
+export async function runMapBounded<T, R>({
+  items,
+  worker,
+  concurrency = DEFAULT_MAP_CONCURRENCY,
+  signal,
+  onItemDone
+}: RunMapBoundedOptions<T, R>): Promise<R[]> {
   const list = Array.isArray(items) ? items : [];
-  const limit = Math.max(1, Math.floor(Number(concurrency) || 1));
-  const results = new Array(list.length);
+  const limit = Math.max(1, Math.floor(Number(concurrency)) || 1);
+  const results = new Array<R | undefined>(list.length);
   const queue = list.map((_, index) => index);
   let inFlight = 0;
   let finished = false;
 
   return await new Promise((resolve, reject) => {
     // 整体落定：错误（aborted 标记或重试耗尽）reject，否则 resolve 已完成的 results。
-    const settle = (error) => {
+    const settle = (error?: MarkedError | null) => {
       if (finished) return;
       finished = true;
       if (error) reject(error);
-      else resolve(results);
+      else resolve(results as R[]);
     };
 
     // 补位拉起队列下一项；中止后不再启动新项。
     const pump = () => {
       while (!finished && !signal?.aborted && inFlight < limit && queue.length > 0) {
         const index = queue.shift();
+        if (index === undefined) break;
         inFlight += 1;
         runItem(index);
       }
@@ -48,28 +68,29 @@ export async function runMapBounded({ items, worker, concurrency = DEFAULT_MAP_C
       }
     };
 
-    const runItem = async (index) => {
-      let lastError = null;
-      let result;
+    const runItem = async (index: number) => {
+      let lastError: MarkedError | null = null;
+      let result: R | undefined;
       for (let attempt = 0; attempt <= MAX_MAP_RETRIES; attempt++) {
         try {
           result = await worker(list[index], index);
           break;
         } catch (e) {
-          if (e?.aborted) {
+          const err = e as MarkedError;
+          if (err?.aborted) {
             // 中止标记错误：不重试，整体 rethrow（上层 Map-Reduce 走 abort 收束）。
             inFlight -= 1;
-            settle(e);
+            settle(err);
             return;
           }
-          if (e?.overflow) {
+          if (err?.overflow) {
             // 溢出标记错误：不重试（同素材重发必然再溢出），整体 rethrow
             // 供上层 Map-Reduce 做一次放宽预算重跑。
             inFlight -= 1;
-            settle(e);
+            settle(err);
             return;
           }
-          lastError = e;
+          lastError = err;
           // 重试耗尽或已中止：不再重试，rethrow 最后错误。
           if (attempt >= MAX_MAP_RETRIES || signal?.aborted) {
             inFlight -= 1;
@@ -81,10 +102,10 @@ export async function runMapBounded({ items, worker, concurrency = DEFAULT_MAP_C
       }
       results[index] = result;
       try {
-        if (!finished) onItemDone?.(result, index);
+        if (!finished) onItemDone?.(result as R, index);
       } catch (e) {
         inFlight -= 1;
-        settle(e);
+        settle(e as MarkedError);
         return;
       }
       inFlight -= 1;

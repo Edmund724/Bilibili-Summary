@@ -25,13 +25,13 @@ const COMPRESSED_SUMMARY_MAX_CHARS = 60000;
 const TRUNCATION_MARKER = "\n…（压缩摘要过长，已截断尾部）";
 
 // 保守地把 maxChars 规整为非负整数；非有限值（undefined/NaN 等）回落 0。
-function normalizeMaxChars(maxChars) {
+function normalizeMaxChars(maxChars: unknown): number {
   const n = Number(maxChars);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
 // 尾部截断：超长时保留头部、在尾部补截断标记，返回串长度严格 ≤ maxChars。
-function truncateTail(text, maxChars) {
+function truncateTail(text: unknown, maxChars: unknown): string {
   const value = String(text ?? "");
   const max = normalizeMaxChars(maxChars);
   if (value.length <= max) return value;
@@ -39,8 +39,13 @@ function truncateTail(text, maxChars) {
   return value.slice(0, max - TRUNCATION_MARKER.length) + TRUNCATION_MARKER;
 }
 
+interface FinalNoteInput {
+  note?: unknown;
+  segmentSummaries?: unknown[];
+}
+
 // 是否已「成稿」：笔记正文 + 分段小结两者齐备才算；首轮 / 尚未成稿 → false。
-export function hasFinalNote({ note, segmentSummaries } = {}) {
+export function hasFinalNote({ note, segmentSummaries }: FinalNoteInput = {}): boolean {
   const noteText = String(note || "").trim();
   const hasSummaries = Array.isArray(segmentSummaries) && segmentSummaries.length > 0;
   return noteText.length > 0 && hasSummaries;
@@ -48,10 +53,16 @@ export function hasFinalNote({ note, segmentSummaries } = {}) {
 
 // 近 N 轮 verbatim：只保留最近 turns 轮对话（每轮 = 一 user 一 assistant，共 2 条），
 // 把历史封顶，保证追问 token 不随轮数无限增长（对齐 ADR「token 随追问近乎常数」）。
-export function trimRecentTurns(history, turns = RECENT_TURNS_DEFAULT) {
+export function trimRecentTurns(history: unknown, turns: unknown = RECENT_TURNS_DEFAULT): unknown[] {
   const list = Array.isArray(history) ? history : [];
   const safeTurns = Math.max(1, Math.floor(Number(turns) || RECENT_TURNS_DEFAULT));
   return list.slice(-(safeTurns * 2));
+}
+
+interface CompressedSummaryInput {
+  segmentSummaries?: unknown[];
+  note?: unknown;
+  maxChars?: number | unknown;
 }
 
 // 组装「压缩摘要」字符串：分段小结（每条 `### 片段 i` 小标题 + 正文，先受独立上限约束）
@@ -60,7 +71,7 @@ export function buildCompressedSummary({
   segmentSummaries = [],
   note = "",
   maxChars = COMPRESSED_SUMMARY_MAX_CHARS
-} = {}) {
+}: CompressedSummaryInput = {}): string {
   const summaries = Array.isArray(segmentSummaries) ? segmentSummaries : [];
   const noteText = note == null ? "" : String(note);
 
@@ -70,11 +81,19 @@ export function buildCompressedSummary({
     summariesSection = "## 分段小结\n\n" + truncateTail(lines.join("\n\n"), SEGMENT_SUMMARIES_MAX_CHARS);
   }
 
-  const sections = [];
+  const sections: string[] = [];
   if (summariesSection.length > 0) sections.push(summariesSection);
   if (noteText.length > 0) sections.push("## 成稿笔记\n\n" + noteText);
 
   return truncateTail(sections.join("\n\n"), maxChars);
+}
+
+interface FollowupSubtitleInput {
+  contextData?: Record<string, unknown>;
+  note?: unknown;
+  segmentSummaries?: unknown[] | null;
+  userPrompt?: unknown;
+  retrieveRaw?: ((prompt: unknown) => unknown[]) | null;
 }
 
 // 追问时的字幕体：已成稿 → 压缩摘要 [+ 检索注入的原始段尾缀]；
@@ -87,15 +106,15 @@ export function buildFollowupSubtitleMarkdown({
   segmentSummaries = null,
   userPrompt = "",
   retrieveRaw = null
-} = {}) {
+}: FollowupSubtitleInput = {}): string {
   const ctx = contextData || {};
   const noteText = note == null ? "" : String(note);
   const summaries = Array.isArray(segmentSummaries) ? segmentSummaries : [];
 
   if (!hasFinalNote({ note: noteText, segmentSummaries: summaries })) {
     return buildSubtitlePrompt({
-      body: ctx.subtitleBody,
-      chapters: ctx.chapters,
+      body: ctx.subtitleBody as unknown[],
+      chapters: ctx.chapters as unknown[],
       videoDuration: ctx.videoDuration,
       includeTimestampInBody: ctx.includeTimestampInBody
     });
@@ -104,7 +123,7 @@ export function buildFollowupSubtitleMarkdown({
   const compressed = buildCompressedSummary({ segmentSummaries: summaries, note: noteText });
 
   const retrieveFn = typeof retrieveRaw === "function" ? retrieveRaw : () => [];
-  const hits = (retrieveFn(userPrompt) || []).filter((text) => typeof text === "string" && text.length > 0);
+  const hits = (retrieveFn(userPrompt) || []).filter((text): text is string => typeof text === "string" && text.length > 0);
   if (hits.length === 0) {
     return compressed;
   }
