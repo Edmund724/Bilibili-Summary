@@ -28,7 +28,8 @@ interface SegmentKeyOptions {
 // 段序号之外的预算代后缀：同一 (bvid, cid, 字幕轨) 在不同预算档下的分段边界不同，
 // 段序号相同不代表内容相同——不带代标记的 key 会命中错位小结（内容串段）。
 // budgetScale=1（常态档）不带后缀，key 形状与历史逐字节一致，已有缓存零迁移。
-function budgetScaleSuffix(budgetScale: unknown): string {
+// 导出供同族键位（如 ai/analysis.ts 的 boc_lvs_analysis_ 族）继承同一预算代约定。
+export function budgetScaleSuffix(budgetScale: unknown): string {
   const scale = Number(budgetScale);
   return Number.isFinite(scale) && scale !== 1 ? `_b${Math.round(scale * 100)}` : "";
 }
