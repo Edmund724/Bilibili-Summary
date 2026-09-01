@@ -2,13 +2,14 @@
 // 设置页"语音转写平台"区块行构建器：与 AI 平台行（options-rows.js）共用
 // ui/provider-row.js 的 createProviderRow，本文件只提供 ASR 侧真实差异：
 // 名称输入、模型字段随预设 modelOptions 在下拉/文本间切换、选用 radio、
-// asr-providers-* 报文。行内删除按钮与状态行复用 ai-provider-remove /
-// ai-provider-status 类名（既有耦合，DOM 契约保持不变）。
-// 行构建器只依赖参数与回调，不直接访问 DOM 全局。
+// asr-providers-* 报文（连通性测试已直调 asr/provider-test.js，不再发消息）。
+// 行内删除按钮与状态行复用 ai-provider-remove / ai-provider-status 类名
+// （既有耦合，DOM 契约保持不变）。行构建器只依赖参数与回调，不直接访问 DOM 全局。
 
 import { ASR_PROVIDER_PRESETS, type AsrProviderPreset } from "../core/presets.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
+import { testAsrConnection } from "../asr/provider-test.js";
 import { createProviderRow, type ProviderRowElement, type ProviderRowItem, type ProviderRowPreset } from "./provider-row.js";
 
 const ASR_STATUS_SUCCESS_MIN_MS = 2000;
@@ -80,7 +81,10 @@ const asrProviderRow = createProviderRow({
       setActiveAsrProvider(listNode, providerId);
     });
   },
-  buildTestPayload: ({ row, presets, baseUrl, apiKey, model }) => {
+  // 连通性测试直调 asr/provider-test.js（不再走 asr-providers-test 消息往返）：
+  // options 页同属扩展 context，host_permissions 生效，跨域 fetch 无需 SW 中转；
+  // Key 代查（重输优先、否则按 providerId 读已存 Key）收口在探针入口内。
+  runTestProbe: ({ row, presets, baseUrl, apiKey, model }) => {
     const preset = presets.find((p) => p.id === row.dataset.currentPresetId) || null;
     const provider: {
       id: string;
@@ -96,11 +100,11 @@ const asrProviderRow = createProviderRow({
       baseUrl,
       model
     };
-    // 仅用户重输 Key 时携带，未重输则后台按 id 读已存 Key
+    // 仅用户重输 Key 时携带，未重输则探针按 id 读已存 Key
     if (apiKey) {
       provider.apiKey = apiKey;
     }
-    return { type: "asr-providers-test", provider };
+    return testAsrConnection(provider);
   },
   buildDeleteMessage: (providerId) => ({ type: "asr-providers-delete", providerId })
 });

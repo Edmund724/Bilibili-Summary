@@ -1,4 +1,4 @@
-// asr-provider-store.js 按 provider.type 的测试连接分发测试。
+// asr/provider-test.js 按 provider.type 的测试连接分发测试。
 // 覆盖 openai-transcriptions 探针的成功与失败分支、apiKey 缺失时回退
 // 读取已存 Key、非法 provider 的兜底。
 // 探针只与 fetch / chrome.storage 交互，用 vi.stubGlobal 替换 fetch 与 chrome。
@@ -12,7 +12,7 @@ let fetchMock;
 let localStorage;
 
 async function loadModule() {
-  return import("../../extension/asr/asr-provider-store.js");
+  return import("../../extension/asr/provider-test.js");
 }
 
 beforeEach(() => {

@@ -1,8 +1,8 @@
 // extension/core/provider-handlers.ts
 // Provider 消息处理器的通用工厂。
 // extension/entry/background.js 里 AI 平台与 ASR 平台各有一组形状相同的
-// 消息处理器（列表 / 读取 Key / 保存列表 / 写单个 Key / 删除 / 连通性测试），
-// 本工厂提取这组共享结构：调用方注入对应 store 的函数与探针，换回一组
+// 消息处理器（列表 / 读取 Key / 保存列表 / 写单个 Key / 删除 / 可选的连通性测试），
+// 本工厂提取这组共享结构：调用方注入对应 store 的函数与可选探针，换回一组
 // (message, sender, sendResponse) → boolean 形状的标准处理器。background 的
 // 路由表保持消息名不变，只换处理器指向。不持有状态、不直接碰
 // chrome.storage——存储交互全部经由注入的 store 函数。
@@ -33,7 +33,7 @@ export interface ProviderMessageHandlersDeps {
   deleteProvider: (providerId: string) => Promise<unknown[]>;
   loadKeys: () => Promise<Record<string, string>>;
   saveKey?: (providerId: string, apiKey: string) => Promise<unknown>;
-  probe: (provider: unknown) => Promise<unknown>;
+  probe?: (provider: unknown) => Promise<unknown>;
   pickTestProvider?: (message: ProviderHandlersMessage) => { provider: unknown } | { error: string };
 }
 
@@ -42,7 +42,7 @@ export interface ProviderMessageHandlers {
   get: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
   save: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
   remove: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
-  test: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
+  test?: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
   setKey?: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
 }
 
@@ -55,6 +55,7 @@ export function createProviderMessageHandlers({
   probe,
   pickTestProvider
 }: ProviderMessageHandlersDeps): ProviderMessageHandlers {
+  const hasProbe = typeof probe === "function";
   // 缺省探针输入装配：平铺字段消息（ai-providers-test 的契约）。
   // baseUrl 缺失属于同步失败：回包 { ok: false, error: "请填写 baseUrl" }
   // 并让处理器返回 false；Key 解析是异步的：优先消息直带的 apiKey（用户
@@ -139,7 +140,7 @@ export function createProviderMessageHandlers({
       return false;
     }
     Promise.resolve(picked.provider)
-      .then((provider) => probe(provider))
+      .then((provider) => probe!(provider))
       .then((resp) => sendResponse(resp))
       // 探针本身不抛错（失败以 { ok: false } 负载返回），能到这里的基本是
       // Key 存储读取失败；沿用转发探针负载的处理器的容错写法。
@@ -147,7 +148,12 @@ export function createProviderMessageHandlers({
     return true;
   }
 
-  const handlers: ProviderMessageHandlers = { list, get, save, remove, test };
+  const handlers: ProviderMessageHandlers = { list, get, save, remove };
+  // 只有注入了 probe 的家族才带 test 处理器（AI / ASR 连通性测试均已迁出 SW，
+  // background.js 不再注册 test 消息，工厂保留能力供需要它的场景使用）。
+  if (hasProbe) {
+    handlers.test = test;
+  }
   // ASR 平台没有“写单个 Key”的消息（Key 随 saveProviders 收割进 local），
   // 只有注入了 saveKey 的家族才带 setKey 处理器。
   if (saveKey) {

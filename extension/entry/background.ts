@@ -13,7 +13,7 @@ import {
   aiProviderStore,
   handleAiProvidersModels as fetchAiProviderModels
 } from "../core/ai-provider-store.js";
-import { asrProviderStore, testAsrConnection } from "../asr/asr-provider-store.js";
+import { asrProviderStore } from "../asr/asr-provider-store.js";
 import {
   createProviderMessageHandlers,
   createAsrRuntimeConfigHandler
@@ -159,10 +159,10 @@ function handleFetchJson(message: Msg<"fetch-json">, _sender: MessageSender, sen
 
 // Provider CRUD 消息：AI / ASR 两个家族形状相同，统一由
 // core/provider-handlers.js 的工厂装配。响应负载与消息名保持不变，
-// 路由表只换处理器指向。AI 的连通性测试（ai-providers-test）已移出 SW：
-// options 页直调 ai/provider-test.js（host_permissions 对扩展页面同样生效），
-// 探针的 completion 链不再进 SW 图（候选 04 拆链），故本工厂不再注入 probe。
-// @ts-expect-error AI 家族不使用 test 处理器，probe 仅由 ASR 家族注入。
+// 路由表只换处理器指向。AI / ASR 的连通性测试（ai-providers-test /
+// asr-providers-test）均已移出 SW：options 页分别直调 ai/provider-test.js 与
+// asr/provider-test.js（host_permissions 对扩展页面同样生效），探针的 completion /
+// wav-encode 链不再进 SW 图（候选 04 拆链），故本工厂不再注入 probe。
 const aiProviderHandlers = createProviderMessageHandlers({
   loadProviders: aiProviderStore.loadProviders,
   saveProviders: aiProviderStore.saveProviders,
@@ -199,15 +199,13 @@ function handleAsrPresetsList(_message: Msg<"asr-presets-list">, _sender: Messag
   return false;
 }
 
-// ASR 的 test 消息把整个 provider 对象放在 message.provider（Key 由探针
-// 自行解析），覆写探针输入装配；其余处理器与 AI 家族共用同一套契约。
+// ASR 平台 CRUD 处理器：连通性测试已迁出 SW，本工厂只负责列表 / Key 的
+// 消息路由，与 AI 家族共用同一套契约。
 const asrProviderHandlers = createProviderMessageHandlers({
   loadProviders: asrProviderStore.loadProviders,
   saveProviders: asrProviderStore.saveProviders,
   deleteProvider: asrProviderStore.deleteProvider,
-  loadKeys: asrProviderStore.loadKeys,
-  probe: testAsrConnection,
-  pickTestProvider: (message) => ({ provider: message.provider || {} })
+  loadKeys: asrProviderStore.loadKeys
 });
 
 // 内容脚本 ASR 回退的运行时配置：settings 标量 + provider-store 列表 + 激活
@@ -290,7 +288,6 @@ const messageHandlers = new Map<BackgroundMessageType, BackgroundHandler>([
   ["asr-providers-save", asrProviderHandlers.save as BackgroundHandler],
   ["asr-providers-delete", asrProviderHandlers.remove as BackgroundHandler],
   ["get-asr-provider-key", asrProviderHandlers.get as BackgroundHandler],
-  ["asr-providers-test", asrProviderHandlers.test as BackgroundHandler],
   ["get-asr-runtime-config", handleGetAsrRuntimeConfig as BackgroundHandler],
   ["offload-task", handleOffloadTask as BackgroundHandler],
   ["ai-sidepanel-get-state", handleAiSidepanelGetState as BackgroundHandler],

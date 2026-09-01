@@ -109,10 +109,6 @@ export type GetAsrProviderKeyMessage = {
   type: "get-asr-provider-key";
   providerId?: string;
 };
-export type AsrProvidersTestMessage = {
-  type: "asr-providers-test";
-  provider?: unknown;
-};
 export type GetAsrRuntimeConfigMessage = { type: "get-asr-runtime-config" };
 
 export type OffloadTaskMessage = {
@@ -158,7 +154,6 @@ export type BackgroundMessage =
   | AsrProvidersSaveMessage
   | AsrProvidersDeleteMessage
   | GetAsrProviderKeyMessage
-  | AsrProvidersTestMessage
   | GetAsrRuntimeConfigMessage
   | OffloadTaskMessage
   | AiSidepanelGetStateMessage

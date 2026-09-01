@@ -4,9 +4,8 @@
 // 本文件守住行构建器重构后的关键不变量：
 // - 行结构渲染（含 ASR 复用 AI 类名 ai-provider-remove / ai-provider-status 的既有耦合）；
 // - 预设切换的 baseUrl 跟随规则（未改过 baseUrl 才跟随）；
-// - 测试连接：AI 行直调探针（ai/provider-test.js，候选 04 拆链后不走消息）、
-//   ASR 行走 provider 包裹报文（仅重输 Key 时携带）与成功状态的禁用输入 +
-//   定时恢复；
+// - 测试连接：AI / ASR 行均直调对应探针模块（候选 04 拆链后均不走消息）、
+//   ASR 行 provider 对象仅重输 Key 时携带 apiKey，成功状态的禁用输入 + 定时恢复；
 // - 删除接线（AI 仅后台消息 / ASR 额外触发注入的 onDelete）。
 // shared/messaging.js（sendRuntimeMessage，原 core/runtime.js）被整体 mock，
 // 避免拖入 content script 依赖图；AI 探针模块同理 mock，隔离 fetch。
@@ -15,9 +14,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 import { TRASH_ICON_PATHS } from "../../extension/ui/provider-row.js";
 
-const { sendRuntimeMessageMock, testAiProviderConnectionMock } = vi.hoisted(() => ({
+const { sendRuntimeMessageMock, testAiProviderConnectionMock, testAsrConnectionMock } = vi.hoisted(() => ({
   sendRuntimeMessageMock: vi.fn(),
-  testAiProviderConnectionMock: vi.fn()
+  testAiProviderConnectionMock: vi.fn(),
+  testAsrConnectionMock: vi.fn()
 }));
 
 vi.mock("../../extension/shared/messaging.js", () => ({
@@ -26,6 +26,10 @@ vi.mock("../../extension/shared/messaging.js", () => ({
 
 vi.mock("../../extension/ai/provider-test.js", () => ({
   testAiProviderConnection: testAiProviderConnectionMock
+}));
+
+vi.mock("../../extension/asr/provider-test.js", () => ({
+  testAsrConnection: testAsrConnectionMock
 }));
 
 const AI_PRESETS = [
@@ -96,6 +100,8 @@ beforeEach(() => {
   sendRuntimeMessageMock.mockImplementation(async () => ({ ok: true }));
   testAiProviderConnectionMock.mockReset();
   testAiProviderConnectionMock.mockImplementation(async () => ({ ok: true }));
+  testAsrConnectionMock.mockReset();
+  testAsrConnectionMock.mockImplementation(async () => ({ ok: true }));
   confirmMock = vi.fn(() => true);
   vi.stubGlobal("confirm", confirmMock);
 });
@@ -442,7 +448,7 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     expect(row.querySelector(".asr-provider-name").value).toBe("SiliconFlow 硅基流动（免费）");
   });
 
-  it("测试连接：provider 包裹报文且仅重输 Key 时携带 apiKey；成功回调保存", async () => {
+  it("测试连接：直调探针（provider 对象仅重输 Key 时携带 apiKey）；成功回调保存", async () => {
     vi.useFakeTimers();
     const rows = await loadAsrRows();
     const { listNode, emptyNode } = makeContainer();
@@ -458,17 +464,15 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     // 未重输 Key → 不携带 apiKey
     fireClick(row.querySelector(".asr-provider-test"));
     await flushMicrotasks();
-    expect(sendRuntimeMessageMock).toHaveBeenCalledTimes(1);
-    expect(sendRuntimeMessageMock.mock.calls[0][0]).toEqual({
-      type: "asr-providers-test",
-      provider: {
-        id: "asr1",
-        name: "我的 ASR",
-        type: "openai-transcriptions",
-        baseUrl: "https://api.siliconflow.cn/v1",
-        model: "FunAudioLLM/SenseVoiceSmall"
-      }
+    expect(testAsrConnectionMock).toHaveBeenCalledTimes(1);
+    expect(testAsrConnectionMock.mock.calls[0][0]).toEqual({
+      id: "asr1",
+      name: "我的 ASR",
+      type: "openai-transcriptions",
+      baseUrl: "https://api.siliconflow.cn/v1",
+      model: "FunAudioLLM/SenseVoiceSmall"
     });
+    expect(sendRuntimeMessageMock).not.toHaveBeenCalled();
     expect(onTestSuccess).toHaveBeenCalledWith("asr1");
 
     // 重渲染后的新行显示"连接成功"并禁用输入，2 秒后恢复
@@ -480,11 +484,11 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     expect(Array.from(newRow.querySelectorAll("input, button")).every((el) => !el.disabled)).toBe(true);
 
     // 重输 Key → 携带 apiKey
-    sendRuntimeMessageMock.mockClear();
+    testAsrConnectionMock.mockClear();
     newRow.querySelector(".asr-provider-apikey").value = "sk-new";
     fireClick(newRow.querySelector(".asr-provider-test"));
     await flushMicrotasks();
-    expect(sendRuntimeMessageMock.mock.calls[0][0].provider.apiKey).toBe("sk-new");
+    expect(testAsrConnectionMock.mock.calls[0][0].apiKey).toBe("sk-new");
   });
 
   it("删除：后台消息后触发注入的 onDelete，并恢复空态", async () => {

@@ -280,9 +280,8 @@ export function createProviderRow({
         return;
       }
       showStatus(statusNode, "正在测试...");
-      // 探针执行可注入：AI 平台行直调 ai/provider-test.js（options 页本地
-      // 执行，免一次 SW 消息往返，见候选 04 拆链）；未注入时回退运行时消息
-      // （ASR 家族探针仍收口在 SW）。
+      // 探针执行可注入：AI / ASR 平台行均直调对应 provider-test.js（options
+      // 页本地执行，免一次 SW 消息往返，见候选 04 拆链）；未注入时回退运行时消息。
       const resp = (runTestProbe
         ? await runTestProbe({ row, presets, baseUrl, apiKey, model })
         : await sendRuntimeMessage(buildTestPayload!({ row, presets, baseUrl, apiKey, model }))) as {
