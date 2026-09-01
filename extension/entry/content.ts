@@ -11,14 +11,13 @@ import { logInfo, logWarn } from "../shared/logging.js";
 // 不再常驻，start/stop/sync 全部走 loadPlayerAi() 的动态 import。
 import { loadPlayerAi, isPlayerAiLoaded } from "../core/lazy-player-ai.js";
 
-import { ensureUiReady } from "../ui/ui-renderer.js";
-// 候选02 分层惰性：init() 的启动符号全部来自常驻微模块/轻呈现层——
-//   启动接线（debug 辅助/设置监听/presenter 注册）：./reader/init-essentials.js
-//   页面状态守卫（clear/guard）：./reader/state.js
-//   设置水合/排版呈现/状态栏文案：./reader/presentation.js
-// 它们只依赖常驻叶子，不把 reader 重域（lifecycle/page-frame/player-host/sync）
-// 拖进常驻。唯一例外是 enterReaderMode（reader 直达 URL 路径）：reader 重域
-// 符号，经 ensureReaderDomain() 动态装载后调用（带 promise 缓存与失败重试）。
+// 候选03 常驻瘦身：UI 壳构建（ensureUiReady）与 reader 静态呈现层
+//（hydrateReaderStateFromSettings / applyReadingViewPresentation / renderReadingStatus）
+// 已惰性化，只在面板打开或进入阅读模式时加载。普通页启动路径不再构建
+// #boc-root / #boc-reading-view 壳，也不应用阅读排版属性。
+import { ensureUiReady } from "../core/lazy-ui.js";
+// 候选02 分层惰性 + 候选03 常驻瘦身：init() 的启动符号只保留真正常驻的轻量
+// 接线与页面状态守卫；设置水合/排版呈现/状态栏文案随阅读模式进入惰性装载。
 import {
   installReaderDebugHelpers,
   bindSettingsWatcher,
@@ -29,7 +28,7 @@ import {
   hydrateReaderStateFromSettings,
   applyReadingViewPresentation,
   renderReadingStatus
-} from "../reader/presentation.js";
+} from "../core/lazy-reader-presentation.js";
 import { ensureReaderDomain } from "../core/lazy-reader.js";
 
 import {
@@ -77,7 +76,8 @@ function init(): void {
     return;
   }
 
-  ensureUiReady({ forceRecreate: true });
+  // 候选03：普通页启动不再同步构建 UI 壳。面板/阅读视图壳在首次打开/进入时
+  // 经 ensureUiReady 惰性构建。
   installReaderDebugHelpers();
 
   const shouldEnterReaderMode = isReaderMode();
@@ -156,8 +156,6 @@ function init(): void {
   }).catch(() => {});
   getSettings().then((settings) => {
     state.setSettings(settings);
-    hydrateReaderStateFromSettings(settings);
-    applyReadingViewPresentation();
     // 按设置显式启停：默认关闭（core/defaults.js enablePlayerAiQuickAction:
     // false）时不绑 layout 监听、不挂 observer，避免关闭态每帧空转 no-op。
     // 懒加载语义：开启才触发模块加载；关闭时模块未加载即无任何残留可清理，
@@ -168,10 +166,13 @@ function init(): void {
       stopPlayerAiQuickActionLazy();
     }
     if (shouldEnterReaderMode) {
-      // 候选02：enterReaderMode 属 reader 重域，经 ensureReaderDomain 动态装载
-      // 后进入（阅读模式直达链接的装载开销被页面跳转掩盖）；装载失败与启动
-      // 失败同走状态栏提示（renderReadingStatus 为常驻轻函数）。
-      ensureReaderDomain()
+      // 候选03：阅读模式直达链接才惰性装载 UI 壳 + reader 呈现层，再进入重域。
+      // ensureUiReady 与 hydrate/apply 并发装载，壳构建完成后应用排版属性，
+      // 最后 enterReaderMode（其内部会再次 hydrate/apply，保证状态最终一致）。
+      ensureUiReady({ forceRecreate: true })
+        .then(() => hydrateReaderStateFromSettings(settings))
+        .then(() => applyReadingViewPresentation())
+        .then(() => ensureReaderDomain())
         .then((reader) => reader.enterReaderMode())
         .catch((error) => {
           renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);

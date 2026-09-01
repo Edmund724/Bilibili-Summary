@@ -25,7 +25,10 @@ import {
 // 链内符号一律 ensureSummarizeChain().then((chain) => chain.xxx())。一键总结
 // 热路径上的装载是本地 chunk 动态 import（~10ms），被消息往返掩盖。
 import { ensureSummarizeChain } from "../subtitle/lazy.js";
-import { setStatus, ensureUiReady } from "../ui/ui-renderer.js";
+// 候选03 常驻瘦身：setStatus 迁入 shared/ui-status.js（DOM 节点存在时写入，
+// 否则仅更新 state）；ensureUiReady 经 core/lazy-ui.js 惰性构建 UI 壳。
+import { setStatus } from "../shared/ui-status.js";
+import { ensureUiReady } from "./lazy-ui.js";
 
 // player-ai 经加载器按需引入（候选4 分包）：默认关闭的能力不再常驻。
 // 「未加载」时按钮不可能存在，remove/sync 均可安全跳过（幂等不变量见
@@ -40,7 +43,8 @@ import { loadPlayerAi, isPlayerAiLoaded } from "./lazy-player-ai.js";
 // seekReadingTarget 的规范序，本文件不再触碰 scroll-state 与跟随状态。）
 import { ensureReaderDomain } from "./lazy-reader.js";
 import { isReaderViewOpen, enforceNormalPageStateIfNeeded } from "../reader/state.js";
-import { renderReadingStatus } from "../reader/presentation.js";
+// 候选03 常驻瘦身：renderReadingStatus 已惰性化。
+import { renderReadingStatus } from "./lazy-reader-presentation.js";
 // 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
 import { logWarn } from "../shared/logging.js";
 // S3 分层：阅读表随阅读模式挂载/移除（打开/关闭/URL 跳转编排三处共用）
@@ -81,7 +85,10 @@ export function bindRuntimeEvents() {
     }
 
     if (message.type === "popup-refresh") {
-      ensureSummarizeChain()
+      // 候选03：刷新抓取会写面板 DOM（resetClipState / renderMeta 等），先确保
+      // UI 壳存在。首开面板/首次刷新的惰性装载开销被用户动作掩盖。
+      ensureUiReady()
+        .then(() => ensureSummarizeChain())
         .then((chain) =>
           chain
             .refreshClip()
@@ -111,7 +118,9 @@ export function bindRuntimeEvents() {
           .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
         return true;
       }
-      ensureSummarizeChain()
+      // 候选03：字幕切换会渲染面板 DOM，先确保 UI 壳存在。
+      ensureUiReady()
+        .then(() => ensureSummarizeChain())
         .then((chain) =>
           chain
             .loadSubtitle(url, lang, state.clip.fetchRunId, subtitleId)
@@ -140,24 +149,27 @@ export function bindRuntimeEvents() {
           .then((playerAi) => playerAi.removePlayerAiQuickActionButton())
           .catch(() => {});
       }
-      ensureUiReady();
       const readerUrl = String(message.readerUrl || "").trim();
-      if (readerUrl) {
-        replaceReaderModeUrl(readerUrl);
-        // S3：先挂阅读表再翻属性（无闪变时序，见 content.js 同款注释）
-        ensureReaderStyles();
-        document.documentElement.setAttribute("data-boc-reader-mode", "1");
-        document.body.setAttribute("data-boc-reader-mode", "1");
-      }
-      if (!isReaderViewOpen()) {
-        // 候选02：enterReaderMode 属 reader 重域，经 ensureReaderDomain 装载后
-        // 进入（点击路径的本地动态装载对用户无感）。
-        ensureReaderDomain()
-          .then((reader) => reader.enterReaderMode())
-          .catch((error) => {
-            logWarn("[BOC] reading mode trigger failed", error);
-          });
-      }
+      // 候选03：先确保 UI 壳存在，再设置阅读模式属性并进入重域。ensureUiReady
+      // 与后续 reader 操作串成同一 promise 链，避免并发触发导致壳构建两次。
+      ensureUiReady().then(() => {
+        if (readerUrl) {
+          replaceReaderModeUrl(readerUrl);
+          // S3：先挂阅读表再翻属性（无闪变时序，见 content.js 同款注释）
+          ensureReaderStyles();
+          document.documentElement.setAttribute("data-boc-reader-mode", "1");
+          document.body.setAttribute("data-boc-reader-mode", "1");
+        }
+        if (!isReaderViewOpen()) {
+          // 候选02：enterReaderMode 属 reader 重域，经 ensureReaderDomain 装载后
+          // 进入（点击路径的本地动态装载对用户无感）。
+          ensureReaderDomain()
+            .then((reader) => reader.enterReaderMode())
+            .catch((error) => {
+              logWarn("[BOC] reading mode trigger failed", error);
+            });
+        }
+      });
       sendResponse({ ok: true });
       return true;
     }
@@ -325,14 +337,17 @@ export function bindUrlChangeHandler() {
     clipState.setCurrentUrl(nextUrl);
     clipState.setCurrentClipSignature(nextSignature);
     enforceNormalPageStateIfNeeded(nextUrl);
-    ensureUiReady();
-    // 候选02：resetClipState 属总结链层，经 ensure 装载后执行。装载/执行失败
-    // 记日志不中断编排（后续 reader 分支与状态提示仍需走到）。
-    ensureSummarizeChain()
-      .then((chain) => chain.resetClipState())
-      .catch((error) => {
-        logWarn("[BOC] clip state reset after URL change failed", error);
-      });
+    // 候选03：UI 壳惰性构建。URL 变化后需要先确保壳存在，再执行依赖壳的逻辑
+    //（resetClipState 会清空面板内容；阅读模式进入依赖阅读视图壳）。
+    ensureUiReady().then(() => {
+      // 候选02：resetClipState 属总结链层，经 ensure 装载后执行。装载/执行失败
+      // 记日志不中断编排（后续 reader 分支与状态提示仍需走到）。
+      ensureSummarizeChain()
+        .then((chain) => chain.resetClipState())
+        .catch((error) => {
+          logWarn("[BOC] clip state reset after URL change failed", error);
+        });
+    });
     // player-ai 按钮同步（原为同步调用）：懒加载后「已加载/加载中才请求」，
     // 未加载（快捷开关关闭态）跳过——player-ai start 自带初始 sync，开启后
     // 的 URL 变化自会恢复同步，行为等价。
@@ -347,37 +362,42 @@ export function bindUrlChangeHandler() {
       ensureReaderStyles();
       document.documentElement.setAttribute("data-boc-reader-mode", "1");
       document.body.setAttribute("data-boc-reader-mode", "1");
-      // renderReadingStatus 为常驻微模块（presentation.js）的轻函数，直接写
-      // 状态栏；enterReaderMode 属 reader 重域，经 ensureReaderDomain 装载后进入。
-      renderReadingStatus("检测到阅读视图跳转，正在打开阅读模式...");
-      ensureReaderDomain()
-        .then((reader) => reader.enterReaderMode())
-        .catch((error) => {
-          renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
+      // 候选03：renderReadingStatus 已惰性化；壳构建与呈现层装载完成后写状态栏。
+      Promise.all([ensureUiReady(), renderReadingStatus("检测到阅读视图跳转，正在打开阅读模式...")])
+        .catch(() => {})
+        .then(() => {
+          ensureReaderDomain()
+            .then((reader) => reader.enterReaderMode())
+            .catch((error) => {
+              renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
+            });
         });
       return;
     }
     if (isReaderViewOpen() || shouldEnterReaderMode) {
       // 走到本分支的前提是视图已开或正要进入阅读模式：前者满足「视图开 ⇒ 域
       // 已装载」不变式，后者已由上一分支发起装载，ensure 均命中同一 promise。
-      renderReadingStatus("检测到视频变化，正在自动刷新字幕...");
-      ensureReaderDomain()
-        .then((reader) => {
-          reader.waitForVideoMetadata().then(() => {
-            // 候选02：refreshClip 属总结链层，经 ensureSummarizeChain 装载后刷新。
-            ensureSummarizeChain()
-              .then((chain) => chain.refreshClip())
-              .catch((error) => {
-                if (!isStaleRunError(error)) {
-                  renderReadingStatus(`自动刷新失败：${getErrorMessage(error)}`);
-                }
+      renderReadingStatus("检测到视频变化，正在自动刷新字幕...")
+        .catch(() => {})
+        .then(() => {
+          ensureReaderDomain()
+            .then((reader) => {
+              reader.waitForVideoMetadata().then(() => {
+                // 候选02：refreshClip 属总结链层，经 ensureSummarizeChain 装载后刷新。
+                ensureSummarizeChain()
+                  .then((chain) => chain.refreshClip())
+                  .catch((error) => {
+                    if (!isStaleRunError(error)) {
+                      renderReadingStatus(`自动刷新失败：${getErrorMessage(error)}`);
+                    }
+                  });
               });
-          });
-        })
-        .catch((error) => {
-          if (!isStaleRunError(error)) {
-            renderReadingStatus(`自动刷新失败：${getErrorMessage(error)}`);
-          }
+            })
+            .catch((error) => {
+              if (!isStaleRunError(error)) {
+                renderReadingStatus(`自动刷新失败：${getErrorMessage(error)}`);
+              }
+            });
         });
       return;
     }

@@ -1,5 +1,6 @@
 import { state, uiState } from "../core/state.js";
 import { byId } from "../shared/dom-utils.js";
+import { setStatus, setMessage } from "../shared/ui-status.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { getErrorMessage, toReadableText, isExtensionContextInvalidated } from "../shared/error-helpers.js";
 import { replaceReaderModeUrl } from "../bilibili/reader-url.js";
@@ -9,11 +10,11 @@ import {
 } from "../bilibili/video-id-shared.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { READING_HEADER_ICONS } from "./reading-header-icons.js";
-// 候选02 分层惰性：本模块保持常驻（ensureUiReady 启动建 UI 壳），静态 import
-// 只允许常驻叶子——reader 状态微模块（./reader/state.js，含 ids/view-state/
-// scroll-state）、轻呈现（./reader/presentation.js）。reader 重域（sync/lifecycle
-// 的交互处理）与总结链（fetcher/subtitle-ui）一律在回调内经 ensure 动态装载后
-// 调用：注册监听是启动同步操作，监听体只有用户操作/视图交互时才执行。
+// 候选03 常驻瘦身：本模块（面板 + 阅读视图壳构建、事件绑定）已整体惰性化，
+// 经 core/lazy-ui.js 动态装载。静态 import 只允许常驻叶子——reader 状态微模块
+//（./reader/state.js，含 ids/view-state/scroll-state）、轻状态栏写入器
+//（../shared/ui-status.js）。reader 重域（sync/lifecycle 的交互处理）与总结链
+//（fetcher/subtitle-ui）一律在回调内经 ensure 动态装载后调用。
 import {
   ids,
   isReaderViewOpen,
@@ -419,6 +420,16 @@ export function ensureUiReady({ forceRecreate = false }: { forceRecreate?: boole
     bindUiEvents();
     uiState.setEventsBound(true);
   }
+  // 壳构建前可能已通过 shared/ui-status.js 写入状态，把当前 state 同步到新创建的
+  // 状态栏/消息节点，避免首开面板时文案丢失。
+  const statusNode = document.getElementById(ids.status);
+  if (statusNode) {
+    statusNode.textContent = state.ui.statusText;
+  }
+  const messageNode = document.getElementById(ids.message);
+  if (messageNode) {
+    messageNode.textContent = state.ui.messageText;
+  }
 }
 
 export function setBusyState(disabled: boolean): void {
@@ -429,19 +440,6 @@ export function setBusyState(disabled: boolean): void {
   (byId(ids.subtitleSelect) as HTMLSelectElement).disabled = disabled || state.clip.subtitles.length === 0;
 }
 
-// renderMeta / renderSubtitleSelect 已移往 subtitle/ui.js（候选02 分层惰性）：
-// 两者只渲染「抓取结果」（视频属性 + 字幕轨列表），唯一调用方是总结链
-//（fetcher 的抓取收尾/重置）与 message-handler 的 popup-select-subtitle
-//（该处理器本就经 ensureSummarizeChain 装载链后调用）。留在本模块会把
-// selection.js（isAiSubtitle）及其依赖 cache/cache-lru 拖回常驻。
-// setStatus/setMessage 保留：URL 变化编排与本模块自身的错误提示在启动期使用。
-
-export function setStatus(text: string): void {
-  uiState.setStatusText(String(text || ""));
-  byId(ids.status).textContent = state.ui.statusText;
-}
-
-export function setMessage(text: string): void {
-  uiState.setMessageText(String(text || ""));
-  byId(ids.message).textContent = state.ui.messageText;
-}
+// renderMeta / renderSubtitleSelect 已移往 subtitle/ui.js（候选02 分层惰性）。
+// setStatus / setMessage 已迁往 ../shared/ui-status.js（候选03 常驻瘦身），本模块
+// 只消费它们，不再自行实现。

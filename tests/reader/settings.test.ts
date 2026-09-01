@@ -205,6 +205,9 @@ describe("设置变更与 data-attribute", () => {
       return undefined;
     });
 
+    // 候选03：设置变更只在阅读视图打开时才应用呈现层。
+    state.reader.setViewOpen(true);
+
     listener(
       { readerTheme: { newValue: "dark" } },
       "sync"
@@ -214,6 +217,8 @@ describe("设置变更与 data-attribute", () => {
     });
 
     const readingView = document.getElementById(ids.readingView) as HTMLElement;
-    expect(readingView.dataset.theme).toBe("dark");
+    await vi.waitFor(() => {
+      expect(readingView.dataset.theme).toBe("dark");
+    });
   });
 });

@@ -24,10 +24,8 @@ vi.mock("../../extension/reader/presenter.js", () => ({
   subscribeSubtitleRefresh: vi.fn(),
   notifyReaderPresenter: vi.fn()
 }));
-vi.mock("../../extension/ui/ui-renderer.js", () => ({
-  renderMeta: vi.fn(),
-  renderSubtitleSelect: vi.fn(),
-  setBusyState: vi.fn(),
+// 候选03 常驻瘦身：setMessage / setStatus 已迁入 shared/ui-status.js。
+vi.mock("../../extension/shared/ui-status.js", () => ({
   setStatus: vi.fn(),
   setMessage: vi.fn()
 }));
@@ -102,7 +100,7 @@ import {
   saveSubtitleToCache,
   clearSubtitleCacheByKey
 } from "../../extension/subtitle/cache.js";
-import { setMessage } from "../../extension/ui/ui-renderer.js";
+import { setMessage } from "../../extension/shared/ui-status.js";
 import { acceptSubtitle } from "../../extension/subtitle/commit.js";
 
 // 时长合规字幕体：videoDuration=300 时 minCoverageRatio=0.22，maxTo=290 ≥ 66

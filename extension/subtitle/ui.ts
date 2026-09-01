@@ -10,7 +10,8 @@ import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import { normalizeDownloadFormat } from "../core/validators.js";
 import { state } from "../core/state.js";
-import { setMessage, setStatus } from "../ui/ui-renderer.js";
+// 候选03 常驻瘦身：setMessage / setStatus 迁入 shared/ui-status.js。
+import { setMessage, setStatus } from "../shared/ui-status.js";
 // ids 为 reader 状态微模块（候选04 结构归并）：纯常量表，不经 reader/index.js
 // facade 转发（否则总结链会静态拖起整个 reader 域）。
 import { ids } from "../reader/state.js";

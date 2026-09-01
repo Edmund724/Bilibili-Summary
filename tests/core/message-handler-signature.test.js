@@ -31,10 +31,16 @@ vi.mock("../../extension/subtitle/fetcher.js", () => ({
   loadSubtitle: vi.fn(async () => {}),
   resetClipState: vi.fn()
 }));
-vi.mock("../../extension/ui/ui-renderer.js", () => ({
-  setStatus: vi.fn(),
-  renderSubtitleSelect: vi.fn(),
-  ensureUiReady: vi.fn()
+// 候选03 常驻瘦身：setStatus 迁入 shared/ui-status.js；ensureUiReady 迁入
+// core/lazy-ui.js；renderReadingStatus 迁入 core/lazy-reader-presentation.js。
+vi.mock("../../extension/shared/ui-status.js", () => ({
+  setStatus: vi.fn()
+}));
+vi.mock("../../extension/core/lazy-ui.js", () => ({
+  ensureUiReady: vi.fn(async () => {})
+}));
+vi.mock("../../extension/core/lazy-reader-presentation.js", () => ({
+  renderReadingStatus: vi.fn(async () => {})
 }));
 vi.mock("../../extension/ai/player-ai.js", () => ({
   removePlayerAiQuickActionButton: vi.fn(),

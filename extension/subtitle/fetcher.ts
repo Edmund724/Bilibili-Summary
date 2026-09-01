@@ -1,4 +1,5 @@
-import { setMessage, setStatus } from "../ui/ui-renderer.js";
+// 候选03 常驻瘦身：setMessage / setStatus 迁入 shared/ui-status.js。
+import { setMessage, setStatus } from "../shared/ui-status.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import { normalizeDownloadFormat } from "../core/validators.js";
 import { state, clipState } from "../core/state.js";

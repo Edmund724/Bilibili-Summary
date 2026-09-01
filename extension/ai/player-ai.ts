@@ -1,4 +1,6 @@
-import { setMessage } from "../ui/ui-renderer.js";
+// 候选03 常驻瘦身：setMessage 迁入 shared/ui-status.js，player-ai 动态 chunk
+// 不再把 ui/ui-renderer.js 拖为静态依赖。
+import { setMessage } from "../shared/ui-status.js";
 import { buildPlayerAiQuickActionIconSvg } from "../ui/icons.js";
 import { isReaderMode } from "../bilibili/video-id-shared.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";

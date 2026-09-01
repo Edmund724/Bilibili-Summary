@@ -16,10 +16,11 @@ import {
   requestPlayerAiSync,
   subscribeReaderPresenter
 } from "./presenter.js";
+// 候选03 常驻瘦身：hydrate / apply 已惰性化，只在阅读视图打开时才需要应用。
 import {
   applyReadingViewPresentation,
   hydrateReaderStateFromSettings
-} from "./presentation.js";
+} from "../core/lazy-reader-presentation.js";
 import { isReaderViewOpen } from "./state.js";
 import { ensureReaderDomain, isReaderDomainLoaded } from "../core/lazy-reader.js";
 import type * as LifecycleModule from "./lifecycle.js";
@@ -80,8 +81,15 @@ export function bindSettingsWatcher() {
       .then((settings) => {
         const next = settings as Settings;
         state.setSettings(next);
-        hydrateReaderStateFromSettings(next);
-        applyReadingViewPresentation();
+        // 候选03：阅读视图未打开时跳过呈现层应用；进入阅读模式时 enterReaderMode
+        // 内部会 hydrate/apply，保证最终状态正确。视图开着则经惰性装载后应用。
+        if (isReaderViewOpen()) {
+          hydrateReaderStateFromSettings(next)
+            .then(() => applyReadingViewPresentation())
+            .catch((error) => {
+              logWarn("[BOC] failed to apply reader presentation after storage change", error);
+            });
+        }
         requestPlayerAiSync();
       })
       .catch((error) => {

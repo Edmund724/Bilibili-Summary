@@ -34,9 +34,12 @@ vi.mock("../../extension/bilibili/reader-url.js", () => ({
 vi.mock("../../extension/subtitle/lazy.js", () => ({
   ensureSummarizeChain: vi.fn()
 }));
-vi.mock("../../extension/ui/ui-renderer.js", () => ({
-  setStatus: vi.fn(),
-  ensureUiReady: vi.fn()
+// 候选03 常驻瘦身：setStatus 迁入 shared/ui-status.js；ensureUiReady 迁入 core/lazy-ui.js。
+vi.mock("../../extension/shared/ui-status.js", () => ({
+  setStatus: vi.fn()
+}));
+vi.mock("../../extension/core/lazy-ui.js", () => ({
+  ensureUiReady: vi.fn(async () => {})
 }));
 vi.mock("../../extension/core/lazy-player-ai.js", () => ({
   loadPlayerAi: vi.fn(),

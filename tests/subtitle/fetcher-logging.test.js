@@ -19,11 +19,8 @@ vi.mock("../../extension/reader/presenter.js", () => ({
   subscribeSubtitleRefresh: vi.fn(),
   notifyReaderPresenter: vi.fn()
 }));
-// ui-message.js 已合入 ui-renderer.js，setMessage 直接从 ui-renderer mock。
-vi.mock("../../extension/ui/ui-renderer.js", () => ({
-  renderMeta: vi.fn(),
-  renderSubtitleSelect: vi.fn(),
-  setBusyState: vi.fn(),
+// 候选03 常驻瘦身：setMessage / setStatus 已迁入 shared/ui-status.js。
+vi.mock("../../extension/shared/ui-status.js", () => ({
   setStatus: vi.fn(),
   setMessage: vi.fn()
 }));
