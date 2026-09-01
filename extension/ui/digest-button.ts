@@ -44,8 +44,8 @@ const PLAYER_SELECTORS = [
 ];
 
 const BUTTON_BASE_STYLE =
-  "display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border:none;" +
-  "border-radius:6px;cursor:pointer;font-size:13px;line-height:1.4;color:#fff;white-space:nowrap;";
+  "display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border:none;" +
+  "border-radius:6px;cursor:pointer;font-size:14px;line-height:1.4;color:#fff;white-space:nowrap;";
 
 // ===== 模块求值即启动生命周期（content.ts 只在非阅读模式分支装载本模块） =====
 
@@ -180,7 +180,7 @@ function findComplaintNode(): HTMLElement | null {
 function styleDigestButton(button: HTMLElement, { floating }: { floating: boolean }): void {
   button.style.cssText = floating
     ? `${BUTTON_BASE_STYLE}background:rgba(251,114,153,.92);box-shadow:0 2px 8px rgba(0,0,0,.2);`
-    : `${BUTTON_BASE_STYLE}background:#fb7299;margin-right:12px;`;
+    : `${BUTTON_BASE_STYLE}background:#fb7299;margin-right:16px;`;
 }
 
 // ===== 浮动降级 =====
