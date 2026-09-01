@@ -23,7 +23,7 @@
 import { DEFAULT_INITIAL_QUICK_PROMPTS, DEFAULT_PRESET_PROMPTS } from "../core/defaults.js";
 import type { AiContext } from "../ai/types.js";
 
-// 上下文快照 = content 侧 ai-sidepanel-get-state payload 的落地形态。结构上
+// 上下文快照 = getAiSidepanelState 返回的 payload 的落地形态。结构上
 // 与 AI 域的 AiContext 同形（含 subtitleBody / isVideoContext / url 等字段与
 // 开放索引签名），复用该类型避免第二份手写契约。
 export type SidepanelContextSnapshot = AiContext;

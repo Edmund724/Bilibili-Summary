@@ -1,7 +1,7 @@
 // extension/ai/context-resolver.ts
 // AI 侧边栏上下文解析：拉取视频元信息 + 字幕 + 热评，构建 Markdown 字幕上下文。
-// 从 extension/entry/background.js 提取的深模块，只暴露 background.js 消息处理器
-// 需要调用的函数；B站抓取统一走 bilibili/gateway.js 的 bgFetchJson 传输层。
+// 本模块由 sidepanel 页面直接调用；B站抓取统一走 bilibili/gateway.js 的
+// bgFetchJson 传输层。
 
 import { getSubtitleCacheKey, loadSubtitleFromCache } from "../subtitle/cache.js";
 import {
@@ -29,8 +29,8 @@ import { withTimeout } from "../shared/error-helpers.js";
 import { buildAiContextRef } from "./conversation.js";
 import type { AiContext, HotComment, SubtitleBodyItem } from "./types.js";
 
-// ===== 页内状态（由 background.js 注入：ensureReaderContentReady / sendMessageToTab）=====
-// 在消息路由中直接读取，避免把注入生命周期耦合进本模块。
+// ===== 页内状态（由 sidepanel 注入：ensureReaderContentReady / sendMessageToTab）=====
+// 调用方直接传入，避免把注入生命周期耦合进本模块。
 
 interface SidepanelContextResponse {
   ok?: boolean;
@@ -248,9 +248,9 @@ export async function getAiSidepanelState(
   });
 
   // 候选5 签名短路：content 状态与 SP 快照一致 → 不取字幕、不发 popup-refresh、
-  // 也不拉热评（下方热评块不可达），直接向上透传 unchanged（background 原样
-  // 包进 payload 回给 SP，SP 据此跳过 apply/渲染）。短路只发生在首查——后面
-  // needsRefresh 分支的复查不带签名，必然回全量。
+  // 也不拉热评（下方热评块不可达），直接返回 { unchanged: true }（sidepanel
+  // 据此跳过 apply/渲染）。短路只发生在首查——后面 needsRefresh 分支的复查不
+  // 带签名，必然回全量。
   if (contextResp?.ok && contextResp?.unchanged === true) {
     return { unchanged: true };
   }

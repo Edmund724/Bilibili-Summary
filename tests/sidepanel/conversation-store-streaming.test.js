@@ -68,8 +68,8 @@ function makeUiStubs() {
     removeConversationContextNotice: vi.fn(),
     hideHistoryPopover: vi.fn(),
     loadContextState: vi.fn(async () => true),
-    getActiveTab: vi.fn(async () => ({ id: 1 })),
-    sendRuntimeMessage: vi.fn(async () => ({ ok: false }))
+    resolveAiSidepanelContext: vi.fn(async () => ({})),
+    resolveAiSidepanelPageRef: vi.fn(async () => ({}))
   };
 }
 

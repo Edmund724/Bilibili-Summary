@@ -117,23 +117,6 @@ export type OffloadTaskMessage = {
   [key: string]: unknown;
 };
 
-export type AiSidepanelGetStateMessage = {
-  type: "ai-sidepanel-get-state";
-  tabId?: number;
-  forceRefresh?: boolean;
-  ifSignature?: string;
-};
-
-export type AiSidepanelResolveContextMessage = {
-  type: "ai-sidepanel-resolve-context";
-  contextRef?: unknown;
-};
-
-export type AiSidepanelResolvePageRefMessage = {
-  type: "ai-sidepanel-resolve-page-ref";
-  contextRef?: unknown;
-};
-
 export type BackgroundMessage =
   | GetSettingsMessage
   | SaveSettingsMessage
@@ -155,10 +138,7 @@ export type BackgroundMessage =
   | AsrProvidersDeleteMessage
   | GetAsrProviderKeyMessage
   | GetAsrRuntimeConfigMessage
-  | OffloadTaskMessage
-  | AiSidepanelGetStateMessage
-  | AiSidepanelResolveContextMessage
-  | AiSidepanelResolvePageRefMessage;
+  | OffloadTaskMessage;
 
 export type BackgroundMessageType = BackgroundMessage["type"];
 

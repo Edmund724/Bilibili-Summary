@@ -99,6 +99,10 @@ const copyFiles = [
 // 原样拷贝的目录（icons 资源；chunks/ 文件名带内容 hash，整目录拷）。
 const copyDirs = ["icons", "entry/chunks"];
 
+// background.js 体积守卫：防止 context-resolver / gateway / subtitle 等链重新
+// 内联回 SW 包。阈值 = 落地后实测 minified 字节 ×1.1 向上取整到 KB。
+const BACKGROUND_JS_MAX_KB = 35;
+
 // 版本一致性守卫（与 build-content.js 同源逻辑提前到这里没必要——
 // build-content.js 子进程内已做 manifest vs core/version.js 的守卫并会
 // fail fast；这里不重复）。
@@ -337,6 +341,21 @@ function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// background.js 体积守卫：minified 产物字节数超过上限时 fail fast，防止
+// context-resolver / gateway / subtitle 等链意外重新内联回 SW 包。
+function assertBackgroundBundleSize() {
+  const backgroundPath = path.join(distDir, "entry", "background.js");
+  const bytes = fs.statSync(backgroundPath).size;
+  const maxBytes = BACKGROUND_JS_MAX_KB * 1024;
+  if (bytes > maxBytes) {
+    console.error(
+      `build.js: dist/entry/background.js 体积为 ${bytes} B (${(bytes / 1024).toFixed(1)} KB)，` +
+        `超过上限 ${BACKGROUND_JS_MAX_KB} KB（${maxBytes} B）`
+    );
+    process.exit(1);
+  }
+}
+
 // html 本地引用校验（src/href，排除外链与锚点），保证 dist 内页面资源闭合。
 function assertHtmlReferences() {
   const htmlFiles = copyFiles.filter((f) => f.endsWith(".html"));
@@ -481,6 +500,7 @@ async function main() {
   }
   assertManifestReferences();
   assertHtmlReferences();
+  assertBackgroundBundleSize();
 
   // offscreen 拆分守卫：常驻文件必须仍含动态 import( 且至少产出一个动态
   // chunk——防止未来依赖变化把动态图又内联回单文件而无人察觉。

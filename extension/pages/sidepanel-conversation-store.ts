@@ -121,8 +121,8 @@ export interface CreateConversationStoreDeps {
   removeConversationContextNotice: () => void;
   hideHistoryPopover: () => void;
   loadContextState: (opts: LoadContextStateOptions) => Promise<boolean | object>;
-  getActiveTab: () => Promise<{ id?: number; url?: string } | null>;
-  sendRuntimeMessage: (message: unknown, opts?: unknown) => Promise<{ ok?: boolean; payload?: unknown; error?: string }>;
+  resolveAiSidepanelContext: (contextRef: ConversationContextRef) => Promise<Record<string, unknown>>;
+  resolveAiSidepanelPageRef: (contextRef: ConversationContextRef) => Promise<Record<string, unknown>>;
   stopActiveChat: () => void;
   storage?: StorageArea;
   conversationsStorageKey?: string;
@@ -211,8 +211,8 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     removeConversationContextNotice,
     hideHistoryPopover,
     loadContextState,
-    getActiveTab,
-    sendRuntimeMessage,
+    resolveAiSidepanelContext,
+    resolveAiSidepanelPageRef,
     stopActiveChat,
     storage = (typeof chrome !== "undefined" && chrome?.storage?.local) || undefined,
     conversationsStorageKey = "boc_ai_conversations_v1",
@@ -258,11 +258,14 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
       if (!contextRef?.bvid || !contextRef?.cid) {
         continue;
       }
-      const response = await requireDep("sendRuntimeMessage", sendRuntimeMessage)({
-        type: "ai-sidepanel-resolve-page-ref",
-        contextRef
-      }).catch(() => null);
-      if (!response?.ok || !response.payload) {
+      let response: { ok?: boolean; payload?: unknown; error?: string } = { ok: false };
+      try {
+        const payload = await requireDep("resolveAiSidepanelPageRef", resolveAiSidepanelPageRef)(contextRef);
+        response = { ok: true, payload };
+      } catch (error: unknown) {
+        response = { ok: false, error: (error as Error)?.message || String(error || "") };
+      }
+      if (!response.ok || !response.payload) {
         continue;
       }
 
@@ -582,12 +585,12 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
   async function resolveContext(
     contextRef: ConversationContextRef
   ): Promise<{ ok?: boolean; payload?: unknown; error?: string }> {
-    const tab = await requireDep("getActiveTab", getActiveTab)().catch(() => null);
-    return requireDep("sendRuntimeMessage", sendRuntimeMessage)({
-      type: "ai-sidepanel-resolve-context",
-      tabId: Number(tab?.id || 0) || 0,
-      contextRef
-    });
+    try {
+      const payload = await requireDep("resolveAiSidepanelContext", resolveAiSidepanelContext)(contextRef);
+      return { ok: true, payload };
+    } catch (error: unknown) {
+      return { ok: false, error: (error as Error)?.message || String(error || "") };
+    }
   }
 
   return {

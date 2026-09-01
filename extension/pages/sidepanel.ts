@@ -46,9 +46,15 @@ import {
   MAX_SAVED_CONVERSATIONS
 } from "../ai/conversation.js";
 import { escapeHtml, truncate } from "../shared/string-utils.js";
-import { sendMessageToActiveTab, waitForTabComplete } from "../shared/tab-utils.js";
+import { sendMessageToActiveTab, sendMessageToTab, waitForTabComplete } from "../shared/tab-utils.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { renderMarkdown, stripThinkBlocks } from "../ui/markdown.js";
+import { ensureReaderContentReady } from "../core/content-orchestration-wiring.js";
+import {
+  getAiSidepanelState,
+  resolveAiSidepanelContext,
+  resolveAiSidepanelPageRef
+} from "../ai/context-resolver.js";
 import { linkifyAssistantTimestamps } from "../ui/timestamp-nav.js";
 import { normalizeMarkdownForSectionPaste } from "../notes/paste.js";
 import { createChatRuntime } from "./sidepanel-chat-runtime.js";
@@ -85,7 +91,7 @@ const THINKING_LEVEL_KEY = "boc_ai_thinking_level";
 const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
 const NON_VIDEO_CONTEXT_MESSAGE = "当前页非 B 站视频页面，<br>无法获取当前页面信息作为对话上下文，<br>仅支持 AI 对话。";
 
-// ai-sidepanel-get-state 的响应信封（payload 为 content 侧上下文快照；缺省
+// getAiSidepanelState 的响应信封（payload 为 content 侧上下文快照；缺省
 // 字段由运行时真值判定兜底，这里断言 payload 不为 undefined）
 interface SidepanelStateResponse {
   ok?: boolean;
@@ -189,8 +195,8 @@ const conversationStore = createConversationStore({
   removeConversationContextNotice,
   hideHistoryPopover,
   loadContextState,
-  getActiveTab,
-  sendRuntimeMessage: sendRuntimeMessage as unknown as CreateConversationStoreDeps["sendRuntimeMessage"],
+  resolveAiSidepanelContext,
+  resolveAiSidepanelPageRef,
   // 流式中删除当前会话 / 清空全部 / restoreLatest 无匹配时由 store 同步调用：
   // 断 port、清在途一问一答、清消息区并退出流式 UI 态（对应 restartChat 的
   // 清理动作，但不清会话状态——那由 store 自己做）。store 不直接 import
@@ -507,16 +513,20 @@ async function loadContextState({ forceRefresh = false, silent = false }: LoadCo
     return plan.returnValue;
   }
 
-  const resp = await sendRuntimeMessage({
-    type: "ai-sidepanel-get-state",
-    tabId: tab.id,
-    forceRefresh,
-    // 候选5：带上次全量快照的签名，content 侧状态未变时一次往返即短路返回
-    //（不重发整份字幕体、不拉热评）。forceRefresh=true 时 content 忽略签名，
-    // 手动刷新语义不变。liveContextData 为空（首次/此前失败）时签名为空串，
-    // content 必走全量。
-    ifSignature: String(sidepanelState.liveContextData?.signature || "")
-  }).catch((error) => ({ ok: false, error: (error as Error).message })) as SidepanelStateResponse;
+  const resp = await getAiSidepanelState(
+    tab.id,
+    {
+      forceRefresh,
+      // 候选5：带上次全量快照的签名，content 侧状态未变时一次往返即短路返回
+      //（不重发整份字幕体、不拉热评）。forceRefresh=true 时 content 忽略签名，
+      // 手动刷新语义不变。liveContextData 为空（首次/此前失败）时签名为空串，
+      // content 必走全量。
+      ifSignature: String(sidepanelState.liveContextData?.signature || "")
+    },
+    { ensureReaderContentReady, sendMessageToTab }
+  )
+    .then((payload) => ({ ok: true, payload }) as SidepanelStateResponse)
+    .catch((error: unknown) => ({ ok: false, error: (error as Error).message }) as SidepanelStateResponse);
   sidepanelState.liveTabUrl = String(tab.url || "").trim();
 
   // 决策点二（消息往返之后）：「输入 → 动作」映射全部交给策略模块。forceRefresh
