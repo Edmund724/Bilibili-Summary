@@ -62,7 +62,9 @@ export function mountPlayerChain(container = document.body) {
 // 元素），返回 { readingView, readingMain, digestPanel }。阅读视图 id 取自
 // ids 表，顺序/从属关系与 ui-renderer.js 的真实模板保持一致（PR2 起：
 // 字幕列表挂进统一面板「字幕」tab body，header/settings 也在面板壳内——
-// 骨架按同一从属关系搭建，bindUiEvents 可直接使用）。
+// 骨架按同一从属关系搭建，bindUiEvents 可直接使用。PR3 起字幕 tab 另含
+// 搜索工具条/复制导出/转写横幅/Follow 按钮/解释浮层，chat tab 含待解释
+// 意图卡，均按真实模板同构搭建）。
 export function mountReaderSkeleton(ids) {
   const doc = document;
 
@@ -130,6 +132,65 @@ export function mountReaderSkeleton(ids) {
   tabBodyChat.setAttribute("hidden", "");
   digestPanel.appendChild(tabBodyChat);
 
+  // PR3 字幕 tab 工具条（搜索 + 复制/导出）：与 ui-renderer 真实模板同构，
+  // bindUiEvents 对这些节点直接 byId 绑定（缺节点会抛错，骨架必须齐）。
+  const subToolbar = doc.createElement("div");
+  subToolbar.className = "boc-reading-sub-toolbar";
+  tabBodySubtitle.appendChild(subToolbar);
+
+  const searchBox = doc.createElement("div");
+  searchBox.className = "boc-reading-search";
+  subToolbar.appendChild(searchBox);
+
+  const searchInput = doc.createElement("input");
+  searchInput.type = "text";
+  searchInput.id = ids.readingSearchInput;
+  searchInput.className = "boc-reading-search-input";
+  searchBox.appendChild(searchInput);
+
+  const searchCount = doc.createElement("span");
+  searchCount.id = ids.readingSearchCount;
+  searchCount.className = "boc-reading-search-count";
+  searchBox.appendChild(searchCount);
+
+  const searchPrev = doc.createElement("button");
+  searchPrev.type = "button";
+  searchPrev.id = ids.readingSearchPrevBtn;
+  searchPrev.className = "boc-reading-search-nav";
+  searchPrev.disabled = true;
+  searchBox.appendChild(searchPrev);
+
+  const searchNext = doc.createElement("button");
+  searchNext.type = "button";
+  searchNext.id = ids.readingSearchNextBtn;
+  searchNext.className = "boc-reading-search-nav";
+  searchNext.disabled = true;
+  searchBox.appendChild(searchNext);
+
+  const copySubtitleBtn = doc.createElement("button");
+  copySubtitleBtn.type = "button";
+  copySubtitleBtn.id = ids.readingCopySubtitleBtn;
+  copySubtitleBtn.className = "boc-reading-mini-btn";
+  subToolbar.appendChild(copySubtitleBtn);
+
+  const exportSubtitleBtn = doc.createElement("button");
+  exportSubtitleBtn.type = "button";
+  exportSubtitleBtn.id = ids.readingExportSubtitleBtn;
+  exportSubtitleBtn.className = "boc-reading-mini-btn";
+  subToolbar.appendChild(exportSubtitleBtn);
+
+  // PR3 转写中间态横幅（默认隐藏）+ 进度行
+  const transcribeBanner = doc.createElement("aside");
+  transcribeBanner.id = ids.readingTranscribeBanner;
+  transcribeBanner.className = "boc-reading-asr-banner";
+  transcribeBanner.setAttribute("hidden", "");
+  tabBodySubtitle.appendChild(transcribeBanner);
+
+  const transcribeProgress = doc.createElement("div");
+  transcribeProgress.id = ids.readingTranscribeProgress;
+  transcribeProgress.className = "boc-reading-asr-foot";
+  transcribeBanner.appendChild(transcribeProgress);
+
   const readingChapterList = doc.createElement("div");
   readingChapterList.id = ids.readingChapterList;
   readingView.appendChild(readingChapterList);
@@ -141,6 +202,51 @@ export function mountReaderSkeleton(ids) {
   const readingSubtitleList = doc.createElement("div");
   readingSubtitleList.id = ids.readingSubtitleList;
   readingMain.appendChild(readingSubtitleList);
+
+  // PR3 Follow playback 悬浮按钮 + 句上「解释」浮层（含按钮，真实模板同构）
+  const followBtn = doc.createElement("button");
+  followBtn.type = "button";
+  followBtn.id = ids.readingFollowBtn;
+  followBtn.className = "boc-reading-follow-btn";
+  tabBodySubtitle.appendChild(followBtn);
+
+  const explainPop = doc.createElement("div");
+  explainPop.id = ids.readingExplainPop;
+  explainPop.className = "boc-reading-explain-pop";
+  explainPop.setAttribute("hidden", "");
+  tabBodySubtitle.appendChild(explainPop);
+
+  const explainBtn = doc.createElement("button");
+  explainBtn.type = "button";
+  explainBtn.className = "boc-reading-explain-btn";
+  explainPop.appendChild(explainBtn);
+
+  // PR3 AI 对话 tab 占位期的待解释意图卡（quote/time/note，真实模板同构）
+  const chatIntent = doc.createElement("div");
+  chatIntent.id = ids.readingChatIntent;
+  chatIntent.className = "boc-reading-chat-intent";
+  chatIntent.setAttribute("hidden", "");
+  tabBodyChat.appendChild(chatIntent);
+
+  const intentHead = doc.createElement("div");
+  intentHead.className = "boc-reading-chat-intent-head";
+  chatIntent.appendChild(intentHead);
+
+  const intentTitle = doc.createElement("span");
+  intentTitle.className = "boc-reading-chat-intent-title";
+  intentHead.appendChild(intentTitle);
+
+  const intentTime = doc.createElement("span");
+  intentTime.className = "boc-reading-chat-intent-time boc-reading-time";
+  intentHead.appendChild(intentTime);
+
+  const intentQuote = doc.createElement("blockquote");
+  intentQuote.className = "boc-reading-chat-intent-quote";
+  chatIntent.appendChild(intentQuote);
+
+  const intentNote = doc.createElement("p");
+  intentNote.className = "boc-reading-chat-intent-note";
+  chatIntent.appendChild(intentNote);
 
   const readingAutoScroll = doc.createElement("input");
   readingAutoScroll.type = "checkbox";

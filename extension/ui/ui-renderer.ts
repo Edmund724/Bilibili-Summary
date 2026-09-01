@@ -8,8 +8,14 @@ import {
   isReaderMode,
   stripReaderModeUrl
 } from "../bilibili/video-id-shared.js";
-import { escapeHtml } from "../shared/string-utils.js";
+import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
 import { READING_HEADER_ICONS } from "./reading-header-icons.js";
+// PR3 句上「解释」的待处理意图契约叶子（零依赖常驻叶，见 reader/explain-intent.ts）：
+// 浮层点击写入意图并切到 AI 对话 tab；对话 tab 占位卡经 peek 渲染引用。
+import {
+  peekPendingExplainIntent,
+  setPendingExplainIntent
+} from "../reader/explain-intent.js";
 // 候选03 常驻瘦身：本模块（面板 + 阅读视图壳构建、事件绑定）已整体惰性化，
 // 经 core/lazy-ui.js 动态装载。静态 import 只允许常驻叶子——reader 状态微模块
 //（./reader/state.js，含 ids/view-state/scroll-state）、轻状态栏写入器
@@ -194,11 +200,64 @@ export function buildUiHtml(): string {
               <button id="${ids.readingTabChat}" type="button" class="boc-reading-tab" role="tab" aria-selected="false">AI 对话</button>
             </div>
 
-            <!-- 字幕 tab：现有字幕列表整体搬家（分批渲染/尾 spacer/事件委托不变） -->
+            <!-- 字幕 tab：工具条（句内搜索 + 复制/导出，PR3）+ 转写中间态横幅 +
+                 字幕列表整体搬家（分批渲染/尾 spacer/事件委托不变） +
+                 Follow playback 悬浮按钮与句上「解释」浮层 -->
             <div id="${ids.readingTabBodySubtitle}" class="boc-reading-tab-body is-active" role="tabpanel" aria-label="字幕">
+              <div class="boc-reading-sub-toolbar">
+                <div class="boc-reading-search">
+                  <input
+                    id="${ids.readingSearchInput}"
+                    class="boc-reading-search-input"
+                    type="text"
+                    placeholder="搜索字幕…"
+                    aria-label="搜索字幕"
+                  />
+                  <span id="${ids.readingSearchCount}" class="boc-reading-search-count" aria-live="polite"></span>
+                  <button
+                    id="${ids.readingSearchPrevBtn}"
+                    type="button"
+                    class="boc-reading-search-nav"
+                    title="上一条（Shift+Enter）"
+                    aria-label="上一条搜索结果"
+                    disabled
+                  >↑</button>
+                  <button
+                    id="${ids.readingSearchNextBtn}"
+                    type="button"
+                    class="boc-reading-search-nav"
+                    title="下一条（Enter）"
+                    aria-label="下一条搜索结果"
+                    disabled
+                  >↓</button>
+                </div>
+                <button id="${ids.readingCopySubtitleBtn}" type="button" class="boc-reading-mini-btn">复制</button>
+                <button id="${ids.readingExportSubtitleBtn}" type="button" class="boc-reading-mini-btn">导出</button>
+              </div>
+
+              <!-- 转写中间态（PR3）：显隐由 reader/transcribe-banner.ts 按
+                   shared/subtitle-status-bus 的进程内相位驱动；进度为不确定样式
+                   （页面侧拿不到片 x/y），进度行实时显示状态栏文本 -->
+              <aside id="${ids.readingTranscribeBanner}" class="boc-reading-asr-banner" hidden>
+                <div class="boc-reading-asr-title">该视频无字幕，正在进行音频转写…</div>
+                <p class="boc-reading-asr-copy">转写完成后字幕与概览将自动出现，期间可先看视频</p>
+                <div class="boc-reading-asr-track" aria-hidden="true"><div class="boc-reading-asr-fill"></div></div>
+                <div id="${ids.readingTranscribeProgress}" class="boc-reading-asr-foot">正在准备转写…</div>
+              </aside>
+
               <section class="boc-reading-main">
                 <div id="${ids.readingSubtitleList}" class="boc-reading-subtitle"></div>
               </section>
+
+              <!-- Follow playback 悬浮按钮：显隐只由 data-boc-reader-follow 三态
+                   （off/manual/auto）的 CSS 驱动，点击恢复跟随并跳回当前句 -->
+              <button id="${ids.readingFollowBtn}" type="button" class="boc-reading-follow-btn">↓ 跟随播放</button>
+
+              <!-- 句上「解释」浮层：单实例、绝对定位在 tab body（不进列表滚动
+                   容器，避免随滚动裁剪/漂移），hover 字幕句时定位显示 -->
+              <div id="${ids.readingExplainPop}" class="boc-reading-explain-pop" hidden>
+                <button type="button" class="boc-reading-explain-btn">解释</button>
+              </div>
             </div>
 
             <!-- 概览 tab：诚实占位（PR4 落地概览管线，不放假数据） -->
@@ -209,8 +268,18 @@ export function buildUiHtml(): string {
               </div>
             </div>
 
-            <!-- AI 对话 tab：诚实占位（PR5 移植对话功能，不放假输入框） -->
+            <!-- AI 对话 tab：诚实占位（PR5 移植对话功能，不放假输入框）。
+                 待解释意图卡（PR3）：句上「解释」的 pending 意图在此展示引用，
+                 对话功能上线后由 PR5 消费发送 -->
             <div id="${ids.readingTabBodyChat}" class="boc-reading-tab-body" role="tabpanel" aria-label="AI 对话" hidden>
+              <div id="${ids.readingChatIntent}" class="boc-reading-chat-intent" hidden>
+                <div class="boc-reading-chat-intent-head">
+                  <span class="boc-reading-chat-intent-title">待解释的字幕句</span>
+                  <span class="boc-reading-chat-intent-time boc-reading-time">00:00</span>
+                </div>
+                <blockquote class="boc-reading-chat-intent-quote"></blockquote>
+                <p class="boc-reading-chat-intent-note">AI 对话功能上线后，将自动把这句话的解释请求发送到对话。</p>
+              </div>
               <div class="boc-reading-placeholder">
                 <div class="boc-reading-placeholder-title">AI 对话即将上线</div>
                 <p class="boc-reading-placeholder-copy">针对本视频的提问与解读将在这里进行。</p>
@@ -262,6 +331,30 @@ export function resetReaderDigestTabs(): void {
   setReaderDigestTab("subtitle");
 }
 
+// AI 对话 tab 占位期的待解释意图卡（PR3）：句上「解释」的 pending 意图在此
+// 展示引用（时间戳 pill 母题 + 句子原文 + 上线后自动发送的说明）。意图契约见
+// reader/explain-intent.ts；PR5 对话 tab 落地后由对话功能消费意图并接管此卡。
+export function renderReadingChatIntent(): void {
+  const node = document.getElementById(ids.readingChatIntent);
+  if (!node) {
+    return;
+  }
+  const intent = peekPendingExplainIntent();
+  if (!intent || !intent.content) {
+    node.hidden = true;
+    return;
+  }
+  const quote = node.querySelector<HTMLElement>(".boc-reading-chat-intent-quote");
+  if (quote) {
+    quote.textContent = `「${intent.content}」`;
+  }
+  const stamp = node.querySelector<HTMLElement>(".boc-reading-chat-intent-time");
+  if (stamp) {
+    stamp.textContent = formatCompactTimestamp(intent.from, intent.from >= 3600);
+  }
+  node.hidden = false;
+}
+
 export function bindUiEvents(): void {
   const panel = byId(ids.panel);
   const closeBtn = byId(ids.closeBtn);
@@ -284,9 +377,16 @@ export function bindUiEvents(): void {
   const chapterList = byId(ids.readingChapterList);
   const subtitleList = byId(ids.readingSubtitleList);
 
-  // Digest 面板三标签切换（纯壳交互，见上方 setReaderDigestTab 注释）
+  // Digest 面板三标签切换（纯壳交互，见上方 setReaderDigestTab 注释）。
+  // 切到 AI 对话 tab 时按当前 pending 意图刷新待解释意图卡（句上「解释」写入
+  // 意图后也会主动切过来，两条路径都保证卡片与意图一致）。
   for (const def of DIGEST_TAB_DEFS) {
-    byId(def.buttonId).addEventListener("click", () => setReaderDigestTab(def.name));
+    byId(def.buttonId).addEventListener("click", () => {
+      setReaderDigestTab(def.name);
+      if (def.name === "chat") {
+        renderReadingChatIntent();
+      }
+    });
   }
 
   closeBtn.addEventListener("click", () => panel.classList.remove("open"));
@@ -412,6 +512,135 @@ export function bindUiEvents(): void {
       .catch((error) => {
         logWarn("[BOC] failed to switch subtitle in reading view", error);
       });
+  });
+
+  // ===== PR3 字幕 tab：句内搜索（输入/键盘/上下条） =====
+  // 搜索状态与高亮逻辑在 reader/subtitle-search.js（重域：补渲染走分批渲染
+  // 状态机），交互回调经 loadReaderDomain 装载后转发（首次输入多一次本地动态
+  // import，其后命中缓存 promise，与滚动/点击回调同款）。
+  const readingSearchInput = byId(ids.readingSearchInput) as HTMLInputElement;
+  const searchRefresh = () => {
+    loadReaderDomain()
+      .then((reader) => reader.refreshReadingSubtitleSearch())
+      .catch((error) => logWarn("[BOC] subtitle search refresh failed", error));
+  };
+  readingSearchInput.addEventListener("input", searchRefresh);
+  readingSearchInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== "Escape") {
+      return;
+    }
+    event.preventDefault();
+    loadReaderDomain()
+      .then((reader) => {
+        if (event.key === "Enter") {
+          reader.moveReadingSubtitleSearch(event.shiftKey ? -1 : 1);
+          return;
+        }
+        // Escape：清输入恢复原文本（焦点留在输入框便于再次输入）
+        readingSearchInput.value = "";
+        reader.refreshReadingSubtitleSearch({ scroll: false });
+        readingSearchInput.focus();
+      })
+      .catch((error) => logWarn("[BOC] subtitle search keydown failed", error));
+  });
+  byId(ids.readingSearchPrevBtn).addEventListener("click", () => {
+    loadReaderDomain()
+      .then((reader) => reader.moveReadingSubtitleSearch(-1))
+      .catch((error) => logWarn("[BOC] subtitle search prev failed", error));
+  });
+  byId(ids.readingSearchNextBtn).addEventListener("click", () => {
+    loadReaderDomain()
+      .then((reader) => reader.moveReadingSubtitleSearch(1))
+      .catch((error) => logWarn("[BOC] subtitle search next failed", error));
+  });
+
+  // ===== PR3 字幕 tab：复制 / 导出（纯接线，逻辑在总结链） =====
+  // 复制 = 字幕纯文本（copySubtitleTranscript，buildTxt 管线，transcript 语义）；
+  // 导出 = SRT/TXT（downloadSubtitle，按 downloadFormat 设置）。接线方式与
+  // 面板 copyBtn/downloadBtn 同款（ensureSummarizeChain 装载后调用）。
+  byId(ids.readingCopySubtitleBtn).addEventListener("click", () => {
+    ensureSummarizeChain()
+      .then((chain) => chain.copySubtitleTranscript())
+      .catch((error) => logWarn("[BOC] copy subtitle transcript failed", error));
+  });
+  byId(ids.readingExportSubtitleBtn).addEventListener("click", () => {
+    ensureSummarizeChain()
+      .then((chain) => chain.downloadSubtitle())
+      .catch((error) => logWarn("[BOC] download subtitle failed", error));
+  });
+
+  // ===== PR3 字幕 tab：Follow playback 悬浮按钮 =====
+  // 显隐由 data-boc-reader-follow 三态的 CSS 驱动；点击恢复跟随并跳回当前句
+  //（resumeReaderFollowPlayback，不改播放进度）。
+  byId(ids.readingFollowBtn).addEventListener("click", () => {
+    loadReaderDomain()
+      .then((reader) => reader.resumeReaderFollowPlayback())
+      .catch((error) => logWarn("[BOC] resume reader follow failed", error));
+  });
+
+  // ===== PR3 字幕 tab：句上「解释」浮层 =====
+  // 单实例浮层，hover 字幕句（mouseover 委托）时定位到条目右上；挂在本 tab
+  // body（非列表滚动容器）内——mouseover 目标含浮层自身（浮层是 tab body 子
+  // 节点），从条目移入浮层不会误隐藏。列表滚动 / pointerdown（开始选择文本）
+  // 时隐藏，浮层不挡文本选择。
+  const readingExplainPop = byId(ids.readingExplainPop);
+  const readingExplainBtn = readingExplainPop.querySelector("button") as HTMLButtonElement;
+  const readingTabBodySubtitle = byId(ids.readingTabBodySubtitle);
+  const hideExplainPop = () => {
+    readingExplainPop.hidden = true;
+    delete readingExplainPop.dataset.itemIndex;
+  };
+  const showExplainPopForItem = (item: HTMLElement) => {
+    const bodyRect = readingTabBodySubtitle.getBoundingClientRect();
+    const rect = item.getBoundingClientRect();
+    readingExplainPop.dataset.itemIndex = item.dataset.index || "";
+    // 视觉定稿（prototype/final-字幕-解释.jpg）：浮层贴条目右上角
+    readingExplainPop.style.left = `${Math.max(8, Math.round(rect.right - bodyRect.left - 96))}px`;
+    readingExplainPop.style.top = `${Math.max(0, Math.round(rect.top - bodyRect.top + 2))}px`;
+    readingExplainPop.hidden = false;
+  };
+  readingTabBodySubtitle.addEventListener("mouseover", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (!target?.closest) {
+      return;
+    }
+    if (target.closest(".boc-reading-explain-pop")) {
+      return; // 移入浮层自身：保持显示，让用户能点到「解释」
+    }
+    const item = target.closest<HTMLElement>(".boc-reading-item");
+    if (item) {
+      showExplainPopForItem(item);
+    } else {
+      hideExplainPop();
+    }
+  });
+  readingTabBodySubtitle.addEventListener("mouseleave", hideExplainPop);
+  subtitleList.addEventListener("scroll", hideExplainPop, { passive: true });
+  subtitleList.addEventListener("pointerdown", hideExplainPop);
+  readingExplainBtn.addEventListener("click", () => {
+    // 从渲染条目取选中句（textContent + data-seconds），不回读 state 结构——
+    // 语义就是「用户看到的这句」，也避免常驻侧依赖字幕数据链。
+    // 索引缺失（浮层已隐藏/重复 click）按无效处理：不回退到第 0 条。
+    const rawIndex = readingExplainPop.dataset.itemIndex || "";
+    const itemIndex = Number(rawIndex);
+    const itemNode =
+      rawIndex !== "" && Number.isFinite(itemIndex) && itemIndex >= 0
+        ? subtitleList.querySelector<HTMLElement>(`[data-index="${itemIndex}"]`)
+        : null;
+    const content = itemNode?.querySelector(".boc-reading-text")?.textContent?.trim() || "";
+    if (!itemNode || !content) {
+      hideExplainPop();
+      return;
+    }
+    // 待解释意图契约（reader/explain-intent.ts）：单槽 pending，PR5 对话 tab 消费
+    setPendingExplainIntent({
+      from: Number(itemNode?.dataset.seconds || 0) || 0,
+      content,
+      createdAt: Date.now()
+    });
+    renderReadingChatIntent();
+    setReaderDigestTab("chat");
+    hideExplainPop();
   });
 
   // Click outside settings panel to close

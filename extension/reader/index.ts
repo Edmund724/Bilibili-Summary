@@ -62,3 +62,13 @@ export { onReadingChapterClick } from "./sync.js";
 export { onReadingSubtitleClick } from "./sync.js";
 export { noteManualReaderInteraction } from "./sync.js";
 export { updateReaderFollowState } from "./sync.js";
+// PR3：Follow playback 悬浮按钮的恢复跟随回调
+export { resumeReaderFollowPlayback } from "./sync.js";
+
+// ===== PR3 字幕 tab：句内搜索 / 转写中间态横幅 =====
+
+// 句内搜索：refresh（renderReadingView 尾部重放 + 输入变化）、move（上/下一条）、
+// clear（closeReadingView 会话收尾）
+export { refreshReadingSubtitleSearch, moveReadingSubtitleSearch, clearReadingSubtitleSearch } from "./subtitle-search.js";
+// 转写中间态横幅：渲染尾部/tick 收敛（update）与转写中判定
+export { updateReadingTranscribeBanner, isReaderTranscribing } from "./transcribe-banner.js";

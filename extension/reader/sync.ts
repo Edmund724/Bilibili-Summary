@@ -50,6 +50,10 @@ import { renderReadingStatus } from "./presentation.js";
 // 候选06 端口半边：SYNC → LIFECYCLE 的字幕同步补渲染经显式端口回调
 //（实现由 lifecycle.js 启动时单点注册，缺失即抛错）。
 import { readerPorts } from "./ports.js";
+// PR3 转写中间态：250ms tick 顺带收敛转写横幅（相位/进度行脏检查在
+// transcribe-banner 内部，稳态零 DOM 写）。transcribe-banner 是零依赖呈现叶子
+//（state + shared status-bus），不破坏 SYNC → LAYOUT + ports 的层图。
+import { updateReadingTranscribeBanner } from "./transcribe-banner.js";
 
 // ===== sync-domain private bookkeeping (module-level closure state) =====
 //
@@ -119,6 +123,9 @@ export function syncReadingViewPlayback(forceScroll = false) {
   setActiveReadingItems(subtitleIndex, chapterIndex, forceScroll || changed);
   updateReaderFollowState();
   renderReadingStatus(`当前进度 ${formatCompactTimestamp(currentTime, currentTime >= 3600)}`);
+  // PR3：转写横幅随 tick 收敛（转写期间 onProgress 持续改写状态栏文本，进度行
+  // 需要跟着刷新；显隐脏检查在 updateReadingTranscribeBanner 内部）。
+  updateReadingTranscribeBanner();
 }
 
 // 候选10 批1：上次激活高亮的缓存（字幕 + 章节各一份）。index 未变且上次写入的
@@ -339,6 +346,27 @@ export function noteManualReaderInteraction(durationMs = 3000) {
   }
   setManualScrollPaused(Date.now() + durationMs);
   updateReaderFollowState();
+}
+
+// PR3 Follow playback 悬浮按钮的回调：把跟随从「关闭（off）/手动暂停（manual）」
+// 拉回自动。按钮显隐由 data-boc-reader-follow 三态的 CSS 驱动（reader.css），
+// 本函数只负责行为：
+//   - off 态 = 用户在设置面板关了自动滚动 → 重新打开并同步 checkbox；
+//   - manual 态 = 手动滚动暂停中 → 清暂停；
+//   - 随后 forceScroll 同步一次高亮与滚动，跳回「当前正在播的句子」——不改
+//     播放进度（按钮语义是「回去继续跟随」，不是 seek；与 youtube-digest
+//     sidepanel.js 的 Follow playback 按钮行为一致）。
+export function resumeReaderFollowPlayback() {
+  if (!state.reader.readingAutoScroll) {
+    state.reader.setAutoScroll(true);
+    const checkbox = document.getElementById(ids.readingAutoScroll) as HTMLInputElement | null;
+    if (checkbox) {
+      checkbox.checked = true;
+    }
+  }
+  resetManualScrollPause();
+  updateReaderFollowState();
+  syncReadingViewPlayback(true);
 }
 
 export function updateReaderFollowState() {

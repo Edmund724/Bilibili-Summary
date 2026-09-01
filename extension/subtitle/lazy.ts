@@ -40,6 +40,8 @@ export interface SummarizeChain {
   resetClipState(options?: { keepFetchState?: boolean }): void;
   onSubtitleChange(event: Event): Promise<void>;
   copyMarkdown(): Promise<void>;
+  // PR3：阅读模式字幕 tab「复制」——复制字幕纯文本（transcript，buildTxt 管线）
+  copySubtitleTranscript(): Promise<void>;
   downloadSubtitle(): Promise<void>;
   getPopupPayload(): Record<string, unknown>;
   renderMeta(): void;

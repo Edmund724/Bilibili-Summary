@@ -60,7 +60,20 @@ export const ids = {
   readingTabChat: "boc-reading-tab-chat",
   readingTabBodySubtitle: "boc-reading-tabbody-subtitle",
   readingTabBodyOverview: "boc-reading-tabbody-overview",
-  readingTabBodyChat: "boc-reading-tabbody-chat"
+  readingTabBodyChat: "boc-reading-tabbody-chat",
+  // PR3 字幕 tab 五件事：句内搜索、Copy/Export、Follow 悬浮按钮、转写中间态
+  // 横幅、句上「解释」浮层与 AI 对话 tab 占位期的待解释意图卡。
+  readingSearchInput: "boc-reading-search-input",
+  readingSearchCount: "boc-reading-search-count",
+  readingSearchPrevBtn: "boc-reading-search-prev",
+  readingSearchNextBtn: "boc-reading-search-next",
+  readingCopySubtitleBtn: "boc-reading-copy-subtitle",
+  readingExportSubtitleBtn: "boc-reading-export-subtitle",
+  readingFollowBtn: "boc-reading-follow-btn",
+  readingTranscribeBanner: "boc-reading-transcribe-banner",
+  readingTranscribeProgress: "boc-reading-transcribe-progress",
+  readingExplainPop: "boc-reading-explain-pop",
+  readingChatIntent: "boc-reading-chat-intent"
 };
 
 // ===== view-state.js：阅读视图开关状态访问器 =====

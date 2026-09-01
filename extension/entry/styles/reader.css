@@ -267,6 +267,8 @@
   display: flex;
   flex-direction: column;
   padding: 14px 16px 16px;
+  /* Follow 悬浮按钮与句上「解释」浮层的定位上下文 */
+  position: relative;
 }
 
 /* tab 显隐双通道：class（is-active）与 hidden 属性都收敛为不显示——
@@ -686,4 +688,280 @@
 .boc-reading-stepper-btn.is-active {
   background: var(--boc-reader-accent-soft);
   color: var(--boc-reader-accent);
+}
+
+/* ===== PR3 字幕 tab：搜索工具条 / 转写横幅 / 跟随按钮 / 句上解释浮层 / 意图卡
+ * 色值全部走 --boc-reader-* token（reader-gate.css 三主题定义），暗色自动跟随。
+ * 视觉基准：prototype/unified-panel.html + final-字幕-解释.jpg / final-转写中.jpg */
+.boc-reading-sub-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.boc-reading-search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 10px;
+  padding: 5px 10px;
+  background: var(--boc-reader-card, #ffffff);
+}
+
+.boc-reading-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--boc-reader-text, #2b2620);
+}
+
+.boc-reading-search-input::placeholder {
+  color: var(--boc-reader-faint, #a39a8d);
+}
+
+.boc-reading-search-count {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--boc-reader-faint, #a39a8d);
+  white-space: nowrap;
+}
+
+.boc-reading-search-nav {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  background: var(--boc-reader-card, #ffffff);
+  border-radius: 8px;
+  padding: 0;
+  font-size: 12px;
+  color: var(--boc-reader-muted, #6f675c);
+  cursor: pointer;
+}
+
+.boc-reading-search-nav:hover:not(:disabled) {
+  border-color: var(--boc-reader-accent, #fb7299);
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+.boc-reading-search-nav:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.boc-reading-mini-btn {
+  flex: 0 0 auto;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  background: var(--boc-reader-card, #ffffff);
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--boc-reader-muted, #6f675c);
+  cursor: pointer;
+}
+
+.boc-reading-mini-btn:hover {
+  border-color: var(--boc-reader-accent, #fb7299);
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+/* 命中高亮：mark + 当前命中（search-current 为 JS/CSS 契约名） */
+.boc-reading-subtitle mark.boc-reading-search-hit {
+  background: var(--boc-reader-accent-soft, #fce0ea);
+  color: var(--boc-reader-accent, #fb7299);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+.boc-reading-subtitle mark.boc-reading-search-hit.search-current {
+  background: var(--boc-reader-accent, #fb7299);
+  color: var(--boc-reader-accent-ink, #ffffff);
+}
+
+.boc-reading-item.search-current {
+  background: var(--boc-reader-highlight, #fdeeda);
+}
+
+/* 转写中间态：横幅（highlight 底）+ 不确定进度动画 + 列表淡出禁用 */
+.boc-reading-asr-banner {
+  flex: 0 0 auto;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  background: var(--boc-reader-highlight, #fdeeda);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.boc-reading-asr-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--boc-reader-text, #2b2620);
+  margin-bottom: 4px;
+}
+
+.boc-reading-asr-copy {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--boc-reader-muted, #6f675c);
+  margin: 0 0 10px;
+}
+
+.boc-reading-asr-track {
+  height: 6px;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.boc-reading-asr-fill {
+  height: 100%;
+  width: 38%;
+  background: var(--boc-reader-accent, #fb7299);
+  border-radius: 99px;
+  animation: boc-asr-pulse 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes boc-asr-pulse {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boc-reading-asr-fill {
+    animation: none;
+  }
+}
+
+.boc-reading-asr-foot {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--boc-reader-faint, #a39a8d);
+  margin-top: 6px;
+}
+
+.boc-reading-main {
+  transition: opacity 0.2s ease;
+}
+
+.boc-reading-tab-body.is-transcribing .boc-reading-main {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* Follow playback 悬浮按钮：显隐只由 data-boc-reader-follow 三态驱动——
+ * auto（跟随中）隐藏；manual（手动滚动暂停）/off（自动滚动关闭）时显示，
+ * 点击由 resumeReaderFollowPlayback 拉回 auto 并跳回当前句。 */
+.boc-reading-follow-btn {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 6;
+  border: none;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: var(--boc-reader-accent, #fb7299);
+  color: var(--boc-reader-accent-ink, #ffffff);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+#boc-reading-view[data-boc-reader-follow="manual"] .boc-reading-follow-btn,
+#boc-reading-view[data-boc-reader-follow="off"] .boc-reading-follow-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.boc-reading-tab-body.is-transcribing .boc-reading-follow-btn {
+  display: none !important;
+}
+
+/* 句上「解释」浮层：绝对定位在 tab body（不进列表滚动容器，避免随滚动裁剪）；
+ * hover 显示、列表滚动/pointerdown 隐藏，不挡条目文本选择 */
+.boc-reading-explain-pop {
+  position: absolute;
+  z-index: 7;
+}
+
+.boc-reading-explain-btn {
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  background: var(--boc-reader-card, #ffffff);
+  color: var(--boc-reader-text, #2b2620);
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.14);
+}
+
+.boc-reading-explain-btn:hover {
+  border-color: var(--boc-reader-accent, #fb7299);
+  background: var(--boc-reader-accent-soft, #fce0ea);
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+/* AI 对话 tab 占位期的待解释意图卡（PR5 对话落地后由对话功能接管） */
+.boc-reading-chat-intent {
+  flex: 0 0 auto;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-left: 3px solid var(--boc-reader-accent, #fb7299);
+  background: var(--boc-reader-card, #ffffff);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.boc-reading-chat-intent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.boc-reading-chat-intent-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--boc-reader-faint, #a39a8d);
+}
+
+.boc-reading-chat-intent-quote {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--boc-reader-text, #2b2620);
+  word-break: break-word;
+}
+
+.boc-reading-chat-intent-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--boc-reader-muted, #6f675c);
 }

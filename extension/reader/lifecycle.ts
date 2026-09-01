@@ -91,7 +91,7 @@ import { resetManualScrollPause, setProgrammaticScrollUntil } from "./state.js";
 // PR2 统一 Digest 面板：进入阅读模式时把右侧面板重置回默认「字幕」标签。
 // tab 切换是纯壳交互，实现在 ui/ui-renderer（buildUiEvents 的标签绑定同文件），
 // 本域只做打开时机上的重置调用（重渲 renderReadingView 不重置，避免打断用户）。
-import { resetReaderDigestTabs } from "../ui/ui-renderer.js";
+import { resetReaderDigestTabs, renderReadingChatIntent } from "../ui/ui-renderer.js";
 // 候选06 端口半边：reader 域唯一显式端口的单点注册入口（见文件尾注册区）。
 import { registerReaderPorts } from "./ports.js";
 // 候选09：字幕分批渲染状态机（rAF 任务/游标/spacer 收敛）迁往 ./batched-render.js；
@@ -101,8 +101,18 @@ import {
   buildReadingSubtitleItemHtml,
   cancelReadingSubtitleAppend,
   ensureReadingSubtitleRenderedUpTo,
+  setReadingSubtitleBatchHook,
   startReadingSubtitleAppendTask
 } from "./batched-render.js";
+// PR3 字幕 tab：句内搜索（批次回执 hook + 重渲重放 + 关闭清理）、转写中间态
+// 横幅（相位订阅 + 渲染尾部收敛）、句上「解释」的待处理意图（会话收尾清除）。
+import {
+  clearReadingSubtitleSearch,
+  handleReadingSubtitleRangeAppended,
+  refreshReadingSubtitleSearch
+} from "./subtitle-search.js";
+import { bindReadingTranscribeBanner, updateReadingTranscribeBanner } from "./transcribe-banner.js";
+import { clearPendingExplainIntent } from "./explain-intent.js";
 
 // playerRetryTimer（readingPlayerRetryTimer）自 reader-impl.js 闭包迁入：属主启动
 //（scheduleReaderPlayerRetry）与清除（closeReadingView、presenter reset）都在本
@@ -126,6 +136,13 @@ registerReaderPorts({
   noteManualReaderInteraction: noteManualReaderInteraction as (...args: unknown[]) => unknown,
   flushReadingSubtitleToIndex: ensureReadingSubtitleRenderedUpTo as (...args: unknown[]) => unknown
 });
+
+// PR3 字幕 tab 的两处组装根单点接线（与上方端口注册同位）：
+//   - 批次回执 hook：分批渲染每次 [from, to) 上屏后通知句内搜索补高亮
+//     （batched-render 不 import subtitle-search，经此槽反转依赖，避免成环）；
+//   - 转写相位订阅：asr-transcribing/done/failed 实时切换横幅（视图开着才碰 DOM）。
+setReadingSubtitleBatchHook(handleReadingSubtitleRangeAppended);
+bindReadingTranscribeBanner();
 
 // SYNC functions this module drives (from sync.js):
 import {
@@ -228,6 +245,9 @@ export async function enterReaderMode() {
   // PR2：每次打开阅读视图都回到默认「字幕」标签（概览/AI 对话关闭前的停留
   // 状态不跨会话保留；视图开着期间的重渲不打断所在标签）。
   resetReaderDigestTabs();
+  // PR3：chat tab 占位期的待解释意图卡按当前 pending 意图归位（上次会话可能
+  // 留有意图；closeReadingView 已清，这里按现值渲染兜底）。
+  renderReadingChatIntent();
   await sleep(0);
   openReaderViewShell(readingView);
   applyReaderPageFocus();
@@ -374,6 +394,10 @@ export function closeReadingView() {
   // 候选10 批2：关闭阅读视图时取消未完成的字幕分批追加（rAF 与任务一并作废），
   // 避免关闭后还往已脱离上下文的列表追加节点。
   cancelReadingSubtitleAppend();
+  // PR3：字幕 tab 的会话态随视图关闭一并清掉——搜索（输入框值 + 高亮 + 计数）
+  // 与句上「解释」的待处理意图（不跨会话残留；下次打开按空态渲染）。
+  clearReadingSubtitleSearch();
+  clearPendingExplainIntent();
   stopReadingViewSync();
   unbindReaderLayout();
   cleanupReaderPlayerHost();
@@ -467,6 +491,12 @@ export function renderReadingView() {
   renderReaderPanels();
   applyReadingViewPresentation();
   updateReadingSubtitleTailSpacer();
+  // PR3：渲染尾部收敛字幕 tab 的会话态——
+  //   - 句内搜索重放（列表刚被整体重建，高亮/计数按当前输入重算；scroll:false
+  //     不打断阅读位置）；
+  //   - 转写横幅（视图打开晚于转写发起时，经进程内相位镜像恢复呈现）。
+  refreshReadingSubtitleSearch({ scroll: false });
+  updateReadingTranscribeBanner();
   state.reader.setActiveSubtitleIndex(-1);
   state.reader.setActiveChapterIndex(-1);
 }

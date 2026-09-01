@@ -1,6 +1,6 @@
 import { BOC_VERSION } from "../core/defaults.js";
 import { loadSubtitle } from "./fetcher.js";
-import { buildSubtitlePreview } from "../notes/render.js";
+import { buildSubtitlePreview, buildTxt } from "../notes/render.js";
 import { isAiSubtitle } from "./selection.js";
 import { sanitizeFileName, escapeHtml } from "../shared/string-utils.js";
 import { cleanVideoUrl } from "../bilibili/video-id-shared.js";
@@ -116,6 +116,26 @@ export async function copyMarkdown(): Promise<void> {
   try {
     await navigator.clipboard.writeText(state.clip.markdown);
     setMessage("Markdown 已复制到剪贴板。");
+  } catch (error) {
+    setMessage(`复制失败：${getErrorMessage(error)}`);
+  }
+}
+
+// 阅读模式字幕 tab 的「复制」（PR3 接线）：复制字幕纯文本——transcript 语义，
+// 与 TXT 导出同一渲染管线（buildTxt，按 includeTimestampInBody 设置决定是否带
+// 时间戳）；与 copyMarkdown（复制完整 Markdown 笔记）语义区分。取数与反馈
+// 风格照抄 copyMarkdown，逻辑零新增。
+export async function copySubtitleTranscript(): Promise<void> {
+  state.setSettings(await getSettings());
+  const text = buildTxt(state.clip.subtitleBody, state.settings);
+  if (!text) {
+    setMessage("没有可复制的字幕，请先刷新抓取。");
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    setMessage("字幕已复制到剪贴板。");
   } catch (error) {
     setMessage(`复制失败：${getErrorMessage(error)}`);
   }

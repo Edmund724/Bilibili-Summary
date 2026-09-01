@@ -21,6 +21,9 @@ import { createLazyLoader } from "../shared/lazy-import.js";
 // isReaderViewOpen 位于 reader 状态微模块（候选04 结构归并）：纯 state 读取，
 // 不再经 reader/index.js facade 静态转发（否则整条 reader 域会被拖进本链闭包）。
 import { isReaderViewOpen } from "../reader/state.js";
+// PR3：boc-subtitle-status 广播的进程内镜像（零依赖叶子）——reader 同进程的
+// 转写中间态呈现经它读取/订阅（content script 收不到自己的 runtime 广播）。
+import { publishSubtitleStatusPhase } from "../shared/subtitle-status-bus.js";
 import { readVideoTitle, readVideoAuthor, readUploadDate } from "./core.js";
 import {
   normalizeChapters,
@@ -540,7 +543,14 @@ export async function loadSubtitle(
 // 把耗时阶段的变更广播给 popup / AI 侧边栏，让它们在各自等待抓取响应、
 // 无法实时读取页内状态栏的情况下也能区分“抓取本地字幕”和“音频转写”。
 // 仅广播阶段标记，文案由各端自行渲染；失败（扩展上下文关闭等）静默忽略。
+//
+// PR3：chrome.runtime.sendMessage 广播**不会回送给发送方所在的 content script
+// 自己**（popup/sidepanel 等扩展上下文才收得到）——reader 与本编排同进程，靠
+// 监听 onMessage 拿不到相位。故此处同步把相位发布进 shared/subtitle-status-bus
+// （进程内镜像叶子），reader 域的转写中间态横幅经它读取/订阅；跨上下文场景
+// 仍走原 chrome 广播，行为不变。
 function broadcastSubtitleStatus(phase: string): void {
+  publishSubtitleStatusPhase(phase);
   try {
     const promise = chrome.runtime.sendMessage({ type: "boc-subtitle-status", phase });
     if (promise && typeof promise.catch === "function") {

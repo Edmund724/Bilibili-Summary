@@ -81,6 +81,32 @@ function insertReadingSubtitleRange(
   }
 }
 
+// ===== 批次回执 hook（PR3 句内搜索） =====
+//
+// 搜索激活期间，后续批次上屏的条目也要带上命中高亮。渲染状态机不 import 搜索
+// 模块（会成环：搜索补渲染又要走本状态机的 flush 入口），改用单槽 hook：
+// lifecycle（reader 域组装根，与 registerReaderPorts 同款单点注册位）在模块求值
+// 时把 subtitle-search 的 handleReadingSubtitleRangeAppended 注册进来，每次
+// [from, to) 上屏后同步通知；注册方异常被吞掉，绝不影响渲染主流程。
+type ReadingSubtitleBatchHook = (fromIndex: number, toIndex: number) => void;
+
+let batchAppendedHook: ReadingSubtitleBatchHook | null = null;
+
+export function setReadingSubtitleBatchHook(hook: ReadingSubtitleBatchHook | null): void {
+  batchAppendedHook = typeof hook === "function" ? hook : null;
+}
+
+function notifyReadingSubtitleBatchAppended(fromIndex: number, toIndex: number): void {
+  if (toIndex <= fromIndex || !batchAppendedHook) {
+    return;
+  }
+  try {
+    batchAppendedHook(fromIndex, toIndex);
+  } catch {
+    // 高亮回执失败不影响渲染主流程
+  }
+}
+
 export function cancelReadingSubtitleAppend() {
   if (subtitleAppendRafId) {
     window.cancelAnimationFrame(subtitleAppendRafId);
@@ -109,10 +135,13 @@ function appendReadingSubtitleBatch() {
     return;
   }
   const end = Math.min(task.items.length, task.cursor + TRANSCRIPT_APPEND_BATCH);
+  const batchFrom = task.cursor;
   insertReadingSubtitleRange(task.listEl, task.items, task.cursor, end, task.withHours);
   task.cursor = end;
   // 每批追加后廉价收敛 spacer 高度（内部脏检查：高度没变只多一次 clientHeight 读）
   updateReadingSubtitleTailSpacer();
+  // 批次回执：搜索激活时给本批条目补高亮（hook 内部吞异常）
+  notifyReadingSubtitleBatchAppended(batchFrom, end);
   if (task.cursor < task.items.length) {
     scheduleReadingSubtitleAppend();
   } else {
@@ -138,9 +167,13 @@ export function ensureReadingSubtitleRenderedUpTo(targetIndex: number) {
     return true;
   }
   const end = Math.min(task.items.length, targetIndex + 1);
+  const flushFrom = task.cursor;
   insertReadingSubtitleRange(task.listEl, task.items, task.cursor, end, task.withHours);
   task.cursor = end;
   updateReadingSubtitleTailSpacer();
+  // 批次回执：同步补渲染出的条目同样要带搜索高亮（跳转落点即命中时，当前命中
+  // 标记由搜索模块在补渲染后现查落位）
+  notifyReadingSubtitleBatchAppended(flushFrom, end);
   if (task.cursor >= task.items.length) {
     subtitleAppendTask = null;
   } else {
