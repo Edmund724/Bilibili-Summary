@@ -68,8 +68,6 @@ import {
   alignReaderViewportToPlayer,
   applyReaderPageFocus,
   clearReaderPageFocus,
-  moveReadingMainInline,
-  restoreReadingMainInline,
   cleanupReaderFloatingArtifacts,
   // 候选06：转写尾部留白自 player-host 迁入 page-frame（内联宿主的滚动留白）。
   updateReadingSubtitleTailSpacer
@@ -90,6 +88,10 @@ import {
 // 经该模块驱动头部悬停接线（finishEnterReaderMode）。
 import { bindReaderHeaderActionsHover } from "./hover-chrome.js";
 import { resetManualScrollPause, setProgrammaticScrollUntil } from "./state.js";
+// PR2 统一 Digest 面板：进入阅读模式时把右侧面板重置回默认「字幕」标签。
+// tab 切换是纯壳交互，实现在 ui/ui-renderer（buildUiEvents 的标签绑定同文件），
+// 本域只做打开时机上的重置调用（重渲 renderReadingView 不重置，避免打断用户）。
+import { resetReaderDigestTabs } from "../ui/ui-renderer.js";
 // 候选06 端口半边：reader 域唯一显式端口的单点注册入口（见文件尾注册区）。
 import { registerReaderPorts } from "./ports.js";
 // 候选09：字幕分批渲染状态机（rAF 任务/游标/spacer 收敛）迁往 ./batched-render.js；
@@ -165,7 +167,7 @@ export function handleReaderPresenterNotification(kind: string, text?: string | 
       break;
     case "subtitle-ready":
       if (state.reader.readingViewOpen) {
-        moveReadingMainInline();
+        // PR2：字幕列表已常驻右侧面板「字幕」tab，不再内联搬迁进页面文档流。
         renderReadingView();
         renderReadingStatus(String(text || "") || "抓取完成，阅读视图已同步最新字幕。");
         startReadingViewSync();
@@ -223,6 +225,9 @@ export async function enterReaderMode() {
   hydrateReaderStateFromSettings(state.settings);
   applyReadingViewPresentation();
   alignReaderViewportToPlayer();
+  // PR2：每次打开阅读视图都回到默认「字幕」标签（概览/AI 对话关闭前的停留
+  // 状态不跨会话保留；视图开着期间的重渲不打断所在标签）。
+  resetReaderDigestTabs();
   await sleep(0);
   openReaderViewShell(readingView);
   applyReaderPageFocus();
@@ -278,7 +283,7 @@ function finishEnterReaderMode() {
   if (!state.reader.readingViewOpen || !isReaderMode()) return;
 
   alignReaderViewportToPlayer();
-  moveReadingMainInline();
+  // PR2：字幕列表常驻右侧面板「字幕」tab，无需再内联搬迁进页面文档流。
   scheduleReaderMiniPlayerDismiss();
   maybeRefreshReaderSubtitleInBackground();
   syncReaderModeAfterMount();
@@ -365,7 +370,7 @@ export function closeReadingView() {
   for (const attr of READER_CLOSE_ATTRS.html) {
     document.documentElement.removeAttribute(attr);
   }
-  restoreReadingMainInline();
+  // PR2：字幕列表常驻面板 tab，不再有内联宿主需要恢复。
   // 候选10 批2：关闭阅读视图时取消未完成的字幕分批追加（rAF 与任务一并作废），
   // 避免关闭后还往已脱离上下文的列表追加节点。
   cancelReadingSubtitleAppend();

@@ -1,16 +1,15 @@
 // Reader LAYOUT 层 · page-frame 域（自 reader-impl.js 机械拆分）。
 //
-// 本文件拥有页面框架：DOM 焦点（applyReaderPageFocus）/剪枝/内联宿主
-// （moveReadingMainInline）与阅读模式页面状态守卫（bindNormalPageStateGuard），
-// 以及 reader 私有 DOM id 表（ids，两域与 facade 共用）。分节函数体逐字节
-// 搬自原 reader-impl.js 的 page-frame 分节（原 :257-679），行为零变化。
-// 播放器宿主（挂载/布局/控制条/观察器）在 ./player-host.js；两域互调一律走
-// 显式模块导出：本文件导出 getReaderMainWidthLimit/dismissReaderMiniPlayer，
-// player-host.js 导出 getPlayerHost/layoutReaderPlayerHost。
-// page-frame ⇄ player-host 为 LAYOUT 层内部的相互依赖（全部为函数互调，运行时
-// 经 ESM live binding 解析）。转写列表尾部留白（updateReadingSubtitleTailSpacer）
-// 候选06 自 player-host 迁入本文件：它读取的 boc-reading-inline-host 正是本域
-// moveReadingMainInline 创建的内联宿主，属页面框架的滚动留白。
+// 本文件拥有页面框架：DOM 焦点（applyReaderPageFocus）/剪枝与阅读模式页面
+// 状态守卫（bindNormalPageStateGuard），以及 reader 私有 DOM id 表（ids，两域
+// 与 facade 共用）。播放器宿主（挂载/布局/控制条/观察器）在 ./player-host.js；
+// 两域互调一律走显式模块导出：本文件导出 getReaderMainWidthLimit/dismissReader
+// MiniPlayer，player-host.js 导出 getPlayerHost/layoutReaderPlayerHost。
+//
+// PR2 统一 Digest 面板：字幕列表常驻右侧面板「字幕」tab，原内联宿主机制
+//（moveReadingMainInline / restoreReadingMainInline / applyInlineHostPresentation）
+// 已随字幕列表搬家一并移除；转写尾部留白（updateReadingSubtitleTailSpacer）
+// 保留在本文件，高度基准改为字幕列表容器自身。
 //
 // SYNC 域调用经 ./ports.js 显式端口叶子（readerPorts）；./sync.js 与
 // ./lifecycle.js 依赖本层，本文件不得反向 import 它们。
@@ -23,12 +22,8 @@ import { state } from "../core/state.js";
 import { getReaderElement, isVisibleReaderControl } from "../shared/dom-utils.js";
 import { isReaderMode } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
-import { isProgrammaticScrolling } from "./state.js";
 // 跨域模块接口：播放器宿主状态与布局函数（player-host.js 导出）。
 import { getPlayerHost, layoutReaderPlayerHost } from "./player-host.js";
-// 候选06：SYNC 域回调经 reader 域唯一显式端口（ports.js 叶子，缺失即抛错）。
-import { readerPorts } from "./ports.js";
-import { applyInlineHostPresentation } from "./presentation.js";
 // 候选02 分层惰性：id 表已迁往 ./state.js（常驻微模块），本文件内部仍大量按 id
 // 读写 reader DOM，经该 import 取用（此前为本地 const 定义，迁移后补上）。
 import { ids } from "./state.js";
@@ -41,18 +36,16 @@ export {
   enforceNormalPageStateIfNeeded,
   bindNormalPageStateGuard
 } from "./state.js";
-export { applyInlineHostPresentation } from "./presentation.js";
 
-// ===== page-frame 域闭包状态（自 reader-impl.js 头部迁入） =====
+// ===== page-frame 域闭包状态 =====
 //
-// mainOriginalParent / mainOriginalNextSibling 仅本域读写
-//（moveReadingMainInline 记录、restoreReadingMainInline 恢复并清空）。
-let mainOriginalParent: Node | null = null;     // readingMainOriginalParent
-let mainOriginalNextSibling: Node | null = null;// readingMainOriginalNextSibling
+// PR2 统一 Digest 面板：字幕列表常驻右侧面板「字幕」tab，原内联宿主
+//（boc-reading-inline-host）随 moveReadingMainInline/restoreReadingMainInline
+// 一并移除——字幕列表不再搬进页面文档流，转写尾部留白改以字幕列表容器自身的
+// 可视高度为基准（见 updateReadingSubtitleTailSpacer）。
 
 // Reader 私有 DOM id 表 / isReaderViewOpen / 页面状态守卫已迁往 ./state.js
-//（候选04 结构归并），applyInlineHostPresentation 留在 ./presentation.js——
-// 见文件头的 re-export。
+//（候选04 结构归并）；applyInlineHostPresentation 已随内联宿主机制移除（PR2）。
 // getReaderElement / isVisibleReaderControl live in ../shared/dom-utils.js:
 // reading reader DOM ids is a reader-internal concern, and keeping that helper
 // out of core/runtime.js keeps the reader modules free of a static import back
@@ -137,86 +130,22 @@ export function clearReaderPageFocus() {
   });
 }
 
-export function moveReadingMainInline() {
-  if (!isReaderMode()) {
-    return;
-  }
+// PR2 统一 Digest 面板：字幕列表常驻右侧面板「字幕」tab，内联搬迁机制
+//（moveReadingMainInline / restoreReadingMainInline / inline-host 滚动绑定）
+// 随之移除——原「把字幕列表搬到播放器下方随页面滚动」的形态由面板内滚动
+// 容器替代，sync 域的跟随滚动也收敛为容器内滚动（见 sync.js）。
 
-  const readingMain = document.querySelector(".boc-reading-main");
-  if (!readingMain) {
-    return;
-  }
-
-  if (!mainOriginalParent) {
-    mainOriginalParent = readingMain.parentElement;
-    mainOriginalNextSibling = readingMain.nextSibling;
-  }
-  const playerWrap =
-    document.getElementById("playerWrap") ||
-    getPlayerHost()?.closest?.("#playerWrap") ||
-    getPlayerHost();
-  const hostParent = playerWrap?.parentElement;
-  if (!playerWrap || !hostParent) {
-    return;
-  }
-
-  let inlineHost = document.getElementById("boc-reading-inline-host");
-  if (!inlineHost) {
-    inlineHost = document.createElement("div");
-    inlineHost.id = "boc-reading-inline-host";
-  }
-
-  if (inlineHost.parentElement !== hostParent || inlineHost.previousElementSibling !== playerWrap) {
-    playerWrap.insertAdjacentElement("afterend", inlineHost);
-  }
-
-  if (!inlineHost.dataset.bocScrollBound) {
-    const handleInlineHostManualScroll = () => {
-      if (isProgrammaticScrolling()) {
-        return;
-      }
-      readerPorts.noteManualReaderInteraction();
-    };
-    inlineHost.addEventListener("scroll", handleInlineHostManualScroll);
-    inlineHost.addEventListener("wheel", handleInlineHostManualScroll, { passive: true });
-    inlineHost.dataset.bocScrollBound = "1";
-  }
-
-  if (readingMain.parentElement !== inlineHost) {
-    inlineHost.appendChild(readingMain);
-  }
-  applyInlineHostPresentation();
-  updateReadingSubtitleTailSpacer();
-}
-
-export function restoreReadingMainInline() {
-  const readingMain = document.querySelector(".boc-reading-main");
-  const inlineHost = document.getElementById("boc-reading-inline-host");
-  if (readingMain && mainOriginalParent) {
-    if (mainOriginalNextSibling?.parentNode === mainOriginalParent) {
-      mainOriginalParent.insertBefore(readingMain, mainOriginalNextSibling);
-    } else {
-      mainOriginalParent.appendChild(readingMain);
-    }
-  }
-  inlineHost?.remove();
-  mainOriginalParent = null;
-  mainOriginalNextSibling = null;
-}
-
-// 转写列表尾部留白（候选06 自 player-host.js 迁入）：高度取内联宿主
-//（boc-reading-inline-host，由本域 moveReadingMainInline 创建）或转写列表的
-// 可视高度与视口的较大者——留白是内联滚动框架的一部分，故归页面框架域。
-// 消费方：player-host.layoutReaderPlayerHost（native/slot 两分支收尾）、本域
-// moveReadingMainInline、lifecycle 的分批追加/整段渲染，均经合法静态边取用。
+// 转写列表尾部留白（候选06 自 player-host.js 迁入；PR2 起高度基准为字幕
+// 列表容器自身的可视高度——列表是面板 tab 内的滚动容器，留白保证末屏内容
+// 也能滚到容器顶部）。消费方：player-host.layoutReaderPlayerHost（native/slot
+// 两分支收尾）、lifecycle 的分批追加/整段渲染，均经合法静态边取用。
 export function updateReadingSubtitleTailSpacer() {
   const spacer = document.getElementById(ids.readingSubtitleTailSpacer);
   if (!spacer) {
     return;
   }
-  const inlineHost = document.getElementById("boc-reading-inline-host");
   const subtitleList = document.getElementById(ids.readingSubtitleList);
-  const hostHeight = inlineHost?.clientHeight || subtitleList?.clientHeight || 0;
+  const hostHeight = subtitleList?.clientHeight || 0;
   const spacerHeight = Math.max(hostHeight, Math.round(window.innerHeight * 0.92), 320);
   // 候选10 批1 脏检查：现值与目标一致则跳写（250ms tick / 每帧追加都会调到）。
   // 读现值而非缓存快照：换新 spacer 节点（重建后 style.height 为空）或外部

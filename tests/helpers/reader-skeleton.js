@@ -59,8 +59,10 @@ export function mountPlayerChain(container = document.body) {
 }
 
 // 搭建阅读视图的基本 DOM 骨架（renderReadingView 及其 presentation 依赖的
-// 元素），返回 { readingView, readingMain }。阅读视图 id 取自 ids 表，
-// 顺序/从属关系与 ui-renderer.js 的真实模板保持一致。
+// 元素），返回 { readingView, readingMain, digestPanel }。阅读视图 id 取自
+// ids 表，顺序/从属关系与 ui-renderer.js 的真实模板保持一致（PR2 起：
+// 字幕列表挂进统一面板「字幕」tab body，header/settings 也在面板壳内——
+// 骨架按同一从属关系搭建，bindUiEvents 可直接使用）。
 export function mountReaderSkeleton(ids) {
   const doc = document;
 
@@ -73,7 +75,7 @@ export function mountReaderSkeleton(ids) {
   readingView.id = ids.readingView;
   doc.body.appendChild(readingView);
 
-  const readingStatus = doc.createElement("div");
+  const readingStatus = doc.createElement("p");
   readingStatus.id = ids.readingStatus;
   readingView.appendChild(readingStatus);
 
@@ -81,89 +83,129 @@ export function mountReaderSkeleton(ids) {
   readingPlayerSlot.id = ids.readingPlayerSlot;
   readingView.appendChild(readingPlayerSlot);
 
+  // 统一 Digest 面板壳（PR2）：header / 设置面板 / 三标签 + tab body 与真实
+  // 模板同构；字幕列表 .boc-reading-main 挂在字幕 tab body 内。
+  const digestPanel = doc.createElement("aside");
+  digestPanel.id = ids.readingDigestPanel;
+  digestPanel.className = "boc-reading-digest-panel";
+  readingView.appendChild(digestPanel);
+
   const readingMeta = doc.createElement("div");
   readingMeta.id = ids.readingMeta;
-  readingView.appendChild(readingMeta);
+  digestPanel.appendChild(readingMeta);
+
+  const readingSettingsPanel = doc.createElement("div");
+  readingSettingsPanel.id = ids.readingSettingsPanel;
+  digestPanel.appendChild(readingSettingsPanel);
+
+  const tabSubtitle = doc.createElement("button");
+  tabSubtitle.id = ids.readingTabSubtitle;
+  tabSubtitle.className = "boc-reading-tab is-active";
+  digestPanel.appendChild(tabSubtitle);
+
+  const tabOverview = doc.createElement("button");
+  tabOverview.id = ids.readingTabOverview;
+  tabOverview.className = "boc-reading-tab";
+  digestPanel.appendChild(tabOverview);
+
+  const tabChat = doc.createElement("button");
+  tabChat.id = ids.readingTabChat;
+  tabChat.className = "boc-reading-tab";
+  digestPanel.appendChild(tabChat);
+
+  const tabBodySubtitle = doc.createElement("div");
+  tabBodySubtitle.id = ids.readingTabBodySubtitle;
+  tabBodySubtitle.className = "boc-reading-tab-body is-active";
+  digestPanel.appendChild(tabBodySubtitle);
+
+  const tabBodyOverview = doc.createElement("div");
+  tabBodyOverview.id = ids.readingTabBodyOverview;
+  tabBodyOverview.className = "boc-reading-tab-body";
+  tabBodyOverview.setAttribute("hidden", "");
+  digestPanel.appendChild(tabBodyOverview);
+
+  const tabBodyChat = doc.createElement("div");
+  tabBodyChat.id = ids.readingTabBodyChat;
+  tabBodyChat.className = "boc-reading-tab-body";
+  tabBodyChat.setAttribute("hidden", "");
+  digestPanel.appendChild(tabBodyChat);
 
   const readingChapterList = doc.createElement("div");
   readingChapterList.id = ids.readingChapterList;
   readingView.appendChild(readingChapterList);
 
+  const readingMain = doc.createElement("div");
+  readingMain.className = "boc-reading-main";
+  tabBodySubtitle.appendChild(readingMain);
+
   const readingSubtitleList = doc.createElement("div");
   readingSubtitleList.id = ids.readingSubtitleList;
-  readingView.appendChild(readingSubtitleList);
+  readingMain.appendChild(readingSubtitleList);
 
   const readingAutoScroll = doc.createElement("input");
   readingAutoScroll.type = "checkbox";
   readingAutoScroll.checked = true;
   readingAutoScroll.id = ids.readingAutoScroll;
-  readingView.appendChild(readingAutoScroll);
+  digestPanel.appendChild(readingAutoScroll);
 
   const readingSubtitleVisible = doc.createElement("input");
   readingSubtitleVisible.type = "checkbox";
   readingSubtitleVisible.checked = true;
   readingSubtitleVisible.id = ids.readingSubtitleVisible;
-  readingView.appendChild(readingSubtitleVisible);
+  digestPanel.appendChild(readingSubtitleVisible);
 
   const readingChapterVisible = doc.createElement("input");
   readingChapterVisible.type = "checkbox";
   readingChapterVisible.checked = true;
   readingChapterVisible.id = ids.readingChapterVisible;
-  readingView.appendChild(readingChapterVisible);
-
-  const readingSettingsPanel = doc.createElement("div");
-  readingSettingsPanel.id = ids.readingSettingsPanel;
-  readingView.appendChild(readingSettingsPanel);
+  digestPanel.appendChild(readingChapterVisible);
 
   const readingSettingsBtn = doc.createElement("button");
   readingSettingsBtn.id = ids.readingSettingsBtn;
-  readingView.appendChild(readingSettingsBtn);
+  digestPanel.appendChild(readingSettingsBtn);
 
   const readingFontScaleSelect = doc.createElement("div");
   readingFontScaleSelect.id = ids.readingFontScaleSelect;
-  readingView.appendChild(readingFontScaleSelect);
+  digestPanel.appendChild(readingFontScaleSelect);
 
   const readingLetterSpacingSelect = doc.createElement("div");
   readingLetterSpacingSelect.id = ids.readingLetterSpacingSelect;
-  readingView.appendChild(readingLetterSpacingSelect);
+  digestPanel.appendChild(readingLetterSpacingSelect);
 
   const readingLineHeightSelect = doc.createElement("div");
   readingLineHeightSelect.id = ids.readingLineHeightSelect;
-  readingView.appendChild(readingLineHeightSelect);
+  digestPanel.appendChild(readingLineHeightSelect);
 
   const readingContentWidthSelect = doc.createElement("div");
   readingContentWidthSelect.id = ids.readingContentWidthSelect;
-  readingView.appendChild(readingContentWidthSelect);
+  digestPanel.appendChild(readingContentWidthSelect);
 
   const readingInfoSummary = doc.createElement("div");
   readingInfoSummary.id = ids.readingInfoSummary;
-  readingView.appendChild(readingInfoSummary);
+  digestPanel.appendChild(readingInfoSummary);
 
   const readingInfoDescription = doc.createElement("div");
   readingInfoDescription.id = ids.readingInfoDescription;
-  readingView.appendChild(readingInfoDescription);
+  digestPanel.appendChild(readingInfoDescription);
 
   const readingDescriptionBtn = doc.createElement("button");
   readingDescriptionBtn.id = ids.readingDescriptionBtn;
-  readingView.appendChild(readingDescriptionBtn);
+  digestPanel.appendChild(readingDescriptionBtn);
 
   const readingSubtitleSelect = doc.createElement("select");
   readingSubtitleSelect.id = ids.readingSubtitleSelect;
-  readingView.appendChild(readingSubtitleSelect);
+  digestPanel.appendChild(readingSubtitleSelect);
 
   const readingChapterVisibilitySelect = doc.createElement("select");
   readingChapterVisibilitySelect.id = ids.readingChapterVisibilitySelect;
-  readingView.appendChild(readingChapterVisibilitySelect);
+  digestPanel.appendChild(readingChapterVisibilitySelect);
 
-  // 阅读主内容容器（moveReadingMainInline 的落点，真实模板里挂在 readingView 下）
-  const readingMain = doc.createElement("div");
-  readingMain.className = "boc-reading-main";
-  readingView.appendChild(readingMain);
-
-  return { readingView, readingMain };
+  return { readingView, readingMain, digestPanel };
 }
 
 // 给播放器链上的元素补可见尺寸，保证 video-probe / player-host 判定通过。
+// （PR2：#boc-reading-inline-host 随字幕列表搬进统一面板而移除，列表容器
+// 自身不再需要可见尺寸 mock——sync 域滚动路径对其不可见容器本就走兜底。）
 export function mockPlayerRects(extraSelectors = []) {
   const selectors = [
     ".bpx-player-primary-area",
@@ -171,7 +213,6 @@ export function mockPlayerRects(extraSelectors = []) {
     ".bpx-player-container",
     "#bilibili-player",
     "#playerWrap",
-    "#boc-reading-inline-host",
     ...extraSelectors
   ];
 

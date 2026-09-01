@@ -49,7 +49,7 @@
 .boc-reading-stage {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto auto minmax(320px, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(320px, 1fr) minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -204,6 +204,102 @@
   pointer-events: none;
 }
 
+/* ===== 统一 Digest 面板（PR2）：右侧面板壳 + 三标签 =====
+ * 视口定位（fixed 右侧、全高卡片）在 reader-gate.css 门控段；这里只定义
+ * 面板内部结构：header → tabs（pill 分段控件）→ tab-body。色值全部走
+ * --boc-reader-* 主题 token（gate 段三主题定义），暗色主题自动跟随。 */
+.boc-reading-digest-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 18px;
+  background: var(--boc-reader-surface, #fdfbf7);
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  box-shadow: var(--boc-reader-shadow, none);
+  pointer-events: auto;
+}
+
+.boc-reading-digest-panel .boc-reading-header {
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 14px 16px 10px;
+  gap: 10px;
+}
+
+.boc-reading-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  margin: 2px 14px 0;
+  padding: 4px;
+  background: var(--boc-reader-pill-bg, #f0e9df);
+  border-radius: 12px;
+}
+
+.boc-reading-tab {
+  flex: 1;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 7px 0;
+  border-radius: 9px;
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--boc-reader-muted, #6f675c);
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.boc-reading-tab:hover {
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+.boc-reading-tab.is-active {
+  background: var(--boc-reader-accent, #fb7299);
+  color: var(--boc-reader-accent-ink, #ffffff);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.boc-reading-tab-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px 16px;
+}
+
+/* tab 显隐双通道：class（is-active）与 hidden 属性都收敛为不显示——
+ * 作者 display:flex 会盖过 hidden 的 UA 样式，两条都写防漂移。 */
+.boc-reading-tab-body:not(.is-active),
+.boc-reading-tab-body[hidden] {
+  display: none;
+}
+
+/* 概览 / AI 对话 tab 的诚实占位卡（PR4/PR5 落地前不假装可用） */
+.boc-reading-placeholder {
+  margin: auto 0;
+  padding: 26px 20px;
+  background: var(--boc-reader-card, #ffffff);
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 14px;
+  text-align: center;
+}
+
+.boc-reading-placeholder-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--boc-reader-text, #2b2620);
+  margin-bottom: 6px;
+}
+
+.boc-reading-placeholder-copy {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--boc-reader-muted, #6f675c);
+  margin: 0;
+}
+
 .boc-reading-player-slot {
   width: min(100%, 960px);
   aspect-ratio: 16 / 9;
@@ -242,16 +338,17 @@
 
 .boc-reading-main {
   min-height: 0;
+  flex: 1;
   overflow: hidden;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
   pointer-events: auto;
 }
 
 .boc-reading-subtitle {
-  width: min(100%, 960px);
-  height: 100%;
-  max-height: 100%;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
   margin: 0 auto;
   padding: 6px 8px 12px;
   overflow-x: hidden;
@@ -280,14 +377,14 @@
 
 .boc-reading-item {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: 76px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
   padding: 6px 8px;
   color: #111827;
   position: relative;
   /* 视口外条目跳过布局：估计高度按默认字号单行取 42px（视图内实际内边距
-   * 10px×2 + max(时间列 14px×1.4+2px, 文本列 14px×1.5)≈41.6px），auto 让
+   * 10px×2 + max(时间 pill 11.5px×1.5+2px, 文本列 14px×1.5)≈41px），auto 让
    * 浏览器记住首次绘制后的实际尺寸，多行/调字号条目上屏后即用真实值。 */
   content-visibility: auto;
   contain-intrinsic-size: auto 42px;
@@ -303,13 +400,21 @@
   box-shadow: none;
 }
 
+/* 时间戳 pill：贯穿字幕行 / 章节 / 金句 / AI 引用的视觉母题
+ *（prototype/direction-approved.md）——等宽字体 + accent-soft 底 + accent 字。 */
 .boc-reading-chapter-time,
 .boc-reading-time {
-  font-size: var(--boc-reader-subtitle-font-size);
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11.5px;
   font-weight: 600;
-  color: #16a34a;
-  padding-top: 2px;
-  line-height: 1.4;
+  line-height: 1.5;
+  color: var(--boc-reader-accent, #fb7299);
+  background: var(--boc-reader-accent-soft, #fce0ea);
+  border-radius: 6px;
+  padding: 1px 7px;
+  white-space: nowrap;
+  justify-self: start;
+  align-self: start;
 }
 
 .boc-reading-chapter-title {
@@ -371,21 +476,8 @@
     grid-template-rows: auto auto minmax(220px, auto) minmax(0, 1fr);
   }
 
-  .boc-reading-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .boc-reading-actions {
-    justify-content: flex-start;
-  }
-
-  .boc-reading-title {
-    font-size: 16px;
-  }
-
   .boc-reading-item {
-    grid-template-columns: 56px minmax(0, 1fr);
+    grid-template-columns: 64px minmax(0, 1fr);
     gap: 10px;
   }
 
@@ -412,10 +504,6 @@
 #boc-reading-view .boc-reading-stage {
   display: grid;
   gap: 16px;
-}
-
-#boc-reading-view .boc-reading-header {
-  align-items: flex-start;
 }
 
 #boc-reading-view .boc-reading-title {
@@ -508,21 +596,16 @@
 }
 
 #boc-reading-view .boc-reading-main {
-  justify-content: center;
+  justify-content: stretch;
   background: transparent;
 }
 
 #boc-reading-view .boc-reading-subtitle {
-  width: min(100%, var(--boc-reader-content-max));
-}
-
-#boc-reading-view[data-subtitle-visible="0"] #boc-reading-inline-host {
-  border: none;
-  background: transparent;
+  width: 100%;
 }
 
 #boc-reading-view .boc-reading-item {
-  grid-template-columns: 70px minmax(0, 1fr);
+  grid-template-columns: 76px minmax(0, 1fr);
   gap: 12px;
   padding: 10px 12px;
   border-radius: 18px;

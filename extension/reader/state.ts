@@ -51,7 +51,16 @@ export const ids = {
   readingMeta: "boc-reading-meta",
   readingChapterList: "boc-reading-chapters",
   readingSubtitleList: "boc-reading-subtitle",
-  readingSubtitleTailSpacer: "boc-reading-tail-spacer"
+  readingSubtitleTailSpacer: "boc-reading-tail-spacer",
+  // 统一 Digest 面板（PR2）：右侧面板壳 + 三标签（字幕/概览/AI 对话）分段控件。
+  // 字幕列表（readingSubtitleList）整体挂进字幕 tab body；概览/AI 对话为诚实占位。
+  readingDigestPanel: "boc-reading-digest-panel",
+  readingTabSubtitle: "boc-reading-tab-subtitle",
+  readingTabOverview: "boc-reading-tab-overview",
+  readingTabChat: "boc-reading-tab-chat",
+  readingTabBodySubtitle: "boc-reading-tabbody-subtitle",
+  readingTabBodyOverview: "boc-reading-tabbody-overview",
+  readingTabBodyChat: "boc-reading-tabbody-chat"
 };
 
 // ===== view-state.js：阅读视图开关状态访问器 =====

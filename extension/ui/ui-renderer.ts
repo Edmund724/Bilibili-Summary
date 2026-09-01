@@ -97,99 +97,169 @@ export function buildUiHtml(): string {
         </aside>
 
         <section class="boc-reading-stage">
-          <header class="boc-reading-header">
-            <div class="boc-reading-header-copy">
-              <strong class="boc-reading-title">${escapeHtml(state.clip.title || "B站字幕阅读")}</strong>
-              <div id="${ids.readingMeta}" class="boc-reading-meta">bilibili.com</div>
-            </div>
-            <div class="boc-reading-actions">
-              <button id="${ids.readingThemeSelect}" type="button" class="boc-reading-icon-btn" title="主题" aria-label="切换主题">
-                ${READING_HEADER_ICONS.theme}
-              </button>
-              <button id="${ids.readingSettingsBtn}" type="button" class="boc-reading-icon-btn" title="设置" aria-label="设置">
-                ${READING_HEADER_ICONS.settings}
-              </button>
-              <button id="${ids.readingCloseBtn}" type="button" class="boc-reading-icon-btn" title="退出" aria-label="退出阅读视图">
-                ${READING_HEADER_ICONS.close}
-              </button>
-            </div>
-          </header>
-
-          <section id="${ids.readingSettingsPanel}" class="boc-reading-panel boc-reading-settings-panel" hidden>
-            <section class="boc-reading-settings-group">
-              <div class="boc-reading-eyebrow">排版</div>
-              <div class="boc-reading-stepper-list">
-                ${buildReaderStepperControl({
-                  id: ids.readingFontScaleSelect,
-                  title: "字号",
-                  settingKey: "readerFontScale"
-                })}
-                ${buildReaderStepperControl({
-                  id: ids.readingLetterSpacingSelect,
-                  title: "字间距",
-                  settingKey: "readerLetterSpacing"
-                })}
-                ${buildReaderStepperControl({
-                  id: ids.readingLineHeightSelect,
-                  title: "行间距",
-                  settingKey: "readerLineHeight"
-                })}
-                ${buildReaderStepperControl({
-                  id: ids.readingContentWidthSelect,
-                  title: "正文宽度",
-                  settingKey: "readerContentWidth"
-                })}
-              </div>
-            </section>
-
-            <section class="boc-reading-settings-group">
-              <div class="boc-reading-controls">
-                <label class="boc-reading-toggle boc-reading-toggle-inline">
-                  <input id="${ids.readingAutoScroll}" type="checkbox" checked />
-                  <span>滚动</span>
-                </label>
-                <label class="boc-reading-toggle boc-reading-toggle-inline">
-                  <input id="${ids.readingSubtitleVisible}" type="checkbox" checked />
-                  <span>字幕</span>
-                </label>
-                <label class="boc-reading-toggle boc-reading-toggle-inline">
-                  <input id="${ids.readingChapterVisible}" type="checkbox" checked />
-                  <span>章节</span>
-                </label>
-              </div>
-            </section>
-
-            <section class="boc-reading-settings-group">
-              <div class="boc-reading-controls">
-                <select id="${ids.readingSubtitleSelect}" class="boc-reading-select boc-reading-select-sm" aria-label="字幕语言">
-                </select>
-              </div>
-            </section>
-
-            <section class="boc-reading-settings-group boc-reading-info-group">
-              <div class="boc-reading-eyebrow">视频摘要</div>
-              <div id="${ids.readingInfoSummary}" class="boc-reading-info-list"></div>
-            </section>
-            <section class="boc-reading-settings-group boc-reading-info-group">
-              <div class="boc-reading-eyebrow">视频简介</div>
-              <div id="${ids.readingInfoDescription}" class="boc-reading-info-copy"></div>
-              <button id="${ids.readingDescriptionBtn}" type="button" class="boc-reading-text-btn">展开简介</button>
-            </section>
-          </section>
-
           <p id="${ids.readingStatus}" class="boc-reading-status">使用页面原生播放器联动章节和字幕。</p>
 
           <div class="boc-reading-player-shell">
             <div id="${ids.readingPlayerSlot}" class="boc-reading-player-slot"></div>
           </div>
 
-          <section class="boc-reading-main">
-            <div id="${ids.readingSubtitleList}" class="boc-reading-subtitle"></div>
-          </section>
+          <!-- 统一 Digest 面板（PR2）：右侧 430px 卡片壳，三标签 = 字幕 / 概览 / AI 对话。
+               字幕列表整体挂进字幕 tab body（分批渲染/点句跳转/跟随播放等行为不变）；
+               概览与 AI 对话为本期诚实占位，功能分别在 PR4 / PR5 落地。 -->
+          <aside id="${ids.readingDigestPanel}" class="boc-reading-digest-panel" aria-label="Digest 面板">
+            <header class="boc-reading-header">
+              <div class="boc-reading-header-copy">
+                <strong class="boc-reading-title">${escapeHtml(state.clip.title || "B站字幕阅读")}</strong>
+                <div id="${ids.readingMeta}" class="boc-reading-meta">bilibili.com</div>
+              </div>
+              <div class="boc-reading-actions">
+                <button id="${ids.readingThemeSelect}" type="button" class="boc-reading-icon-btn" title="主题" aria-label="切换主题">
+                  ${READING_HEADER_ICONS.theme}
+                </button>
+                <button id="${ids.readingSettingsBtn}" type="button" class="boc-reading-icon-btn" title="设置" aria-label="设置">
+                  ${READING_HEADER_ICONS.settings}
+                </button>
+                <button id="${ids.readingCloseBtn}" type="button" class="boc-reading-icon-btn" title="退出" aria-label="退出阅读视图">
+                  ${READING_HEADER_ICONS.close}
+                </button>
+              </div>
+            </header>
+
+            <section id="${ids.readingSettingsPanel}" class="boc-reading-panel boc-reading-settings-panel" hidden>
+              <section class="boc-reading-settings-group">
+                <div class="boc-reading-eyebrow">排版</div>
+                <div class="boc-reading-stepper-list">
+                  ${buildReaderStepperControl({
+                    id: ids.readingFontScaleSelect,
+                    title: "字号",
+                    settingKey: "readerFontScale"
+                  })}
+                  ${buildReaderStepperControl({
+                    id: ids.readingLetterSpacingSelect,
+                    title: "字间距",
+                    settingKey: "readerLetterSpacing"
+                  })}
+                  ${buildReaderStepperControl({
+                    id: ids.readingLineHeightSelect,
+                    title: "行间距",
+                    settingKey: "readerLineHeight"
+                  })}
+                  ${buildReaderStepperControl({
+                    id: ids.readingContentWidthSelect,
+                    title: "正文宽度",
+                    settingKey: "readerContentWidth"
+                  })}
+                </div>
+              </section>
+
+              <section class="boc-reading-settings-group">
+                <div class="boc-reading-controls">
+                  <label class="boc-reading-toggle boc-reading-toggle-inline">
+                    <input id="${ids.readingAutoScroll}" type="checkbox" checked />
+                    <span>滚动</span>
+                  </label>
+                  <label class="boc-reading-toggle boc-reading-toggle-inline">
+                    <input id="${ids.readingSubtitleVisible}" type="checkbox" checked />
+                    <span>字幕</span>
+                  </label>
+                  <label class="boc-reading-toggle boc-reading-toggle-inline">
+                    <input id="${ids.readingChapterVisible}" type="checkbox" checked />
+                    <span>章节</span>
+                  </label>
+                </div>
+              </section>
+
+              <section class="boc-reading-settings-group">
+                <div class="boc-reading-controls">
+                  <select id="${ids.readingSubtitleSelect}" class="boc-reading-select boc-reading-select-sm" aria-label="字幕语言">
+                  </select>
+                </div>
+              </section>
+
+              <section class="boc-reading-settings-group boc-reading-info-group">
+                <div class="boc-reading-eyebrow">视频摘要</div>
+                <div id="${ids.readingInfoSummary}" class="boc-reading-info-list"></div>
+              </section>
+              <section class="boc-reading-settings-group boc-reading-info-group">
+                <div class="boc-reading-eyebrow">视频简介</div>
+                <div id="${ids.readingInfoDescription}" class="boc-reading-info-copy"></div>
+                <button id="${ids.readingDescriptionBtn}" type="button" class="boc-reading-text-btn">展开简介</button>
+              </section>
+            </section>
+
+            <!-- 标签页 pill 分段控件（active 态 = accent 实底，见 prototype/direction-approved.md） -->
+            <div class="boc-reading-tabs" role="tablist" aria-label="Digest 标签">
+              <button id="${ids.readingTabSubtitle}" type="button" class="boc-reading-tab is-active" role="tab" aria-selected="true">字幕</button>
+              <button id="${ids.readingTabOverview}" type="button" class="boc-reading-tab" role="tab" aria-selected="false">概览</button>
+              <button id="${ids.readingTabChat}" type="button" class="boc-reading-tab" role="tab" aria-selected="false">AI 对话</button>
+            </div>
+
+            <!-- 字幕 tab：现有字幕列表整体搬家（分批渲染/尾 spacer/事件委托不变） -->
+            <div id="${ids.readingTabBodySubtitle}" class="boc-reading-tab-body is-active" role="tabpanel" aria-label="字幕">
+              <section class="boc-reading-main">
+                <div id="${ids.readingSubtitleList}" class="boc-reading-subtitle"></div>
+              </section>
+            </div>
+
+            <!-- 概览 tab：诚实占位（PR4 落地概览管线，不放假数据） -->
+            <div id="${ids.readingTabBodyOverview}" class="boc-reading-tab-body" role="tabpanel" aria-label="概览" hidden>
+              <div class="boc-reading-placeholder">
+                <div class="boc-reading-placeholder-title">概览即将上线</div>
+                <p class="boc-reading-placeholder-copy">视频的段落总结、章节与金句将在这里呈现。当前版本可先在「字幕」页阅读和跳转。</p>
+              </div>
+            </div>
+
+            <!-- AI 对话 tab：诚实占位（PR5 移植对话功能，不放假输入框） -->
+            <div id="${ids.readingTabBodyChat}" class="boc-reading-tab-body" role="tabpanel" aria-label="AI 对话" hidden>
+              <div class="boc-reading-placeholder">
+                <div class="boc-reading-placeholder-title">AI 对话即将上线</div>
+                <p class="boc-reading-placeholder-copy">针对本视频的提问与解读将在这里进行。</p>
+              </div>
+            </div>
+          </aside>
         </section>
       </div>
     </section>
   `;
+}
+
+// ===== 统一 Digest 面板三标签（PR2） =====
+//
+// 标签切换是纯壳交互（class/aria/hidden 写入），不触碰 reader 域状态；
+// active 态约定：tab 按钮 .is-active + aria-selected，tab body .is-active 且
+// 去 hidden（CSS 双通道：.boc-reading-tab-body:not(.is-active) 与 [hidden]
+// 都收敛为 display:none，防 UA 样式被作者 display 覆盖）。
+export type ReaderDigestTab = "subtitle" | "overview" | "chat";
+
+const DIGEST_TAB_DEFS: Array<{ name: ReaderDigestTab; buttonId: string; bodyId: string }> = [
+  { name: "subtitle", buttonId: ids.readingTabSubtitle, bodyId: ids.readingTabBodySubtitle },
+  { name: "overview", buttonId: ids.readingTabOverview, bodyId: ids.readingTabBodyOverview },
+  { name: "chat", buttonId: ids.readingTabChat, bodyId: ids.readingTabBodyChat }
+];
+
+export function setReaderDigestTab(tab: ReaderDigestTab): void {
+  for (const def of DIGEST_TAB_DEFS) {
+    const button = document.getElementById(def.buttonId);
+    const body = document.getElementById(def.bodyId);
+    if (!button || !body) {
+      continue;
+    }
+    const active = def.name === tab;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+    body.classList.toggle("is-active", active);
+    if (active) {
+      body.removeAttribute("hidden");
+    } else {
+      body.setAttribute("hidden", "");
+    }
+  }
+}
+
+// 进入阅读模式时回到默认「字幕」标签（lifecycle.enterReaderMode 调用）；
+// 视图开着期间的渲染重渲不重置，避免打断用户所在标签。
+export function resetReaderDigestTabs(): void {
+  setReaderDigestTab("subtitle");
 }
 
 export function bindUiEvents(): void {
@@ -213,6 +283,11 @@ export function bindUiEvents(): void {
   const readingDescriptionBtn = byId(ids.readingDescriptionBtn);
   const chapterList = byId(ids.readingChapterList);
   const subtitleList = byId(ids.readingSubtitleList);
+
+  // Digest 面板三标签切换（纯壳交互，见上方 setReaderDigestTab 注释）
+  for (const def of DIGEST_TAB_DEFS) {
+    byId(def.buttonId).addEventListener("click", () => setReaderDigestTab(def.name));
+  }
 
   closeBtn.addEventListener("click", () => panel.classList.remove("open"));
   // ===== 总结链按钮回调（候选02）：refreshClip/onSubtitleChange/copyMarkdown/

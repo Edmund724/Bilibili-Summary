@@ -3,11 +3,12 @@
 //
 // 这里只收拢「启动路径必需」的轻呈现函数：阅读视图的排版应用
 //（applyReadingViewPresentation）、设置水合（hydrateReaderStateFromSettings）、
-// 状态栏文案（renderReadingStatus）、内联宿主呈现（applyInlineHostPresentation）
-// 与步进器控件的静态模板/监听绑定（buildReaderStepperControl /
-// bindReaderStepperControl）。它们是启动路径（content.js init 的 hydrate/apply、
-// ui-renderer 建 UI 壳的 stepper 模板）的直接依赖——留在 lifecycle.js/
-// player-host.js 会把整个 reader 域拖回常驻。
+// 状态栏文案（renderReadingStatus）与步进器控件的静态模板/监听绑定
+//（buildReaderStepperControl / bindReaderStepperControl）。它们是启动路径
+//（content.js init 的 hydrate/apply、ui-renderer 建 UI 壳的 stepper 模板）的
+// 直接依赖——留在 lifecycle.js/player-host.js 会把整个 reader 域拖回常驻。
+//（PR2：原内联宿主呈现 applyInlineHostPresentation 已随字幕列表搬进统一面板
+// 一并移除。）
 //
 // 阅读视图打开后才用到的交互呈现（updateReaderPreferences / renderReaderPanels /
 // renderReadingInfoPanel / renderReaderStepperState / setReaderPreference →
@@ -45,29 +46,11 @@ export function renderReadingStatus(text: string | number | null | undefined) {
   node.textContent = next;
 }
 
-// ===== 内联宿主呈现（自 page-frame.js 迁入；moveReadingMainInline 经本模块取用） =====
-
-export function applyInlineHostPresentation() {
-  const inlineHost = document.getElementById("boc-reading-inline-host");
-  if (!inlineHost) {
-    return;
-  }
-  const leftContainer = document.querySelector(".left-container");
-  const bgColor = leftContainer ? getComputedStyle(leftContainer).backgroundColor : "";
-  if (state.reader.readingSubtitleVisible) {
-    inlineHost.style.border = "";
-    inlineHost.style.background = "";
-    inlineHost.style.marginTop = "";
-    inlineHost.style.boxShadow = "";
-    inlineHost.style.borderRadius = "";
-  } else {
-    inlineHost.style.border = "none";
-    inlineHost.style.background = bgColor;
-    inlineHost.style.marginTop = "0";
-    inlineHost.style.boxShadow = "none";
-    inlineHost.style.borderRadius = "0";
-  }
-}
+// ===== 内联宿主呈现（PR2 移除） =====
+//
+// applyInlineHostPresentation 随字幕列表搬进统一面板「字幕」tab 一并移除：
+// 内联宿主（boc-reading-inline-host）形态不复存在，字幕显隐由
+// applyReadingViewPresentation 直接写 .boc-reading-main 的 display 表达。
 
 // ===== 设置水合与排版应用（自 lifecycle.js 迁入） =====
 
@@ -113,7 +96,6 @@ export function applyReadingViewPresentation() {
   if (main) {
     main.style.display = state.reader.readingSubtitleVisible ? "" : "none";
   }
-  applyInlineHostPresentation();
 }
 
 // updateReaderPreferences / persistReaderSettings / renderReaderPanels /

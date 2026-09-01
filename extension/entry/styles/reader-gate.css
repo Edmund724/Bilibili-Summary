@@ -141,19 +141,31 @@ body[data-boc-reader-mode="1"] [data-boc-reader-hidden="1"] {
   display: none !important;
 }
 
+/* ===== 主题 token =====
+ * PR2 统一 Digest 面板按 prototype/direction-approved.md 定稿色板重排：
+ * light（默认）= 暖白纸感底 + B 站粉 accent（#fb7299）；dark/paper 沿用各自
+ * 底色，accent 换粉系可读变体（暗底用亮粉、纸底用深粉），暗色主题不破相。
+ * 新增 card（白卡片）/faint（三级文字）/accent-ink（accent 实底上的文字）/
+ * pill-bg（分段控件底）/highlight（提示横幅底，PR3 转写横幅消费）。
+ * 时间戳 pill 母题消费 accent-soft 底 + accent 字。 */
 html[data-boc-reader-mode="1"],
 body[data-boc-reader-mode="1"],
 #boc-reading-view {
-  --boc-reader-page-bg: #f4f6f8;
-  --boc-reader-surface: #ffffff;
-  --boc-reader-surface-2: #f7f9fc;
-  --boc-reader-surface-3: #edf2f7;
-  --boc-reader-border: rgba(15, 23, 42, 0.1);
-  --boc-reader-text: #0f172a;
-  --boc-reader-muted: #64748b;
-  --boc-reader-accent: #16a34a;
-  --boc-reader-accent-soft: rgba(34, 197, 94, 0.12);
-  --boc-reader-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+  --boc-reader-page-bg: #f4efe8;
+  --boc-reader-surface: #fdfbf7;
+  --boc-reader-surface-2: #f0e9df;
+  --boc-reader-surface-3: #e7dfd4;
+  --boc-reader-card: #ffffff;
+  --boc-reader-border: #e7dfd4;
+  --boc-reader-text: #2b2620;
+  --boc-reader-muted: #6f675c;
+  --boc-reader-faint: #a39a8d;
+  --boc-reader-accent: #fb7299;
+  --boc-reader-accent-soft: #fce0ea;
+  --boc-reader-accent-ink: #ffffff;
+  --boc-reader-pill-bg: #f0e9df;
+  --boc-reader-highlight: #fdeeda;
+  --boc-reader-shadow: 0 18px 40px rgba(112, 93, 64, 0.1);
   --boc-reader-subtitle-font-size: 14px;
   --boc-reader-subtitle-line-height: 1.5;
   --boc-reader-letter-spacing: 0em;
@@ -168,11 +180,16 @@ body[data-boc-reader-mode="1"][data-boc-reader-theme="dark"],
   --boc-reader-surface: #0f172a;
   --boc-reader-surface-2: #132038;
   --boc-reader-surface-3: #1a2a46;
+  --boc-reader-card: #132038;
   --boc-reader-border: rgba(148, 163, 184, 0.22);
   --boc-reader-text: #e5eefb;
   --boc-reader-muted: #9fb0c8;
-  --boc-reader-accent: #4ade80;
-  --boc-reader-accent-soft: rgba(74, 222, 128, 0.14);
+  --boc-reader-faint: #7e8ea6;
+  --boc-reader-accent: #fc8bab;
+  --boc-reader-accent-soft: rgba(251, 114, 153, 0.18);
+  --boc-reader-accent-ink: #2b1220;
+  --boc-reader-pill-bg: #1a2a46;
+  --boc-reader-highlight: rgba(253, 238, 218, 0.1);
   --boc-reader-shadow: 0 18px 42px rgba(2, 6, 23, 0.42);
 }
 
@@ -183,11 +200,16 @@ body[data-boc-reader-mode="1"][data-boc-reader-theme="paper"],
   --boc-reader-surface: #fbf7ee;
   --boc-reader-surface-2: #f4eddc;
   --boc-reader-surface-3: #eee4ce;
-  --boc-reader-border: rgba(180, 155, 112, 0.22);
+  --boc-reader-card: #fffcf4;
+  --boc-reader-border: rgba(180, 155, 112, 0.28);
   --boc-reader-text: #3b3124;
   --boc-reader-muted: #756653;
-  --boc-reader-accent: #2f9e44;
-  --boc-reader-accent-soft: rgba(47, 158, 68, 0.12);
+  --boc-reader-faint: #93836c;
+  --boc-reader-accent: #e05587;
+  --boc-reader-accent-soft: rgba(251, 114, 153, 0.16);
+  --boc-reader-accent-ink: #ffffff;
+  --boc-reader-pill-bg: #f0e6d2;
+  --boc-reader-highlight: #fdeeda;
   --boc-reader-shadow: 0 18px 40px rgba(112, 93, 64, 0.12);
 }
 
@@ -293,23 +315,11 @@ body[data-boc-reader-mode="1"] #boc-reading-view {
   background: transparent;
 }
 
-body[data-boc-reader-mode="1"] .boc-reading-header {
-  left: auto;
-  right: 24px;
-  max-width: min(1100px, calc(100vw - 48px));
-  gap: 14px;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-actions {
-  pointer-events: auto;
-  justify-content: flex-end;
-}
-
 body[data-boc-reader-mode="1"] .boc-reading-panel {
   position: fixed;
-  right: 24px;
-  top: 76px;
-  width: min(380px, calc(100vw - 48px));
+  right: calc(var(--boc-reader-panel-inset) + 8px);
+  top: calc(var(--boc-reader-panel-inset) + 56px);
+  width: min(286px, calc(100vw - 48px));
   z-index: 2147483646;
   background: var(--boc-reader-surface-2);
 }
@@ -330,16 +340,24 @@ body[data-boc-reader-mode="1"] {
   --boc-reader-page-padding: clamp(16px, 2.8vw, 32px);
   --boc-reader-layout-gap: clamp(16px, 2vw, 24px);
   --boc-reader-rail-target-width: clamp(168px, 15vw, 220px);
+  /* 统一 Digest 面板（PR2）：右侧面板占用 = 面板宽 + 与主体的间隙 + 右缘留白；
+   * 左视频区（页面主体）宽度按「视口 - 面板占用 - 左侧页边距」收缩。 */
+  --boc-reader-panel-width: clamp(360px, 30vw, 430px);
+  --boc-reader-panel-gap: clamp(14px, 1.6vw, 22px);
+  --boc-reader-panel-inset: clamp(10px, 1.2vw, 16px);
+  --boc-reader-panel-occupied: calc(
+    var(--boc-reader-panel-width) + var(--boc-reader-panel-gap) + var(--boc-reader-panel-inset)
+  );
   --boc-reader-main-width: min(
     var(--boc-reader-content-max),
-    calc(100vw - (var(--boc-reader-page-padding) * 2))
+    calc(100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-page-padding))
   );
   --boc-reader-rail-width: min(
     var(--boc-reader-rail-target-width),
     max(
       0px,
       calc(
-        ((100vw - var(--boc-reader-main-width)) / 2) - var(--boc-reader-page-padding) - var(--boc-reader-layout-gap)
+        ((100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-main-width)) / 2) - var(--boc-reader-page-padding) - var(--boc-reader-layout-gap)
       )
     )
   );
@@ -378,19 +396,31 @@ body[data-boc-reader-mode="1"][data-boc-reader-line-height="loose"],
 
 body[data-boc-reader-mode="1"] .boc-reading-actions {
   gap: 12px;
-  margin-right: -20px;
-  margin-top: -8px;
 }
 
-body[data-boc-reader-mode="1"] .boc-reading-header {
+/* 统一 Digest 面板（PR2）：右侧全高卡片。面板内布局（header/tabs/tab-body）
+ * 见 reader.css 基础段；此处只落视口定位与门控前置。 */
+body[data-boc-reader-mode="1"] .boc-reading-digest-panel {
   position: fixed;
-  top: 18px;
-  right: var(--boc-reader-page-padding);
-  left: auto;
-  max-width: calc(100vw - (var(--boc-reader-page-padding) * 2));
-  margin-bottom: 0;
+  top: var(--boc-reader-panel-inset);
+  right: var(--boc-reader-panel-inset);
+  bottom: var(--boc-reader-panel-inset);
+  width: var(--boc-reader-panel-width);
   z-index: 2147483646;
   pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: var(--boc-reader-surface);
+  border: 1px solid var(--boc-reader-border);
+  border-radius: 18px;
+  box-shadow: var(--boc-reader-shadow);
+}
+
+/* native 模式下 header-copy 隐藏（标题由页面 h1 承担），面板头只剩动作按钮 */
+body[data-boc-reader-mode="1"] .boc-reading-header {
+  justify-content: flex-end;
 }
 
 body[data-boc-reader-mode="1"] .boc-reading-settings-panel {
@@ -508,8 +538,7 @@ body[data-boc-reader-mode="1"] #playerWrap,
 body[data-boc-reader-mode="1"] .player-wrap,
 body[data-boc-reader-mode="1"] h1.video-title,
 body[data-boc-reader-mode="1"] .video-info-container,
-body[data-boc-reader-mode="1"] #viewbox_report,
-body[data-boc-reader-mode="1"] #boc-reading-inline-host {
+body[data-boc-reader-mode="1"] #viewbox_report {
   width: min(
     var(--boc-reader-main-width),
     var(--boc-reader-player-rendered-width, var(--boc-reader-main-width))
@@ -518,38 +547,12 @@ body[data-boc-reader-mode="1"] #boc-reading-inline-host {
     var(--boc-reader-main-width),
     var(--boc-reader-player-rendered-width, var(--boc-reader-main-width))
   ) !important;
-  margin-left: auto !important;
+  /* PR2：主体在「视口 - 右侧面板占用」的左侧可用区内水平居中，最窄退到页边距。 */
+  margin-left: max(
+    var(--boc-reader-page-padding),
+    calc((100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-main-width)) / 2)
+  ) !important;
   margin-right: auto !important;
-}
-
-body[data-boc-reader-mode="1"] #boc-reading-inline-host {
-  min-height: 100vh;
-  margin-top: -1px;
-  padding: 0;
-  border: 1px solid var(--boc-reader-border);
-  border-top: 0;
-  border-radius: 0 0 20px 20px;
-  background: var(--boc-reader-surface-2);
-  box-shadow: var(--boc-reader-shadow);
-  box-sizing: border-box;
-  overflow: auto;
-  height: 100vh;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(100, 116, 139, 0.1) transparent;
-  position: relative;
-  isolation: isolate;
-}
-
-body[data-boc-reader-mode="1"] #boc-reading-inline-host::before {
-  content: "";
-  position: sticky;
-  top: 0;
-  display: block;
-  height: 5px;
-  margin-bottom: -5px;
-  z-index: 3;
-  pointer-events: none;
-  background: var(--boc-reader-surface-2);
 }
 
 body[data-boc-reader-mode="1"] #playerWrap,
@@ -582,14 +585,17 @@ body[data-boc-reader-mode="1"] .player-wrap .bpx-player-inner {
   max-height: 100% !important;
 }
 
+/* PR2：字幕列表常驻面板「字幕」tab 内，main 只做 tab 内的弹性占位。 */
 body[data-boc-reader-mode="1"] .boc-reading-main {
-  overflow: visible;
-  display: block;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   width: 100%;
+  min-height: 0;
+  flex: 1;
   background: transparent;
 }
 
-body[data-boc-reader-mode="1"] #boc-reading-inline-host,
 body[data-boc-reader-mode="1"] .boc-reading-subtitle,
 body[data-boc-reader-mode="1"] .boc-reading-item,
 body[data-boc-reader-mode="1"] .boc-reading-item .boc-reading-text,
@@ -626,20 +632,20 @@ body[data-boc-reader-mode="1"] h1.video-title {
   height: auto !important;
 }
 
-body[data-boc-reader-mode="1"] #boc-reading-inline-host::-webkit-scrollbar {
+body[data-boc-reader-mode="1"] .boc-reading-subtitle::-webkit-scrollbar {
   width: 6px;
 }
 
-body[data-boc-reader-mode="1"] #boc-reading-inline-host::-webkit-scrollbar-track {
+body[data-boc-reader-mode="1"] .boc-reading-subtitle::-webkit-scrollbar-track {
   background: transparent;
 }
 
-body[data-boc-reader-mode="1"] #boc-reading-inline-host::-webkit-scrollbar-thumb {
-  background: rgba(100, 116, 139, 0.1);
+body[data-boc-reader-mode="1"] .boc-reading-subtitle::-webkit-scrollbar-thumb {
+  background: var(--boc-reader-pill-bg);
 }
 
-body[data-boc-reader-mode="1"] #boc-reading-inline-host::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.16);
+body[data-boc-reader-mode="1"] .boc-reading-subtitle::-webkit-scrollbar-thumb:hover {
+  background: var(--boc-reader-surface-3);
 }
 
 @media (max-width: 1320px) {
@@ -663,16 +669,34 @@ body[data-boc-reader-mode="1"] #boc-reading-inline-host::-webkit-scrollbar-thumb
     display: none !important;
   }
 
+  /* 窄窗口档：面板收缩，主体宽度公式随变量自动跟随。 */
+  html[data-boc-reader-mode="1"],
+  body[data-boc-reader-mode="1"] {
+    --boc-reader-panel-width: min(380px, 38vw);
+  }
+
   body[data-boc-reader-mode="1"] .left-container,
   body[data-boc-reader-mode="1"] .scroll-sticky,
   body[data-boc-reader-mode="1"] #playerWrap,
   body[data-boc-reader-mode="1"] .player-wrap,
   body[data-boc-reader-mode="1"] h1.video-title,
   body[data-boc-reader-mode="1"] .video-info-container,
-  body[data-boc-reader-mode="1"] #viewbox_report,
-  body[data-boc-reader-mode="1"] #boc-reading-inline-host {
-    margin-left: auto !important;
+  body[data-boc-reader-mode="1"] #viewbox_report {
+    margin-left: max(
+      var(--boc-reader-page-padding),
+      calc((100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-main-width)) / 2)
+    ) !important;
     margin-right: auto !important;
+  }
+}
+
+/* 极窄窗口：面板贴满剩余宽度，保证字幕仍可读。 */
+@media (max-width: 860px) {
+  html[data-boc-reader-mode="1"],
+  body[data-boc-reader-mode="1"] {
+    --boc-reader-panel-width: calc(100vw - (2 * var(--boc-reader-page-padding)));
+    --boc-reader-panel-gap: 0px;
+    --boc-reader-panel-inset: 8px;
   }
 }
 

@@ -2,7 +2,7 @@
 //
 // __BOC_READER_DEBUG_SNAPSHOT__ 全局函数的真身：采集阅读视图/播放器宿主链的
 // getBoundingClientRect + getComputedStyle + data 属性，产出一份可序列化布局
-// 快照，用于排查宿主浮动/小窗/内联化走样。注册在 ./init-essentials.js（常驻
+// 快照，用于排查宿主浮动/小窗/面板布局走样。注册在 ./init-essentials.js（常驻
 // 轻量），只在手动调用全局函数时经 ensureReaderDomain 装载 reader 域后转发；
 // 对外经 reader/index.js 动态域入口转发本导出。
 //
@@ -137,7 +137,7 @@ export function createReaderDebugSnapshot(label = "manual") {
       ".bpx-player-container",
       ".bpx-player-video-area",
       ".bpx-player-primary-area",
-      "#boc-reading-inline-host",
+      "#boc-reading-digest-panel",
       "#boc-reading-view"
     ]
       .map((selector) => pickNodeSnapshot(selector))

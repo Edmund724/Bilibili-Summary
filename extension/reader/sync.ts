@@ -234,8 +234,12 @@ function scrollReadingSubtitleItemIntoView(node: HTMLElement) {
     return;
   }
 
+  // PR2 统一 Digest 面板：字幕列表常驻右侧面板「字幕」tab（自身即滚动容器），
+  // 原内联宿主分支（boc-reading-inline-host 的 scrollTo）随机制移除——跟随/
+  // 跳转滚动一律收敛为「优先列表容器内滚动，容器不可滚才滚页面兜底」。
+  // 列表容器或条目不可见（如其他标签页激活、条目尚未上屏）时退回
+  // scrollIntoView：对隐藏节点无操作，不产生程序化滚动窗口。
   const subtitleList = getReaderElement(ids.readingSubtitleList);
-  const inlineHost = document.getElementById("boc-reading-inline-host");
   const listRect = subtitleList.getBoundingClientRect();
   const itemRect = node.getBoundingClientRect();
   if (!(listRect.height > 0) || !(itemRect.height > 0)) {
@@ -246,20 +250,7 @@ function scrollReadingSubtitleItemIntoView(node: HTMLElement) {
   const behavior = state.reader.readingNextScrollBehavior === "auto" ? "auto" : "smooth";
   setProgrammaticScrollUntil(Date.now() + (behavior === "auto" ? 120 : 800));
   state.reader.setNextScrollBehavior("smooth");
-  if (state.reader.readingNativePageMode && inlineHost && inlineHost.scrollHeight > inlineHost.clientHeight + 8) {
-    const hostRect = inlineHost.getBoundingClientRect();
-    const computed = window.getComputedStyle(node);
-    const lineHeight = Number.parseFloat(computed.lineHeight) || itemRect.height || 32;
-    const desiredOffset = lineHeight * 2.5;
-    const targetScrollTop =
-      inlineHost.scrollTop + (itemRect.top - hostRect.top) - desiredOffset;
-    inlineHost.scrollTo({
-      top: Math.max(0, Math.round(targetScrollTop)),
-      behavior
-    });
-    return;
-  }
-  if (state.reader.readingNativePageMode || subtitleList.scrollHeight <= subtitleList.clientHeight + 8) {
+  if (subtitleList.scrollHeight <= subtitleList.clientHeight + 8) {
     const desiredTop = listRect.top + Math.max(72, Math.min(listRect.height * 0.24, 220));
     const nextTop = window.scrollY + itemRect.top - desiredTop;
     window.scrollTo({
