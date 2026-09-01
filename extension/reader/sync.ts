@@ -37,6 +37,7 @@ import { ids } from "./page-frame.js";
 import {
   getPlayerHost,
   bindReadingViewVideo,
+  unbindReadingViewVideoSync,
   queueEnsureReaderPlayerMounted,
   scheduleReaderLayout,
   stopReaderPlayerObserver,
@@ -78,13 +79,7 @@ export function stopReadingViewSync() {
   closeReaderCleanup();
   stopReaderPlayerObserver();
   unbindReaderPlayerControlsHover();
-  if (state.reader.readingVideoEl && state.reader.readingVideoEl.__bocReadingSyncHandler) {
-    const video = state.reader.readingVideoEl;
-    video.removeEventListener("timeupdate", video.__bocReadingSyncHandler!);
-    video.removeEventListener("seeked", video.__bocReadingSyncHandler!);
-    video.removeEventListener("loadedmetadata", video.__bocReadingSyncHandler!);
-    delete video.__bocReadingSyncHandler;
-  }
+  unbindReadingViewVideoSync();
   setVideoEventsBound(false);
 }
 

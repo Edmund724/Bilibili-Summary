@@ -113,7 +113,7 @@ describe("播放同步与高亮", () => {
     // 手动绑定 stub 视频（与挂载路径一致）
     const bound = playerHost.bindReadingViewVideo(video);
     expect(bound).toBe(video);
-    expect(video.__bocReadingSyncHandler).toBeTypeOf("function");
+    expect(video.__bocReadingSyncController).toBeInstanceOf(AbortController);
 
     video.currentTime = 12;
     sync.syncReadingViewPlayback();
@@ -152,11 +152,13 @@ describe("播放同步与高亮", () => {
     state.reader.readingViewOpen = true;
     playerHost.bindReadingViewVideo(video);
     sync.startReadingViewSync();
-    expect(video.__bocReadingSyncHandler).toBeTypeOf("function");
+    const controller = video.__bocReadingSyncController;
+    expect(controller).toBeInstanceOf(AbortController);
 
     sync.stopReadingViewSync();
 
-    expect(video.__bocReadingSyncHandler).toBeUndefined();
+    expect(controller!.signal.aborted).toBe(true);
+    expect(video.__bocReadingSyncController).toBeUndefined();
   });
 
   it("点击章节跳转：设置 video.currentTime 并高亮对应字幕", async () => {

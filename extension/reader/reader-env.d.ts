@@ -16,7 +16,7 @@ declare global {
   var __BOC_DEBUG__: Record<string, unknown> | undefined;
 
   interface HTMLVideoElement {
-    __bocReadingSyncHandler?: ((event: Event) => void) | undefined;
+    __bocReadingSyncController?: AbortController | undefined;
   }
 }
 

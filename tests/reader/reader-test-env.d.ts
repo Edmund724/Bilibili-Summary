@@ -23,7 +23,7 @@ export interface ChromeRuntimeStub {
 
 declare global {
   interface HTMLVideoElement {
-    __bocReadingSyncHandler?: ((event: Event) => void) | undefined;
+    __bocReadingSyncController?: AbortController | undefined;
   }
 
   interface Window {

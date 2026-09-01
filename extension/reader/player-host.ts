@@ -615,15 +615,20 @@ export function stopReaderPlayerObserver() {
   }
 }
 
+// 解绑 video 同步监听：AbortController 挂在元素上（__bocReadingSyncController），
+// abort 即移除整组 timeupdate/seeked/loadedmetadata 监听，无需再逐个
+// removeEventListener 并 stash handler 引用。
+export function unbindReadingViewVideoSync(): void {
+  const prev = state.reader.readingVideoEl;
+  if (prev && prev.__bocReadingSyncController) {
+    prev.__bocReadingSyncController.abort();
+    delete prev.__bocReadingSyncController;
+  }
+}
+
 export function bindReadingViewVideo(video: HTMLVideoElement | null = getRuntimeVideoElement()): HTMLVideoElement | null {
   if (!video) {
-    if (state.reader.readingVideoEl && state.reader.readingVideoEl.__bocReadingSyncHandler) {
-      const prev = state.reader.readingVideoEl;
-      prev.removeEventListener("timeupdate", prev.__bocReadingSyncHandler!);
-      prev.removeEventListener("seeked", prev.__bocReadingSyncHandler!);
-      prev.removeEventListener("loadedmetadata", prev.__bocReadingSyncHandler!);
-      delete prev.__bocReadingSyncHandler;
-    }
+    unbindReadingViewVideoSync();
     state.reader.readingVideoEl = null;
     videoEventsBound = false;
     return null;
@@ -633,12 +638,7 @@ export function bindReadingViewVideo(video: HTMLVideoElement | null = getRuntime
     return video;
   }
 
-  if (state.reader.readingVideoEl && state.reader.readingVideoEl.__bocReadingSyncHandler) {
-    const prev = state.reader.readingVideoEl;
-    prev.removeEventListener("timeupdate", prev.__bocReadingSyncHandler!);
-    prev.removeEventListener("seeked", prev.__bocReadingSyncHandler!);
-    prev.removeEventListener("loadedmetadata", prev.__bocReadingSyncHandler!);
-  }
+  unbindReadingViewVideoSync();
 
   const syncHandler = (event: Event) => {
     if (state.reader.readingViewOpen) {
@@ -662,10 +662,12 @@ export function bindReadingViewVideo(video: HTMLVideoElement | null = getRuntime
       readerPorts.syncReadingViewPlayback();
     }
   };
-  video.addEventListener("timeupdate", syncHandler);
-  video.addEventListener("seeked", syncHandler);
-  video.addEventListener("loadedmetadata", syncHandler);
-  video.__bocReadingSyncHandler = syncHandler;
+  const controller = new AbortController();
+  const { signal } = controller;
+  video.addEventListener("timeupdate", syncHandler, { signal });
+  video.addEventListener("seeked", syncHandler, { signal });
+  video.addEventListener("loadedmetadata", syncHandler, { signal });
+  video.__bocReadingSyncController = controller;
   state.reader.readingVideoEl = video;
   playerHost = findReaderPlayerHost(video) || playerHost;
   videoEventsBound = true;
