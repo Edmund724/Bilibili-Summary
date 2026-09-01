@@ -6,7 +6,7 @@
 // 边的场景。它替换了此前的两个隐式注册槽：
 //   1. sync-adapter.js 的 registerSyncAdapter/callSync（`?.[` 可选链解析，
 //      适配器缺失时静默返回 undefined——已随本端口删除该文件）；
-//   2. player-host.js 的 setReadingTranscriptFlush 基座槽（无实现时静默返回
+//   2. player-host.js 的 setReadingSubtitleFlush 基座槽（无实现时静默返回
 //      true——已从 player-host 删除）。
 //
 // 层图（保持既有方向不变，ports.js 为叶子）：
@@ -19,7 +19,7 @@
 // 方法集只从真实调用点推导，禁止预留死槽位：
 //   - noteManualReaderInteraction     LAYOUT(page-frame) → SYNC      内联宿主手动滚动/滚轮暂停跟随
 //   - syncReadingViewPlayback         LAYOUT(player-host) → SYNC     视频事件驱动的播放↔字幕同步
-//   - flushReadingTranscriptToIndex   SYNC → LIFECYCLE               字幕分批渲染的同步补渲染
+//   - flushReadingSubtitleToIndex   SYNC → LIFECYCLE               字幕分批渲染的同步补渲染
 // （旧 callSync 注册表里其余名字——startReadingViewSync/stopReadingViewSync/
 // updateReaderFollowState/resetManualScrollPause/setProgrammaticScrollUntil——
 // 从无 callSync 调用点，属死注册，不进端口；它们本来就经合法静态边消费。）
@@ -37,13 +37,13 @@
 export const READER_PORT_METHODS = Object.freeze([
   "noteManualReaderInteraction",
   "syncReadingViewPlayback",
-  "flushReadingTranscriptToIndex"
+  "flushReadingSubtitleToIndex"
 ]);
 
 export type ReaderPortImpls = {
   noteManualReaderInteraction: (...args: unknown[]) => unknown;
   syncReadingViewPlayback: (...args: unknown[]) => unknown;
-  flushReadingTranscriptToIndex: (...args: unknown[]) => unknown;
+  flushReadingSubtitleToIndex: (...args: unknown[]) => unknown;
 };
 
 let portImpls: ReaderPortImpls | null = null;
@@ -92,7 +92,7 @@ export const readerPorts = {
   },
   // SYNC → LIFECYCLE：跳转/跟随目标未上屏时的同步补渲染（分批渲染任务的
   // 实现属主是 lifecycle.js，经此端口供给 sync.js）。
-  flushReadingTranscriptToIndex(...args: unknown[]) {
-    return requirePortMethod("flushReadingTranscriptToIndex")(...args);
+  flushReadingSubtitleToIndex(...args: unknown[]) {
+    return requirePortMethod("flushReadingSubtitleToIndex")(...args);
   }
 };

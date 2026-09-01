@@ -89,9 +89,9 @@ export function mountReaderSkeleton(ids) {
   readingChapterList.id = ids.readingChapterList;
   readingView.appendChild(readingChapterList);
 
-  const readingTranscriptList = doc.createElement("div");
-  readingTranscriptList.id = ids.readingTranscriptList;
-  readingView.appendChild(readingTranscriptList);
+  const readingSubtitleList = doc.createElement("div");
+  readingSubtitleList.id = ids.readingSubtitleList;
+  readingView.appendChild(readingSubtitleList);
 
   const readingAutoScroll = doc.createElement("input");
   readingAutoScroll.type = "checkbox";
@@ -99,11 +99,11 @@ export function mountReaderSkeleton(ids) {
   readingAutoScroll.id = ids.readingAutoScroll;
   readingView.appendChild(readingAutoScroll);
 
-  const readingTranscriptVisible = doc.createElement("input");
-  readingTranscriptVisible.type = "checkbox";
-  readingTranscriptVisible.checked = true;
-  readingTranscriptVisible.id = ids.readingTranscriptVisible;
-  readingView.appendChild(readingTranscriptVisible);
+  const readingSubtitleVisible = doc.createElement("input");
+  readingSubtitleVisible.type = "checkbox";
+  readingSubtitleVisible.checked = true;
+  readingSubtitleVisible.id = ids.readingSubtitleVisible;
+  readingView.appendChild(readingSubtitleVisible);
 
   const readingChapterVisible = doc.createElement("input");
   readingChapterVisible.type = "checkbox";

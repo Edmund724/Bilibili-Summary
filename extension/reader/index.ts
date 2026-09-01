@@ -59,6 +59,6 @@ export { jumpReadingTarget } from "./sync.js";
 // seek 深入口（候选06）：阅读视图内点击与侧栏时间戳 seek 的唯一规范序入口
 export { seekReadingTarget } from "./sync.js";
 export { onReadingChapterClick } from "./sync.js";
-export { onReadingTranscriptClick } from "./sync.js";
+export { onReadingSubtitleClick } from "./sync.js";
 export { noteManualReaderInteraction } from "./sync.js";
 export { updateReaderFollowState } from "./sync.js";

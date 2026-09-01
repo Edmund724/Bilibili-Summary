@@ -97,7 +97,7 @@ describe("设置变更与 data-attribute", () => {
     expect(state.reader.readingLineHeight).toBe("relaxed");
     expect(state.reader.readingContentWidth).toBe("full");
     expect(state.reader.readingChapterVisible).toBe(false);
-    expect(state.reader.readingTranscriptVisible).toBe(true);
+    expect(state.reader.readingSubtitleVisible).toBe(true);
   });
 
   it("applyReadingViewPresentation：在视图/html/body 三处写 data-attribute", () => {
@@ -123,7 +123,7 @@ describe("设置变更与 data-attribute", () => {
       lineHeight: "normal",
       contentWidth: "wide",
       chapterVisibility: "auto",
-      transcriptVisible: "1"
+      subtitleVisible: "1"
     };
 
     expect(readingView.dataset.theme).toBe(expected.theme);
@@ -132,7 +132,7 @@ describe("设置变更与 data-attribute", () => {
     expect(readingView.dataset.lineHeight).toBe(expected.lineHeight);
     expect(readingView.dataset.contentWidth).toBe(expected.contentWidth);
     expect(readingView.dataset.chapterVisibility).toBe(expected.chapterVisibility);
-    expect(readingView.dataset.transcriptVisible).toBe(expected.transcriptVisible);
+    expect(readingView.dataset.subtitleVisible).toBe(expected.subtitleVisible);
 
     expect(htmlEl.dataset.bocReaderTheme).toBe(expected.theme);
     expect(htmlEl.dataset.bocReaderFontScale).toBe(expected.fontScale);

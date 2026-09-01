@@ -9,9 +9,9 @@
 // ./page-frame.js；状态栏文案在 ./presentation.js。
 //
 // 候选06 端口半边：原寄居本文件的「只为破环」符号已各归其位——
-// flushReadingTranscriptToIndex/setReadingTranscriptFlush 槽迁入 ./ports.js
+// flushReadingSubtitleToIndex/setReadingSubtitleFlush 槽迁入 ./ports.js
 // 显式端口（实现由 lifecycle.js 单点注册）；renderReadingStatus 转发删除
-// （消费方直接 import ./presentation.js）；updateReadingTranscriptTailSpacer
+// （消费方直接 import ./presentation.js）；updateReadingSubtitleTailSpacer
 // 迁往 ./page-frame.js（内联宿主的滚动留白属页面框架）。closeReaderCleanup 与
 // clearLayoutTimersForSyncStop 留在本文件（sync.js 经合法 SYNC→LAYOUT 静态边
 // 调用，并非反环 seam），其中控制条 chrome 的定时器清理转发到 ./hover-chrome.js。
@@ -39,7 +39,7 @@ import {
   ids,
   getReaderMainWidthLimit,
   dismissReaderMiniPlayer,
-  updateReadingTranscriptTailSpacer
+  updateReadingSubtitleTailSpacer
 } from "./page-frame.js";
 // 候选06：SYNC 域回调经 reader 域唯一显式端口（ports.js 叶子，缺失即抛错）。
 import { readerPorts } from "./ports.js";
@@ -202,7 +202,7 @@ export function closeReaderCleanup() {
 }
 
 // renderReadingStatus 已迁往 ./presentation.js（消费方直接 import，本文件不再
-// 转发）；updateReadingTranscriptTailSpacer 已迁往 ./page-frame.js（内联宿主
+// 转发）；updateReadingSubtitleTailSpacer 已迁往 ./page-frame.js（内联宿主
 // 的滚动留白属页面框架域，本文件经 import 取用）。
 
 
@@ -473,7 +473,7 @@ export function layoutReaderPlayerHost() {
         delayMs: 120
       });
     }
-    updateReadingTranscriptTailSpacer();
+    updateReadingSubtitleTailSpacer();
     return;
   }
 
@@ -540,7 +540,7 @@ export function layoutReaderPlayerHost() {
     hostNode.style.setProperty("max-width", slotStyles.maxWidth, "important");
     hostNode.style.setProperty("max-height", slotStyles.maxHeight, "important");
   }
-  updateReadingTranscriptTailSpacer();
+  updateReadingSubtitleTailSpacer();
 }
 
 function cleanupReaderPlayerHostNode(playerHostNode: Element | null) {

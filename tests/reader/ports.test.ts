@@ -30,7 +30,7 @@ function validImpls() {
   return {
     noteManualReaderInteraction: vi.fn(),
     syncReadingViewPlayback: vi.fn(),
-    flushReadingTranscriptToIndex: vi.fn()
+    flushReadingSubtitleToIndex: vi.fn()
   };
 }
 
@@ -41,14 +41,14 @@ describe("reader 显式端口", () => {
 
     ports.readerPorts.noteManualReaderInteraction(5000);
     ports.readerPorts.syncReadingViewPlayback(true);
-    ports.readerPorts.flushReadingTranscriptToIndex(7);
+    ports.readerPorts.flushReadingSubtitleToIndex(7);
 
     expect(impls.noteManualReaderInteraction).toHaveBeenCalledTimes(1);
     expect(impls.noteManualReaderInteraction).toHaveBeenCalledWith(5000);
     expect(impls.syncReadingViewPlayback).toHaveBeenCalledTimes(1);
     expect(impls.syncReadingViewPlayback).toHaveBeenCalledWith(true);
-    expect(impls.flushReadingTranscriptToIndex).toHaveBeenCalledTimes(1);
-    expect(impls.flushReadingTranscriptToIndex).toHaveBeenCalledWith(7);
+    expect(impls.flushReadingSubtitleToIndex).toHaveBeenCalledTimes(1);
+    expect(impls.flushReadingSubtitleToIndex).toHaveBeenCalledWith(7);
   });
 
   it("方法集覆盖旧 callSync 的全部真实调用名（无死槽位）", () => {
@@ -67,8 +67,8 @@ describe("reader 显式端口", () => {
   });
 
   it("注册表缺方法即抛错（禁止静默缺实现）", () => {
-    const { flushReadingTranscriptToIndex: _omitted, ...partial } = validImpls();
-    expect(() => ports.registerReaderPorts(partial as unknown as ReaderPortImpls)).toThrow(/缺少方法.*flushReadingTranscriptToIndex/);
+    const { flushReadingSubtitleToIndex: _omitted, ...partial } = validImpls();
+    expect(() => ports.registerReaderPorts(partial as unknown as ReaderPortImpls)).toThrow(/缺少方法.*flushReadingSubtitleToIndex/);
   });
 
   it("注册表含未知方法键即抛错（防拼写漂移绕过显式方法集）", () => {
@@ -83,6 +83,6 @@ describe("reader 显式端口", () => {
   it("未注册即调用端口方法抛错（不再静默 undefined/true）", () => {
     expect(() => ports.readerPorts.syncReadingViewPlayback()).toThrow(/未注册/);
     expect(() => ports.readerPorts.noteManualReaderInteraction()).toThrow(/未注册/);
-    expect(() => ports.readerPorts.flushReadingTranscriptToIndex(0)).toThrow(/未注册/);
+    expect(() => ports.readerPorts.flushReadingSubtitleToIndex(0)).toThrow(/未注册/);
   });
 });

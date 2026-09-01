@@ -1,5 +1,5 @@
-// Reader playback↔transcript synchronization (extracted from reader-impl.js,
-// formerly the transcript-sync.js segment, issue 06+).
+// Reader playback↔subtitle synchronization (extracted from reader-impl.js,
+// formerly the subtitle-sync.js segment, issue 06+).
 //
 // Deep module owning the sync timer and the manual/programmatic scroll-pause
 // deadlines, plus the reader 域唯一定位入口 seekReadingTarget（阅读视图内点击
@@ -58,7 +58,7 @@ import { readerPorts } from "./ports.js";
 // the shared leaf both this module and the LAYOUT layer read/write directly.
 let syncTimer = 0; // readingSyncTimer
 
-// ===== transcript-sync.js (playback sync) =====
+// ===== subtitle-sync.js (playback sync) =====
 
 export function startReadingViewSync() {
   if (syncTimer) {
@@ -152,9 +152,9 @@ function resolveActiveItem(cached: ActiveItemCache, index: number, list: HTMLEle
 }
 
 function setActiveReadingItems(subtitleIndex: number, chapterIndex: number, shouldScroll = false) {
-  const transcriptList = getReaderElement(ids.readingTranscriptList);
+  const subtitleList = getReaderElement(ids.readingSubtitleList);
   const chapterList = getReaderElement(ids.readingChapterList);
-  const subtitleHit = resolveActiveItem(lastActiveItems.subtitle, subtitleIndex, transcriptList, "boc-reading-item");
+  const subtitleHit = resolveActiveItem(lastActiveItems.subtitle, subtitleIndex, subtitleList, "boc-reading-item");
   const chapterHit = resolveActiveItem(lastActiveItems.chapter, chapterIndex, chapterList, "boc-reading-chapter");
 
   if (!subtitleHit.unchanged) {
@@ -185,28 +185,28 @@ function setActiveReadingItems(subtitleIndex: number, chapterIndex: number, shou
       state.reader.setActiveChapterIndex(chapterIndex);
       return;
     }
-    let scrollTranscriptNode = subtitleHit.next;
+    let scrollSubtitleNode = subtitleHit.next;
     // 候选10 批2：字幕列表分批渲染后，跳转/跟随的目标条目可能还没追加上屏。
     // 先同步补渲染到目标 index 再取节点滚动，保证「跳不过去」不发生；章节
     // 列表始终整段渲染，无此问题。
-    if (!scrollTranscriptNode && subtitleIndex >= 0) {
+    if (!scrollSubtitleNode && subtitleIndex >= 0) {
       // 候选06：补渲染实现属 LIFECYCLE（分批渲染状态机在 lifecycle.js），经
       // 显式端口回调（lifecycle 启动时注册，缺失即抛错，不再静默返回 true）。
-      readerPorts.flushReadingTranscriptToIndex(subtitleIndex);
-      scrollTranscriptNode = transcriptList.querySelector(`[data-index="${subtitleIndex}"]`);
-      if (scrollTranscriptNode) {
+      readerPorts.flushReadingSubtitleToIndex(subtitleIndex);
+      scrollSubtitleNode = subtitleList.querySelector(`[data-index="${subtitleIndex}"]`);
+      if (scrollSubtitleNode) {
         // 补渲染后才拿到节点：同步补上 is-active 并刷新缓存，与「节点本就在屏」
         // 的路径保持等价（否则高亮要拖到下一拍才出现）。
-        if (subtitleHit.current && subtitleHit.current !== scrollTranscriptNode) {
+        if (subtitleHit.current && subtitleHit.current !== scrollSubtitleNode) {
           subtitleHit.current.classList.remove("is-active");
         }
-        scrollTranscriptNode.classList.add("is-active");
+        scrollSubtitleNode.classList.add("is-active");
         lastActiveItems.subtitle.index = subtitleIndex;
-        lastActiveItems.subtitle.node = scrollTranscriptNode;
+        lastActiveItems.subtitle.node = scrollSubtitleNode;
       }
     }
-    if (scrollTranscriptNode) {
-      scrollReadingTranscriptItemIntoView(scrollTranscriptNode);
+    if (scrollSubtitleNode) {
+      scrollReadingSubtitleItemIntoView(scrollSubtitleNode);
     }
     if (chapterHit.next) {
       scrollReadingRailItemIntoView(chapterHit.next);
@@ -229,14 +229,14 @@ function scrollReadingRailItemIntoView(node: HTMLElement) {
   });
 }
 
-function scrollReadingTranscriptItemIntoView(node: HTMLElement) {
+function scrollReadingSubtitleItemIntoView(node: HTMLElement) {
   if (!node) {
     return;
   }
 
-  const transcriptList = getReaderElement(ids.readingTranscriptList);
+  const subtitleList = getReaderElement(ids.readingSubtitleList);
   const inlineHost = document.getElementById("boc-reading-inline-host");
-  const listRect = transcriptList.getBoundingClientRect();
+  const listRect = subtitleList.getBoundingClientRect();
   const itemRect = node.getBoundingClientRect();
   if (!(listRect.height > 0) || !(itemRect.height > 0)) {
     scrollReadingRailItemIntoView(node);
@@ -259,7 +259,7 @@ function scrollReadingTranscriptItemIntoView(node: HTMLElement) {
     });
     return;
   }
-  if (state.reader.readingNativePageMode || transcriptList.scrollHeight <= transcriptList.clientHeight + 8) {
+  if (state.reader.readingNativePageMode || subtitleList.scrollHeight <= subtitleList.clientHeight + 8) {
     const desiredTop = listRect.top + Math.max(72, Math.min(listRect.height * 0.24, 220));
     const nextTop = window.scrollY + itemRect.top - desiredTop;
     window.scrollTo({
@@ -270,8 +270,8 @@ function scrollReadingTranscriptItemIntoView(node: HTMLElement) {
   }
 
   const targetScrollTop =
-    transcriptList.scrollTop + (itemRect.top - listRect.top) - Math.max(48, Math.min(listRect.height * 0.24, 180));
-  transcriptList.scrollTo({
+    subtitleList.scrollTop + (itemRect.top - listRect.top) - Math.max(48, Math.min(listRect.height * 0.24, 180));
+  subtitleList.scrollTo({
     top: Math.max(0, Math.round(targetScrollTop)),
     behavior
   });
@@ -329,7 +329,7 @@ export function onReadingChapterClick(event: MouseEvent) {
   jumpReadingTarget(target.dataset.seconds ?? 0);
 }
 
-export function onReadingTranscriptClick(event: MouseEvent) {
+export function onReadingSubtitleClick(event: MouseEvent) {
   const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(".boc-reading-item");
   if (!target) {
     return;

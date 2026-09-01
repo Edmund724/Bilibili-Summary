@@ -11,7 +11,7 @@ import {
 } from "../notes/render.js";
 import type { State } from "../core/state.js";
 
-export interface ReadingTranscriptItem {
+export interface ReadingSubtitleItem {
   index: number;
   from: number;
   to: number;
@@ -68,7 +68,7 @@ export function readUploadDate(): string {
   return formatLocalDate();
 }
 
-export function getReadingTranscriptItems(body: SubtitleBodyItemLike[] = state.clip.subtitleBody): ReadingTranscriptItem[] {
+export function getReadingSubtitleItems(body: SubtitleBodyItemLike[] = state.clip.subtitleBody): ReadingSubtitleItem[] {
   return (Array.isArray(body) ? body : [])
     .map((item, index) => ({
       index,
@@ -79,7 +79,7 @@ export function getReadingTranscriptItems(body: SubtitleBodyItemLike[] = state.c
     .filter((item) => item.content);
 }
 
-export function getReadingTranscriptPlaceholderText(): string {
+export function getReadingSubtitlePlaceholderText(): string {
   if (state.clip.subtitleFetchState === "loading") {
     return "正在加载字幕...";
   }

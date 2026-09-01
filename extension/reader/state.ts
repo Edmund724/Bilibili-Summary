@@ -34,7 +34,7 @@ export const ids = {
   readingCloseBtn: "boc-reading-close-btn",
   readingRefreshBtn: "boc-reading-refresh-btn",
   readingAutoScroll: "boc-reading-autoscroll",
-  readingTranscriptVisible: "boc-reading-transcript-visible",
+  readingSubtitleVisible: "boc-reading-subtitle-visible",
   readingThemeSelect: "boc-reading-theme-select",
   readingSettingsBtn: "boc-reading-settings-btn",
   readingSettingsPanel: "boc-reading-settings-panel",
@@ -50,8 +50,8 @@ export const ids = {
   readingDescriptionBtn: "boc-reading-description-btn",
   readingMeta: "boc-reading-meta",
   readingChapterList: "boc-reading-chapters",
-  readingTranscriptList: "boc-reading-transcript",
-  readingTranscriptTailSpacer: "boc-reading-tail-spacer"
+  readingSubtitleList: "boc-reading-subtitle",
+  readingSubtitleTailSpacer: "boc-reading-tail-spacer"
 };
 
 // ===== view-state.js：阅读视图开关状态访问器 =====

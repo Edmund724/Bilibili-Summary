@@ -8,7 +8,7 @@
 // 显式模块导出：本文件导出 getReaderMainWidthLimit/dismissReaderMiniPlayer，
 // player-host.js 导出 getPlayerHost/layoutReaderPlayerHost。
 // page-frame ⇄ player-host 为 LAYOUT 层内部的相互依赖（全部为函数互调，运行时
-// 经 ESM live binding 解析）。转写列表尾部留白（updateReadingTranscriptTailSpacer）
+// 经 ESM live binding 解析）。转写列表尾部留白（updateReadingSubtitleTailSpacer）
 // 候选06 自 player-host 迁入本文件：它读取的 boc-reading-inline-host 正是本域
 // moveReadingMainInline 创建的内联宿主，属页面框架的滚动留白。
 //
@@ -186,7 +186,7 @@ export function moveReadingMainInline() {
     inlineHost.appendChild(readingMain);
   }
   applyInlineHostPresentation();
-  updateReadingTranscriptTailSpacer();
+  updateReadingSubtitleTailSpacer();
 }
 
 export function restoreReadingMainInline() {
@@ -209,14 +209,14 @@ export function restoreReadingMainInline() {
 // 可视高度与视口的较大者——留白是内联滚动框架的一部分，故归页面框架域。
 // 消费方：player-host.layoutReaderPlayerHost（native/slot 两分支收尾）、本域
 // moveReadingMainInline、lifecycle 的分批追加/整段渲染，均经合法静态边取用。
-export function updateReadingTranscriptTailSpacer() {
-  const spacer = document.getElementById(ids.readingTranscriptTailSpacer);
+export function updateReadingSubtitleTailSpacer() {
+  const spacer = document.getElementById(ids.readingSubtitleTailSpacer);
   if (!spacer) {
     return;
   }
   const inlineHost = document.getElementById("boc-reading-inline-host");
-  const transcriptList = document.getElementById(ids.readingTranscriptList);
-  const hostHeight = inlineHost?.clientHeight || transcriptList?.clientHeight || 0;
+  const subtitleList = document.getElementById(ids.readingSubtitleList);
+  const hostHeight = inlineHost?.clientHeight || subtitleList?.clientHeight || 0;
   const spacerHeight = Math.max(hostHeight, Math.round(window.innerHeight * 0.92), 320);
   // 候选10 批1 脏检查：现值与目标一致则跳写（250ms tick / 每帧追加都会调到）。
   // 读现值而非缓存快照：换新 spacer 节点（重建后 style.height 为空）或外部

@@ -25,14 +25,14 @@ import {
   normalizeReaderLetterSpacing,
   normalizeReaderLineHeight,
   normalizeReaderContentWidth,
-  normalizeReaderTranscriptVisible
+  normalizeReaderSubtitleVisible
 } from "../core/validators.js";
 import { isReaderMode } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
 import {
-  getReadingTranscriptItems,
-  getReadingTranscriptPlaceholderText
+  getReadingSubtitleItems,
+  getReadingSubtitlePlaceholderText
 } from "../subtitle/core.js";
 import {
   normalizeChapters,
@@ -72,7 +72,7 @@ import {
   restoreReadingMainInline,
   cleanupReaderFloatingArtifacts,
   // 候选06：转写尾部留白自 player-host 迁入 page-frame（内联宿主的滚动留白）。
-  updateReadingTranscriptTailSpacer
+  updateReadingSubtitleTailSpacer
 } from "./page-frame.js";
 // LAYOUT (player-host) functions this module drives:
 import {
@@ -95,11 +95,11 @@ import { registerReaderPorts } from "./ports.js";
 // 候选09：字幕分批渲染状态机（rAF 任务/游标/spacer 收敛）迁往 ./batched-render.js；
 // flush 端口实现与首屏批/取消/任务启动入口经下方 import 取用。
 import {
-  TRANSCRIPT_FIRST_BATCH,
-  buildReadingTranscriptItemHtml,
-  cancelReadingTranscriptAppend,
-  ensureReadingTranscriptRenderedUpTo,
-  startReadingTranscriptAppendTask
+  SUBTITLE_FIRST_BATCH,
+  buildReadingSubtitleItemHtml,
+  cancelReadingSubtitleAppend,
+  ensureReadingSubtitleRenderedUpTo,
+  startReadingSubtitleAppendTask
 } from "./batched-render.js";
 
 // playerRetryTimer（readingPlayerRetryTimer）自 reader-impl.js 闭包迁入：属主启动
@@ -113,16 +113,16 @@ let playerRetryTimer = 0;
 // 端口实现一次性注册进 ./ports.js：
 //   - syncReadingViewPlayback / noteManualReaderInteraction：SYNC 域实现
 //    （LAYOUT 两域经端口回调，替代已删除的 sync-adapter.js 注册槽）；
-//   - flushReadingTranscriptToIndex → ensureReadingTranscriptRenderedUpTo：
+//   - flushReadingSubtitleToIndex → ensureReadingSubtitleRenderedUpTo：
 //     本域的分批补渲染实现（实现在 ./batched-render.js，由本模块单点注册；
-//     SYNC 经端口回调，替代已删除的 player-host setReadingTranscriptFlush
+//     SYNC 经端口回调，替代已删除的 player-host setReadingSubtitleFlush
 //     基座槽——旧槽无实现时静默返回 true，现缺失即抛错）。SYNC → LIFECYCLE
 //     是依赖图禁止的边，经端口叶子反转。
 // 函数声明有提升，模块求值时表已完整；重复注册由端口侧报错拦截。
 registerReaderPorts({
   syncReadingViewPlayback: syncReadingViewPlayback as (...args: unknown[]) => unknown,
   noteManualReaderInteraction: noteManualReaderInteraction as (...args: unknown[]) => unknown,
-  flushReadingTranscriptToIndex: ensureReadingTranscriptRenderedUpTo as (...args: unknown[]) => unknown
+  flushReadingSubtitleToIndex: ensureReadingSubtitleRenderedUpTo as (...args: unknown[]) => unknown
 });
 
 // SYNC functions this module drives (from sync.js):
@@ -353,7 +353,7 @@ export function closeReadingView() {
   readingView.setAttribute("aria-hidden", "true");
   readingView.setAttribute("data-boc-reader-ready", "0");
   // 候选06：移除清单从呈现属性表派生（presentation-fields.js 的 clearOnClose
-  // 标志），不再手抄。相对旧清单的修正：html/body 补清 transcript-visible——
+  // 标志），不再手抄。相对旧清单的修正：html/body 补清 subtitle-visible——
   // 153b976 引入该属性时只加了写入、漏补 close 清单，属走样而非故意（守卫
   // 清理清单与 CSS 消费方均按可清除对待，详见 presentation-fields.js 头注）。
   for (const attr of READER_CLOSE_ATTRS.readingView) {
@@ -368,7 +368,7 @@ export function closeReadingView() {
   restoreReadingMainInline();
   // 候选10 批2：关闭阅读视图时取消未完成的字幕分批追加（rAF 与任务一并作废），
   // 避免关闭后还往已脱离上下文的列表追加节点。
-  cancelReadingTranscriptAppend();
+  cancelReadingSubtitleAppend();
   stopReadingViewSync();
   unbindReaderLayout();
   cleanupReaderPlayerHost();
@@ -389,14 +389,14 @@ export function closeReadingView() {
 export function renderReadingView() {
   // 候选10 批2：渲染期间再次触发（切轨/重进阅读模式/状态重渲）时，先取消上一轮
   // 未完成的追加任务，按新数据从头分批，避免旧任务把过期条目追加进新列表。
-  cancelReadingTranscriptAppend();
+  cancelReadingSubtitleAppend();
   const titleNode = document.querySelector(".boc-reading-title");
   const metaNode = getReaderElement(ids.readingMeta);
   const chapterList = getReaderElement(ids.readingChapterList);
-  const transcriptList = getReaderElement(ids.readingTranscriptList);
+  const subtitleList = getReaderElement(ids.readingSubtitleList);
   const chapters = normalizeChapters(state.clip.chapters || []);
   const body = Array.isArray(state.clip.subtitleBody) ? state.clip.subtitleBody : [];
-  const transcriptItems = getReadingTranscriptItems();
+  const subtitleItems = getReadingSubtitleItems();
   const withHours = shouldShowHoursInNote(state, body);
   const hasChapters = chapters.length > 0;
 
@@ -429,27 +429,27 @@ export function renderReadingView() {
       .join("");
   }
 
-  if (transcriptItems.length === 0) {
-    transcriptList.innerHTML = `<div class="boc-reading-empty">${escapeHtml(
-      getReadingTranscriptPlaceholderText()
+  if (subtitleItems.length === 0) {
+    subtitleList.innerHTML = `<div class="boc-reading-empty">${escapeHtml(
+      getReadingSubtitlePlaceholderText()
     )}</div>`;
   } else {
-    // 候选10 批2：首屏只渲染前 TRANSCRIPT_FIRST_BATCH 条，其余走 rAF 分批追加
+    // 候选10 批2：首屏只渲染前 SUBTITLE_FIRST_BATCH 条，其余走 rAF 分批追加
     //（./batched-render.js 的 rAF 状态机）。首屏 HTML 形态与整段重建逐字一致。
-    const firstEnd = Math.min(transcriptItems.length, TRANSCRIPT_FIRST_BATCH);
+    const firstEnd = Math.min(subtitleItems.length, SUBTITLE_FIRST_BATCH);
     let firstHtml = "";
     for (let i = 0; i < firstEnd; i += 1) {
-      firstHtml += buildReadingTranscriptItemHtml(transcriptItems[i], withHours);
+      firstHtml += buildReadingSubtitleItemHtml(subtitleItems[i], withHours);
     }
-    transcriptList.innerHTML = firstHtml;
-    transcriptList.insertAdjacentHTML(
+    subtitleList.innerHTML = firstHtml;
+    subtitleList.insertAdjacentHTML(
       "beforeend",
-      `<div id="${ids.readingTranscriptTailSpacer}" class="boc-reading-tail-spacer" aria-hidden="true"></div>`
+      `<div id="${ids.readingSubtitleTailSpacer}" class="boc-reading-tail-spacer" aria-hidden="true"></div>`
     );
-    if (firstEnd < transcriptItems.length) {
-      startReadingTranscriptAppendTask({
-        listEl: transcriptList,
-        items: transcriptItems,
+    if (firstEnd < subtitleItems.length) {
+      startReadingSubtitleAppendTask({
+        listEl: subtitleList,
+        items: subtitleItems,
         cursor: firstEnd,
         withHours
       });
@@ -461,7 +461,7 @@ export function renderReadingView() {
   renderReadingSubtitleSelect();
   renderReaderPanels();
   applyReadingViewPresentation();
-  updateReadingTranscriptTailSpacer();
+  updateReadingSubtitleTailSpacer();
   state.reader.setActiveSubtitleIndex(-1);
   state.reader.setActiveChapterIndex(-1);
 }
@@ -490,8 +490,8 @@ export function updateReaderPreferences(next: Partial<Record<string, unknown>>, 
   state.reader.setLineHeight(normalizeReaderLineHeight(next.readerLineHeight ?? state.reader.readingLineHeight));
   state.reader.setContentWidth(normalizeReaderContentWidth(next.readerContentWidth ?? state.reader.readingContentWidth));
   state.reader.setChapterVisible(next.readerChapterVisible !== undefined ? Boolean(next.readerChapterVisible) : state.reader.readingChapterVisible);
-  state.reader.setTranscriptVisible(
-    normalizeReaderTranscriptVisible(next.readerTranscriptVisible ?? state.reader.readingTranscriptVisible)
+  state.reader.setSubtitleVisible(
+    normalizeReaderSubtitleVisible(next.readerTranscriptVisible ?? state.reader.readingSubtitleVisible)
   );
   state.setSettings({
     ...state.settings,
@@ -501,7 +501,7 @@ export function updateReaderPreferences(next: Partial<Record<string, unknown>>, 
     readerLineHeight: state.reader.readingLineHeight,
     readerContentWidth: state.reader.readingContentWidth,
     readerChapterVisible: state.reader.readingChapterVisible,
-    readerTranscriptVisible: state.reader.readingTranscriptVisible
+    readerTranscriptVisible: state.reader.readingSubtitleVisible
   });
   applyReadingViewPresentation();
   renderReaderPanels();
@@ -550,7 +550,7 @@ export function renderReaderPanels() {
   settingsPanel.hidden = !state.reader.readingSettingsExpanded;
   settingsBtn.classList.toggle("is-active", state.reader.readingSettingsExpanded);
   (getReaderElement(ids.readingAutoScroll) as HTMLInputElement).checked = state.reader.readingAutoScroll;
-  (getReaderElement(ids.readingTranscriptVisible) as HTMLInputElement).checked = state.reader.readingTranscriptVisible;
+  (getReaderElement(ids.readingSubtitleVisible) as HTMLInputElement).checked = state.reader.readingSubtitleVisible;
   renderReaderStepperState(getReaderElement(ids.readingFontScaleSelect), "readerFontScale");
   renderReaderStepperState(getReaderElement(ids.readingLetterSpacingSelect), "readerLetterSpacing");
   renderReaderStepperState(getReaderElement(ids.readingLineHeightSelect), "readerLineHeight");

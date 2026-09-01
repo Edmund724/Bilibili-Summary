@@ -154,8 +154,8 @@ body[data-boc-reader-mode="1"],
   --boc-reader-accent: #16a34a;
   --boc-reader-accent-soft: rgba(34, 197, 94, 0.12);
   --boc-reader-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
-  --boc-reader-transcript-font-size: 14px;
-  --boc-reader-transcript-line-height: 1.5;
+  --boc-reader-subtitle-font-size: 14px;
+  --boc-reader-subtitle-line-height: 1.5;
   --boc-reader-letter-spacing: 0em;
   --boc-reader-content-max: 860px;
   color: var(--boc-reader-text);
@@ -194,25 +194,25 @@ body[data-boc-reader-mode="1"][data-boc-reader-theme="paper"],
 html[data-boc-reader-mode="1"][data-boc-reader-font-scale="s"],
 body[data-boc-reader-mode="1"][data-boc-reader-font-scale="s"],
 #boc-reading-view[data-font-scale="s"] {
-  --boc-reader-transcript-font-size: 12.8px;
+  --boc-reader-subtitle-font-size: 12.8px;
 }
 
 html[data-boc-reader-mode="1"][data-boc-reader-font-scale="xs"],
 body[data-boc-reader-mode="1"][data-boc-reader-font-scale="xs"],
 #boc-reading-view[data-font-scale="xs"] {
-  --boc-reader-transcript-font-size: 11.6px;
+  --boc-reader-subtitle-font-size: 11.6px;
 }
 
 html[data-boc-reader-mode="1"][data-boc-reader-font-scale="l"],
 body[data-boc-reader-mode="1"][data-boc-reader-font-scale="l"],
 #boc-reading-view[data-font-scale="l"] {
-  --boc-reader-transcript-font-size: 16.4px;
+  --boc-reader-subtitle-font-size: 16.4px;
 }
 
 html[data-boc-reader-mode="1"][data-boc-reader-font-scale="xl"],
 body[data-boc-reader-mode="1"][data-boc-reader-font-scale="xl"],
 #boc-reading-view[data-font-scale="xl"] {
-  --boc-reader-transcript-font-size: 18.8px;
+  --boc-reader-subtitle-font-size: 18.8px;
 }
 
 html[data-boc-reader-mode="1"][data-boc-reader-letter-spacing="tighter"],
@@ -283,9 +283,9 @@ body[data-boc-reader-mode="1"] #app {
   max-width: none !important;
 }
 
-html[data-boc-reader-mode="1"][data-boc-reader-transcript-visible="0"] #boc-reading-view .boc-reading-main,
-body[data-boc-reader-mode="1"][data-boc-reader-transcript-visible="0"] #boc-reading-view .boc-reading-main,
-#boc-reading-view[data-transcript-visible="0"] .boc-reading-main {
+html[data-boc-reader-mode="1"][data-boc-reader-subtitle-visible="0"] #boc-reading-view .boc-reading-main,
+body[data-boc-reader-mode="1"][data-boc-reader-subtitle-visible="0"] #boc-reading-view .boc-reading-main,
+#boc-reading-view[data-subtitle-visible="0"] .boc-reading-main {
   display: none !important;
 }
 
@@ -314,7 +314,7 @@ body[data-boc-reader-mode="1"] .boc-reading-panel {
   background: var(--boc-reader-surface-2);
 }
 
-/* Simplified reader layout: player in normal flow, transcript box below with its own scroll. */
+/* Simplified reader layout: player in normal flow, subtitle box below with its own scroll. */
 body[data-boc-reader-mode="1"] .boc-reading-player-shell {
   display: none !important;
 }
@@ -343,37 +343,37 @@ body[data-boc-reader-mode="1"] {
       )
     )
   );
-  --boc-reader-transcript-line-height: 1.404;
+  --boc-reader-subtitle-line-height: 1.404;
 }
 
 html[data-boc-reader-mode="1"][data-boc-reader-line-height="compact"],
 body[data-boc-reader-mode="1"][data-boc-reader-line-height="compact"],
 #boc-reading-view[data-line-height="compact"] {
-  --boc-reader-transcript-line-height: 1.32;
+  --boc-reader-subtitle-line-height: 1.32;
 }
 
 html[data-boc-reader-mode="1"][data-boc-reader-line-height="tight"],
 body[data-boc-reader-mode="1"][data-boc-reader-line-height="tight"],
 #boc-reading-view[data-line-height="tight"] {
-  --boc-reader-transcript-line-height: 1.404;
+  --boc-reader-subtitle-line-height: 1.404;
 }
 
 html[data-boc-reader-mode="1"][data-boc-reader-line-height="normal"],
 body[data-boc-reader-mode="1"][data-boc-reader-line-height="normal"],
 #boc-reading-view[data-line-height="normal"] {
-  --boc-reader-transcript-line-height: 1.5;
+  --boc-reader-subtitle-line-height: 1.5;
 }
 
 html[data-boc-reader-mode="1"][data-boc-reader-line-height="relaxed"],
 body[data-boc-reader-mode="1"][data-boc-reader-line-height="relaxed"],
 #boc-reading-view[data-line-height="relaxed"] {
-  --boc-reader-transcript-line-height: 1.596;
+  --boc-reader-subtitle-line-height: 1.596;
 }
 
 html[data-boc-reader-mode="1"][data-boc-reader-line-height="loose"],
 body[data-boc-reader-mode="1"][data-boc-reader-line-height="loose"],
 #boc-reading-view[data-line-height="loose"] {
-  --boc-reader-transcript-line-height: 1.692;
+  --boc-reader-subtitle-line-height: 1.692;
 }
 
 body[data-boc-reader-mode="1"] .boc-reading-actions {
@@ -590,7 +590,7 @@ body[data-boc-reader-mode="1"] .boc-reading-main {
 }
 
 body[data-boc-reader-mode="1"] #boc-reading-inline-host,
-body[data-boc-reader-mode="1"] .boc-reading-transcript,
+body[data-boc-reader-mode="1"] .boc-reading-subtitle,
 body[data-boc-reader-mode="1"] .boc-reading-item,
 body[data-boc-reader-mode="1"] .boc-reading-item .boc-reading-text,
 body[data-boc-reader-mode="1"] .boc-reading-time,
@@ -602,8 +602,8 @@ body[data-boc-reader-mode="1"] .boc-reading-info-copy {
 }
 
 body[data-boc-reader-mode="1"] .boc-reading-item .boc-reading-text {
-  font-size: var(--boc-reader-transcript-font-size) !important;
-  line-height: var(--boc-reader-transcript-line-height) !important;
+  font-size: var(--boc-reader-subtitle-font-size) !important;
+  line-height: var(--boc-reader-subtitle-line-height) !important;
   letter-spacing: var(--boc-reader-letter-spacing) !important;
 }
 

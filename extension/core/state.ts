@@ -49,7 +49,7 @@ type ReaderBusinessState = {
   readingLineHeight: string;
   readingContentWidth: string;
   readingChapterVisible: boolean;
-  readingTranscriptVisible: boolean;
+  readingSubtitleVisible: boolean;
   readingSettingsExpanded: boolean;
   readingDescriptionExpanded: boolean;
   readingActiveSubtitleIndex: number;
@@ -73,7 +73,7 @@ type ReaderSetters = {
   setLineHeight(value: string): void;
   setContentWidth(value: string): void;
   setChapterVisible(value: boolean): void;
-  setTranscriptVisible(value: boolean): void;
+  setSubtitleVisible(value: boolean): void;
   setSettingsExpanded(value: boolean): void;
   setDescriptionExpanded(value: boolean): void;
   setActiveSubtitleIndex(value: number): void;
@@ -95,7 +95,7 @@ const readerState: ReaderStateWritable = {
   readingLineHeight: "tight",
   readingContentWidth: "medium",
   readingChapterVisible: true,
-  readingTranscriptVisible: true,
+  readingSubtitleVisible: true,
   readingSettingsExpanded: false,
   readingDescriptionExpanded: false,
   readingActiveSubtitleIndex: -1,
@@ -113,7 +113,7 @@ const readerState: ReaderStateWritable = {
   setLineHeight(value) { this.readingLineHeight = value; },
   setContentWidth(value) { this.readingContentWidth = value; },
   setChapterVisible(value) { this.readingChapterVisible = value; },
-  setTranscriptVisible(value) { this.readingTranscriptVisible = value; },
+  setSubtitleVisible(value) { this.readingSubtitleVisible = value; },
   setSettingsExpanded(value) { this.readingSettingsExpanded = value; },
   setDescriptionExpanded(value) { this.readingDescriptionExpanded = value; },
   setActiveSubtitleIndex(value) { this.readingActiveSubtitleIndex = value; },

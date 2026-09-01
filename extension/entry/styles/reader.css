@@ -187,7 +187,7 @@
 }
 
 .boc-reading-list,
-.boc-reading-transcript {
+.boc-reading-subtitle {
   min-height: 0;
   overflow: auto;
 }
@@ -248,7 +248,7 @@
   pointer-events: auto;
 }
 
-.boc-reading-transcript {
+.boc-reading-subtitle {
   width: min(100%, 960px);
   height: 100%;
   max-height: 100%;
@@ -305,7 +305,7 @@
 
 .boc-reading-chapter-time,
 .boc-reading-time {
-  font-size: var(--boc-reader-transcript-font-size);
+  font-size: var(--boc-reader-subtitle-font-size);
   font-weight: 600;
   color: #16a34a;
   padding-top: 2px;
@@ -512,11 +512,11 @@
   background: transparent;
 }
 
-#boc-reading-view .boc-reading-transcript {
+#boc-reading-view .boc-reading-subtitle {
   width: min(100%, var(--boc-reader-content-max));
 }
 
-#boc-reading-view[data-transcript-visible="0"] #boc-reading-inline-host {
+#boc-reading-view[data-subtitle-visible="0"] #boc-reading-inline-host {
   border: none;
   background: transparent;
 }
@@ -544,8 +544,8 @@
 }
 
 #boc-reading-view .boc-reading-text {
-  font-size: var(--boc-reader-transcript-font-size);
-  line-height: var(--boc-reader-transcript-line-height);
+  font-size: var(--boc-reader-subtitle-font-size);
+  line-height: var(--boc-reader-subtitle-line-height);
   letter-spacing: var(--boc-reader-letter-spacing);
   color: var(--boc-reader-text);
 }

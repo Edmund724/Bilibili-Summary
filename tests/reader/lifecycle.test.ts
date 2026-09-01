@@ -84,10 +84,10 @@ describe("reader 生命周期", () => {
     expect(chapterButtons[1].dataset.seconds).toBe("30");
     expect(chapterButtons[0].textContent).toContain("开场");
 
-    const transcriptItems = readingView.querySelectorAll(".boc-reading-item") as NodeListOf<HTMLElement>;
-    expect(transcriptItems.length).toBe(2);
-    expect(transcriptItems[1].dataset.seconds).toBe("10");
-    expect(transcriptItems[1].textContent).toContain("今天讲测试");
+    const subtitleItems = readingView.querySelectorAll(".boc-reading-item") as NodeListOf<HTMLElement>;
+    expect(subtitleItems.length).toBe(2);
+    expect(subtitleItems[1].dataset.seconds).toBe("10");
+    expect(subtitleItems[1].textContent).toContain("今天讲测试");
 
     // 视图进入 ready 状态（stub 播放器有可见尺寸）
     expect(state.reader.readingViewReady).toBe(true);

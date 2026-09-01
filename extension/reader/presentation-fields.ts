@@ -3,7 +3,7 @@
 // 「阅读模式开着 + 排版设置」由一组 data-boc-reader-* / data-boc-reading-* 页面
 // 属性表达。历史上同一份字段清单在 5 处手抄且已漂移：
 //   1. 写入方 presentation.js（applyReadingViewPresentation）；
-//   2. closeReadingView 的移除清单（lifecycle.js）——漏了 transcript-visible；
+//   2. closeReadingView 的移除清单（lifecycle.js）——漏了 subtitle-visible；
 //   3. 守卫清理 clearReaderModePageState（page-state.js）——body 侧只有 3 项；
 //   4. 守卫 observer 的两份 attributeFilter（page-state.js）——body 侧同样过窄；
 //   5. storage 变更监听键清单（init-essentials.js）——仍盯旧键
@@ -188,21 +188,21 @@ export const READER_PRESENTATION_FIELDS: ReaderPresentationField[] = [
     readValue: null
   },
   {
-    id: "transcriptVisible",
+    id: "subtitleVisible",
     kind: "presentation",
-    targets: { html: "data-boc-reader-transcript-visible", body: "data-boc-reader-transcript-visible", readingView: "data-transcript-visible" },
-    datasetKeys: { html: "bocReaderTranscriptVisible", body: "bocReaderTranscriptVisible", readingView: "transcriptVisible" },
+    targets: { html: "data-boc-reader-subtitle-visible", body: "data-boc-reader-subtitle-visible", readingView: "data-subtitle-visible" },
+    datasetKeys: { html: "bocReaderSubtitleVisible", body: "bocReaderSubtitleVisible", readingView: "subtitleVisible" },
     storageKey: "readerTranscriptVisible",
     legacyStorageKey: null,
     watchedByGuard: true,
     clearOnGuard: true,
-    // 修正走样：旧 closeReadingView 手抄清单漏了 transcript-visible（153b976
+    // 修正走样：旧 closeReadingView 手抄清单漏了 subtitle-visible（153b976
     // 引入该属性时只加了写入、漏补 close 清单；守卫清理清单与 CSS 消费方均按
     // 可清除对待）。close 与守卫在此对齐，避免关闭后残留陈旧值。
     clearOnClose: true,
     clearViewOnClose: false,
     writtenByApply: true,
-    readValue: (reader) => (reader.readingTranscriptVisible ? "1" : "0")
+    readValue: (reader) => (reader.readingSubtitleVisible ? "1" : "0")
   },
   // —— 进入标记：apply 不写（组合根/enterReaderMode 写 "1"），close/守卫都清 ——
   {

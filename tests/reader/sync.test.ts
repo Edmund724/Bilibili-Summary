@@ -1,5 +1,5 @@
 // 播放同步（sync）与章节/字幕高亮切换测试。
-// 覆盖 transcript-sync.js 的 start/stop/sync/click 与 shell.js 的 renderReadingView。
+// 覆盖 subtitle-sync.js 的 start/stop/sync/click 与 shell.js 的 renderReadingView。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
@@ -121,10 +121,10 @@ describe("播放同步与高亮", () => {
     sync.syncReadingViewPlayback();
 
     const readingView = document.getElementById(ids.readingView) as HTMLElement;
-    const activeTranscript = readingView.querySelector(".boc-reading-item.is-active") as HTMLElement;
+    const activeSubtitle = readingView.querySelector(".boc-reading-item.is-active") as HTMLElement;
     const activeChapter = readingView.querySelector(".boc-reading-chapter.is-active") as HTMLElement;
-    expect(activeTranscript.dataset.index).toBe("1");
-    expect(activeTranscript.textContent).toContain("第二句");
+    expect(activeSubtitle.dataset.index).toBe("1");
+    expect(activeSubtitle.textContent).toContain("第二句");
     expect(activeChapter.dataset.index).toBe("0");
 
     // 状态同步到 readerState
@@ -142,9 +142,9 @@ describe("播放同步与高亮", () => {
     video.dispatchEvent(new Event("timeupdate"));
 
     const readingView = document.getElementById(ids.readingView) as HTMLElement;
-    const activeTranscript = readingView.querySelector(".boc-reading-item.is-active") as HTMLElement;
+    const activeSubtitle = readingView.querySelector(".boc-reading-item.is-active") as HTMLElement;
     const activeChapter = readingView.querySelector(".boc-reading-chapter.is-active") as HTMLElement;
-    expect(activeTranscript.dataset.index).toBe("2");
+    expect(activeSubtitle.dataset.index).toBe("2");
     expect(activeChapter.dataset.index).toBe("1");
     expect(state.reader.readingActiveSubtitleIndex).toBe(2);
     expect(state.reader.readingActiveChapterIndex).toBe(1);
@@ -214,8 +214,8 @@ describe("播放同步与高亮", () => {
     await vi.waitFor(() => {
       expect(video.currentTime).toBe(30);
     });
-    const activeTranscript = readingView.querySelector(".boc-reading-item.is-active") as HTMLElement;
-    expect(activeTranscript.dataset.index).toBe("2");
+    const activeSubtitle = readingView.querySelector(".boc-reading-item.is-active") as HTMLElement;
+    expect(activeSubtitle.dataset.index).toBe("2");
   });
 
   it("jumpReadingTarget：暂停时触发播放", () => {

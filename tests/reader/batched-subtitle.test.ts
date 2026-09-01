@@ -7,7 +7,7 @@
 // - follow 跳转到未渲染区：先同步补渲染到目标 index 再滚动（不许跳不过去）；
 // - 激活计算对未渲染条目照旧（不产生高亮 DOM，条目上屏后下一拍补上高亮）；
 // - 渲染期间再次 renderReadingView（切轨）：取消上一轮任务，从头分批不重不漏；
-// - spacer 最终高度与整段重建一致（经 updateReadingTranscriptTailSpacer 收敛）；
+// - spacer 最终高度与整段重建一致（经 updateReadingSubtitleTailSpacer 收敛）；
 // - closeReadingView 取消挂起的追加任务。
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -88,7 +88,7 @@ beforeEach(async () => {
   await loadReaderModules();
   mountSkeleton();
   installFakeRaf();
-  // scrollReadingTranscriptItemIntoView 的兜底路径会调 scrollIntoView，jsdom 未实现
+  // scrollReadingSubtitleItemIntoView 的兜底路径会调 scrollIntoView，jsdom 未实现
   Element.prototype.scrollIntoView = () => {};
 });
 
@@ -98,17 +98,17 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-function transcriptList() {
-  return document.getElementById(ids.readingTranscriptList) as HTMLElement;
+function subtitleList() {
+  return document.getElementById(ids.readingSubtitleList) as HTMLElement;
 }
 
 function renderedItemCount() {
-  return transcriptList().querySelectorAll(".boc-reading-item").length;
+  return subtitleList().querySelectorAll(".boc-reading-item").length;
 }
 
 function tailSpacer() {
-  const list = transcriptList();
-  const spacer = document.getElementById(ids.readingTranscriptTailSpacer) as HTMLElement | null;
+  const list = subtitleList();
+  const spacer = document.getElementById(ids.readingSubtitleTailSpacer) as HTMLElement | null;
   // spacer 必须始终是列表最后一个子节点（滚动定位的尾部留白依赖它）
   if (spacer && spacer.parentElement === list && spacer === list.lastElementChild) {
     return spacer;
@@ -132,7 +132,7 @@ describe("字幕列表分批渲染", () => {
     expect(renderedItemCount()).toBe(800);
     expect(tailSpacer()).not.toBeNull();
     // data-index 0..799 各恰好一个（不重不漏）
-    const list = transcriptList();
+    const list = subtitleList();
     for (let i = 0; i < 800; i += 50) {
       expect(list.querySelectorAll(`[data-index="${i}"]`).length).toBe(1);
     }
@@ -145,11 +145,11 @@ describe("字幕列表分批渲染", () => {
     shell.renderReadingView();
     // 首屏 120 条里没有 index 300：先 flush 一批（120+200=320），300 上屏
     flushAnimationFrames();
-    const target = transcriptList().querySelector('[data-index="300"]') as HTMLElement;
+    const target = subtitleList().querySelector('[data-index="300"]') as HTMLElement;
     expect(target).not.toBeNull();
     const event = new MouseEvent("click", { bubbles: true, cancelable: true });
     Object.defineProperty(event, "target", { value: target });
-    shell.onReadingTranscriptClick(event);
+    shell.onReadingSubtitleClick(event);
     expect(video.currentTime).toBe(600); // data-seconds = 300 * 2
     expect(state.reader.readingActiveSubtitleIndex).toBe(300);
   });
@@ -170,7 +170,7 @@ describe("字幕列表分批渲染", () => {
     shell.syncReadingViewPlayback(true);
 
     expect(renderedItemCount()).toBeGreaterThanOrEqual(601);
-    const active = transcriptList().querySelector(".boc-reading-item.is-active") as HTMLElement;
+    const active = subtitleList().querySelector(".boc-reading-item.is-active") as HTMLElement;
     expect(active.dataset.index).toBe("600");
     expect(state.reader.readingActiveSubtitleIndex).toBe(600);
     // 剩余条目继续排进 rAF 队列，flush 后全量渲染完成
@@ -187,11 +187,11 @@ describe("字幕列表分批渲染", () => {
     video.currentTime = 1200; // index 600 未渲染
     shell.syncReadingViewPlayback();
     expect(state.reader.readingActiveSubtitleIndex).toBe(600); // 计算照旧
-    expect(transcriptList().querySelector(".boc-reading-item.is-active")).toBeNull(); // 无高亮 DOM
+    expect(subtitleList().querySelector(".boc-reading-item.is-active")).toBeNull(); // 无高亮 DOM
 
     flushAnimationFrames(); // 条目上屏
     shell.syncReadingViewPlayback(); // 下一拍：同一 index，缓存节点为 null 必然现查
-    expect((transcriptList().querySelector('.boc-reading-item.is-active') as HTMLElement).dataset.index).toBe("600");
+    expect((subtitleList().querySelector('.boc-reading-item.is-active') as HTMLElement).dataset.index).toBe("600");
   });
 
   it("渲染期间再次 renderReadingView（切轨）：取消上一轮任务，新数据不重不漏", () => {
@@ -208,7 +208,7 @@ describe("字幕列表分批渲染", () => {
     expect(renderedItemCount()).toBe(120); // 新数据首屏
 
     flushAnimationFrames();
-    const list = transcriptList();
+    const list = subtitleList();
     expect(renderedItemCount()).toBe(400); // 精确等于新数据条数
     expect(list.querySelectorAll('[data-index="0"]').length).toBe(1);
     expect(list.querySelectorAll('[data-index="399"]').length).toBe(1);
@@ -216,7 +216,7 @@ describe("字幕列表分批渲染", () => {
     expect(tailSpacer()).not.toBeNull();
   });
 
-  it("spacer 最终高度与整段重建等价（经 updateReadingTranscriptTailSpacer 收敛）", () => {
+  it("spacer 最终高度与整段重建等价（经 updateReadingSubtitleTailSpacer 收敛）", () => {
     state.clip.subtitleBody = makeBody(800);
     shell.renderReadingView();
     flushAnimationFrames();

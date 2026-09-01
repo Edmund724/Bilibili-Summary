@@ -3,17 +3,17 @@
 // declaring their surface here keeps reader/ strict without editing shared files.
 
 declare module "../subtitle/core.js" {
-  export interface ReadingTranscriptItem {
+  export interface ReadingSubtitleItem {
     index: number;
     from: number;
     to: number;
     content: string;
   }
 
-  export function getReadingTranscriptItems(
+  export function getReadingSubtitleItems(
     body?: Array<{ from?: number; to?: number; content?: string }>
-  ): ReadingTranscriptItem[];
-  export function getReadingTranscriptPlaceholderText(): string;
+  ): ReadingSubtitleItem[];
+  export function getReadingSubtitlePlaceholderText(): string;
   export function findActiveSubtitleIndex(currentTime: number): number;
   export function findActiveChapterIndex(currentTime: number): number;
 }

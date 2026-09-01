@@ -25,7 +25,7 @@ import {
   normalizeReaderLetterSpacing,
   normalizeReaderLineHeight,
   normalizeReaderContentWidth,
-  normalizeReaderTranscriptVisible
+  normalizeReaderSubtitleVisible
 } from "../core/validators.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { ids } from "./state.js";
@@ -54,7 +54,7 @@ export function applyInlineHostPresentation() {
   }
   const leftContainer = document.querySelector(".left-container");
   const bgColor = leftContainer ? getComputedStyle(leftContainer).backgroundColor : "";
-  if (state.reader.readingTranscriptVisible) {
+  if (state.reader.readingSubtitleVisible) {
     inlineHost.style.border = "";
     inlineHost.style.background = "";
     inlineHost.style.marginTop = "";
@@ -78,7 +78,7 @@ export function hydrateReaderStateFromSettings(settings: Partial<Settings> = sta
   state.reader.setLineHeight(normalizeReaderLineHeight(settings?.readerLineHeight));
   state.reader.setContentWidth(normalizeReaderContentWidth(settings?.readerContentWidth));
   state.reader.setChapterVisible(settings?.readerChapterVisible !== undefined ? Boolean(settings.readerChapterVisible) : true);
-  state.reader.setTranscriptVisible(normalizeReaderTranscriptVisible(settings?.readerTranscriptVisible));
+  state.reader.setSubtitleVisible(normalizeReaderSubtitleVisible(settings?.readerTranscriptVisible));
 }
 
 export function applyReadingViewPresentation() {
@@ -111,7 +111,7 @@ export function applyReadingViewPresentation() {
   }
   const main = document.querySelector<HTMLElement>(".boc-reading-main");
   if (main) {
-    main.style.display = state.reader.readingTranscriptVisible ? "" : "none";
+    main.style.display = state.reader.readingSubtitleVisible ? "" : "none";
   }
   applyInlineHostPresentation();
 }

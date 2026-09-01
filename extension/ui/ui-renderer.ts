@@ -148,7 +148,7 @@ export function buildUiHtml(): string {
                   <span>滚动</span>
                 </label>
                 <label class="boc-reading-toggle boc-reading-toggle-inline">
-                  <input id="${ids.readingTranscriptVisible}" type="checkbox" checked />
+                  <input id="${ids.readingSubtitleVisible}" type="checkbox" checked />
                   <span>字幕</span>
                 </label>
                 <label class="boc-reading-toggle boc-reading-toggle-inline">
@@ -183,7 +183,7 @@ export function buildUiHtml(): string {
           </div>
 
           <section class="boc-reading-main">
-            <div id="${ids.readingTranscriptList}" class="boc-reading-transcript"></div>
+            <div id="${ids.readingSubtitleList}" class="boc-reading-subtitle"></div>
           </section>
         </section>
       </div>
@@ -202,7 +202,7 @@ export function bindUiEvents(): void {
   const readingView = byId(ids.readingView);
   const readingCloseBtn = byId(ids.readingCloseBtn);
   const readingAutoScroll = byId(ids.readingAutoScroll);
-  const readingTranscriptVisible = byId(ids.readingTranscriptVisible);
+  const readingSubtitleVisible = byId(ids.readingSubtitleVisible);
   const readingThemeSelect = byId(ids.readingThemeSelect);
   const readingSettingsToggleBtn = byId(ids.readingSettingsBtn);
   const readingFontScaleSelect = byId(ids.readingFontScaleSelect);
@@ -211,7 +211,7 @@ export function bindUiEvents(): void {
   const readingContentWidthSelect = byId(ids.readingContentWidthSelect);
   const readingDescriptionBtn = byId(ids.readingDescriptionBtn);
   const chapterList = byId(ids.readingChapterList);
-  const transcriptList = byId(ids.readingTranscriptList);
+  const subtitleList = byId(ids.readingSubtitleList);
 
   closeBtn.addEventListener("click", () => panel.classList.remove("open"));
   // ===== 总结链按钮回调（候选02）：refreshClip/onSubtitleChange/copyMarkdown/
@@ -263,7 +263,7 @@ export function bindUiEvents(): void {
       })
       .catch((error) => logWarn("[BOC] reader autoscroll sync failed", error));
   });
-  readingTranscriptVisible.addEventListener("change", (event) => {
+  readingSubtitleVisible.addEventListener("change", (event) => {
     // 候选02：updateReaderPreferences 属 reader 动态 chunk（视图开着 ⇒ 已装载），
     // 经 ensure 转发；手动兜底的 main 显隐写在偏好应用之后（与旧顺序一致）。
     loadReaderDomain()
@@ -274,7 +274,7 @@ export function bindUiEvents(): void {
           main.style.display = (event.target as HTMLInputElement).checked ? "" : "none";
         }
       })
-      .catch((error) => logWarn("[BOC] reader transcript visibility failed", error));
+      .catch((error) => logWarn("[BOC] reader subtitle visibility failed", error));
   });
   const readingChapterVisible = byId(ids.readingChapterVisible);
   if (readingChapterVisible) {
@@ -367,15 +367,15 @@ export function bindUiEvents(): void {
       .then((reader) => reader.noteManualReaderInteraction())
       .catch(() => {});
   };
-  transcriptList.addEventListener("scroll", handleReaderManualScroll);
-  transcriptList.addEventListener("wheel", handleReaderManualScroll, { passive: true });
+  subtitleList.addEventListener("scroll", handleReaderManualScroll);
+  subtitleList.addEventListener("wheel", handleReaderManualScroll, { passive: true });
   chapterList.addEventListener("wheel", handleReaderManualScroll, { passive: true });
   chapterList.addEventListener("pointerdown", () => {
     loadReaderDomain()
       .then((reader) => reader.noteManualReaderInteraction(3500))
       .catch(() => {});
   });
-  transcriptList.addEventListener("pointerdown", () => {
+  subtitleList.addEventListener("pointerdown", () => {
     loadReaderDomain()
       .then((reader) => reader.noteManualReaderInteraction(3500))
       .catch(() => {});
@@ -385,9 +385,9 @@ export function bindUiEvents(): void {
       .then((reader) => reader.onReadingChapterClick(event))
       .catch(() => {});
   });
-  transcriptList.addEventListener("click", (event) => {
+  subtitleList.addEventListener("click", (event) => {
     loadReaderDomain()
-      .then((reader) => reader.onReadingTranscriptClick(event))
+      .then((reader) => reader.onReadingSubtitleClick(event))
       .catch(() => {});
   });
   readingView.addEventListener("transitionend", () => {
