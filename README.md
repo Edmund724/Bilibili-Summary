@@ -1,12 +1,17 @@
 # Bilibili-Summary｜一键总结 B 站视频
 
-> UI 设计参考了 [YouTube Digest](https://github.com/zarazhangrui/youtube-digest)。
-
 > **本仓库说明**：本仓库（Bilibili-Summary）是在上游源仓库 [haixiong1997/Bilibili-Obsidian-Clipper](https://github.com/haixiong1997/Bilibili-Obsidian-Clipper) 的基础上由本人进行二次修改（fork）的版本，保留了上游的 MIT License 与版权归属。
 
-在 B 站视频页抓取字幕，支持预览、复制 Markdown、下载字幕文件，并可一键总结视频；内置 AI 侧边栏可直接围绕字幕内容进行多轮对话，也可在任意网页中作为通用 AI 对话侧边栏使用。
+> UI 设计参考了 [YouTube Digest](https://github.com/zarazhangrui/youtube-digest)。
 
-> 注意：仅支持获取"有字幕轨"的 B 站视频字幕（播放器里有「字幕」选项，通常表示作者上传了外挂字幕或平台提供了 AI 字幕）；没有字幕轨的视频无法获取字幕。
+把每个 B 站视频变成一份可以深入学习的学习资料。Bilibili-Summary 把字幕、AI 概览、内容讲解和时间戳笔记放进同一个 Chrome 侧边栏，让你可以持续学习视频中的知识，同时不丢失原视频上下文。
+
+- 把零碎字幕变成清晰、可搜索的学习资料。
+- 通过 AI 概览、章节、重点引用和选中文本讲解建立系统理解。
+- 点击字幕、概览或笔记中的时间戳，快速跳转到对应位置。
+- 使用自己的 API Key，数据保存在本地浏览器中，不包含分析统计或行为追踪。
+
+Bilibili-Summary 是一个需要自行提供 API Key 的开源项目。目前没有上架 Chrome 应用商店，不赠送 API 额度，也没有开发者运营的服务器。
 
 ## 功能
 
@@ -39,39 +44,6 @@
 ![Bilibili-Summary 功能演示](docs/images/feature-demo-v2.png)
 
 ![Bilibili-Summary AI 侧边栏演示](docs/images/ai-sidebar-demo.png)
-
-## 让你的编程 Agent 帮你安装
-
-你不需要看懂代码，也不需要会使用命令行。把下面这段话发送给你的编程 Agent：
-
-> 请把这个项目下载或克隆到我选择的长期保留文件夹，告诉我准确的完整路径，并让 Chrome"加载已解压的扩展程序"使用同一个文件夹。如果我在第一次安装时需要位置建议，可以推荐 macOS 或 Linux 上的 `~/Documents/bilibili-summary`，或 Windows 上的 `%USERPROFILE%\Documents\bilibili-summary`，但不要假设我一定使用这些路径。请用简单易懂的语言一步一步指导我完成安装和配置。https://github.com/Edmund724/Bilibili-Summary
-
-你的 Agent 应该帮你：
-
-1. 先询问你想把项目长期保存在哪里，再下载或克隆到那里，并告诉你准确的完整路径。如果你需要建议，可以推荐 macOS 或 Linux 上的 `~/Documents/bilibili-summary`，或 Windows 上的 `%USERPROFILE%\Documents\bilibili-summary`。
-2. 打开下方硅基流动和 ModelScope 官方页面，指导你创建自己的账号。
-3. 指导你在 Chrome 中通过"加载已解压的扩展程序"选择你刚才确定的那个准确项目文件夹。
-4. 告诉你应该在扩展的"设置"页面哪个位置填写 API Key。
-5. 打开一个有字幕的 B 站视频，确认字幕、阅读视图和 AI 对话功能可以使用。
-
-安装后请让这个文件夹留在原位。如果移动或删除它，Chrome 中加载的本地扩展会失效，需要从新的长期存放位置重新加载。
-
-不要把 API Key 发送到 AI 对话、源代码、截图或公开消息中。请你自己在 Bilibili Summary 的设置页面直接填写。编程 Agent 可以告诉你填写位置，但不需要看到 Key。
-
-## 手动安装
-
-如果你想自己操作：
-
-1. 打开 [github.com/Edmund724/Bilibili-Summary](https://github.com/Edmund724/Bilibili-Summary)。
-2. 点击 **Code**，再选择 **Download ZIP**。
-3. 选择一个长期保留的文件夹，并把项目解压到这里。可选建议是 macOS 或 Linux 上的 `~/Documents/bilibili-summary`，或 Windows 上的 `%USERPROFILE%\Documents\bilibili-summary`。你也可以使用其他文件夹。
-4. 在 Chrome 地址栏打开 `chrome://extensions`。
-5. 打开右上角的"开发者模式"。
-6. 点击"加载已解压的扩展程序"。
-7. 选择你刚才确定的那个准确项目文件夹，其中必须包含 `manifest.json`。
-8. 如果需要，可以在 Chrome 扩展菜单中固定 Bilibili Summary。
-
-这是一个本地加载的扩展，不会自动更新。下载新版或让 Agent 修改代码后，请在 `chrome://extensions` 中找到 Bilibili Summary 并点击"重新加载"，然后刷新已经打开的 B 站页面。如果移动或删除源代码文件夹，Chrome 中加载的扩展会失效，需要从新的位置重新加载。
 
 ## 设置 API Key
 
@@ -115,7 +87,7 @@ API Key 和设置保存在你设备上的 Chrome 扩展本地存储中。发布�
 ## 使用方式
 
 1. 打开一个带有字幕的 B 站视频页面。
-2. 点击 Bilibili Summary 扩展图标，打开侧边栏。
+2. 点击 Bilibili Summary 扩展图标或视频下方的Digest按钮，打开侧边栏。
 3. 阅读带时间戳的字幕。
 4. 打开 **AI 模式**，查看 AI 生成的视频摘要，或围绕字幕内容进行多轮对话。
 5. 选中字幕，获取 AI 内容讲解或保存带时间戳的笔记。
@@ -162,19 +134,19 @@ API Key 和设置保存在你设备上的 Chrome 扩展本地存储中。发布�
 
 本扩展支持 OpenAI 兼容协议的 AI 服务，内置以下平台预设：
 
-| 平台 | 预设名称 |
-|------|----------|
-| OpenAI | OpenAI 兼容 |
-| DeepSeek | DeepSeek |
-| 阿里通义千问 | Qwen |
-| 智谱 GLM | GLM |
-| 月之暗面 Kimi | Kimi |
-| MiniMax | MiniMax |
-| Mimo | Mimo |
-| Opencode Go | Opencode Go |
-| OpenRouter | OpenRouter |
-| 阶跃星辰 | Stepfun |
-| ModelScope | ModelScope |
+| 平台           | 预设名称        |
+| ------------ | ----------- |
+| OpenAI       | OpenAI 兼容   |
+| DeepSeek     | DeepSeek    |
+| 阿里通义千问       | Qwen        |
+| 智谱 GLM       | GLM         |
+| 月之暗面 Kimi    | Kimi        |
+| MiniMax      | MiniMax     |
+| Mimo         | Mimo        |
+| Opencode Go  | Opencode Go |
+| OpenRouter   | OpenRouter  |
+| 阶跃星辰         | Stepfun     |
+| ModelScope   | ModelScope  |
 | Ollama（本地部署） | Ollama (本地) |
 
 如果没有您使用的平台，可选择「自定义」预设，手动填写该平台的 API Base URL（需兼容 OpenAI 协议）即可。
@@ -204,32 +176,14 @@ extension/
 
 > 仅支持 Chrome / Edge 等 Chromium 浏览器（依赖 sidePanel、offscreen 等 Chrome 专属 API），不支持 Firefox。
 
-### 方式一：下载打包版本（推荐）
-
-1. 前往 [Releases](https://github.com/Edmund724/Bilibili-Summary/releases) 下载最新版本的 zip 包
-2. 解压到任意目录
-
-### 方式二：从源码构建
-
-```bash
-git clone https://github.com/Edmund724/Bilibili-Summary.git
-cd Bilibili-Summary
-npm install
-npm run build          # 生成 dist/（content 分包 + 各入口 bundle，含 sourcemap）
-npm run dev            # watch 模式：首轮全量构建到 dist/ 后持续重建，改代码即生效
-npm run build:release  # 生成 Chrome 打包到 release/（zip 不含 sourcemap）
-```
-
-日常开发：跑 `npm run dev`，在扩展管理页「加载已解压的扩展程序」选择 `dist/`，重建后点扩展的刷新按钮即可。
-
-### Chrome / Edge 加载
-
-1. 解压下载的 Chrome zip 包（或源码构建后使用 `dist/` 文件夹）
+1. 解压下载的 zip 包到任意长期保留的文件夹
 2. 打开扩展管理页：
    - Chrome：`chrome://extensions/`
    - Edge：`edge://extensions/`
 3. 开启"开发者模式"
 4. 点击"加载已解压的扩展程序"，选择解压后的文件夹
+
+安装后请让这个文件夹留在原位。如果移动或删除它，Chrome 中加载的本地扩展会失效，需要从新的存放位置重新加载。
 
 ## 用编程 Agent 改造成自己的版本
 
@@ -240,8 +194,11 @@ npm run build:release  # 生成 Chrome 打包到 release/（zip 不含 sourcemap
 1. 使用 `git clone` 下载源码到本地
 2. 用 Cursor、Codex、Claude Code 等 AI 编程工具打开项目文件夹
 3. 把想修改的功能描述清楚，例如：
+   
    - "调整 AI 总结视频的提示词和预期输出格式"
+   
    - "新增一个自定义的总结命令或快捷方式"
+   
    - "修改视频总结的触发方式（例如自动总结、播放器内快捷按钮或侧边栏手动触发）"
 4. 修改完成后跑 `npm run build`（或开发时直接 `npm run dev` 持续重建），在浏览器扩展管理页选择 `dist/` 文件夹进行本地加载
 5. 打开 B 站视频页测试字幕抓取、AI 对话和视频总结是否正常
@@ -285,6 +242,7 @@ Bilibili Summary 没有账号系统、广告、分析统计或行为追踪。硅
 ### 模型下拉列表为空或拉取失败是什么原因？
 
 下拉列表会从配置的 API Base URL 拉取 `/v1/models` 接口返回的模型列表。如果列表为空或报错，请检查：
+
 - API Base URL 是否正确且可访问
 - API Key 是否有效（部分平台需要 Key 才能查看模型列表）
 - 该平台是否兼容 OpenAI `/v1/models` 接口规范
