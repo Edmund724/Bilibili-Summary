@@ -38,16 +38,16 @@ vi.mock("../../extension/shared/messaging.js", () => ({
 const DEFAULTS = ["生成视频摘要和结论", "按章节整理视频内容", "生成带时间轴的笔记"];
 
 let createPresetPrompts;
-let sidepanelState;
+let chatSessionState;
 
 // 组装工厂 + 重置模块级单例（与 provider-row.test.js 同构：resetModules
 // 后同纪元导入被测模块与其状态模块）
 async function makePresets() {
   const module = await import("../../extension/chat/presets.js");
-  const state = (await import("../../extension/chat/chat-state.js")).sidepanelState;
+  const state = (await import("../../extension/chat/chat-state.js")).chatSessionState;
   state.aiPrefs.aiPresetPrompts = [];
   createPresetPrompts = module.createPresetPrompts;
-  sidepanelState = state;
+  chatSessionState = state;
   return createPresetPrompts({
     presetInput: { value: "" },
     renderPresetPrompts: vi.fn()
@@ -85,7 +85,7 @@ describe("preset prompts 持久化（bug ⑦ 回归：单键写，不读改写�
   });
 
   it("removePresetPrompt 只发单键 save-settings（不发 get-settings）", async () => {
-    sidepanelState.aiPrefs.aiPresetPrompts = [...DEFAULTS];
+    chatSessionState.aiPrefs.aiPresetPrompts = [...DEFAULTS];
     const presets = createPresetPrompts({
       presetInput: presetInputWith(""),
       renderPresetPrompts: vi.fn()
@@ -105,7 +105,7 @@ describe("preset prompts 持久化（bug ⑦ 回归：单键写，不读改写�
 
   it("12 条截断仍生效：add 第 13 条时持久化与内存镜像都 slice(0, 12)", async () => {
     const twelve = Array.from({ length: 12 }, (_, i) => `预设${i + 1}`);
-    sidepanelState.aiPrefs.aiPresetPrompts = twelve;
+    chatSessionState.aiPrefs.aiPresetPrompts = twelve;
     const presets = createPresetPrompts({
       presetInput: presetInputWith("第十三条"),
       renderPresetPrompts: vi.fn()
@@ -113,7 +113,7 @@ describe("preset prompts 持久化（bug ⑦ 回归：单键写，不读改写�
 
     await presets.addPresetPrompt();
 
-    expect(sidepanelState.aiPrefs.aiPresetPrompts).toHaveLength(12);
+    expect(chatSessionState.aiPrefs.aiPresetPrompts).toHaveLength(12);
     expect(sendRuntimeMessageMock.mock.calls[0][0]).toEqual({
       type: "save-settings",
       settings: { aiPresetPrompts: twelve }
@@ -121,7 +121,7 @@ describe("preset prompts 持久化（bug ⑦ 回归：单键写，不读改写�
   });
 
   it("去重仍生效：重复文本不重复入列，持久化只发一次全量", async () => {
-    sidepanelState.aiPrefs.aiPresetPrompts = [...DEFAULTS];
+    chatSessionState.aiPrefs.aiPresetPrompts = [...DEFAULTS];
     const presets = createPresetPrompts({
       presetInput: presetInputWith("按章节整理视频内容"),
       renderPresetPrompts: vi.fn()
@@ -129,7 +129,7 @@ describe("preset prompts 持久化（bug ⑦ 回归：单键写，不读改写�
 
     await presets.addPresetPrompt();
 
-    expect(sidepanelState.aiPrefs.aiPresetPrompts).toEqual(DEFAULTS);
+    expect(chatSessionState.aiPrefs.aiPresetPrompts).toEqual(DEFAULTS);
     expect(sendRuntimeMessageMock).toHaveBeenCalledTimes(1);
     expect(sendRuntimeMessageMock.mock.calls[0][0]).toEqual({
       type: "save-settings",
@@ -148,7 +148,7 @@ describe("preset prompts 持久化（bug ⑦ 回归：单键写，不读改写�
 
     await expect(presets.addPresetPrompt()).resolves.toBeUndefined();
 
-    expect(sidepanelState.aiPrefs.aiPresetPrompts).toEqual(["自定义提示词"]);
+    expect(chatSessionState.aiPrefs.aiPresetPrompts).toEqual(["自定义提示词"]);
     expect(sendRuntimeMessageMock).toHaveBeenCalledTimes(1);
     expect(sendRuntimeMessageMock.mock.calls[0][0]).toEqual({
       type: "save-settings",

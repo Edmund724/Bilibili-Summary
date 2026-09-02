@@ -834,7 +834,7 @@ describe("消费方对账锚点：对话侧 读取字段 ⊆ payload ∪ {signat
     // 消费不在 对话侧 对账锚点范围（由整包展开天然随 payload 下传）；此处仅固化转发
     // 形态：contextData 整包展开 + contextKey 命中时删除 subtitleBody 省传输。
     const source = readSource("../../extension/chat/chat-runtime.js");
-    expect(source).toMatch(/\.\.\.sidepanelState\.contextData/);
+    expect(source).toMatch(/\.\.\.chatSessionState\.contextData/);
     expect(source).toMatch(/delete context\.subtitleBody/);
   });
 

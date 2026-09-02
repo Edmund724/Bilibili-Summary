@@ -59,7 +59,7 @@ let createConversationStore;
 let createChatRuntime;
 let createSubtitleWaiter;
 let isContextPending;
-let sidepanelState;
+let chatSessionState;
 let noSubtitle;
 
 const VIDEO_URL = "https://www.bilibili.com/video/BV1test000000/";
@@ -79,7 +79,7 @@ async function importModules() {
   createSubtitleWaiter = waitModule.createSubtitleWaiter;
   isContextPending = waitModule.isContextPending;
   noSubtitle = await import("../../extension/chat/no-subtitle.js");
-  sidepanelState = (await import("../../extension/chat/chat-state.js")).sidepanelState;
+  chatSessionState = (await import("../../extension/chat/chat-state.js")).chatSessionState;
 }
 
 // content 侧 state.clip 的受控替身（字段与 core/state.ts 的 ClipBusinessState
@@ -164,7 +164,7 @@ function makeChatDeps(overrides = {}) {
     stopBtn: null,
     store: {
       persistCurrent: vi.fn(async () => {}),
-      isCurrent: (id) => id === sidepanelState.currentConversationId
+      isCurrent: (id) => id === chatSessionState.currentConversationId
     },
     ui: {
       setStreamingUiState: vi.fn(),
@@ -205,15 +205,15 @@ beforeEach(async () => {
   gatewayMock.fetchHotComments.mockReset();
   clipStateMock.setHotComments.mockReset();
   await importModules();
-  sidepanelState.contextData = null;
-  sidepanelState.currentContextKey = "";
-  sidepanelState.chatHistory = [];
-  sidepanelState.currentConversationId = "";
-  sidepanelState.currentConversationMeta = null;
-  sidepanelState.liveContextData = null;
-  sidepanelState.liveContextKey = "";
-  sidepanelState.liveTabUrl = "";
-  sidepanelState.asrTranscribingActive = false;
+  chatSessionState.contextData = null;
+  chatSessionState.currentContextKey = "";
+  chatSessionState.chatHistory = [];
+  chatSessionState.currentConversationId = "";
+  chatSessionState.currentConversationMeta = null;
+  chatSessionState.liveContextData = null;
+  chatSessionState.liveContextKey = "";
+  chatSessionState.liveTabUrl = "";
+  chatSessionState.asrTranscribingActive = false;
 });
 
 afterEach(() => {
@@ -233,10 +233,10 @@ describe("工单 08 短路三事（进程内直读路径）", () => {
     // 首次全量组装：热评拉取 + 快照附 signature
     await contextLoad.loadContextState({ silent: true });
     expect(fetchHotComments).toHaveBeenCalledTimes(1);
-    expect(sidepanelState.contextData.subtitleBody).toEqual([{ from: 0, to: 5, content: "第一句" }]);
-    const signature = sidepanelState.liveContextData.signature;
+    expect(chatSessionState.contextData.subtitleBody).toEqual([{ from: 0, to: 5, content: "第一句" }]);
+    const signature = chatSessionState.liveContextData.signature;
     expect(signature).not.toBe("");
-    expect(sidepanelState.currentContextKey).toBe(CONTEXT_KEY);
+    expect(chatSessionState.currentContextKey).toBe(CONTEXT_KEY);
 
     // 首条消息：字幕体全量携带；offscreen 回执 cachedContextKey 确认单槽缓存
     const { deps } = makeChatDeps();
@@ -252,11 +252,11 @@ describe("工单 08 短路三事（进程内直读路径）", () => {
 
     // 签名未变的一轮同步：进程内短路命中——不拉热评、不落新 payload
     //（对应 message-handler 现有签名短路语义的进程内重演）
-    const contextDataBefore = sidepanelState.contextData;
+    const contextDataBefore = chatSessionState.contextData;
     await contextLoad.loadContextState({ silent: true });
     expect(fetchHotComments).toHaveBeenCalledTimes(1);
-    expect(sidepanelState.contextData).toBe(contextDataBefore);
-    expect(sidepanelState.currentContextKey).toBe(CONTEXT_KEY);
+    expect(chatSessionState.contextData).toBe(contextDataBefore);
+    expect(chatSessionState.currentContextKey).toBe(CONTEXT_KEY);
 
     // 接力断言：追问消息因 contextKey 未变（lastAckedContextKey 命中）省略字幕体
     await send(runtime, deps, "第二章讲了什么？");
@@ -277,9 +277,9 @@ describe("工单 08 短路三事（进程内直读路径）", () => {
     // 的进程内重演），并随快照补写 signature / isVideoContext
     await contextLoad.loadContextState({ silent: true });
     expect(fetchHotComments).toHaveBeenCalledTimes(1);
-    expect(sidepanelState.contextData.hotComments).toEqual(HOT_COMMENTS);
-    expect(sidepanelState.contextData.isVideoContext).toBe(true);
-    expect(sidepanelState.contextData.signature).not.toBe("");
+    expect(chatSessionState.contextData.hotComments).toEqual(HOT_COMMENTS);
+    expect(chatSessionState.contextData.isVideoContext).toBe(true);
+    expect(chatSessionState.contextData.signature).not.toBe("");
 
     // 签名未变：短路路径提前返回，不拉热评
     await contextLoad.loadContextState({ silent: true });
@@ -288,7 +288,7 @@ describe("工单 08 短路三事（进程内直读路径）", () => {
     // forceRefresh：忽略签名强制全量 → 再次拉取（与消息链手动刷新语义一致）
     await contextLoad.loadContextState({ forceRefresh: true, silent: true });
     expect(fetchHotComments).toHaveBeenCalledTimes(2);
-    expect(sidepanelState.contextData.hotComments).toEqual(HOT_COMMENTS);
+    expect(chatSessionState.contextData.hotComments).toEqual(HOT_COMMENTS);
   });
 
   it("③ ASR 转写中发送 → subtitle-wait 等待而非发空上下文；转写完成后放行完整字幕", async () => {
@@ -298,7 +298,7 @@ describe("工单 08 短路三事（进程内直读路径）", () => {
     };
     const { fetchHotComments, contextLoad } = makeContextHarness(clipRef);
     await contextLoad.loadContextState({ silent: true });
-    sidepanelState.asrTranscribingActive = true;
+    chatSessionState.asrTranscribingActive = true;
 
     // 组合根同款等待状态机组装（sidepanel.ts 的 pollContext 装配，数据源换成
     // 进程内 loadContextState 的 live 快照）
@@ -311,10 +311,10 @@ describe("工单 08 短路三事（进程内直读路径）", () => {
       pollContext: async () => {
         const ok = await contextLoad.loadContextState({ forceRefresh: false, silent: true }).catch(() => false);
         // 等待期间读 liveContextData 保证数据不断供（组合根同款口径）
-        const snapshot = ok ? (sidepanelState.liveContextData || sidepanelState.contextData) : null;
+        const snapshot = ok ? (chatSessionState.liveContextData || chatSessionState.contextData) : null;
         return {
           ok: Boolean(snapshot),
-          pending: isContextPending(snapshot, { asrTranscribingActive: sidepanelState.asrTranscribingActive })
+          pending: isContextPending(snapshot, { asrTranscribingActive: chatSessionState.asrTranscribingActive })
         };
       },
       showWaitingNotice: waitingNotice,
@@ -336,7 +336,7 @@ describe("工单 08 短路三事（进程内直读路径）", () => {
     const { deps } = makeChatDeps();
     deps.ensureCurrentContextForSend = vi.fn(async () => {
       const ok = await contextLoad.loadContextState({ forceRefresh: false, silent: true });
-      if (!ok || !sidepanelState.contextData) {
+      if (!ok || !chatSessionState.contextData) {
         return false;
       }
       const ready = await subtitleWaiter.wait();
@@ -345,10 +345,10 @@ describe("工单 08 短路三事（进程内直读路径）", () => {
       }
       // 等待期间快照可能停在旧状态：放行前重取一次（组合根同款）
       await contextLoad.loadContextState({ forceRefresh: false, silent: true });
-      if (!sidepanelState.contextData) {
+      if (!chatSessionState.contextData) {
         return false;
       }
-      if (noSubtitle.isNoSubtitleEmptyContext(sidepanelState.contextData)) {
+      if (noSubtitle.isNoSubtitleEmptyContext(chatSessionState.contextData)) {
         return noSubtitle.NO_SUBTITLE_SEND_BLOCKED;
       }
       return true;
@@ -364,7 +364,7 @@ describe("工单 08 短路三事（进程内直读路径）", () => {
     expect(deps.ensureCurrentContextForSend).toHaveBeenCalledTimes(1);
     expect(waitingNotice).toHaveBeenCalled();
     expect(deps.ports).toHaveLength(0);
-    expect(deps.messages.querySelector(".sp-msg-user")).toBeNull();
+    expect(deps.messages.querySelector(".chat-msg-user")).toBeNull();
     expect(deps.ui.setStreamingUiState).not.toHaveBeenCalledWith(true, expect.anything());
     // 等待轮询按 4s 间隔挂起（kick 前不推进）
     expect(timers).toHaveLength(1);
@@ -372,7 +372,7 @@ describe("工单 08 短路三事（进程内直读路径）", () => {
     // 转写完成：字幕体落账 + fetchState ready + 广播兜底信号熄灭（签名随之
     // 变化：subtitleBody 长度与 fetchState 参与签名投影）→ kick 立即补轮
     clipRef.current = makeClip();
-    sidepanelState.asrTranscribingActive = false;
+    chatSessionState.asrTranscribingActive = false;
     subtitleWaiter.kick();
     await sendPromise;
 
@@ -575,21 +575,18 @@ describe("pinned 补水身份短路（工单 04）", () => {
     const contextChip = document.createElement("button");
     document.body.appendChild(contextChip);
     const store = createConversationStore({
-      renderHistoryList: vi.fn(),
-      renderInitialState: vi.fn(),
-      updateContextChip: vi.fn(),
-      showConversationContextNotice: vi.fn(),
-      showConversationContextError: vi.fn(),
-      removeConversationContextNotice: vi.fn(),
-      hideHistoryPopover: vi.fn(),
       loadContextState: vi.fn(async () => true),
-      resolveAiConversationContext: resolve,
-      resolveAiConversationPageRef: vi.fn(async () => ({})),
-      stopActiveChat: vi.fn(),
+      // purpose="context" 走被测的身份短路复合适配器；"page" 无关本用例
+      resolveAiConversationRef: vi.fn((ref, purpose) =>
+        purpose === "context" ? resolve(ref) : Promise.resolve({})
+      ),
+      onConversationChanged: vi.fn(),
+      onStreamInterrupted: vi.fn(),
+      onContextNotice: vi.fn(),
       storage: { get: vi.fn(async () => ({})), set: vi.fn(async () => {}) }
     });
     // 重开后 live 键缺失（分支 2 的键比较不命中）→ 补水落到 context 解析 dep
-    sidepanelState.currentConversationMeta = {
+    chatSessionState.currentConversationMeta = {
       id: "conv-1",
       title: "测试视频",
       createdAt: 1,
@@ -602,16 +599,16 @@ describe("pinned 补水身份短路（工单 04）", () => {
       contextRef: makePinnedRef(),
       resolvedContext: null
     };
-    sidepanelState.liveContextKey = "";
+    chatSessionState.liveContextKey = "";
 
     const ok = await store.hydratePinned({ silent: true });
 
     expect(ok).toBe(true);
     // 零网络往返：补水上下文来自进程内快照
     expect(network).not.toHaveBeenCalled();
-    expect(sidepanelState.contextData.subtitleBody).toEqual([{ from: 0, to: 5, content: "第一句" }]);
-    expect(sidepanelState.contextData.signature).not.toBe("");
-    expect(sidepanelState.currentContextKey).toBe(CONTEXT_KEY);
-    expect(sidepanelState.currentConversationMeta.resolvedContext).not.toBeNull();
+    expect(chatSessionState.contextData.subtitleBody).toEqual([{ from: 0, to: 5, content: "第一句" }]);
+    expect(chatSessionState.contextData.signature).not.toBe("");
+    expect(chatSessionState.currentContextKey).toBe(CONTEXT_KEY);
+    expect(chatSessionState.currentConversationMeta.resolvedContext).not.toBeNull();
   });
 });

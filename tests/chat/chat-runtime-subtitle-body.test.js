@@ -6,7 +6,7 @@
 //   消息重新携带全文（不自动重发本条）；
 // - port 断连（offscreen 文档被回收）→ lastAcked 重置。
 //
-// 注意：chat-runtime 直接读写 sidepanelState。沿 chat-runtime-stream.test.js
+// 注意：chat-runtime 直接读写 chatSessionState。沿 chat-runtime-stream.test.js
 // 的单纪元模式：beforeEach 里 resetModules 后把两个模块放进同一模块纪元导入，
 // 并手动重置用到的字段。
 
@@ -15,7 +15,7 @@ import { resetModuleState } from "../setup.js";
 import { normalizeMarkdownForSectionPaste } from "../../extension/notes/paste.js";
 
 let createChatRuntime;
-let sidepanelState;
+let chatSessionState;
 
 const CONTEXT_KEY = "video:BV1body|101";
 const SUBTITLE_BODY = [{ from: 0, to: 5, content: "x".repeat(1000) }];
@@ -41,7 +41,7 @@ function makeRuntime() {
     stopBtn: null,
     store: {
       persistCurrent: vi.fn(async () => {}),
-      isCurrent: (id) => id === sidepanelState.currentConversationId
+      isCurrent: (id) => id === chatSessionState.currentConversationId
     },
     ui: {
       setStreamingUiState: vi.fn(),
@@ -68,14 +68,14 @@ function makeRuntime() {
 }
 
 function seedVideoContext() {
-  sidepanelState.contextData = {
+  chatSessionState.contextData = {
     bvid: "BV1body",
     cid: "101",
     title: "长视频",
     url: "https://www.bilibili.com/video/BV1body/",
     subtitleBody: SUBTITLE_BODY
   };
-  sidepanelState.currentContextKey = CONTEXT_KEY;
+  chatSessionState.currentContextKey = CONTEXT_KEY;
 }
 
 // 发送一条消息（sendMessage 会清空 input.value，每条消息需重新赋值）
@@ -96,12 +96,12 @@ beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
   ({ createChatRuntime } = await import("../../extension/chat/chat-runtime.js"));
-  ({ sidepanelState } = await import("../../extension/chat/chat-state.js"));
-  sidepanelState.contextData = null;
-  sidepanelState.currentContextKey = "";
-  sidepanelState.chatHistory = [];
-  sidepanelState.currentConversationId = "";
-  sidepanelState.currentConversationMeta = null;
+  ({ chatSessionState } = await import("../../extension/chat/chat-state.js"));
+  chatSessionState.contextData = null;
+  chatSessionState.currentContextKey = "";
+  chatSessionState.chatHistory = [];
+  chatSessionState.currentConversationId = "";
+  chatSessionState.currentConversationMeta = null;
 });
 
 afterEach(() => {
@@ -124,7 +124,7 @@ describe("追问消息的字幕体省略传输", () => {
 
   it("收到 cachedContextKey 回执后：追问 context 省略 subtitleBody，元数据/history 照常全量", async () => {
     seedVideoContext();
-    sidepanelState.aiPrefs.aiSystemPrompt = "你是助手";
+    chatSessionState.aiPrefs.aiSystemPrompt = "你是助手";
     const { runtime, deps, ports } = makeRuntime();
 
     // 第一条：发送 → offscreen 确认缓存（token 回执带 cachedContextKey）→ 正常收尾
@@ -144,7 +144,7 @@ describe("追问消息的字幕体省略传输", () => {
     expect(second.context.title).toBe("长视频");
     expect(second.context.bvid).toBe("BV1body");
     expect(second.context.aiSystemPrompt).toBe("你是助手");
-    expect(second.history).toEqual(sidepanelState.chatHistory);
+    expect(second.history).toEqual(chatSessionState.chatHistory);
     expect(second.prompt).toBe("第二章讲了什么？");
   });
 
@@ -202,8 +202,8 @@ describe("追问消息的字幕体省略传输", () => {
 
 describe("无字幕体上下文的兜底行为", () => {
   it("contextData 无 subtitleBody 字段时照常发送（省略条件不满足）", async () => {
-    sidepanelState.contextData = { title: "无字幕页面", isVideoContext: false };
-    sidepanelState.currentContextKey = "url:https://www.bilibili.com/";
+    chatSessionState.contextData = { title: "无字幕页面", isVideoContext: false };
+    chatSessionState.currentContextKey = "url:https://www.bilibili.com/";
     const { runtime, deps, ports } = makeRuntime();
 
     await send(runtime, deps, "随便聊聊");

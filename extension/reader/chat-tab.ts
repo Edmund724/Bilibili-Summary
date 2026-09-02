@@ -13,10 +13,11 @@
 //     contextRef 与当前 clip 身份一致 → 进程内快照装配（工单 04 短路，零网络
 //     解析）；未命中走 ai/context-resolver 的 bgFetchJson 通道，content script
 //     可用）+ context-load（createInProcessContextFetch：进程内
-//     直读 state.clip，工单 08 三事已配测试）+ context-sync（reader 触发源：
-//     boc:urlchange 强刷；reader 打开/关闭的恢复折叠进本组合根的激活路径）+
-//     providers + presets + subtitle-wait + no-subtitle + notices/lists/popovers
-//     （三壳重建于 reader/chat-{notices,lists,popovers}.ts，逻辑照抄）。
+//     直读 state.clip，工单 08 三事已配测试）+ providers + presets +
+//     subtitle-wait + no-subtitle + notices/lists/popovers（三壳重建于
+//     reader/chat-{notices,lists,popovers}.ts，逻辑照抄）。URL 变化的实时上下文
+//     同步调度（原 chat/context-sync.ts 的防抖状态机，工单 05 并回为本地闭包）
+//     由 boc:urlchange 触发，reader 打开/关闭的恢复折叠进本组合根的激活路径。
 //   - offscreen 连接：chrome.offscreen/getContexts 仅扩展上下文可用，content
 //     script 经 "ensure-offscreen-chat" 消息委托 background 幂等 ensure，再
 //     connect "offscreen-chat" 端口——sidepanel.ts connectPort 的自愈设计照搬。
@@ -35,11 +36,11 @@
 //     对话 tab 的流式中关闭不做后台续跑（connectPort 的 closed 闸兜底）。
 //
 // 测试注意：els 在模块求值时解析（对话 tab 只在面板壳存在后装载，与 sidepanel
-// 的页面加载时序同构）；模块级单例状态（sidepanelState + 本文件闭包）在测试里
+// 的页面加载时序同构）；模块级单例状态（chatSessionState + 本文件闭包）在测试里
 // 靠 vi.resetModules 换纪元重置。
 
 import { state } from "../core/state.js";
-import { buildContextKey, doesTabMatchContextUrl, MAX_SAVED_CONVERSATIONS } from "../ai/conversation.js";
+import { buildContextKey, doesTabMatchContextUrl } from "../ai/conversation.js";
 import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import {
@@ -57,10 +58,9 @@ import {
   type NoSubtitleReason
 } from "../chat/no-subtitle.js";
 import { createConversationStore } from "../chat/conversation-store.js";
-import { sidepanelState } from "../chat/chat-state.js";
+import { chatSessionState } from "../chat/chat-state.js";
 import { createPresetPrompts } from "../chat/presets.js";
 import { createProviderPrefs } from "../chat/providers.js";
-import { createLiveContextSync } from "../chat/context-sync.js";
 import { createContextLoad, createInProcessContextFetch, createInProcessPinnedContextResolver } from "../chat/context-load.js";
 // 上下文加载失败文案：ensureCurrentContextForSend 的失败闸共用策略模块常量。
 import { CONTEXT_READ_FAILED_MESSAGE, isPinnedContextTruthy } from "../chat/context-policy.js";
@@ -87,7 +87,6 @@ import { ids } from "./state.js";
 // 时间戳跳转的进程内 seek（reader 域唯一定位入口，见 getTimestampNavDeps）。
 import { seekReadingTarget } from "./sync.js";
 
-const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
 const NON_VIDEO_CONTEXT_MESSAGE = "当前页非 B 站视频页面，<br>无法获取当前页面信息作为对话上下文，<br>仅支持 AI 对话。";
 
 const els = {
@@ -96,11 +95,11 @@ const els = {
   refreshBtn: document.getElementById(ids.readingChatRefreshBtn) as HTMLButtonElement,
   modelSelect: document.getElementById(ids.readingChatModelSelect) as HTMLSelectElement,
   thinkingToggle: document.getElementById(ids.readingChatThinkingToggle) as HTMLElement,
-  thinkingBtns: document.querySelectorAll<HTMLElement>(`#${ids.readingChatThinkingToggle} .sp-thinking-btn`),
+  thinkingBtns: document.querySelectorAll<HTMLElement>(`#${ids.readingChatThinkingToggle} .chat-thinking-btn`),
   newChatBtn: document.getElementById(ids.readingChatNewBtn) as HTMLButtonElement,
   presetBtn: document.getElementById(ids.readingChatPresetBtn) as HTMLButtonElement,
   historyBtn: document.getElementById(ids.readingChatHistoryBtn) as HTMLButtonElement,
-  toolbar: document.querySelector<HTMLElement>(`#${ids.readingChatRoot} .sp-toolbar`),
+  toolbar: document.querySelector<HTMLElement>(`#${ids.readingChatRoot} .chat-toolbar`),
   presetPopover: document.getElementById(ids.readingChatPresetPopover) as HTMLElement,
   presetList: document.getElementById(ids.readingChatPresetList) as HTMLElement,
   presetInput: document.getElementById(ids.readingChatPresetInput) as HTMLInputElement,
@@ -143,9 +142,9 @@ function bindSubtitleStatusBus(): void {
   }
   unsubscribeStatusBus = subscribeSubtitleStatusPhase((phase) => {
     if (phase === "asr-transcribing") {
-      sidepanelState.asrTranscribingActive = true;
+      chatSessionState.asrTranscribingActive = true;
     } else if (phase === "asr-done" || phase === "asr-failed") {
-      sidepanelState.asrTranscribingActive = false;
+      chatSessionState.asrTranscribingActive = false;
       subtitleWaiter.kick();
     }
     updateAsrNotice();
@@ -160,14 +159,30 @@ function unbindSubtitleStatusBus(): void {
 }
 
 // reader 触发源：boc:urlchange（core/url-watcher 广播）→ 强刷快档（切 P/切视频
-// 必须全网络重拉，与 context-sync handlers.onUrlChange 语义一致）。
+// 必须全网络重拉）。调度状态机原在 chat/context-sync.ts 的
+// createLiveContextSync（工单 05 并回）：~40 行纯间接层里 reader 只消费
+// onUrlChange 一个触发源（sidepanel 世界的 visibility/focus/tabs handler 无
+// 调用方，onReaderOpened/Closed 的恢复折叠进激活路径 restoreChatSession），
+// 单宿主现实下保留其防抖语义即可——120ms 快档，重复触发即防抖重置（触发源
+// 恒为强刷，原「弱刷不覆盖强刷」的合并分支无单宿主场景）。
+let urlChangeSyncTimer = 0;
 let urlChangeHandler: (() => void) | null = null;
+
+function scheduleLiveContextSync(): void {
+  if (urlChangeSyncTimer) {
+    window.clearTimeout(urlChangeSyncTimer);
+  }
+  urlChangeSyncTimer = window.setTimeout(() => {
+    urlChangeSyncTimer = 0;
+    void syncLiveContextState(true);
+  }, 120);
+}
 
 function bindUrlChangeTrigger(): void {
   if (urlChangeHandler) {
     return;
   }
-  urlChangeHandler = () => liveContextSync.handlers.onUrlChange();
+  urlChangeHandler = () => scheduleLiveContextSync();
   window.addEventListener(BOC_URL_CHANGE_EVENT, urlChangeHandler);
 }
 
@@ -210,7 +225,7 @@ function unbindStorageWatcher(): void {
 // 跨模块共享状态（contextData / currentContextKey / providers / chatHistory /
 // savedConversations / currentConversationId / currentConversationMeta /
 // liveContextData / liveContextKey / liveTabUrl / aiPrefs / asrTranscribingActive /
-// aiThinkingLevel）收拢在 ../chat/chat-state.ts 的 sidepanelState，本文件与各
+// aiThinkingLevel）收拢在 ../chat/chat-state.ts 的 chatSessionState，本文件与各
 // 子模块直接 import 读写。以下为纯局部单例。
 let suggestionsNode: HTMLElement | null = null;
 let initialized = false;
@@ -243,38 +258,54 @@ const {
   isMessagesNearBottom
 } = feedback;
 
-// 会话状态（会话列表/当前会话/上下文）已收拢至 sidepanelState，store 直接
-// import 读写；deps 只剩 UI/transport 回调、storage 抽象与常量。
+// 会话状态（会话列表/当前会话/上下文）已收拢至 chatSessionState，store 直接
+// import 读写；deps 只剩上下文获取 dep、三个能力事件与 storage 抽象（工单 05
+// 渲染编排反转：store 自己编排渲染时机，本组合根只订阅结果——历史列表恒随
+// onConversationChanged 重渲，标志驱动 chip/popover/视图重建）。
+// pinned 补水的 context 解析（工单 04 身份短路）接在 resolveAiConversationRef
+// 的 purpose="context" 用途上：会话 contextRef 与当前 clip 一致 → 进程内快照
+// 装配（零网络解析、不重下字幕正文）；未命中（换视频/换分P/换轨/无页面）→
+// ai/context-resolver 的网络路径原样兜底。
+const resolveConversationContext = createInProcessPinnedContextResolver({
+  clip: () => state.clip,
+  settings: () => state.settings,
+  resolveNetwork: resolveAiConversationContext
+});
 const conversationStore = createConversationStore({
-  renderHistoryList: () => lists.renderHistoryList(),
-  renderInitialState,
-  updateContextChip: () => contextLoad.updateContextChip(),
-  showConversationContextNotice,
-  showConversationContextError,
-  removeConversationContextNotice,
-  hideHistoryPopover: () => popovers.hideHistoryPopover(),
   loadContextState: (opts) => contextLoad.loadContextState(opts),
-  // pinned 补水的 context 解析（工单 04 身份短路）：会话 contextRef 与当前
-  // clip 一致 → 进程内快照装配（零网络解析、不重下字幕正文）；未命中（换
-  // 视频/换分P/换轨/无页面）→ ai/context-resolver 的网络路径原样兜底。
-  resolveAiConversationContext: createInProcessPinnedContextResolver({
-    clip: () => state.clip,
-    settings: () => state.settings,
-    resolveNetwork: resolveAiConversationContext
-  }),
-  resolveAiConversationPageRef,
-  // 流式中删除当前会话 / 清空全部 / restoreLatest 无匹配时由 store 同步调用：
+  resolveAiConversationRef: (contextRef, purpose) =>
+    purpose === "page" ? resolveAiConversationPageRef(contextRef) : resolveConversationContext(contextRef),
+  onConversationChanged: (change) => {
+    lists.renderHistoryList();
+    if (change.refreshContextChip) {
+      contextLoad.updateContextChip();
+    }
+    if (change.historyCleared) {
+      popovers.hideHistoryPopover();
+    }
+    if (change.resetView) {
+      renderInitialState();
+    }
+  },
+  // 流式中删除当前会话 / 清空全部 / restoreLatest 无匹配时由 store 同步发出：
   // 断 port、清在途一问一答、清消息区并退出流式 UI 态（对应 restartChat 的
   // 清理动作，但不清会话状态——那由 store 自己做）。store 不直接 import
   // chatRuntime，依赖方向由本文件组装；回调幂等（非流式时为无害空操作）。
-  stopActiveChat: () => {
+  onStreamInterrupted: () => {
     chatRuntime.resetStreamState();
     resetConversationView();
     setStreamingUiState(false);
   },
-  storage: chrome.storage.local,
-  conversationsStorageKey: CONVERSATIONS_STORAGE_KEY,
-  maxSavedConversations: MAX_SAVED_CONVERSATIONS
+  onContextNotice: (notice) => {
+    if (notice.kind === "pending") {
+      showConversationContextNotice(notice.message);
+    } else if (notice.kind === "clear") {
+      removeConversationContextNotice();
+    } else {
+      showConversationContextError(notice.message);
+    }
+  },
+  storage: chrome.storage.local
 });
 
 // 三列表渲染（建议/预设/历史）+ 预设提示词插入。insertPresetPrompt /
@@ -330,7 +361,7 @@ const contextLoad = createContextLoad({
 const { loadContextState, updateContextChip } = contextLoad;
 
 // chat 流状态机：自身流状态（activePort 等）与自动滚动标志（shouldAutoScroll-
-// Messages）都在 runtime 闭包内；会话状态读 sidepanelState；deps 只剩 DOM
+// Messages）都在 runtime 闭包内；会话状态读 chatSessionState；deps 只剩 DOM
 // 容器/元素引用、store 实例与 UI/transport 回调。
 const chatRuntime = createChatRuntime({
   // ---- DOM 容器 / 元素引用（本文件模块级 `els`）----
@@ -388,16 +419,6 @@ const providerPrefs = createProviderPrefs({
 });
 const { loadProvidersAndPrefs, setThinkingLevel } = providerPrefs;
 
-// 实时上下文同步调度（防抖 + 强刷合并 + 触发处理体；post-sync 分支编排
-// syncLiveContextState 留在组合根——流式守卫与三个渲染回调的组合是页面级职责）。
-// reader 触发源：boc:urlchange（bindUrlChangeTrigger）；视图打开/关闭的恢复
-// 折叠进激活路径（ensureChatTabActivated）。
-const liveContextSync = createLiveContextSync({
-  sync: (forceRefresh = false) => syncLiveContextState(forceRefresh),
-  setTimer: (fn, ms) => window.setTimeout(fn, ms),
-  clearTimer: (handle) => window.clearTimeout(handle)
-});
-
 // 抓取/音频转写进行中（content 的 subtitleFetchState 为 loading 且字幕体为空）
 // 时等待其完成再放行发送流程，状态机本体在 ../chat/subtitle-wait.ts（可测）。
 // 这里只组装 deps：轮询读当前上下文、提示走消息区 notice、定时器用 window。
@@ -414,10 +435,10 @@ const subtitleWaiter = createSubtitleWaiter({
     const ok = await loadContextState({ forceRefresh: false, silent: true }).catch(() => false);
     // loadContextState 无论走哪个分支都会先更新 liveContextData；等待期间
     // 可能有流式守卫冻结 contextData，读 liveContextData 保证数据不断供。
-    const snapshot = ok ? (sidepanelState.liveContextData || sidepanelState.contextData) : null;
+    const snapshot = ok ? (chatSessionState.liveContextData || chatSessionState.contextData) : null;
     return {
       ok: Boolean(snapshot),
-      pending: isContextPending(snapshot, { asrTranscribingActive: sidepanelState.asrTranscribingActive })
+      pending: isContextPending(snapshot, { asrTranscribingActive: chatSessionState.asrTranscribingActive })
     };
   },
   showWaitingNotice: () => showConversationContextNotice("正在等待音频转写完成，完成后自动开始总结…", 0),
@@ -664,10 +685,10 @@ function bindEvents(): void {
       // 选中平台的持久化通道 = chrome.storage.local（providers 模块的
       // setSelectedProvider）；sync settings 的 defaultModel 双写与 sidepanel 一致。
       providerPrefs.setSelectedProvider(providerId);
-      sidepanelState.aiPrefs.defaultModel = providerId;
+      chatSessionState.aiPrefs.defaultModel = providerId;
       chrome.storage.sync.set({ defaultModel: providerId }).catch(() => {});
     } else {
-      sidepanelState.aiPrefs.defaultModel = "";
+      chatSessionState.aiPrefs.defaultModel = "";
       chrome.storage.sync.set({ defaultModel: "" }).catch(() => {});
     }
     updateModelSelectWidth(els);
@@ -698,7 +719,7 @@ function onWindowResize(): void {
 // 跳转活动标签页）。content script 无 chrome.tabs：同视频只做静默强刷；绑定会话
 // 指向别的视频时页内导航到目标 URL（保留 boc_reader=1，阅读模式随 URL 恢复）。
 async function openCurrentContextInReader(): Promise<void> {
-  const targetUrl = String(sidepanelState.contextData?.url || sidepanelState.currentConversationMeta?.contextUrl || "").trim();
+  const targetUrl = String(chatSessionState.contextData?.url || chatSessionState.currentConversationMeta?.contextUrl || "").trim();
   if (!targetUrl) {
     return;
   }
@@ -720,7 +741,7 @@ async function openCurrentContextInReader(): Promise<void> {
 function autosizeInput(): void {
   els.input.style.height = "auto";
   const next = Math.min(els.input.scrollHeight, 320);
-  const minHeight = els.root.classList.contains("sp-non-video-context") ? 72 : 94;
+  const minHeight = els.root.classList.contains("chat-non-video-context") ? 72 : 94;
   els.input.style.height = `${Math.max(next, minHeight)}px`;
 }
 
@@ -754,11 +775,11 @@ async function refreshProvidersAndPrefsAfterExternalChange(): Promise<void> {
 // 【整段迁移自 sidepanel.ts】post-sync 分支编排：流式守卫 + 三个渲染回调。
 async function syncLiveContextState(forceRefresh = false): Promise<void> {
   const ok = await loadContextState({ forceRefresh, silent: true }).catch(() => false);
-  if (sidepanelState.currentConversationMeta?.pinnedContext || chatRuntime.isStreaming() || chatRuntime.hasPendingUserPrompt()) {
+  if (chatSessionState.currentConversationMeta?.pinnedContext || chatRuntime.isStreaming() || chatRuntime.hasPendingUserPrompt()) {
     updateContextChip();
     return;
   }
-  if (!ok || !sidepanelState.contextData || !sidepanelState.providers.length || !sidepanelState.chatHistory.length) {
+  if (!ok || !chatSessionState.contextData || !chatSessionState.providers.length || !chatSessionState.chatHistory.length) {
     renderInitialState();
     return;
   }
@@ -770,19 +791,19 @@ async function syncLiveContextState(forceRefresh = false): Promise<void> {
 // 点击绑定上收在 ui-renderer（打开侧边栏设置抽屉；open-options 消息已删除）。
 function renderInitialState(): void {
   updateChatLayoutState();
-  if (!sidepanelState.contextData) {
+  if (!chatSessionState.contextData) {
     resetConversationView("当前页面不是 B 站视频页，无法读取视频信息。");
     return;
   }
-  if (!sidepanelState.providers.length) {
+  if (!chatSessionState.providers.length) {
     resetConversationView(`还没有配置 AI 平台，<a href="#" id="${ids.readingChatOpenSettings}">前往设置</a>`);
     return;
   }
-  if (sidepanelState.chatHistory.length) {
+  if (chatSessionState.chatHistory.length) {
     renderConversationMessages();
     return;
   }
-  if (sidepanelState.contextData.isVideoContext === false) {
+  if (chatSessionState.contextData.isVideoContext === false) {
     resetConversationView(NON_VIDEO_CONTEXT_MESSAGE);
     return;
   }
@@ -795,12 +816,12 @@ function resetConversationView(stateHtml = ""): void {
   els.messages.innerHTML = "";
   if (stateHtml) {
     const stateNode = document.createElement("div");
-    stateNode.className = "sp-center-error";
+    stateNode.className = "chat-center-error";
     stateNode.innerHTML = stateHtml;
     els.messages.appendChild(stateNode);
   }
   suggestionsNode = document.createElement("div");
-  suggestionsNode.className = "sp-suggestions";
+  suggestionsNode.className = "chat-suggestions";
   suggestionsNode.id = ids.readingChatSuggestions;
   els.messages.appendChild(suggestionsNode);
   lists.renderSuggestions();
@@ -810,15 +831,15 @@ function resetConversationView(stateHtml = ""): void {
 }
 
 // 【整段迁移自 sidepanel.ts】布局状态：紧凑输入判定写在对话 tab 根元素
-//（sidepanel 写 document.body 的 sp-non-video-context）。
+//（sidepanel 写 document.body 的 chat-non-video-context）。
 function updateChatLayoutState(): void {
   const useCompactInput = Boolean(
-    sidepanelState.contextData &&
-    sidepanelState.contextData.isVideoContext === false &&
-    !sidepanelState.chatHistory.length &&
-    !sidepanelState.currentConversationMeta?.pinnedContext
+    chatSessionState.contextData &&
+    chatSessionState.contextData.isVideoContext === false &&
+    !chatSessionState.chatHistory.length &&
+    !chatSessionState.currentConversationMeta?.pinnedContext
   );
-  els.root.classList.toggle("sp-non-video-context", useCompactInput);
+  els.root.classList.toggle("chat-non-video-context", useCompactInput);
   if (els.input) {
     autosizeInput();
   }
@@ -833,7 +854,7 @@ async function refreshContextManually(): Promise<void> {
   try {
     const ok = await loadContextState({ forceRefresh: true });
     if (ok) {
-      if (!sidepanelState.contextData || !sidepanelState.providers.length || !sidepanelState.chatHistory.length) {
+      if (!chatSessionState.contextData || !chatSessionState.providers.length || !chatSessionState.chatHistory.length) {
         renderInitialState();
       } else {
         lists.renderSuggestions();
@@ -867,9 +888,9 @@ async function startNewConversation(): Promise<void> {
   } finally {
     setRefreshing(false);
   }
-  if (sidepanelState.liveContextData) {
-    sidepanelState.contextData = { ...sidepanelState.liveContextData };
-    sidepanelState.currentContextKey = sidepanelState.liveContextKey || buildContextKey(sidepanelState.liveContextData);
+  if (chatSessionState.liveContextData) {
+    chatSessionState.contextData = { ...chatSessionState.liveContextData };
+    chatSessionState.currentContextKey = chatSessionState.liveContextKey || buildContextKey(chatSessionState.liveContextData);
     updateContextChip();
   }
   restartChat({ keepContext: true });
@@ -883,17 +904,17 @@ function renderConversationMessages(): void {
   updateChatLayoutState();
   els.messages.innerHTML = "";
   suggestionsNode = null;
-  if (!sidepanelState.chatHistory.length) {
+  if (!chatSessionState.chatHistory.length) {
     resetConversationView("");
     return;
   }
-  sidepanelState.chatHistory.forEach((message, index) => {
+  chatSessionState.chatHistory.forEach((message, index) => {
     if (message.role === "user") {
       chatRuntime.appendUserMessage(message.content, false);
       return;
     }
     const node = document.createElement("div");
-    node.className = "sp-msg sp-msg-assistant";
+    node.className = "chat-msg chat-msg-assistant";
     chatRuntime.renderAssistantMessage(node, String(message.content || ""), {
       userPrompt: findPreviousUserPrompt(index)
     });
@@ -906,7 +927,7 @@ function renderConversationMessages(): void {
 // 历史回放时找该助手消息的前一条用户消息（注入 renderAssistantMessage 的 userPrompt）
 function findPreviousUserPrompt(index: number): string {
   for (let i = Number(index) - 1; i >= 0; i -= 1) {
-    const item = sidepanelState.chatHistory[i];
+    const item = chatSessionState.chatHistory[i];
     if (item?.role === "user" && typeof item.content === "string") {
       return item.content;
     }
@@ -922,14 +943,14 @@ function findPreviousUserPrompt(index: number): string {
 async function ensureCurrentContextForSend(): Promise<boolean | string> {
   // pinned 判定沿用本调用点的原始语义（真值判断，与 loadContextState 的严格
   // 相等不同——见 ../chat/context-policy.ts 两个谓词的疑义记录）。
-  if (isPinnedContextTruthy(sidepanelState.currentConversationMeta)) {
+  if (isPinnedContextTruthy(chatSessionState.currentConversationMeta)) {
     await loadContextState({ forceRefresh: false, silent: true }).catch(() => null);
     return conversationStore.hydratePinned();
   }
   // 失败闸把「无标签页」与「读取失败」合并为同一文案（与策略模块的
   // resolveNoTabPlan 语义不同：这里即使静默加载也会重置视图），保持原状。
   const ok = await loadContextState({ forceRefresh: false, silent: true });
-  if (!ok || !sidepanelState.contextData) {
+  if (!ok || !chatSessionState.contextData) {
     resetConversationView(CONTEXT_READ_FAILED_MESSAGE);
     return false;
   }
@@ -941,12 +962,12 @@ async function ensureCurrentContextForSend(): Promise<boolean | string> {
   // 等待期间 contextData 可能停在旧快照（守卫分支或就绪瞬间），放行前重取
   // 一次，确保发送出去的是转写完成后的完整字幕。
   await loadContextState({ forceRefresh: false, silent: true }).catch(() => null);
-  if (!sidepanelState.contextData) {
+  if (!chatSessionState.contextData) {
     resetConversationView(CONTEXT_READ_FAILED_MESSAGE);
     return false;
   }
-  if (isNoSubtitleEmptyContext(sidepanelState.contextData)) {
-    const notice = buildNoSubtitleNotice(sidepanelState.contextData.noSubtitleReason as NoSubtitleReason);
+  if (isNoSubtitleEmptyContext(chatSessionState.contextData)) {
+    const notice = buildNoSubtitleNotice(chatSessionState.contextData.noSubtitleReason as NoSubtitleReason);
     showConversationContextNotice(notice.message, 0, { openSettingsAction: notice.openSettings });
     return NO_SUBTITLE_SEND_BLOCKED;
   }
@@ -959,7 +980,7 @@ async function ensureCurrentContextForSend(): Promise<boolean | string> {
 // matchContextUrl 恒 true（同一页面）、sendMessageToActiveTab 折算成 seek 回包。
 function getTimestampNavDeps() {
   return {
-    contextUrl: String(sidepanelState.contextData?.url || sidepanelState.currentConversationMeta?.contextUrl || "").trim(),
+    contextUrl: String(chatSessionState.contextData?.url || chatSessionState.currentConversationMeta?.contextUrl || "").trim(),
     notice: showConversationContextNotice,
     getActiveTab: async () => ({ id: 0, url: location.href }),
     matchContextUrl: () => true,
@@ -975,11 +996,11 @@ function getTimestampNavDeps() {
 //（编排入口，被新对话/上下文切换复用）。
 function restartChat({ keepContext = false }: { keepContext?: boolean } = {}): void {
   chatRuntime.resetStreamState();
-  sidepanelState.chatHistory = [];
-  sidepanelState.currentConversationId = "";
-  sidepanelState.currentConversationMeta = null;
+  chatSessionState.chatHistory = [];
+  chatSessionState.currentConversationId = "";
+  chatSessionState.currentConversationMeta = null;
   if (!keepContext) {
-    sidepanelState.currentContextKey = buildContextKey(sidepanelState.contextData);
+    chatSessionState.currentContextKey = buildContextKey(chatSessionState.contextData);
   }
   updateContextChip();
   resetConversationView("");

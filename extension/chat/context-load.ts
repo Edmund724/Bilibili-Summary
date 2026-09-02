@@ -43,8 +43,8 @@ import {
   resolveLoadContextAction,
   resolveNoTabPlan
 } from "./context-policy.js";
-import { sidepanelState } from "./chat-state.js";
-import type { SidepanelContextSnapshot } from "./chat-state.js";
+import { chatSessionState } from "./chat-state.js";
+import type { ChatSessionContextSnapshot } from "./chat-state.js";
 import type { LoadContextStateOptions } from "./conversation-store.js";
 
 // getAiContextState 的 tabOps 消息响应信封（对齐 context-resolver 的
@@ -68,7 +68,7 @@ interface TabStateResponse {
 //            此走 SKIP_UNCHANGED；两条策略实现都以该形态表达短路）
 //   error    读取失败（tabUrl 可选：消息链在拿到 tab 后失败仍携带，与迁移前
 //            「error 分支也刷新 liveTabUrl」的行为一致）
-export type ContextFetchPayload = SidepanelContextSnapshot | { unchanged: true };
+export type ContextFetchPayload = ChatSessionContextSnapshot | { unchanged: true };
 
 export type ContextFetchOutcome =
   | { kind: "no-tab" }
@@ -211,7 +211,7 @@ export function createInProcessContextFetch(deps: InProcessContextFetchDeps = {}
     }
     // 全量路径才拉热评（短路已提前返回，时机与消息链现状一致）。热评条目为
     // 开放形状（HotComment 带索引签名），策略边界对齐 AiContext 的字段类型。
-    const hotComments = (await fetchHotComments()) as SidepanelContextSnapshot["hotComments"];
+    const hotComments = (await fetchHotComments()) as ChatSessionContextSnapshot["hotComments"];
     return {
       kind: "payload",
       tabUrl,
@@ -346,11 +346,11 @@ export function createContextLoad(deps: CreateContextLoadDeps): ContextLoad {
   const { contextChip } = deps;
 
   async function loadContextState({ forceRefresh = false, silent = false }: LoadContextStateOptions = {}): Promise<boolean> {
-    const hasPinnedConversation = isPinnedContextStrict(sidepanelState.currentConversationMeta);
+    const hasPinnedConversation = isPinnedContextStrict(chatSessionState.currentConversationMeta);
     // 上下文组装策略注入点（PR5）。ifSignature 沿用迁移前口径：上次全量快照
     // 的签名；liveContextData 为空（首次/此前失败）时签名为空串，策略必走全量。
     const outcome = await deps
-      .fetchContext({ forceRefresh, ifSignature: String(sidepanelState.liveContextData?.signature || "") })
+      .fetchContext({ forceRefresh, ifSignature: String(chatSessionState.liveContextData?.signature || "") })
       .catch((error: unknown) => ({ kind: "error", error: (error as Error)?.message }) as ContextFetchOutcome);
 
     if (outcome.kind === "no-tab") {
@@ -358,12 +358,12 @@ export function createContextLoad(deps: CreateContextLoadDeps): ContextLoad {
       // 同样不被调用）：无可用标签页，按计划做失败清理（文案/清上下文/
       // 重置视图的取舍全部来自策略计划）。
       const plan = resolveNoTabPlan({ hasPinnedConversation, silent });
-      sidepanelState.liveContextData = null;
-      sidepanelState.liveContextKey = "";
-      sidepanelState.liveTabUrl = "";
+      chatSessionState.liveContextData = null;
+      chatSessionState.liveContextKey = "";
+      chatSessionState.liveTabUrl = "";
       if (plan.clearContext) {
-        sidepanelState.contextData = null;
-        sidepanelState.currentContextKey = "";
+        chatSessionState.contextData = null;
+        chatSessionState.currentContextKey = "";
       }
       updateContextChip();
       if (plan.resetView) {
@@ -374,7 +374,7 @@ export function createContextLoad(deps: CreateContextLoadDeps): ContextLoad {
 
     // no-tab 之外的分支都刷新 liveTabUrl（error 亦然——迁移前行为：往返
     // 结束后即使失败也写入 tab.url）。
-    sidepanelState.liveTabUrl = outcome.tabUrl || "";
+    chatSessionState.liveTabUrl = outcome.tabUrl || "";
 
     // 决策点二（消息往返之后）：「输入 → 动作」映射全部交给策略模块。unchanged
     // 信封折算成 policy 的响应形态；forceRefresh 只随策略透传，不参与动作判定；
@@ -402,11 +402,11 @@ export function createContextLoad(deps: CreateContextLoadDeps): ContextLoad {
     }
 
     if (plan.action === LOAD_CONTEXT_ACTION.ERROR) {
-      sidepanelState.liveContextData = null;
-      sidepanelState.liveContextKey = "";
+      chatSessionState.liveContextData = null;
+      chatSessionState.liveContextKey = "";
       if (plan.clearContext) {
-        sidepanelState.contextData = null;
-        sidepanelState.currentContextKey = "";
+        chatSessionState.contextData = null;
+        chatSessionState.currentContextKey = "";
       }
       updateContextChip();
       if (plan.resetView) {
@@ -417,8 +417,8 @@ export function createContextLoad(deps: CreateContextLoadDeps): ContextLoad {
 
     // 三个成功动作（pinned / 流式守卫 / live）的公共前缀：live 快照照常落地，
     // 保证轮询与补水的数据源不断供。
-    sidepanelState.liveContextData = resp.payload as SidepanelContextSnapshot;
-    sidepanelState.liveContextKey = buildContextKey(resp.payload as SidepanelContextSnapshot);
+    chatSessionState.liveContextData = resp.payload as ChatSessionContextSnapshot;
+    chatSessionState.liveContextKey = buildContextKey(resp.payload as ChatSessionContextSnapshot);
 
     // pinned 与流式守卫的执行体逐字节相同：只落地 live 快照，不进主上下文。
     if (
@@ -431,7 +431,7 @@ export function createContextLoad(deps: CreateContextLoadDeps): ContextLoad {
     }
 
     // apply-live：正常路径，上下文变化时恢复最近对话并重渲染初始态。
-    const contextChanged = applyContextPayload(resp.payload as SidepanelContextSnapshot | null);
+    const contextChanged = applyContextPayload(resp.payload as ChatSessionContextSnapshot | null);
     deps.renderHistoryList();
     if (contextChanged) {
       await deps.restoreLatest();
@@ -440,13 +440,13 @@ export function createContextLoad(deps: CreateContextLoadDeps): ContextLoad {
     return plan.returnValue;
   }
 
-  function applyContextPayload(payload: SidepanelContextSnapshot | null): boolean {
+  function applyContextPayload(payload: ChatSessionContextSnapshot | null): boolean {
     const nextContext = payload && typeof payload === "object" ? payload : null;
     const nextKey = buildContextKey(nextContext);
-    const contextChanged = Boolean(sidepanelState.currentContextKey && nextKey && nextKey !== sidepanelState.currentContextKey);
+    const contextChanged = Boolean(chatSessionState.currentContextKey && nextKey && nextKey !== chatSessionState.currentContextKey);
 
-    sidepanelState.contextData = nextContext;
-    sidepanelState.currentContextKey = nextKey;
+    chatSessionState.contextData = nextContext;
+    chatSessionState.currentContextKey = nextKey;
     updateContextChip();
 
     if (contextChanged && !deps.isStreaming() && !deps.hasPendingUserPrompt()) {
@@ -458,7 +458,7 @@ export function createContextLoad(deps: CreateContextLoadDeps): ContextLoad {
   }
 
   function updateContextChip(): void {
-    if (!sidepanelState.contextData) {
+    if (!chatSessionState.contextData) {
       contextChip.textContent = "无上下文";
       contextChip.title = "";
       contextChip.disabled = true;
@@ -468,34 +468,34 @@ export function createContextLoad(deps: CreateContextLoadDeps): ContextLoad {
 
     // 标题不按字数硬截：chip 已占满 header 剩余宽度，溢出交给 CSS
     // text-overflow: ellipsis 按真实盒宽裁（短标题也能铺满整个 chip）。
-    contextChip.textContent = sidepanelState.contextData.title || "未知视频";
+    contextChip.textContent = chatSessionState.contextData.title || "未知视频";
     const mismatch = isBoundConversationMismatched();
     contextChip.classList.toggle("is-mismatch", mismatch);
-    contextChip.title = sidepanelState.contextData.url
-      ? `${sidepanelState.contextData.title || ""}${mismatch ? "\n当前页不是这个对话绑定的视频" : ""}\n点击跳转目标视频，或开启新对话`
-      : sidepanelState.contextData.title || "";
-    contextChip.disabled = !String(sidepanelState.contextData.url || "").trim();
+    contextChip.title = chatSessionState.contextData.url
+      ? `${chatSessionState.contextData.title || ""}${mismatch ? "\n当前页不是这个对话绑定的视频" : ""}\n点击跳转目标视频，或开启新对话`
+      : chatSessionState.contextData.title || "";
+    contextChip.disabled = !String(chatSessionState.contextData.url || "").trim();
   }
 
   function isBoundConversationMismatched(): boolean {
-    if (sidepanelState.currentConversationMeta?.pinnedContext !== true) {
+    if (chatSessionState.currentConversationMeta?.pinnedContext !== true) {
       return false;
     }
-    const targetUrl = String(sidepanelState.currentConversationMeta?.contextUrl || sidepanelState.contextData?.url || "").trim();
+    const targetUrl = String(chatSessionState.currentConversationMeta?.contextUrl || chatSessionState.contextData?.url || "").trim();
     if (!targetUrl) {
       return false;
     }
-    if (!sidepanelState.liveTabUrl) {
+    if (!chatSessionState.liveTabUrl) {
       return true;
     }
-    return !doesTabMatchContextUrl(sidepanelState.liveTabUrl, targetUrl);
+    return !doesTabMatchContextUrl(chatSessionState.liveTabUrl, targetUrl);
   }
 
   async function openCurrentContextUrl(): Promise<void> {
     if (!deps.getActiveTab) {
       return;
     }
-    const targetUrl = String(sidepanelState.contextData?.url || sidepanelState.currentConversationMeta?.contextUrl || "").trim();
+    const targetUrl = String(chatSessionState.contextData?.url || chatSessionState.currentConversationMeta?.contextUrl || "").trim();
     if (!targetUrl) {
       return;
     }

@@ -5,7 +5,7 @@
 //
 // 覆盖：
 // - loadProvidersAndPrefs：双消息（ai-providers-list + get-settings）+ storage
-//   读取并行、enabled 过滤、aiPrefs 归一化落 sidepanelState、空预设回落
+//   读取并行、enabled 过滤、aiPrefs 归一化落 chatSessionState、空预设回落
 //   DEFAULT_PRESET_PROMPTS 并触发持久化、渲染回调（modelSelect/思考档位/预设
 //   列表）；
 // - renderModelSelect：无平台 → disabled +「未配置平台」；有平台 → 按优先级
@@ -30,13 +30,13 @@ const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 const THINKING_LEVEL_KEY = "boc_ai_thinking_level";
 
 let createProviderPrefs;
-let sidepanelState;
+let chatSessionState;
 
 async function importModule() {
   const module = await import("../../extension/chat/providers.js");
-  const state = (await import("../../extension/chat/chat-state.js")).sidepanelState;
+  const state = (await import("../../extension/chat/chat-state.js")).chatSessionState;
   createProviderPrefs = module.createProviderPrefs;
-  sidepanelState = state;
+  chatSessionState = state;
 }
 
 // chrome.storage.local fake（conversation-store 测试同款手法：Map 底座 + 记录
@@ -85,7 +85,7 @@ beforeEach(async () => {
 });
 
 describe("loadProvidersAndPrefs", () => {
-  it("双消息并行拉取 + storage 读取，enabled 过滤后写 sidepanelState，并触发三路渲染", async () => {
+  it("双消息并行拉取 + storage 读取，enabled 过滤后写 chatSessionState，并触发三路渲染", async () => {
     sendRuntimeMessageMock.mockImplementation(async (message) => {
       if (message.type === "ai-providers-list") {
         return { providers: [
@@ -109,14 +109,14 @@ describe("loadProvidersAndPrefs", () => {
     expect(sendRuntimeMessageMock).toHaveBeenCalledWith({ type: "ai-providers-list" });
     expect(sendRuntimeMessageMock).toHaveBeenCalledWith({ type: "get-settings" });
     expect(storage.get).toHaveBeenCalledWith([SELECTED_PROVIDER_KEY, THINKING_LEVEL_KEY]);
-    expect(sidepanelState.providers.map((p) => p.id)).toEqual(["p1", "p3"]);
-    expect(sidepanelState.aiPrefs).toEqual({
+    expect(chatSessionState.providers.map((p) => p.id)).toEqual(["p1", "p3"]);
+    expect(chatSessionState.aiPrefs).toEqual({
       aiSystemPrompt: "系统提示",
       aiInitialQuickPrompts: ["快速一"],
       aiPresetPrompts: ["预设一"],
       defaultModel: "p3"
     });
-    expect(sidepanelState.aiThinkingLevel).toBe("low");
+    expect(chatSessionState.aiThinkingLevel).toBe("low");
     expect(deps.renderPresetPrompts).toHaveBeenCalledTimes(1);
     expect(deps.persistAiPresetPrompts).not.toHaveBeenCalled();
     // 默认选中 defaultModel 对应平台
@@ -137,7 +137,7 @@ describe("loadProvidersAndPrefs", () => {
 
     await providerPrefs.loadProvidersAndPrefs();
 
-    expect(sidepanelState.aiPrefs.aiPresetPrompts.length).toBeGreaterThan(0);
+    expect(chatSessionState.aiPrefs.aiPresetPrompts.length).toBeGreaterThan(0);
     expect(deps.persistAiPresetPrompts).toHaveBeenCalledTimes(1);
   });
 
@@ -152,8 +152,8 @@ describe("loadProvidersAndPrefs", () => {
 
     await expect(providerPrefs.loadProvidersAndPrefs()).resolves.toBeUndefined();
 
-    expect(sidepanelState.aiPrefs.aiSystemPrompt).toBe("");
-    expect(sidepanelState.aiThinkingLevel).toBe("off");
+    expect(chatSessionState.aiPrefs.aiSystemPrompt).toBe("");
+    expect(chatSessionState.aiThinkingLevel).toBe("off");
   });
 
   it("aiThinkingLevel 兜底读 chrome.storage（settings 缺省时）", async () => {
@@ -168,13 +168,13 @@ describe("loadProvidersAndPrefs", () => {
 
     await providerPrefs.loadProvidersAndPrefs();
 
-    expect(sidepanelState.aiThinkingLevel).toBe("high");
+    expect(chatSessionState.aiThinkingLevel).toBe("high");
   });
 });
 
 describe("renderModelSelect", () => {
   it("无平台：disabled + 「未配置平台」占位", () => {
-    sidepanelState.providers = [];
+    chatSessionState.providers = [];
     const { modelSelect, providerPrefs } = makeHarness();
 
     providerPrefs.renderModelSelect();
@@ -184,11 +184,11 @@ describe("renderModelSelect", () => {
   });
 
   it("preferredProviderId 优先于 aiPrefs.defaultModel 与 chrome.storage 选中", () => {
-    sidepanelState.providers = [
+    chatSessionState.providers = [
       { id: "p1", name: "平台一", enabled: true },
       { id: "p2", name: "平台二", enabled: true }
     ];
-    sidepanelState.aiPrefs.defaultModel = "p2";
+    chatSessionState.aiPrefs.defaultModel = "p2";
     const storage = makeStorageFake({ [SELECTED_PROVIDER_KEY]: "p2" });
     const { modelSelect, providerPrefs } = makeHarness(storage);
 
@@ -216,7 +216,7 @@ describe("renderModelSelect", () => {
   });
 
   it("闭包缓存未预取（未经过 loadProvidersAndPrefs）时回退到首个平台", () => {
-    sidepanelState.providers = [
+    chatSessionState.providers = [
       { id: "p1", name: "平台一", enabled: true },
       { id: "p2", name: "平台二", enabled: true }
     ];
@@ -234,7 +234,7 @@ describe("setThinkingLevel", () => {
 
     await providerPrefs.setThinkingLevel("high");
 
-    expect(sidepanelState.aiThinkingLevel).toBe("high");
+    expect(chatSessionState.aiThinkingLevel).toBe("high");
     expect(storage.set).toHaveBeenCalledWith({ [THINKING_LEVEL_KEY]: "high" });
     expect(storage.data.get(THINKING_LEVEL_KEY)).toBe("high");
     expect(sendRuntimeMessageMock).toHaveBeenCalledWith({
@@ -250,7 +250,7 @@ describe("setThinkingLevel", () => {
 
     await providerPrefs.setThinkingLevel("ultra");
 
-    expect(sidepanelState.aiThinkingLevel).toBe("off");
+    expect(chatSessionState.aiThinkingLevel).toBe("off");
   });
 });
 

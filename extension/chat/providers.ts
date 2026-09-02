@@ -32,8 +32,8 @@ import {
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { updateModelSelectWidth } from "../ui/model-select-width.js";
-import { sidepanelState } from "./chat-state.js";
-import type { SidepanelProvider } from "./chat-state.js";
+import { chatSessionState } from "./chat-state.js";
+import type { ChatSessionProvider } from "./chat-state.js";
 import type { ModelSelectWidthEls } from "../ui/model-select-width.js";
 
 export const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
@@ -95,7 +95,7 @@ export function createProviderPrefs(deps: CreateProviderPrefsDeps): ProviderPref
     }
   }
 
-  // ai-providers-list 响应里的平台条目由 SidepanelProvider（chat-state.ts）
+  // ai-providers-list 响应里的平台条目由 ChatSessionProvider（chat-state.ts）
   // 描述：id 必填，name/model/enabled 宽松可选。
   async function loadProvidersAndPrefs({ preferredProviderId = "" }: { preferredProviderId?: string } = {}): Promise<void> {
     const [providersResp, settingsResp, storedPrefs] = await Promise.all([
@@ -103,25 +103,25 @@ export function createProviderPrefs(deps: CreateProviderPrefsDeps): ProviderPref
       sendRuntimeMessage({ type: "get-settings" }).catch(() => ({ ok: false })),
       loadStoredPrefs()
     ]) as [
-      { providers?: SidepanelProvider[] },
+      { providers?: ChatSessionProvider[] },
       { ok?: boolean; settings?: Partial<Settings> },
       Record<string, unknown>
     ];
     storedSelectedProviderId = String(storedPrefs[SELECTED_PROVIDER_KEY] || "").trim();
-    sidepanelState.providers = Array.isArray(providersResp?.providers)
+    chatSessionState.providers = Array.isArray(providersResp?.providers)
       ? providersResp.providers.filter((p) => p.enabled)
       : [];
-    sidepanelState.aiPrefs = {
+    chatSessionState.aiPrefs = {
       aiSystemPrompt: String(settingsResp?.settings?.aiSystemPrompt || "").trim(),
       aiInitialQuickPrompts: normalizeAiInitialQuickPrompts(settingsResp?.settings?.aiInitialQuickPrompts),
       aiPresetPrompts: normalizeAiPresetPrompts(settingsResp?.settings?.aiPresetPrompts),
       defaultModel: String(settingsResp?.settings?.defaultModel || "").trim()
     };
-    sidepanelState.aiThinkingLevel = normalizeAiThinkingLevel(
+    chatSessionState.aiThinkingLevel = normalizeAiThinkingLevel(
       settingsResp?.settings?.aiThinkingLevel ?? storedPrefs[THINKING_LEVEL_KEY]
     );
-    if (!sidepanelState.aiPrefs.aiPresetPrompts.length) {
-      sidepanelState.aiPrefs.aiPresetPrompts = DEFAULT_PRESET_PROMPTS.slice();
+    if (!chatSessionState.aiPrefs.aiPresetPrompts.length) {
+      chatSessionState.aiPrefs.aiPresetPrompts = DEFAULT_PRESET_PROMPTS.slice();
       void deps.persistAiPresetPrompts();
     }
     renderModelSelect(preferredProviderId);
@@ -130,22 +130,22 @@ export function createProviderPrefs(deps: CreateProviderPrefsDeps): ProviderPref
   }
 
   function renderModelSelect(preferredProviderId = ""): void {
-    if (!sidepanelState.providers.length) {
+    if (!chatSessionState.providers.length) {
       modelSelect.innerHTML = '<option value="">未配置平台</option>';
       modelSelect.disabled = true;
       modelSelect.style.width = "96px";
       return;
     }
 
-    modelSelect.innerHTML = sidepanelState.providers
+    modelSelect.innerHTML = chatSessionState.providers
       .map((p) => {
         const label = String(p.model || p.name || "").trim();
         return `<option value="${escapeHtml(p.id)}">${escapeHtml(label)}</option>`;
       })
       .join("");
 
-    const savedProviderId = String(preferredProviderId || sidepanelState.aiPrefs.defaultModel || storedSelectedProviderId || "").trim();
-    const matchedProvider = sidepanelState.providers.find((item) => item.id === savedProviderId) || sidepanelState.providers[0];
+    const savedProviderId = String(preferredProviderId || chatSessionState.aiPrefs.defaultModel || storedSelectedProviderId || "").trim();
+    const matchedProvider = chatSessionState.providers.find((item) => item.id === savedProviderId) || chatSessionState.providers[0];
     modelSelect.value = matchedProvider?.id || "";
     modelSelect.disabled = false;
     updateModelSelectWidth(widthEls);
@@ -153,18 +153,18 @@ export function createProviderPrefs(deps: CreateProviderPrefsDeps): ProviderPref
 
   function renderThinkingLevel(): void {
     thinkingBtns.forEach((btn) => {
-      btn.classList.toggle("is-active", btn.dataset.level === sidepanelState.aiThinkingLevel);
-      btn.setAttribute("aria-pressed", btn.dataset.level === sidepanelState.aiThinkingLevel ? "true" : "false");
+      btn.classList.toggle("is-active", btn.dataset.level === chatSessionState.aiThinkingLevel);
+      btn.setAttribute("aria-pressed", btn.dataset.level === chatSessionState.aiThinkingLevel ? "true" : "false");
     });
   }
 
   async function setThinkingLevel(level: string): Promise<void> {
-    sidepanelState.aiThinkingLevel = normalizeAiThinkingLevel(level);
+    chatSessionState.aiThinkingLevel = normalizeAiThinkingLevel(level);
     renderThinkingLevel();
     if (storage) {
-      await storage.set({ [THINKING_LEVEL_KEY]: sidepanelState.aiThinkingLevel }).catch(() => {});
+      await storage.set({ [THINKING_LEVEL_KEY]: chatSessionState.aiThinkingLevel }).catch(() => {});
     }
-    await sendRuntimeMessage({ type: "save-settings", settings: { aiThinkingLevel: sidepanelState.aiThinkingLevel } }).catch(() => null);
+    await sendRuntimeMessage({ type: "save-settings", settings: { aiThinkingLevel: chatSessionState.aiThinkingLevel } }).catch(() => null);
   }
 
   function setSelectedProvider(providerId: string): void {

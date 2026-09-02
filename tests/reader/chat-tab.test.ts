@@ -18,7 +18,7 @@
 //   定位对话 tab + startNewConversation + 填提示词 + 自动发送；不消费待解释
 //   意图（互不踩踏）。
 //
-// 模块纪元注意：sidepanelState 与组合根闭包都是模块级单例，beforeEach
+// 模块纪元注意：chatSessionState 与组合根闭包都是模块级单例，beforeEach
 // resetModules 后同纪元导入；chrome.storage / runtime 消息按 type 路由 stub。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -46,7 +46,7 @@ let ids: typeof import("../../extension/reader/state.js").ids;
 let uiRenderer: typeof import("../../extension/ui/ui-renderer.js");
 let lazyChat: typeof import("../../extension/core/lazy-chat-tab.js");
 let explainIntent: typeof import("../../extension/reader/explain-intent.js");
-let sidepanelState: typeof import("../../extension/chat/chat-state.js").sidepanelState;
+let chatSessionState: typeof import("../../extension/chat/chat-state.js").chatSessionState;
 let statusBus: typeof import("../../extension/shared/subtitle-status-bus.js");
 
 // 假 offscreen 端口（chat-runtime 经 chrome.runtime.connect 取用）
@@ -118,7 +118,7 @@ async function loadShell() {
   uiRenderer = await import("../../extension/ui/ui-renderer.js");
   lazyChat = await import("../../extension/core/lazy-chat-tab.js");
   explainIntent = await import("../../extension/reader/explain-intent.js");
-  sidepanelState = (await import("../../extension/chat/chat-state.js")).sidepanelState;
+  chatSessionState = (await import("../../extension/chat/chat-state.js")).chatSessionState;
   statusBus = await import("../../extension/shared/subtitle-status-bus.js");
   uiRenderer.ensureUiReady({ forceRecreate: true });
   mountPlayerChain();
@@ -165,8 +165,8 @@ describe("组合根装配与懒加载边界", () => {
     expect(chip.disabled).toBe(false);
     // - 初始态：无会话历史 → 空消息区 + 建议区（无居中错误）
     const messages = document.getElementById(ids.readingChatMessages) as HTMLElement;
-    expect(messages.querySelectorAll(".sp-center-error")).toHaveLength(0);
-    expect(messages.querySelector(".sp-suggestions")).not.toBe(null);
+    expect(messages.querySelectorAll(".chat-center-error")).toHaveLength(0);
+    expect(messages.querySelector(".chat-suggestions")).not.toBe(null);
   });
 
   it("重复激活幂等：不重跑 init（storage 读取次数不变）", async () => {
@@ -228,7 +228,7 @@ describe("explain 意图消费（自动发送 + consume 一次）", () => {
     const chat = await lazyChat.ensureReaderChatTab();
     await chat.ensureChatTabActivated();
     await waitFor(() =>
-      Boolean((document.getElementById(ids.readingChatMessages) as HTMLElement).querySelector(".sp-context-notice"))
+      Boolean((document.getElementById(ids.readingChatMessages) as HTMLElement).querySelector(".chat-context-notice"))
     );
     expect(ports).toHaveLength(0); // 发送被拦截
     const intentCard = document.getElementById(ids.readingChatIntent) as HTMLElement;
@@ -262,14 +262,14 @@ describe("subtitle-wait kick 总线接线", () => {
     statusBus.publishSubtitleStatusPhase("asr-transcribing");
     const asrNotice = document.getElementById(ids.readingChatAsrNotice) as HTMLElement;
     expect(asrNotice.hidden).toBe(false);
-    expect(sidepanelState.asrTranscribingActive).toBe(true);
+    expect(chatSessionState.asrTranscribingActive).toBe(true);
 
     // 发送被 subtitle-wait 挂起：未发起 port，意图保持 pending，等待提示在显
     const messages = document.getElementById(ids.readingChatMessages) as HTMLElement;
-    await waitFor(() => Boolean(messages.querySelector(".sp-context-notice")));
+    await waitFor(() => Boolean(messages.querySelector(".chat-context-notice")));
     expect(ports).toHaveLength(0);
     expect(explainIntent.peekPendingExplainIntent()).not.toBe(null);
-    expect(messages.querySelector(".sp-context-notice")?.textContent).toContain("等待音频转写完成");
+    expect(messages.querySelector(".chat-context-notice")?.textContent).toContain("等待音频转写完成");
 
     // 转写完成（字幕落账 + 相位 asr-done）→ kick 补轮放行
     state.clip.subtitleFetchState = "ready";
@@ -283,7 +283,7 @@ describe("subtitle-wait kick 总线接线", () => {
     expect(explainIntent.consumePendingExplainIntent()).toBe(null);
     expect((document.getElementById(ids.readingChatIntent) as HTMLElement).hidden).toBe(true);
     // 等待提示清理 + asr 提示行收起
-    expect(messages.querySelector(".sp-context-notice")).toBeNull();
+    expect(messages.querySelector(".chat-context-notice")).toBeNull();
     expect(asrNotice.hidden).toBe(true);
     await activation;
   });
@@ -327,8 +327,8 @@ describe("断流收口（工单 08：关闭即断流，重开从会话历史恢�
 
     // 恢复路径重渲消息区（关闭后残留的失败/半截节点清场）
     const messages = document.getElementById(ids.readingChatMessages) as HTMLElement;
-    expect(messages.querySelector(".sp-center-error")).toBeNull();
-    expect(messages.querySelector(".sp-suggestions")).not.toBe(null);
+    expect(messages.querySelector(".chat-center-error")).toBeNull();
+    expect(messages.querySelector(".chat-suggestions")).not.toBe(null);
     // 触发源重挂：相位总线又能驱动 asr 提示行
     statusBus.publishSubtitleStatusPhase("asr-transcribing");
     expect((document.getElementById(ids.readingChatAsrNotice) as HTMLElement).hidden).toBe(false);

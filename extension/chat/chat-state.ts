@@ -27,10 +27,10 @@ import type { AiContext } from "../ai/types.js";
 // 上下文快照 = getAiContextState 返回的 payload 的落地形态。结构上
 // 与 AI 域的 AiContext 同形（含 subtitleBody / isVideoContext / url 等字段与
 // 开放索引签名），复用该类型避免第二份手写契约。
-export type SidepanelContextSnapshot = AiContext;
+export type ChatSessionContextSnapshot = AiContext;
 
 // 可用 AI 平台（loadProvidersAndProviders 过滤 enabled 后写入 providers）
-export interface SidepanelProvider {
+export interface ChatSessionProvider {
   id: string;
   name?: string;
   model?: string;
@@ -48,7 +48,7 @@ export interface CurrentConversationMeta {
 }
 
 // 一问一答条目（{ role, content }）；role 的取值由写入方约束为 user/assistant。
-export interface SidepanelChatMessage {
+export interface ChatSessionMessage {
   role: string;
   content: string;
 }
@@ -56,7 +56,7 @@ export interface SidepanelChatMessage {
 // 持久化历史会话（storage 的内存镜像条目）。字段集与 conversation-store 的
 // Conversation 对齐（其写入方构造完整对象后落进本状态）；渲染层只读 id/title/
 // createdAt/updatedAt。
-export interface SidepanelSavedConversation {
+export interface ChatSessionSavedConversation {
   id: string;
   title: string;
   contextKey: string;
@@ -70,26 +70,26 @@ export interface SidepanelSavedConversation {
   [key: string]: unknown;
 }
 
-export interface SidepanelState {
+export interface ChatSessionState {
   // ---- 上下文（loadContextState 写，UI 渲染读） ----
   // 当前应用的上下文快照（视频信息/字幕等）；null = 无上下文
-  contextData: SidepanelContextSnapshot | null;
+  contextData: ChatSessionContextSnapshot | null;
   // contextData 对应的上下文键（buildContextKey 产物）
   currentContextKey: string;
   // 可用 AI 平台列表（loadProvidersAndPrefs 过滤 enabled 后写入）
-  providers: SidepanelProvider[];
+  providers: ChatSessionProvider[];
   // ---- 对话（conversation-store 与 chat-runtime 双侧读写） ----
   // 当前会话的一问一答数组 [{ role, content }]
-  chatHistory: SidepanelChatMessage[];
+  chatHistory: ChatSessionMessage[];
   // 持久化的历史会话列表（storage 的内存镜像）
-  savedConversations: SidepanelSavedConversation[];
+  savedConversations: ChatSessionSavedConversation[];
   // 当前会话 id（"" = 无当前会话）
   currentConversationId: string;
   // 当前会话元信息（id/标题/上下文绑定等）；null = 无当前会话
   currentConversationMeta: CurrentConversationMeta | null;
   // ---- 实时上下文（loadContextState 维护的"活跃标签页"快照，与 contextData
   // 分离：流式守卫冻结 contextData 时 live 侧继续断供更新） ----
-  liveContextData: SidepanelContextSnapshot | null;
+  liveContextData: ChatSessionContextSnapshot | null;
   liveContextKey: string;
   // 活跃标签页 URL（isBoundConversationMismatched / 历史列表 live 匹配读）
   liveTabUrl: string;
@@ -112,7 +112,7 @@ export interface SidepanelState {
   aiThinkingLevel: "off" | "low" | "high";
 }
 
-export const sidepanelState: SidepanelState = {
+export const chatSessionState: ChatSessionState = {
   // ---- 上下文（loadContextState 写，UI 渲染读） ----
   // 当前应用的上下文快照（视频信息/字幕等）；null = 无上下文
   contextData: null,

@@ -5,7 +5,7 @@
 // 为什么存在：sidepanel.js 的 loadContextState 把「签名短路 / pinned / streaming
 // 守卫 / live 快照应用」四态判定交错在带副作用的编排里（消息往返、setState、
 // 渲染），分支组合零直测。本模块只做「输入 → 动作」映射：不做任何 I/O、
-// 不写 sidepanelState、不渲染；编排壳（sidepanel.js 的 loadContextState /
+// 不写 chatSessionState、不渲染；编排壳（sidepanel.js 的 loadContextState /
 // ensureCurrentContextForSend）负责拉数据、按动作执行，可观察行为逐字节不变。
 //
 // 动作与旧分支的对应（旧代码真实分支顺序，判定优先级自上而下）：
@@ -24,7 +24,7 @@ export interface LoadContextResponse {
   payload?: { unchanged?: unknown; [key: string]: unknown } | null;
 }
 
-// 会话绑定判定输入（sidepanelState.currentConversationMeta 的窄视图）
+// 会话绑定判定输入（chatSessionState.currentConversationMeta 的窄视图）
 export interface CurrentConversationMetaLike {
   pinnedContext?: unknown;
   [key: string]: unknown;
@@ -88,7 +88,7 @@ export function resolveNoTabPlan({ hasPinnedConversation = false, silent = false
 // 决策点二（消息往返之后）：按响应分类 + 运行时标志给出动作计划。
 // 输入全部来自编排壳已拉到的数据：
 //   response              getAiContextState 的结果（含 .catch 兜底对象，可为 null）
-//   hasPinnedConversation isPinnedContextStrict(sidepanelState.currentConversationMeta)
+//   hasPinnedConversation isPinnedContextStrict(chatSessionState.currentConversationMeta)
 //   silent                loadContextState 的静默标志（轮询/补水路径为 true）
 //   isStreaming           chatRuntime.isStreaming()
 //   hasPendingUserPrompt  chatRuntime.hasPendingUserPrompt()

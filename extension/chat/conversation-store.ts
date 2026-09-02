@@ -1,14 +1,30 @@
 // extension/chat/conversation-store.ts
 // 会话持久化 + 上下文绑定关注点（sidepanel-split ticket #05 抽出；PR5 自
-// extension/pages/sidepanel-conversation-store.ts 迁入 chat 域，逻辑零语义改动）。
+// extension/pages/sidepanel-conversation-store.ts 迁入 chat 域，逻辑零语义改动；
+// arch-slim 工单 05：渲染面反转为能力事件，见下）。
 //
 // 本模块从 extension/pages/sidepanel.js 抽出「会话列表的存取、按视频上下文
 // 绑定/恢复、增删改」这条关注点。会话状态本体收拢在 ./chat-state.js
-// 的 sidepanelState，本模块直接 import 读写；deps 只剩 UI/transport 回调、
-// storage 抽象与常量。
+// 的 chatSessionState，本模块直接 import 读写。
+//
+// 工单 05（渲染编排反转）：原 14 键 deps 里 9 个 caller 必学的渲染/行为回调
+// （renderHistoryList / renderInitialState / updateContextChip /
+// show·removeConversationContextNotice / showConversationContextError /
+// hideHistoryPopover / stopActiveChat）收窄为 3 个能力事件——store 自己编排
+// 渲染时机，caller 只订阅结果：
+//   - onConversationChanged(change)：会话相关状态已落账后发出；历史列表恒随
+//     事件重渲，change 标志（refreshContextChip / historyCleared / resetView）
+//     声明其余需要刷新的呈现面。发火点与反转前各渲染回调的位点逐一对齐：
+//     loadAll/save（仅列表）、hydratePages/apply/hydratePinned 成功（列表+chip）、
+//     applyById/删当前/清空（列表+chip+视图重建；清空另收 popover）。
+//   - onStreamInterrupted()：当前会话被拆除（恢复无匹配 / 删当前会话 / 清空
+//     全部）时同步发出——必须先于任何 await 落盘（原 stopActiveChat dep 的
+//     承重时序：流式身份守卫在 id 清空前依赖同步断流，防会话复活）。
+//   - onContextNotice(notice)：上下文补水提示生命周期（pending 展示 / clear
+//     撤除 / error 展示），消息文案属补水结果，由 store 提供。
 //
 // 纯函数（`needsConversationPageHydration`）直接 export，可在无 store 实例时测试。
-// 工厂返回的窄接口仅暴露 sidepanel 真正调用的方法。
+// 工厂返回的窄接口仅暴露组合根真正调用的方法。
 
 import {
   buildAiContextRef,
@@ -23,7 +39,7 @@ import {
   MAX_SAVED_CONVERSATIONS
 } from "../ai/conversation.js";
 import { extractPageIndexFromUrl } from "../bilibili/video-id-shared.js";
-import { sidepanelState as _sidepanelState } from "./chat-state.js";
+import { chatSessionState as _chatSessionState } from "./chat-state.js";
 
 // ---------------------------------------------------------------------------
 // 本地类型契约
@@ -79,7 +95,7 @@ export interface ConversationMeta {
   resolvedContext?: Record<string, unknown> | null;
 }
 
-export interface SidepanelState {
+export interface ChatSessionState {
   contextData: Record<string, unknown> | null;
   currentContextKey: string;
   providers: unknown[];
@@ -113,21 +129,44 @@ export interface HydratePinnedOptions {
   silent?: boolean;
 }
 
+// 能力事件一：会话相关状态变更声明。历史列表恒随事件重渲；其余呈现面由标志
+// 声明（store 编排「何时」，caller 只实现「各表面怎么刷」）。
+export interface ConversationChange {
+  // 上下文绑定呈现需刷新（contextData / currentContextKey / currentConversationMeta 已落账）
+  refreshContextChip?: boolean;
+  // 存档已整体清空（clearAll）——caller 收起历史 popover
+  historyCleared?: boolean;
+  // 当前会话视图需按最新会话状态重建（applyById / 流式中删除当前会话 / clearAll）
+  resetView?: boolean;
+}
+
+// 能力事件三：上下文补水提示生命周期。pending = 补水开始（applyById 载入旧会话）；
+// clear = 一次补水尝试收尾（成功失败均发，与反转前 removeConversationContextNotice
+// 的 5 个位点一致）；error = 补水失败的用户可见文案（silent 路径不发）。
+export type ConversationContextNotice =
+  | { kind: "pending"; message: string }
+  | { kind: "clear" }
+  | { kind: "error"; message: string };
+
 export interface CreateConversationStoreDeps {
-  renderHistoryList: () => void;
-  renderInitialState: () => void;
-  updateContextChip: () => void;
-  showConversationContextNotice: (message: string, autoHideMs?: number) => void;
-  showConversationContextError: (message: string) => void;
-  removeConversationContextNotice: () => void;
-  hideHistoryPopover: () => void;
+  // ---- 上下文获取（数据面，非渲染） ----
+  // live 快照静默重取（hydratePinned 分支 2：targetKey === liveContextKey 时
+  // 先刷新 live 快照再落账，ok=false 落回网络解析）。
   loadContextState: (opts: LoadContextStateOptions) => Promise<boolean | object>;
-  resolveAiConversationContext: (contextRef: ConversationContextRef) => Promise<Record<string, unknown>>;
-  resolveAiConversationPageRef: (contextRef: ConversationContextRef) => Promise<Record<string, unknown>>;
-  stopActiveChat: () => void;
+  // 会话引用解析单接缝（工单 05 合并原 resolveAiConversationContext /
+  // resolveAiConversationPageRef 两个同形 dep）：purpose="context" 解析整份
+  // 对话上下文（pinned 补水；组合根接工单 04 的进程内短路 + 网络复合适配器），
+  // purpose="page" 解析分页信息（hydratePages 的会话分页补水）。
+  resolveAiConversationRef: (
+    contextRef: ConversationContextRef,
+    purpose: "context" | "page"
+  ) => Promise<Record<string, unknown>>;
+  // ---- 能力事件（store 编排渲染时机；caller 只订阅结果） ----
+  onConversationChanged: (change: ConversationChange) => void;
+  onStreamInterrupted: () => void;
+  onContextNotice: (notice: ConversationContextNotice) => void;
+  // ---- 存储（可选；测试注入，缺省 chrome.storage.local） ----
   storage?: StorageArea;
-  conversationsStorageKey?: string;
-  maxSavedConversations?: number;
 }
 
 export interface ConversationStore {
@@ -148,7 +187,9 @@ export interface ConversationStore {
 // 从 JS 模块导入的函数在 checkJs:false 下无类型；用本地接口断言到实际契约。
 // ---------------------------------------------------------------------------
 
-const sidepanelState = _sidepanelState as SidepanelState;
+// 本地窄视图（store 实际读写的字段形态）经断言对齐 chat-state 的宽类型：
+// currentConversationMeta 的完整形态由 ConversationMeta 承载，宽侧只约束读写面。
+const chatSessionState = _chatSessionState as ChatSessionState;
 
 const _buildAiContextRef = buildAiContextRef as unknown as (context: unknown) => ConversationContextRef;
 const _buildContextKey = buildContextKey as unknown as (payload: unknown) => string;
@@ -202,47 +243,46 @@ export function needsConversationPageHydration(conversation: Conversation | null
 // 工厂：createConversationStore(deps)
 // ---------------------------------------------------------------------------
 
-export function createConversationStore(deps: CreateConversationStoreDeps): ConversationStore {
-  const {
-    renderHistoryList,
-    renderInitialState,
-    updateContextChip,
-    showConversationContextNotice,
-    showConversationContextError,
-    removeConversationContextNotice,
-    hideHistoryPopover,
-    loadContextState,
-    resolveAiConversationContext,
-    resolveAiConversationPageRef,
-    stopActiveChat,
-    storage = (typeof chrome !== "undefined" && chrome?.storage?.local) || undefined,
-    conversationsStorageKey = "boc_ai_conversations_v1",
-    maxSavedConversations = MAX_SAVED_CONVERSATIONS
-  } = deps;
+// 存档存储键与容量上限（工单 05 收窄：原 deps 可选键收进模块常量——唯一生产
+// 宿主组合根传的正是这两个值，测试无一覆盖）。
+const CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
 
-  function requireDep<T>(name: string, value: T | undefined): T {
-    if (typeof value !== "function" && name !== "storage") {
-      throw new Error(`createConversationStore: deps.${name} is required (must be a function)`);
+export function createConversationStore(deps: CreateConversationStoreDeps): ConversationStore {
+  // 工厂期校验（缺 dep 早失败；原为调用期 requireDep 逐点检查，单宿主下等价）
+  for (const key of [
+    "loadContextState",
+    "resolveAiConversationRef",
+    "onConversationChanged",
+    "onStreamInterrupted",
+    "onContextNotice"
+  ] as const) {
+    if (typeof deps[key] !== "function") {
+      throw new Error(`createConversationStore: deps.${key} is required (must be a function)`);
     }
-    if (value === undefined) {
-      throw new Error(`createConversationStore: deps.${name} is required`);
-    }
-    return value;
+  }
+  const { loadContextState, resolveAiConversationRef, onConversationChanged, onStreamInterrupted, onContextNotice } = deps;
+  const storage = deps.storage || (typeof chrome !== "undefined" && chrome?.storage?.local) || undefined;
+  const conversationsStorageKey = CONVERSATIONS_STORAGE_KEY;
+  const maxSavedConversations = MAX_SAVED_CONVERSATIONS;
+
+  // 能力事件出心：change 事件统一经此发出（detail 缺省 = 仅历史列表面）
+  function emitChange(change: ConversationChange = {}): void {
+    onConversationChanged(change);
   }
 
   function saved(): Conversation[] {
-    return sidepanelState.savedConversations;
+    return chatSessionState.savedConversations;
   }
   function commitSaved(next: Conversation[]): void {
-    sidepanelState.savedConversations = next;
+    chatSessionState.savedConversations = next;
   }
 
   async function loadAll(): Promise<void> {
-    const data = await requireDep("storage", storage)
-      .get([conversationsStorageKey])
+    const data = await storage
+      ?.get([conversationsStorageKey])
       .catch(() => ({}) as Record<string, unknown>);
-    commitSaved(_normalizeConversations(data[conversationsStorageKey]));
-    requireDep("renderHistoryList", renderHistoryList)();
+    commitSaved(_normalizeConversations(data?.[conversationsStorageKey]));
+    emitChange({});
     void hydratePages();
   }
 
@@ -261,7 +301,7 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
       }
       let response: { ok?: boolean; payload?: unknown; error?: string } = { ok: false };
       try {
-        const payload = await requireDep("resolveAiConversationPageRef", resolveAiConversationPageRef)(contextRef);
+        const payload = await resolveAiConversationRef(contextRef, "page");
         response = { ok: true, payload };
       } catch (error: unknown) {
         response = { ok: false, error: (error as Error)?.message || String(error || "") };
@@ -312,12 +352,12 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
       return;
     }
 
-    const currentId = sidepanelState.currentConversationId;
+    const currentId = chatSessionState.currentConversationId;
     if (currentId) {
       const activeConversation = conversations.find((item) => item.id === currentId);
       if (activeConversation) {
-        sidepanelState.currentConversationMeta = {
-          ...sidepanelState.currentConversationMeta,
+        chatSessionState.currentConversationMeta = {
+          ...chatSessionState.currentConversationMeta,
           title: activeConversation.title,
           contextKey: activeConversation.contextKey,
           contextUrl: activeConversation.contextUrl,
@@ -325,42 +365,45 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
         } as ConversationMeta;
       }
     }
-    requireDep("renderHistoryList", renderHistoryList)();
-    requireDep("updateContextChip", updateContextChip)();
+    emitChange({ refreshContextChip: true });
     await saveConversations();
   }
 
   async function saveConversations(): Promise<void> {
-    await requireDep("storage", storage).set({
+    await storage?.set({
       [conversationsStorageKey]: saved().slice(0, maxSavedConversations)
     });
-    requireDep("renderHistoryList", renderHistoryList)();
+    emitChange({});
   }
 
   async function restoreLatest(): Promise<boolean> {
-    const targetContextKey = sidepanelState.liveContextKey || sidepanelState.currentContextKey;
-    const currentRef = sidepanelState.liveContextData || sidepanelState.contextData;
+    const targetContextKey = chatSessionState.liveContextKey || chatSessionState.currentContextKey;
+    const currentRef = chatSessionState.liveContextData || chatSessionState.contextData;
     const conversations = saved();
     const latest = conversations.find((item) =>
       _doesConversationMatchCurrentContext(item, currentRef, targetContextKey)
     );
     if (!latest) {
-      requireDep("stopActiveChat", stopActiveChat)();
-      sidepanelState.currentConversationId = "";
-      sidepanelState.currentConversationMeta = null;
-      sidepanelState.chatHistory = [];
+      // 当前会话拆除：同步断流（先于下方状态清空与任何 await——流式身份守卫的
+      // 承重时序，会话复活回归防线）。原编排此处不重渲列表/chip/视图。
+      onStreamInterrupted();
+      chatSessionState.currentConversationId = "";
+      chatSessionState.currentConversationMeta = null;
+      chatSessionState.chatHistory = [];
       return false;
     }
     apply(latest);
     return true;
   }
 
-  function apply(conversation: Conversation | null | undefined): void {
+  // change 缺省仅声明 chip 刷新（apply 的上下文落账语义）；resetView 由
+  // applyById 等会话重建入口追加。
+  function apply(conversation: Conversation | null | undefined, change: ConversationChange = {}): void {
     if (!conversation) {
       return;
     }
-    sidepanelState.currentConversationId = conversation.id;
-    sidepanelState.currentConversationMeta = {
+    chatSessionState.currentConversationId = conversation.id;
+    chatSessionState.currentConversationMeta = {
       id: conversation.id,
       title: conversation.title,
       createdAt: conversation.createdAt,
@@ -373,24 +416,23 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
       contextRef: conversation.contextRef || null,
       resolvedContext: null
     };
-    sidepanelState.chatHistory = Array.isArray(conversation.messages)
+    chatSessionState.chatHistory = Array.isArray(conversation.messages)
       ? conversation.messages.map((item) => ({ role: item.role, content: String(item.content || "") }))
       : [];
-    const liveData = sidepanelState.liveContextData;
-    const liveKey = sidepanelState.liveContextKey;
+    const liveData = chatSessionState.liveContextData;
+    const liveKey = chatSessionState.liveContextKey;
     if (liveData && conversation.contextKey && conversation.contextKey === liveKey) {
-      sidepanelState.contextData = { ...liveData };
-      sidepanelState.currentContextKey = liveKey;
-      sidepanelState.currentConversationMeta = {
-        ...sidepanelState.currentConversationMeta,
+      chatSessionState.contextData = { ...liveData };
+      chatSessionState.currentContextKey = liveKey;
+      chatSessionState.currentConversationMeta = {
+        ...chatSessionState.currentConversationMeta,
         resolvedContext: { ...liveData }
       } as ConversationMeta;
     } else if (conversation.contextRef) {
-      sidepanelState.contextData = _buildContextPlaceholder(conversation.contextRef);
-      sidepanelState.currentContextKey = conversation.contextKey || _buildContextKey(sidepanelState.contextData);
+      chatSessionState.contextData = _buildContextPlaceholder(conversation.contextRef);
+      chatSessionState.currentContextKey = conversation.contextKey || _buildContextKey(chatSessionState.contextData);
     }
-    requireDep("updateContextChip", updateContextChip)();
-    requireDep("renderHistoryList", renderHistoryList)();
+    emitChange({ refreshContextChip: true, ...change });
   }
 
   function applyById(id: string): void {
@@ -398,18 +440,21 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     if (!conversation) {
       return;
     }
-    apply(conversation);
-    requireDep("renderInitialState", renderInitialState)();
-    if (conversation.contextKey && conversation.contextKey !== sidepanelState.liveContextKey) {
-      requireDep("showConversationContextNotice", showConversationContextNotice)("正在加载原视频上下文...");
+    // 单次 change 声明全部呈现面（反转前为 apply 的 chip+列表、随后的
+    // renderInitialState 两段渲染；合成一次发火，次序 list→chip→reset 与
+    // 原 chip→list→reset 的最终 DOM 一致——各面均为幂等状态投影）。
+    apply(conversation, { resetView: true });
+    if (conversation.contextKey && conversation.contextKey !== chatSessionState.liveContextKey) {
+      onContextNotice({ kind: "pending", message: "正在加载原视频上下文..." });
       void hydratePinned({ silent: true });
     }
   }
 
   async function deleteById(id: string): Promise<void> {
-    const wasCurrent = id && id === sidepanelState.currentConversationId;
+    const wasCurrent = id && id === chatSessionState.currentConversationId;
     if (wasCurrent) {
-      requireDep("stopActiveChat", stopActiveChat)();
+      // 断流先于落盘（同步，见 restoreLatest 注记）
+      onStreamInterrupted();
     }
     const next = saved().filter((item) => item.id !== id);
     commitSaved(next);
@@ -417,16 +462,15 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     if (!wasCurrent) {
       return;
     }
-    sidepanelState.currentConversationId = "";
-    sidepanelState.currentConversationMeta = null;
-    sidepanelState.chatHistory = [];
-    const liveData = sidepanelState.liveContextData;
+    chatSessionState.currentConversationId = "";
+    chatSessionState.currentConversationMeta = null;
+    chatSessionState.chatHistory = [];
+    const liveData = chatSessionState.liveContextData;
     if (liveData) {
-      sidepanelState.contextData = { ...liveData };
-      sidepanelState.currentContextKey = sidepanelState.liveContextKey || _buildContextKey(liveData);
-      requireDep("updateContextChip", updateContextChip)();
+      chatSessionState.contextData = { ...liveData };
+      chatSessionState.currentContextKey = chatSessionState.liveContextKey || _buildContextKey(liveData);
     }
-    requireDep("renderInitialState", renderInitialState)();
+    emitChange({ refreshContextChip: true, resetView: true });
   }
 
   async function clearAll(): Promise<void> {
@@ -437,43 +481,43 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
       return;
     }
     commitSaved([]);
-    requireDep("stopActiveChat", stopActiveChat)();
-    sidepanelState.currentConversationId = "";
-    sidepanelState.currentConversationMeta = null;
-    sidepanelState.chatHistory = [];
+    onStreamInterrupted();
+    chatSessionState.currentConversationId = "";
+    chatSessionState.currentConversationMeta = null;
+    chatSessionState.chatHistory = [];
     await saveConversations();
-    requireDep("hideHistoryPopover", hideHistoryPopover)();
-    const liveData = sidepanelState.liveContextData;
+    const liveData = chatSessionState.liveContextData;
     if (liveData) {
-      sidepanelState.contextData = { ...liveData };
-      sidepanelState.currentContextKey = sidepanelState.liveContextKey || _buildContextKey(liveData);
-      requireDep("updateContextChip", updateContextChip)();
+      chatSessionState.contextData = { ...liveData };
+      chatSessionState.currentContextKey = chatSessionState.liveContextKey || _buildContextKey(liveData);
     }
-    requireDep("renderInitialState", renderInitialState)();
+    // 原编排：save 后收起 popover → live 回填 + chip → renderInitialState；
+    // 合成一次发火（历史列表已随 save 的 change 重渲，此处各面幂等）。
+    emitChange({ refreshContextChip: true, historyCleared: true, resetView: true });
   }
 
   function isCurrent(id: string): boolean {
-    return id === sidepanelState.currentConversationId;
+    return id === chatSessionState.currentConversationId;
   }
 
   async function persistCurrent(): Promise<void> {
-    const chat = sidepanelState.chatHistory;
-    const context = sidepanelState.contextData;
+    const chat = chatSessionState.chatHistory;
+    const context = chatSessionState.contextData;
     if (!chat.length || !context) {
       return;
     }
     const now = Date.now();
-    let currentId = sidepanelState.currentConversationId;
-    let meta = sidepanelState.currentConversationMeta;
+    let currentId = chatSessionState.currentConversationId;
+    let meta = chatSessionState.currentConversationMeta;
     if (!currentId) {
       currentId = _generateConversationId();
-      sidepanelState.currentConversationId = currentId;
+      chatSessionState.currentConversationId = currentId;
       meta = {
         id: currentId,
         title: _buildConversationTitle(context),
         createdAt: now,
         updatedAt: now,
-        contextKey: sidepanelState.currentContextKey,
+        contextKey: chatSessionState.currentContextKey,
         contextTitle: String(context.title || "").trim(),
         contextUrl: String(context.url || "").trim(),
         isVideoContext: context.isVideoContext !== false,
@@ -481,12 +525,12 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
         contextRef: _buildAiContextRef(context),
         resolvedContext: { ...context }
       };
-      sidepanelState.currentConversationMeta = meta;
+      chatSessionState.currentConversationMeta = meta;
     }
     const nextConversation: Conversation = {
       id: currentId,
       title: meta?.title || _buildConversationTitle(context),
-      contextKey: String(meta?.contextKey || sidepanelState.currentContextKey || "").trim(),
+      contextKey: String(meta?.contextKey || chatSessionState.currentContextKey || "").trim(),
       contextTitle: String(meta?.contextTitle || context.title || "").trim(),
       contextUrl: String(meta?.contextUrl || context.url || "").trim(),
       isVideoContext: meta?.isVideoContext !== false,
@@ -497,7 +541,7 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     };
     const filtered = saved().filter((item) => item.id !== currentId);
     commitSaved([nextConversation, ...filtered].slice(0, maxSavedConversations));
-    sidepanelState.currentConversationMeta = {
+    chatSessionState.currentConversationMeta = {
       id: nextConversation.id,
       title: nextConversation.title,
       createdAt: nextConversation.createdAt,
@@ -514,38 +558,38 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
   }
 
   async function hydratePinned({ silent = false }: HydratePinnedOptions = {}): Promise<boolean> {
-    let meta = sidepanelState.currentConversationMeta;
+    let meta = chatSessionState.currentConversationMeta;
     const targetKey = String(meta?.contextKey || "").trim();
     const cachedResolvedContext = meta?.resolvedContext;
     if (cachedResolvedContext && typeof cachedResolvedContext === "object") {
-      sidepanelState.contextData = { ...cachedResolvedContext };
-      sidepanelState.currentContextKey = targetKey || _buildContextKey(sidepanelState.contextData);
-      requireDep("updateContextChip", updateContextChip)();
-      requireDep("removeConversationContextNotice", removeConversationContextNotice)();
+      chatSessionState.contextData = { ...cachedResolvedContext };
+      chatSessionState.currentContextKey = targetKey || _buildContextKey(chatSessionState.contextData);
+      emitChange({ refreshContextChip: true });
+      onContextNotice({ kind: "clear" });
       return true;
     }
 
-    if (targetKey && sidepanelState.liveContextKey && targetKey === sidepanelState.liveContextKey) {
-      const ok = await requireDep("loadContextState", loadContextState)({ forceRefresh: false, silent: true });
-      const context = sidepanelState.contextData;
+    if (targetKey && chatSessionState.liveContextKey && targetKey === chatSessionState.liveContextKey) {
+      const ok = await loadContextState({ forceRefresh: false, silent: true });
+      const context = chatSessionState.contextData;
       if (ok && context) {
-        sidepanelState.currentContextKey = targetKey;
-        meta = sidepanelState.currentConversationMeta;
-        sidepanelState.currentConversationMeta = {
+        chatSessionState.currentContextKey = targetKey;
+        meta = chatSessionState.currentConversationMeta;
+        chatSessionState.currentConversationMeta = {
           ...meta,
           resolvedContext: { ...context }
         } as ConversationMeta;
-        requireDep("updateContextChip", updateContextChip)();
-        requireDep("removeConversationContextNotice", removeConversationContextNotice)();
+        emitChange({ refreshContextChip: true });
+        onContextNotice({ kind: "clear" });
         return true;
       }
     }
 
-    const contextRef = sidepanelState.currentConversationMeta?.contextRef || null;
+    const contextRef = chatSessionState.currentConversationMeta?.contextRef || null;
     if (!contextRef) {
-      requireDep("removeConversationContextNotice", removeConversationContextNotice)();
+      onContextNotice({ kind: "clear" });
       if (!silent) {
-        requireDep("showConversationContextError", showConversationContextError)("历史对话缺少原视频信息，无法继续。");
+        onContextNotice({ kind: "error", message: "历史对话缺少原视频信息，无法继续。" });
       }
       return false;
     }
@@ -557,29 +601,27 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
       error: (error as Error)?.message || String(error || "")
     }));
     if (!response?.ok || !response.payload) {
-      requireDep("removeConversationContextNotice", removeConversationContextNotice)();
+      onContextNotice({ kind: "clear" });
       if (!silent) {
-        requireDep("showConversationContextError", showConversationContextError)(
-          `历史视频上下文获取失败：${response?.error || "未知错误"}`
-        );
+        onContextNotice({ kind: "error", message: `历史视频上下文获取失败：${response?.error || "未知错误"}` });
       }
       return false;
     }
 
     const resolved = response.payload as Record<string, unknown>;
-    sidepanelState.contextData = resolved;
-    sidepanelState.currentContextKey = targetKey || _buildContextKey(resolved);
-    meta = sidepanelState.currentConversationMeta;
-    sidepanelState.currentConversationMeta = {
+    chatSessionState.contextData = resolved;
+    chatSessionState.currentContextKey = targetKey || _buildContextKey(resolved);
+    meta = chatSessionState.currentConversationMeta;
+    chatSessionState.currentConversationMeta = {
       ...meta,
-      contextKey: sidepanelState.currentContextKey,
+      contextKey: chatSessionState.currentContextKey,
       contextTitle: String(resolved.title || meta?.contextTitle || "").trim(),
       contextUrl: String(resolved.url || meta?.contextUrl || "").trim(),
       contextRef: _buildAiContextRef(resolved),
       resolvedContext: { ...resolved }
     } as ConversationMeta;
-    requireDep("updateContextChip", updateContextChip)();
-    requireDep("removeConversationContextNotice", removeConversationContextNotice)();
+    emitChange({ refreshContextChip: true });
+    onContextNotice({ kind: "clear" });
     return true;
   }
 
@@ -587,7 +629,7 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     contextRef: ConversationContextRef
   ): Promise<{ ok?: boolean; payload?: unknown; error?: string }> {
     try {
-      const payload = await requireDep("resolveAiConversationContext", resolveAiConversationContext)(contextRef);
+      const payload = await resolveAiConversationRef(contextRef, "context");
       return { ok: true, payload };
     } catch (error: unknown) {
       return { ok: false, error: (error as Error)?.message || String(error || "") };

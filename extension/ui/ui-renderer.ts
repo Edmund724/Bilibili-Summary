@@ -191,12 +191,12 @@ export function buildUiHtml(): string {
                  自动发送成功即消费隐藏；卡上的取消按钮清意图。 -->
             <div id="${ids.readingTabBodyChat}" class="boc-reading-tab-body" role="tabpanel" aria-label="AI 对话" hidden>
               <div id="${ids.readingChatRoot}" class="boc-reading-chat">
-                <header class="sp-header boc-reading-chat-header">
-                  <button type="button" class="sp-context-chip" id="${ids.readingChatContextChip}" title="">加载中...</button>
-                  <button id="${ids.readingChatHistoryBtn}" type="button" class="sp-toolbar-btn" title="历史对话">
+                <header class="chat-header boc-reading-chat-header">
+                  <button type="button" class="chat-context-chip" id="${ids.readingChatContextChip}" title="">加载中...</button>
+                  <button id="${ids.readingChatHistoryBtn}" type="button" class="chat-toolbar-btn" title="历史对话">
                     <span>历史对话</span>
                   </button>
-                  <button id="${ids.readingChatRefreshBtn}" type="button" class="sp-icon-btn" title="刷新当前视频上下文" aria-label="刷新上下文">
+                  <button id="${ids.readingChatRefreshBtn}" type="button" class="chat-icon-btn" title="刷新当前视频上下文" aria-label="刷新上下文">
                     <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
                       <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
                       <path d="M21 3v5h-5"></path>
@@ -204,7 +204,7 @@ export function buildUiHtml(): string {
                       <path d="M8 16H3v5"></path>
                     </svg>
                   </button>
-                  <button id="${ids.readingChatNewBtn}" type="button" class="sp-icon-btn" title="开启新会话" aria-label="开启新会话">
+                  <button id="${ids.readingChatNewBtn}" type="button" class="chat-icon-btn" title="开启新会话" aria-label="开启新会话">
                     <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
                       <path d="M12 5v14"></path>
                       <path d="M5 12h14"></path>
@@ -221,44 +221,44 @@ export function buildUiHtml(): string {
                   <blockquote class="boc-reading-chat-intent-quote"></blockquote>
                 </div>
 
-                <div id="${ids.readingChatAsrNotice}" class="sp-asr-notice" hidden>该视频无字幕，正在音频转写…</div>
-                <main class="sp-messages" id="${ids.readingChatMessages}">
-                  <div class="sp-suggestions" id="${ids.readingChatSuggestions}"></div>
+                <div id="${ids.readingChatAsrNotice}" class="chat-asr-notice" hidden>该视频无字幕，正在音频转写…</div>
+                <main class="chat-messages" id="${ids.readingChatMessages}">
+                  <div class="chat-suggestions" id="${ids.readingChatSuggestions}"></div>
                 </main>
-                <footer class="sp-footer">
-                  <div class="sp-toolbar">
-                    <select id="${ids.readingChatModelSelect}" class="sp-model-select" aria-label="选择模型平台"></select>
-                    <div id="${ids.readingChatThinkingToggle}" class="sp-thinking-toggle" role="group" aria-label="思考档位">
-                      <button type="button" class="sp-thinking-btn" data-level="off">Off</button>
-                      <button type="button" class="sp-thinking-btn" data-level="low">Low</button>
-                      <button type="button" class="sp-thinking-btn" data-level="high">High</button>
+                <footer class="chat-footer">
+                  <div class="chat-toolbar">
+                    <select id="${ids.readingChatModelSelect}" class="chat-model-select" aria-label="选择模型平台"></select>
+                    <div id="${ids.readingChatThinkingToggle}" class="chat-thinking-toggle" role="group" aria-label="思考档位">
+                      <button type="button" class="chat-thinking-btn" data-level="off">Off</button>
+                      <button type="button" class="chat-thinking-btn" data-level="low">Low</button>
+                      <button type="button" class="chat-thinking-btn" data-level="high">High</button>
                     </div>
-                    <button id="${ids.readingChatPresetBtn}" type="button" class="sp-toolbar-btn" title="预设提示词">
+                    <button id="${ids.readingChatPresetBtn}" type="button" class="chat-toolbar-btn" title="预设提示词">
                       <span>预设提示词</span>
                     </button>
                   </div>
-                  <div id="${ids.readingChatPresetPopover}" class="sp-preset-popover" hidden>
-                    <div id="${ids.readingChatPresetList}" class="sp-preset-list"></div>
-                    <div class="sp-preset-editor">
-                      <input id="${ids.readingChatPresetInput}" class="sp-preset-input" type="text" placeholder="添加预设提示词" />
-                      <button id="${ids.readingChatPresetAddBtn}" type="button" class="sp-preset-add-btn">添加</button>
+                  <div id="${ids.readingChatPresetPopover}" class="chat-preset-popover" hidden>
+                    <div id="${ids.readingChatPresetList}" class="chat-preset-list"></div>
+                    <div class="chat-preset-editor">
+                      <input id="${ids.readingChatPresetInput}" class="chat-preset-input" type="text" placeholder="添加预设提示词" />
+                      <button id="${ids.readingChatPresetAddBtn}" type="button" class="chat-preset-add-btn">添加</button>
                     </div>
                   </div>
-                  <div id="${ids.readingChatHistoryPopover}" class="sp-history-popover" hidden>
-                    <div class="sp-history-popover-head">
-                      <span class="sp-history-popover-title">历史对话</span>
-                      <button id="${ids.readingChatHistoryClearBtn}" type="button" class="sp-history-clear-btn">清空全部</button>
+                  <div id="${ids.readingChatHistoryPopover}" class="chat-history-popover" hidden>
+                    <div class="chat-history-popover-head">
+                      <span class="chat-history-popover-title">历史对话</span>
+                      <button id="${ids.readingChatHistoryClearBtn}" type="button" class="chat-history-clear-btn">清空全部</button>
                     </div>
-                    <div id="${ids.readingChatHistoryList}" class="sp-history-list"></div>
+                    <div id="${ids.readingChatHistoryList}" class="chat-history-list"></div>
                   </div>
-                  <div class="sp-input-row">
+                  <div class="chat-input-row">
                     <textarea
                       id="${ids.readingChatInput}"
                       rows="2"
                       placeholder="回车发送，Shift+Enter 换行"
                       autocomplete="off"
                     ></textarea>
-                    <button id="${ids.readingChatStopBtn}" type="button" class="sp-stop-btn" hidden>停止</button>
+                    <button id="${ids.readingChatStopBtn}" type="button" class="chat-stop-btn" hidden>停止</button>
                   </div>
                 </footer>
               </div>

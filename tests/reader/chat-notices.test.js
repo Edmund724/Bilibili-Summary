@@ -67,7 +67,7 @@ describe("showConversationContextNotice / removeConversationContextNotice", () =
 
     feedback.showConversationContextNotice("<b>加粗</b>", 0);
 
-    const notice = messages.querySelector(".sp-context-notice");
+    const notice = messages.querySelector(".chat-context-notice");
     expect(notice).not.toBeNull();
     expect(notice.textContent).toBe("<b>加粗</b>");
     expect(notice.querySelector("b")).toBeNull();
@@ -79,7 +79,7 @@ describe("showConversationContextNotice / removeConversationContextNotice", () =
     feedback.showConversationContextNotice("第一条", 0);
     feedback.showConversationContextNotice("第二条", 0);
 
-    const notices = messages.querySelectorAll(".sp-context-notice");
+    const notices = messages.querySelectorAll(".chat-context-notice");
     expect(notices).toHaveLength(1);
     expect(notices[0].textContent).toBe("第二条");
   });
@@ -96,7 +96,7 @@ describe("showConversationContextNotice / removeConversationContextNotice", () =
     // 与生产 window.setTimeout 行为一致：回调里的 remove 会 clearTimeout 一次
     // 过期句柄（无害），随后 timer 归零
     expect(deps.clearTimer).toHaveBeenCalledTimes(1);
-    expect(messages.querySelector(".sp-context-notice")).toBeNull();
+    expect(messages.querySelector(".chat-context-notice")).toBeNull();
     expect(timers).toHaveLength(0);
   });
 
@@ -108,7 +108,7 @@ describe("showConversationContextNotice / removeConversationContextNotice", () =
 
     expect(deps.clearTimer).toHaveBeenCalledTimes(1);
     expect(timers).toHaveLength(0);
-    expect(messages.querySelector(".sp-context-notice")).toBeNull();
+    expect(messages.querySelector(".chat-context-notice")).toBeNull();
   });
 
   it("openSettingsAction：附「前往设置」链接，点击触发 onOpenSettings 回调", () => {
@@ -116,7 +116,7 @@ describe("showConversationContextNotice / removeConversationContextNotice", () =
 
     feedback.showConversationContextNotice("需要配置", 0, { openSettingsAction: true });
 
-    const link = messages.querySelector(".sp-context-notice a");
+    const link = messages.querySelector(".chat-context-notice a");
     expect(link).not.toBeNull();
     expect(link.textContent).toBe("前往设置");
     link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
@@ -140,8 +140,8 @@ describe("showConversationContextError / removeCenteredState", () => {
 
     feedback.showConversationContextError("读取失败");
 
-    expect(messages.querySelectorAll(".sp-context-notice")).toHaveLength(0);
-    const error = messages.querySelector(".sp-center-error");
+    expect(messages.querySelectorAll(".chat-context-notice")).toHaveLength(0);
+    const error = messages.querySelector(".chat-center-error");
     expect(error.textContent).toBe("读取失败");
     expect(deps.scrollToBottom).toHaveBeenCalledTimes(1);
   });
@@ -152,7 +152,7 @@ describe("showConversationContextError / removeCenteredState", () => {
 
     feedback.removeCenteredState();
 
-    expect(messages.querySelectorAll(".sp-center-error")).toHaveLength(0);
+    expect(messages.querySelectorAll(".chat-center-error")).toHaveLength(0);
   });
 });
 

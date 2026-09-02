@@ -6,7 +6,7 @@
 // tokens → stop/error handling". It owns the stream runtime state
 // (activePort / activeAssistantNode / activeUserPrompt / thinkingNode /
 // streamSlowNoticeTimer / streamFirstTokenReceived), performs the DOM node
-// operations for the live chat message area (.sp-msg-* nodes, scrolling), and
+// operations for the live chat message area (.chat-msg-* nodes, scrolling), and
 // delegates persistence (conversation-store, injected via deps) and markdown
 // rendering (../ui/markdown.js, pulled in directly).
 //
@@ -37,7 +37,7 @@
 import { renderMarkdown, splitMarkdownTail, stripThinkBlocks } from "../ui/markdown.js";
 import { linkifyAssistantTimestamps, type TimestampNavDeps } from "../ui/timestamp-nav.js";
 import type { ConversationStore } from "./conversation-store.js";
-import { sidepanelState } from "./chat-state.js";
+import { chatSessionState } from "./chat-state.js";
 
 const STREAM_SLOW_NOTICE_MS = 15000;
 
@@ -132,7 +132,7 @@ interface ThinkingDisplayState {
  * The runtime owns the stream state machine and the auto-scroll flag
  * (shouldAutoScrollMessages, closure-local); conversation state (chatHistory /
  * conversation meta / context / aiPrefs / thinking level) is read/written via
- * the shared sidepanelState module. deps only carries DOM refs, the store
+ * the shared chatSessionState module. deps only carries DOM refs, the store
  * instance and UI/transport callbacks. The returned methods are bound closures
  * over the runtime's own closure state, so multiple factories would be isolated —
  * sidepanel constructs exactly one.
@@ -340,10 +340,10 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
       if (hasContext !== true) {
         return;
       }
-      const currentMeta = sidepanelState.currentConversationMeta;
-      if (!currentMeta?.pinnedContext && currentMeta?.contextKey && currentMeta.contextKey !== sidepanelState.currentContextKey) {
-        sidepanelState.currentConversationId = "";
-        sidepanelState.currentConversationMeta = null;
+      const currentMeta = chatSessionState.currentConversationMeta;
+      if (!currentMeta?.pinnedContext && currentMeta?.contextKey && currentMeta.contextKey !== chatSessionState.currentContextKey) {
+        chatSessionState.currentConversationId = "";
+        chatSessionState.currentConversationMeta = null;
       }
 
       deps.ui.removeCenteredState();
@@ -354,7 +354,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
       deps.ui.autosizeInput();
       setStreamingUiState(true);
       activeUserPrompt = text;
-      activeConversationId = sidepanelState.currentConversationId;
+      activeConversationId = chatSessionState.currentConversationId;
       activeAssistantNode = appendAssistantPlaceholder();
       startStreamSlowNoticeTimer();
       streamFirstTokenReceived = false;
@@ -388,10 +388,10 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
       // contextKey 始终携带，offscreen 据此校验单槽匹配并在缺失时报错触发重置。
       // 其余元数据/history/aiSystemPrompt 保持全量（体积小且每条都可能变）。
       const context = {
-        ...sidepanelState.contextData,
-        aiSystemPrompt: sidepanelState.aiPrefs.aiSystemPrompt
+        ...chatSessionState.contextData,
+        aiSystemPrompt: chatSessionState.aiPrefs.aiSystemPrompt
       };
-      const contextKey = String(sidepanelState.currentContextKey || "").trim();
+      const contextKey = String(chatSessionState.currentContextKey || "").trim();
       if (contextKey && lastAckedContextKey === contextKey) {
         delete context.subtitleBody;
       }
@@ -399,19 +399,19 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
       port.postMessage({
         action: "chat",
         providerId,
-        thinkingLevel: sidepanelState.aiThinkingLevel,
+        thinkingLevel: chatSessionState.aiThinkingLevel,
         context,
         contextKey,
         prompt: text,
         // 历史只走顶层 history（offscreen/ai 侧统一读 msg.history）；
         // 不再向 context 里塞 chatHistory 副本（无任何读取方的死负载）。
-        history: sidepanelState.chatHistory
+        history: chatSessionState.chatHistory
       });
     } catch (err) {
       // connectPort 失败（ensure offscreen 文档/建连抛错）无回退：UI 卡流式
       // 态而 isStreaming() 为 false（activePort 从未置位，但 setStreamingUiState
       // (true) 已调用）。这里恢复全部半置位流状态并走用户可见错误路径——
-      // 与 showAssistantError 同款机制（endStream 收口六步 + .sp-msg-error 占位）。
+      // 与 showAssistantError 同款机制（endStream 收口六步 + .chat-msg-error 占位）。
       console.error("[chat-runtime] sendMessage 失败：", err);
       sendInFlight = false;
       thinkingEnded = false;
@@ -434,7 +434,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   // =========================================================================
   function appendUserMessage(text: string, shouldScroll = true): void {
     const node = document.createElement("div");
-    node.className = "sp-msg sp-msg-user";
+    node.className = "chat-msg chat-msg-user";
     node.textContent = text;
     deps.messages.appendChild(node);
     if (shouldScroll) {
@@ -448,12 +448,12 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   // =========================================================================
   function appendAssistantPlaceholder(): HTMLDivElement {
     const node = document.createElement("div");
-    node.className = "sp-msg sp-msg-assistant";
+    node.className = "chat-msg chat-msg-assistant";
     // 流式 token 累加器（原 dataset.raw）随占位节点初始化/重置，
     // 保证第二条消息不会串上上一条的流式文本。
     resetTokenStreamState(node);
     const cursor = document.createElement("span");
-    cursor.className = "sp-msg-cursor";
+    cursor.className = "chat-msg-cursor";
     node.appendChild(cursor);
     deps.messages.appendChild(node);
     shouldAutoScrollMessages = true;
@@ -469,12 +469,12 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
       return null;
     }
     const node = document.createElement("div");
-    node.className = "sp-thinking";
+    node.className = "chat-thinking";
     const label = document.createElement("span");
-    label.className = "sp-thinking-label";
+    label.className = "chat-thinking-label";
     label.textContent = "思考中…";
     const text = document.createElement("div");
-    text.className = "sp-thinking-text";
+    text.className = "chat-thinking-text";
     node.appendChild(label);
     node.appendChild(text);
     assistantNode.prepend(node);
@@ -484,7 +484,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   // =========================================================================
   // appendThinkingText
   // =========================================================================
-  // 思考文本的流式累加器（原挂在 .sp-thinking-text 的 dataset.acc，每条增量
+  // 思考文本的流式累加器（原挂在 .chat-thinking-text 的 dataset.acc，每条增量
   // 全量复制旧串，O(n²) 且无上限——纯自用累加器，无任何外部读取方）。
   // 现改为 WeakMap 按节点存放"前 MAX_DISPLAY_CHARS 字符头缓冲 + 溢出计数"：
   // 每条增量只复制能进头缓冲的部分，其余仅累加计数，总复制量 O(n)。
@@ -497,7 +497,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     if (!node) {
       return;
     }
-    const textNode = node.querySelector(".sp-thinking-text");
+    const textNode = node.querySelector(".chat-thinking-text");
     if (!textNode) {
       return;
     }
@@ -527,7 +527,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   // appendToken
   // =========================================================================
   // 流式渲染优化：流式过程中按帧做"稳定前缀 + 末块"增量 markdown 渲染。
-  // 流式节点的 DOM 为两个堆叠的块级容器（.sp-stream-stable / .sp-stream-tail，
+  // 流式节点的 DOM 为两个堆叠的块级容器（.chat-stream-stable / .chat-stream-tail，
   // 无额外样式——markdown 输出本就是块级，与单容器渲染等价）：
   //   - stable：切点前已稳定的前缀块（splitMarkdownTail 按最后一个空行边界
   //     切分，且切点前围栏已闭合），只在增长时渲染一次；
@@ -578,8 +578,8 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     }
     cancelTokenFlush();
     resetTokenStreamState(node);
-    const cursor = node.querySelector(".sp-msg-cursor");
-    node.querySelectorAll(".sp-stream-stable, .sp-stream-tail, .sp-thinking").forEach((el) => el.remove());
+    const cursor = node.querySelector(".chat-msg-cursor");
+    node.querySelectorAll(".chat-stream-stable, .chat-stream-tail, .chat-thinking").forEach((el) => el.remove());
     if (cursor) {
       node.appendChild(cursor);
     }
@@ -594,9 +594,9 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
       return;
     }
     const stableEl = document.createElement("div");
-    stableEl.className = "sp-stream-stable";
+    stableEl.className = "chat-stream-stable";
     const tailEl = document.createElement("div");
-    tailEl.className = "sp-stream-tail";
+    tailEl.className = "chat-stream-tail";
     node.appendChild(stableEl);
     node.appendChild(tailEl);
     state.stableEl = stableEl;
@@ -642,7 +642,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
       const { stableText, tailText } = splitMarkdownTail(cleaned);
       ensureStreamContainers(node, state);
       // 首帧渲染即移除思考节点（与旧的整节点 innerHTML 覆盖行为一致）
-      const thinking = node.querySelector(".sp-thinking");
+      const thinking = node.querySelector(".chat-thinking");
       if (thinking) {
         thinking.remove();
       }
@@ -652,7 +652,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
         state.stableEl!.innerHTML = renderMarkdown(stableText);
       }
       // 先取光标引用再重写 tail（innerHTML 赋值会清掉 tail 内的旧光标）
-      const cursor = node.querySelector(".sp-msg-cursor");
+      const cursor = node.querySelector(".chat-msg-cursor");
       state.tailEl!.innerHTML = renderMarkdown(tailText);
       if (cursor) {
         state.tailEl!.appendChild(cursor);
@@ -700,8 +700,8 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   // chatHistory、不持久化（防会话复活 / 串话），DOM 仍由 renderStep 更新。
   function commitAssistantTurn(raw: string): void {
     if (activeUserPrompt && raw && deps.store.isCurrent(activeConversationId)) {
-      sidepanelState.chatHistory.push({ role: "user", content: activeUserPrompt });
-      sidepanelState.chatHistory.push({ role: "assistant", content: raw });
+      chatSessionState.chatHistory.push({ role: "user", content: activeUserPrompt });
+      chatSessionState.chatHistory.push({ role: "assistant", content: raw });
       void deps.store.persistCurrent();
     }
   }
@@ -730,7 +730,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     endStream(node, (n) => {
       n.innerHTML = "";
       const err = document.createElement("div");
-      err.className = "sp-msg-error";
+      err.className = "chat-msg-error";
       err.textContent = `错误：${error}`;
       n.appendChild(err);
     });
@@ -744,7 +744,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     endStream(node, (n) => {
       const raw = getStreamRaw(n);
       const stopped = document.createElement("div");
-      stopped.className = "sp-msg-stopped";
+      stopped.className = "chat-msg-stopped";
       stopped.textContent = reason || "已停止生成";
       if (raw.trim()) {
         renderAssistantMessage(n, raw, { userPrompt: activeUserPrompt });
@@ -838,16 +838,16 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     const pasteReadyRaw = deps.normalizeMarkdownForSectionPaste(cleanedRaw);
 
     const content = document.createElement("div");
-    content.className = "sp-msg-assistant-body";
+    content.className = "chat-msg-assistant-body";
     content.innerHTML = renderMarkdown(cleanedRaw);
     linkifyAssistantTimestamps(content, deps.getTimestampNavDeps());
     node.appendChild(content);
 
     const actions = document.createElement("div");
-    actions.className = "sp-msg-actions";
+    actions.className = "chat-msg-actions";
     const copyBtn = document.createElement("button");
     copyBtn.type = "button";
-    copyBtn.className = "sp-msg-copy-btn";
+    copyBtn.className = "chat-msg-copy-btn";
     copyBtn.setAttribute("aria-label", "复制回复");
     copyBtn.setAttribute("title", "复制回复");
     copyBtn.innerHTML = `

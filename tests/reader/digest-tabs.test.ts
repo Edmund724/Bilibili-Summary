@@ -111,8 +111,8 @@ describe("统一 Digest 面板三标签", () => {
     expect(document.getElementById(ids.readingChatHistoryBtn)).not.toBe(null);
     expect(document.getElementById(ids.readingChatStopBtn)).not.toBe(null);
     const chatMessages = document.getElementById(ids.readingChatMessages) as HTMLElement;
-    expect(chatMessages.querySelectorAll(".sp-msg, .sp-center-error").length).toBe(0);
-    expect((chatMessages.querySelector(".sp-suggestions") as HTMLElement).innerHTML).toBe("");
+    expect(chatMessages.querySelectorAll(".chat-msg, .chat-center-error").length).toBe(0);
+    expect((chatMessages.querySelector(".chat-suggestions") as HTMLElement).innerHTML).toBe("");
     expect(((document.getElementById(ids.readingChatInput) as HTMLTextAreaElement).value) || "").toBe("");
     // 待解释意图引用卡默认隐藏
     expect((document.getElementById(ids.readingChatIntent) as HTMLElement).hidden).toBe(true);

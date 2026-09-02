@@ -2,7 +2,7 @@
 //（PR5 自 extension/pages/sidepanel-notices.ts 重建：逻辑照抄（通知条去重、
 // textContent 防注入、自动消失定时器、居中错误块、suggestionsNode 同步置空、
 // 近底阈值），DOM 壳换新——容器经 deps 注入 reader 的 readingChatMessages，
-// class 名沿用 .sp-context-notice / .sp-center-error / .sp-suggestions）。
+// class 名沿用 .chat-context-notice / .chat-center-error / .chat-suggestions）。
 //
 // 唯一语义改造（盘点报告 §1.1 notices 判定行）：「前往设置」链接在 reader
 //（content script）语境下没有 chrome.runtime.openOptionsPage；digest-only-ui
@@ -43,7 +43,7 @@ export function createReaderChatFeedback({ messages, setTimer, clearTimer, scrol
   function showConversationContextNotice(message: string, autoHideMs = 0, { openSettingsAction = false }: { openSettingsAction?: boolean } = {}): void {
     removeConversationContextNotice();
     const notice = document.createElement("div");
-    notice.className = "sp-context-notice";
+    notice.className = "chat-context-notice";
     notice.textContent = String(message || "").trim();
     if (openSettingsAction) {
       const link = document.createElement("a");
@@ -69,7 +69,7 @@ export function createReaderChatFeedback({ messages, setTimer, clearTimer, scrol
       clearTimer(contextNoticeTimer);
       contextNoticeTimer = 0;
     }
-    messages.querySelectorAll(".sp-context-notice").forEach((node) => node.remove());
+    messages.querySelectorAll(".chat-context-notice").forEach((node) => node.remove());
   }
 
   function showConversationContextError(message: string): void {
@@ -79,14 +79,14 @@ export function createReaderChatFeedback({ messages, setTimer, clearTimer, scrol
     removeConversationContextNotice();
     removeCenteredState();
     const stateNode = document.createElement("div");
-    stateNode.className = "sp-center-error";
+    stateNode.className = "chat-center-error";
     stateNode.textContent = String(message);
     messages.appendChild(stateNode);
     scrollToBottom();
   }
 
   function removeCenteredState(): void {
-    messages.querySelectorAll(".sp-center-error").forEach((node) => node.remove());
+    messages.querySelectorAll(".chat-center-error").forEach((node) => node.remove());
   }
 
   function removeSuggestions(): void {

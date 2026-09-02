@@ -91,7 +91,7 @@ export function linkifyAssistantTimestamps(root: Node | null | undefined, deps: 
       const seconds = parseTimestampToSeconds(timestamp);
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "sp-timestamp-link";
+      button.className = "chat-timestamp-link";
       button.textContent = timestamp;
       button.setAttribute("title", `跳转到 ${timestamp}`);
       button.addEventListener("click", () => {

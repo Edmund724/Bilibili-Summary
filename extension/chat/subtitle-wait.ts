@@ -16,7 +16,7 @@
 //   - kick() 与轮询去重：同一时刻最多一轮 pollContext 在跑；
 //   - finish（就绪/失败/失效）后挂着的定时器必须作废，notice 必须清理。
 
-import type { SidepanelContextSnapshot } from "./chat-state.js";
+import type { ChatSessionContextSnapshot } from "./chat-state.js";
 
 // 「上下文是否仍在抓取/转写中」的判定（sidepanel 组装 pollContext 用，纯函数可测）。
 // 两个信号缺一不可互为兜底：
@@ -28,7 +28,7 @@ import type { SidepanelContextSnapshot } from "./chat-state.js";
 //     置 false。转写广播仍活跃时，即使快照状态被清也继续等待。
 // 字幕体非空即视为就绪，不受上述信号影响。
 export function isContextPending(
-  snapshot: SidepanelContextSnapshot | null | undefined,
+  snapshot: ChatSessionContextSnapshot | null | undefined,
   { asrTranscribingActive = false }: { asrTranscribingActive?: boolean } = {}
 ): boolean {
   if (!snapshot) {

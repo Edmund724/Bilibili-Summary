@@ -1,10 +1,10 @@
 // sidepanel-chat-runtime 协议级测试（候选07：接口面收窄后全量重写）：
 // 全部经 sendMessage + 假 port（或公开的 handleChatPortMessage 协议入口）喂
 // offscreen port 消息（reasoning / token / stream-reset / done / stopped /
-// error / notice / cost-guard），断言面向可观察结果（DOM / sidepanelState /
+// error / notice / cost-guard），断言面向可观察结果（DOM / chatSessionState /
 // deps 回调 / port 行为），不直接调用任何内部渲染步骤函数。
 //
-// 注意：chat-runtime 直接读写 sidepanelState（./sidepanel-state.js）。测试在
+// 注意：chat-runtime 直接读写 chatSessionState（./sidepanel-state.js）。测试在
 // beforeEach 里 resetModules 后把两个模块放进同一模块纪元导入（跨纪元会拿到
 // 两个不同的 state 单例），并在每个用例前手动重置会用到的字段。
 
@@ -14,7 +14,7 @@ import { normalizeMarkdownForSectionPaste } from "../../extension/notes/paste.js
 import { renderMarkdown } from "../../extension/ui/markdown.js";
 
 let createChatRuntime;
-let sidepanelState;
+let chatSessionState;
 
 const SLOW_NOTICE_TEXT = "模型响应较慢，可能正在思考，请稍候…";
 const THINKING_TRUNCATION_SUFFIX = "\n…（思考内容过长，已截断显示）";
@@ -45,7 +45,7 @@ function makeDeps() {
       persistCurrent: vi.fn(async () => {}),
       // 会话身份守卫的单一判定点在 store；mock 与真实现同语义（严格相等，
       // 含空 id == 空当前 id → true 的新会话首发场景）
-      isCurrent: vi.fn((id) => id === sidepanelState.currentConversationId)
+      isCurrent: vi.fn((id) => id === chatSessionState.currentConversationId)
     },
     ui: {
       setStreamingUiState: vi.fn(),
@@ -90,7 +90,7 @@ function holdRaf() {
 }
 
 function assistantNode(deps) {
-  return deps.messages.querySelector(".sp-msg-assistant");
+  return deps.messages.querySelector(".chat-msg-assistant");
 }
 
 beforeEach(async () => {
@@ -98,13 +98,13 @@ beforeEach(async () => {
   document.body.innerHTML = "";
   // 同一模块纪元内新鲜导入（先 resetModules 再 import，两个模块同图解析）：
   ({ createChatRuntime } = await import("../../extension/chat/chat-runtime.js"));
-  ({ sidepanelState } = await import("../../extension/chat/chat-state.js"));
-  // sidepanelState 是模块级单例，手动重置本文件用到的字段
-  sidepanelState.contextData = null;
-  sidepanelState.currentContextKey = "";
-  sidepanelState.chatHistory = [];
-  sidepanelState.currentConversationId = "";
-  sidepanelState.currentConversationMeta = null;
+  ({ chatSessionState } = await import("../../extension/chat/chat-state.js"));
+  // chatSessionState 是模块级单例，手动重置本文件用到的字段
+  chatSessionState.contextData = null;
+  chatSessionState.currentContextKey = "";
+  chatSessionState.chatHistory = [];
+  chatSessionState.currentConversationId = "";
+  chatSessionState.currentConversationMeta = null;
 });
 
 afterEach(() => {
@@ -127,20 +127,20 @@ describe("sendMessage 建流与协议入口", () => {
     expect(chatMsg.prompt).toBe("总结一下这个视频");
 
     // 用户消息上屏、输入框清空
-    expect(deps.messages.querySelector(".sp-msg-user")?.textContent).toBe("总结一下这个视频");
+    expect(deps.messages.querySelector(".chat-msg-user")?.textContent).toBe("总结一下这个视频");
     expect(deps.input.value).toBe("");
 
     // 首 token 前占位已存在：光标 span 在、流式双容器尚未创建
     const node = assistantNode(deps);
     expect(node).toBeTruthy();
-    expect(node.querySelector(".sp-msg-cursor")).toBeTruthy();
-    expect(node.querySelector(".sp-stream-stable")).toBeNull();
-    expect(node.querySelector(".sp-stream-tail")).toBeNull();
+    expect(node.querySelector(".chat-msg-cursor")).toBeTruthy();
+    expect(node.querySelector(".chat-stream-stable")).toBeNull();
+    expect(node.querySelector(".chat-stream-tail")).toBeNull();
 
     // 流式状态：port 已连、UI 已进入流式、尚无写回
     expect(runtime.isStreaming()).toBe(true);
     expect(deps.ui.setStreamingUiState).toHaveBeenCalledWith(true, expect.anything());
-    expect(sidepanelState.chatHistory).toEqual([]);
+    expect(chatSessionState.chatHistory).toEqual([]);
   });
 
   it("假 port 的 onMessage 监听器与 handleChatPortMessage 走同一协议分派（wiring）", async () => {
@@ -156,7 +156,7 @@ describe("sendMessage 建流与协议入口", () => {
     // 经协议入口喂 token：写入同一条流（累加后整段重渲染进末块容器）
     feed(runtime, { type: "token", data: " 与第二帧" });
     raf.mock.calls[1][0]();
-    const tail = node.querySelector(".sp-stream-tail");
+    const tail = node.querySelector(".chat-stream-tail");
     expect(tail.textContent).toContain("第一帧");
     expect(tail.textContent).toContain("第二帧");
   });
@@ -168,7 +168,7 @@ describe("sendMessage 建流与协议入口", () => {
     await runtime.sendMessage();
 
     expect(deps.ports).toHaveLength(1);
-    expect(deps.messages.querySelectorAll(".sp-msg-user")).toHaveLength(1);
+    expect(deps.messages.querySelectorAll(".chat-msg-user")).toHaveLength(1);
     expect(deps.input.value).toBe("第二条");
   });
 
@@ -185,13 +185,13 @@ describe("sendMessage 建流与协议入口", () => {
     const send1 = runtime.sendMessage();
     // 窗口内：端口未建、无 assistant 占位，但发送流程已在进行
     expect(runtime.isStreaming()).toBe(false);
-    expect(deps.messages.querySelector(".sp-msg-assistant")).toBeNull();
+    expect(deps.messages.querySelector(".chat-msg-assistant")).toBeNull();
 
     // 第二次 sendMessage（用户又按了一次回车）：必须被闸住
     deps.input.value = "第二条";
     await runtime.sendMessage();
     expect(deps.ports).toHaveLength(0);
-    expect(deps.messages.querySelectorAll(".sp-msg-user")).toHaveLength(0);
+    expect(deps.messages.querySelectorAll(".chat-msg-user")).toHaveLength(0);
     expect(deps.input.value).toBe("第二条");
     expect(deps.ui.setStreamingUiState).not.toHaveBeenCalledWith(true, expect.anything());
 
@@ -199,7 +199,7 @@ describe("sendMessage 建流与协议入口", () => {
     releaseEnsure(true);
     await send1;
     expect(deps.ports).toHaveLength(1);
-    expect(deps.messages.querySelectorAll(".sp-msg-user")).toHaveLength(1);
+    expect(deps.messages.querySelectorAll(".chat-msg-user")).toHaveLength(1);
     expect(deps.input.value).toBe("");
   });
 });
@@ -219,14 +219,14 @@ describe("token 流式渲染（协议驱动）", () => {
     raf.mock.calls[0][0]();
     expect(node.querySelector("h3")).toBeTruthy();
     expect(node.querySelector("li")).toBeTruthy();
-    expect(node.querySelector(".sp-msg-cursor")).toBeTruthy();
+    expect(node.querySelector(".chat-msg-cursor")).toBeTruthy();
 
     // 第二帧：追加列表项 + 代码块
     feed(runtime, { type: "token", data: "- 第二项\n```js\nconst a = 1;\n```\n" });
     raf.mock.calls[1][0]();
     expect(node.querySelectorAll("li")).toHaveLength(2);
     expect(node.querySelector("pre code")).toBeTruthy();
-    expect(node.querySelector(".sp-msg-cursor")).toBeTruthy();
+    expect(node.querySelector(".chat-msg-cursor")).toBeTruthy();
 
     // 第三帧：追加段落
     feed(runtime, { type: "token", data: "结尾段落\n" });
@@ -234,9 +234,9 @@ describe("token 流式渲染（协议驱动）", () => {
     expect(node.querySelectorAll("li")).toHaveLength(2);
     expect(node.querySelector("p")).toBeTruthy();
 
-    // 光标始终接在末块容器（sp-stream-tail）尾部、渲染内容之后
-    const tailEl = node.querySelector(".sp-stream-tail");
-    expect(tailEl.lastElementChild.className).toBe("sp-msg-cursor");
+    // 光标始终接在末块容器（chat-stream-tail）尾部、渲染内容之后
+    const tailEl = node.querySelector(".chat-stream-tail");
+    expect(tailEl.lastElementChild.className).toBe("chat-msg-cursor");
   });
 
   it("稳定前缀 + 末块增量渲染：stable 只在增长时重渲染，done 后与全量渲染一致", async () => {
@@ -247,11 +247,11 @@ describe("token 流式渲染（协议驱动）", () => {
     // 帧 1：两个段落 → stable = 第一段（空行边界），tail = 末段 + 光标
     feed(runtime, { type: "token", data: "第一段\n\n第二段开头" });
     raf.mock.calls[0][0]();
-    const stableEl = node.querySelector(".sp-stream-stable");
-    const tailEl = node.querySelector(".sp-stream-tail");
+    const stableEl = node.querySelector(".chat-stream-stable");
+    const tailEl = node.querySelector(".chat-stream-tail");
     expect(stableEl.innerHTML).toBe(renderMarkdown("第一段"));
     expect(tailEl.querySelector("p").textContent).toBe("第二段开头");
-    expect(tailEl.lastElementChild.className).toBe("sp-msg-cursor");
+    expect(tailEl.lastElementChild.className).toBe("chat-msg-cursor");
 
     // 篡改 stable 内容，用于探测后续帧是否重渲染了 stable
     stableEl.innerHTML = "SENTINEL";
@@ -261,7 +261,7 @@ describe("token 流式渲染（协议驱动）", () => {
     raf.mock.calls[1][0]();
     expect(stableEl.innerHTML).toBe("SENTINEL");
     expect(tailEl.querySelector("p").textContent).toBe("第二段开头，仍在增长");
-    expect(tailEl.lastElementChild.className).toBe("sp-msg-cursor");
+    expect(tailEl.lastElementChild.className).toBe("chat-msg-cursor");
 
     // 帧 3：新空行边界出现 → stable 增长并重渲染一次
     feed(runtime, { type: "token", data: "\n\n第三段" });
@@ -272,9 +272,9 @@ describe("token 流式渲染（协议驱动）", () => {
     // done：流式双容器被整体替换，最终 DOM 与 renderMarkdown(全文) 一致
     const fullText = "第一段\n\n第二段开头，仍在增长\n\n第三段";
     feed(runtime, { type: "done" });
-    expect(node.querySelector(".sp-stream-stable")).toBeNull();
-    expect(node.querySelector(".sp-stream-tail")).toBeNull();
-    expect(node.querySelector(".sp-msg-assistant-body").innerHTML).toBe(renderMarkdown(fullText));
+    expect(node.querySelector(".chat-stream-stable")).toBeNull();
+    expect(node.querySelector(".chat-stream-tail")).toBeNull();
+    expect(node.querySelector(".chat-msg-assistant-body").innerHTML).toBe(renderMarkdown(fullText));
   });
 
   it("done 收尾：未 flush 的 pending 一并入全量文本；写回并持久化；断开 port 退出流式 UI", async () => {
@@ -305,9 +305,9 @@ describe("token 流式渲染（协议驱动）", () => {
     // done：取消待执行 flush，全量文本 = 已 flush + 未 flush 缓冲
     feed(runtime, { type: "done" });
 
-    expect(sidepanelState.chatHistory[0]).toEqual({ role: "user", content: "帮我写个标题" });
-    expect(sidepanelState.chatHistory[1]).toEqual({ role: "assistant", content: fullText });
-    expect(node.querySelector(".sp-msg-assistant-body").innerHTML).toBe(renderMarkdown(fullText));
+    expect(chatSessionState.chatHistory[0]).toEqual({ role: "user", content: "帮我写个标题" });
+    expect(chatSessionState.chatHistory[1]).toEqual({ role: "assistant", content: fullText });
+    expect(node.querySelector(".chat-msg-assistant-body").innerHTML).toBe(renderMarkdown(fullText));
 
     // 生命周期收口副作用：断开 port、退出流式 UI、焦点回输入框
     expect(session.port.disconnect).toHaveBeenCalled();
@@ -327,19 +327,19 @@ describe("reasoning / thinking 展示", () => {
     const raf = holdRaf();
 
     feed(runtime, { type: "reasoning", data: "先想" });
-    const thinking = node.querySelector(".sp-thinking");
+    const thinking = node.querySelector(".chat-thinking");
     expect(thinking).toBeTruthy();
-    expect(thinking.querySelector(".sp-thinking-label")?.textContent).toBe("思考中…");
-    expect(thinking.querySelector(".sp-thinking-text")?.textContent).toBe("先想");
+    expect(thinking.querySelector(".chat-thinking-label")?.textContent).toBe("思考中…");
+    expect(thinking.querySelector(".chat-thinking-text")?.textContent).toBe("先想");
 
     // 后续 reasoning 增量累加到同一节点
     feed(runtime, { type: "reasoning", data: "再想" });
-    expect(node.querySelector(".sp-thinking-text")?.textContent).toBe("先想再想");
+    expect(node.querySelector(".chat-thinking-text")?.textContent).toBe("先想再想");
 
     // 首个 token 的帧渲染移除思考节点（与流式渲染行为一致）
     feed(runtime, { type: "token", data: "正文" });
     raf.mock.calls[0][0]();
-    expect(node.querySelector(".sp-thinking")).toBeNull();
+    expect(node.querySelector(".chat-thinking")).toBeNull();
     expect(node.textContent).toContain("正文");
   });
 
@@ -364,11 +364,11 @@ describe("reasoning / thinking 展示", () => {
       total += chunk;
       // 旧逻辑的期望输出：全量累计 > 4000 → 前 4000 字符 + 截断提示；否则全量
       const expected = total.length > 4000 ? total.slice(0, 4000) + THINKING_TRUNCATION_SUFFIX : total;
-      expect(node1.querySelector(".sp-thinking-text")?.textContent).toBe(expected);
+      expect(node1.querySelector(".chat-thinking-text")?.textContent).toBe(expected);
     }
 
     // 头缓冲冻结在前 4000 字符，溢出部分不进显示
-    expect(node1.querySelector(".sp-thinking-text")?.textContent).toBe(
+    expect(node1.querySelector(".chat-thinking-text")?.textContent).toBe(
       "a".repeat(1500) + "b".repeat(2499) + "c" + THINKING_TRUNCATION_SUFFIX
     );
 
@@ -380,9 +380,9 @@ describe("reasoning / thinking 展示", () => {
     // 第二条消息：思考累加器全新，不串上一条内容
     deps.input.value = "问题二";
     await runtime.sendMessage();
-    const node2 = deps.messages.querySelectorAll(".sp-msg-assistant")[1];
+    const node2 = deps.messages.querySelectorAll(".chat-msg-assistant")[1];
     feed(runtime, { type: "reasoning", data: "第二条思考" });
-    expect(node2.querySelector(".sp-thinking-text")?.textContent).toBe("第二条思考");
+    expect(node2.querySelector(".chat-thinking-text")?.textContent).toBe("第二条思考");
   });
 
   // 回归：上一代收尾后到达的 reasoning 事件（某些实现以空 data 的 reasoning
@@ -400,26 +400,26 @@ describe("reasoning / thinking 展示", () => {
     raf.mock.calls[0][0]();
     feed(runtime, { type: "reasoning", data: null });
     feed(runtime, { type: "done" });
-    const node1 = deps.messages.querySelectorAll(".sp-msg-assistant")[0];
-    expect(node1.querySelector(".sp-thinking")).toBeNull();
+    const node1 = deps.messages.querySelectorAll(".chat-msg-assistant")[0];
+    expect(node1.querySelector(".chat-thinking")).toBeNull();
 
     // 第二条消息：reasoning 必须新建节点，且附着在第二条的占位上——
     // 旧实现把「未创建」与「已结束」都折叠为 thinkingNode === null，
     // 会把新回合的思考写进已脱离的旧节点
     deps.input.value = "问题二";
     await runtime.sendMessage();
-    const node2 = deps.messages.querySelectorAll(".sp-msg-assistant")[1];
+    const node2 = deps.messages.querySelectorAll(".chat-msg-assistant")[1];
     feed(runtime, { type: "reasoning", data: null });
-    const node2Thinking = node2.querySelector(".sp-thinking");
+    const node2Thinking = node2.querySelector(".chat-thinking");
     expect(node2Thinking).toBeTruthy();
-    expect(node2Thinking.querySelector(".sp-thinking-text")?.textContent).toBe("");
+    expect(node2Thinking.querySelector(".chat-thinking-text")?.textContent).toBe("");
     // 旧节点不再被触碰（也没有游离新节点）
-    expect(node1.querySelector(".sp-thinking")).toBeNull();
-    expect(deps.messages.querySelectorAll(".sp-thinking")).toHaveLength(1);
+    expect(node1.querySelector(".chat-thinking")).toBeNull();
+    expect(deps.messages.querySelectorAll(".chat-thinking")).toHaveLength(1);
 
     // 后续 reasoning 增量正常流进新节点
     feed(runtime, { type: "reasoning", data: "第二轮思考" });
-    expect(node2.querySelector(".sp-thinking-text")?.textContent).toBe("第二轮思考");
+    expect(node2.querySelector(".chat-thinking-text")?.textContent).toBe("第二轮思考");
   });
 
   // 回归：跨消息时若上一代「已结束思考、且 token 首帧已渲染」，新回合的
@@ -439,9 +439,9 @@ describe("reasoning / thinking 展示", () => {
     // 节点必须建在第二条占位内
     deps.input.value = "问题二";
     await runtime.sendMessage();
-    const node2 = deps.messages.querySelectorAll(".sp-msg-assistant")[1];
+    const node2 = deps.messages.querySelectorAll(".chat-msg-assistant")[1];
     feed(runtime, { type: "reasoning", data: "第二轮思考" });
-    expect(node2.querySelector(".sp-thinking-text")?.textContent).toBe("第二轮思考");
+    expect(node2.querySelector(".chat-thinking-text")?.textContent).toBe("第二轮思考");
   });
 });
 
@@ -458,10 +458,10 @@ describe("终态分派：stopped / error", () => {
     raf.mock.calls[0][0]();
     feed(runtime, { type: "stopped", reason: "用户手动停止" });
 
-    expect(node.querySelector(".sp-msg-assistant-body")?.innerHTML).toBe(renderMarkdown("部分回答"));
-    expect(node.querySelector(".sp-msg-stopped")?.textContent).toBe("用户手动停止");
-    expect(node.querySelector(".sp-stream-stable")).toBeNull();
-    expect(sidepanelState.chatHistory).toEqual([
+    expect(node.querySelector(".chat-msg-assistant-body")?.innerHTML).toBe(renderMarkdown("部分回答"));
+    expect(node.querySelector(".chat-msg-stopped")?.textContent).toBe("用户手动停止");
+    expect(node.querySelector(".chat-stream-stable")).toBeNull();
+    expect(chatSessionState.chatHistory).toEqual([
       { role: "user", content: "总结一下" },
       { role: "assistant", content: "部分回答" }
     ]);
@@ -476,9 +476,9 @@ describe("终态分派：stopped / error", () => {
 
     feed(runtime, { type: "stopped" });
 
-    expect(node.querySelector(".sp-msg-stopped")?.textContent).toBe("已停止生成");
-    expect(node.querySelector(".sp-msg-assistant-body")).toBeNull();
-    expect(sidepanelState.chatHistory).toEqual([]);
+    expect(node.querySelector(".chat-msg-stopped")?.textContent).toBe("已停止生成");
+    expect(node.querySelector(".chat-msg-assistant-body")).toBeNull();
+    expect(chatSessionState.chatHistory).toEqual([]);
     expect(deps.store.persistCurrent).not.toHaveBeenCalled();
     expect(runtime.isStreaming()).toBe(false);
   });
@@ -492,9 +492,9 @@ describe("终态分派：stopped / error", () => {
     raf.mock.calls[0][0]();
     feed(runtime, { type: "error", error: "网络错误" });
 
-    expect(node.querySelector(".sp-msg-error")?.textContent).toBe("错误：网络错误");
-    expect(node.querySelector(".sp-msg-assistant-body")).toBeNull();
-    expect(sidepanelState.chatHistory).toEqual([]);
+    expect(node.querySelector(".chat-msg-error")?.textContent).toBe("错误：网络错误");
+    expect(node.querySelector(".chat-msg-assistant-body")).toBeNull();
+    expect(chatSessionState.chatHistory).toEqual([]);
     expect(deps.store.persistCurrent).not.toHaveBeenCalled();
     expect(session.port.disconnect).toHaveBeenCalled();
     expect(runtime.isStreaming()).toBe(false);
@@ -505,7 +505,7 @@ describe("终态分派：stopped / error", () => {
 
     feed(runtime, { type: "error" });
 
-    expect(assistantNode(deps).querySelector(".sp-msg-error")?.textContent).toBe("错误：未知错误");
+    expect(assistantNode(deps).querySelector(".chat-msg-error")?.textContent).toBe("错误：未知错误");
   });
 });
 
@@ -553,16 +553,16 @@ describe("stream-reset 代际重放（读流中断重试：整体重放）", () 
     // 第一代流：渲染出一部分内容（flush 落进 stable/tail 与累加器 base）
     feed(runtime, { type: "token", data: "# 第一代开头\n\n第一代正文" });
     raf.mock.calls[0][0]();
-    expect(node.querySelector(".sp-stream-stable")).toBeTruthy();
+    expect(node.querySelector(".chat-stream-stable")).toBeTruthy();
     expect(node.querySelector("h3")?.textContent).toContain("第一代");
 
     // 读流中断重试：offscreen 发代际重置信号
     feed(runtime, { type: "stream-reset" });
 
     // 已渲染容器全部清掉，光标保留在节点末尾（下一帧 flush 重新接上）
-    expect(node.querySelector(".sp-stream-stable")).toBeNull();
-    expect(node.querySelector(".sp-stream-tail")).toBeNull();
-    expect(node.querySelector(".sp-msg-cursor")).toBeTruthy();
+    expect(node.querySelector(".chat-stream-stable")).toBeNull();
+    expect(node.querySelector(".chat-stream-tail")).toBeNull();
+    expect(node.querySelector(".chat-msg-cursor")).toBeTruthy();
 
     // 第二代流（重试从头生成，内容与前缀都不同）
     feed(runtime, { type: "token", data: "## 第二代重写\n\n全新的正文" });
@@ -573,8 +573,8 @@ describe("stream-reset 代际重放（读流中断重试：整体重放）", () 
 
     // finalize 全量 = 第二代流全文，无第一代拼接残留
     const expected = "## 第二代重写\n\n全新的正文";
-    expect(sidepanelState.chatHistory[1]).toEqual({ role: "assistant", content: expected });
-    expect(node.querySelector(".sp-msg-assistant-body").innerHTML).toBe(renderMarkdown(expected));
+    expect(chatSessionState.chatHistory[1]).toEqual({ role: "assistant", content: expected });
+    expect(node.querySelector(".chat-msg-assistant-body").innerHTML).toBe(renderMarkdown(expected));
     expect(node.textContent).not.toContain("第一代");
   });
 
@@ -584,14 +584,14 @@ describe("stream-reset 代际重放（读流中断重试：整体重放）", () 
     holdRaf();
 
     feed(runtime, { type: "reasoning", data: "第一代思考" });
-    expect(node.querySelector(".sp-thinking")?.textContent).toContain("第一代思考");
+    expect(node.querySelector(".chat-thinking")?.textContent).toContain("第一代思考");
 
     feed(runtime, { type: "stream-reset" });
-    expect(node.querySelector(".sp-thinking")).toBeNull();
+    expect(node.querySelector(".chat-thinking")).toBeNull();
 
     // 第二代思考从头累积（不是接在第一代后面）
     feed(runtime, { type: "reasoning", data: "第二代思考" });
-    expect(node.querySelector(".sp-thinking-text")?.textContent).toBe("第二代思考");
+    expect(node.querySelector(".chat-thinking-text")?.textContent).toBe("第二代思考");
   });
 });
 
@@ -740,11 +740,11 @@ describe("sendMessage 无字幕拦截的提前返回", () => {
 
     expect(deps.ensureCurrentContextForSend).toHaveBeenCalledTimes(1);
     expect(deps.connectPort).not.toHaveBeenCalled();
-    expect(deps.messages.querySelector(".sp-msg-user")).toBeNull();
-    expect(deps.messages.querySelector(".sp-msg-assistant")).toBeNull();
+    expect(deps.messages.querySelector(".chat-msg-user")).toBeNull();
+    expect(deps.messages.querySelector(".chat-msg-assistant")).toBeNull();
     expect(deps.input.value).toBe("总结一下这个视频");
     expect(deps.ui.setStreamingUiState).not.toHaveBeenCalledWith(true, expect.anything());
-    expect(sidepanelState.chatHistory).toEqual([]);
+    expect(chatSessionState.chatHistory).toEqual([]);
   });
 
   it("false（上下文读取失败）：同样提前返回，行为与拦截一致", async () => {
@@ -754,8 +754,8 @@ describe("sendMessage 无字幕拦截的提前返回", () => {
     await runtime.sendMessage();
 
     expect(deps.connectPort).not.toHaveBeenCalled();
-    expect(deps.messages.querySelector(".sp-msg-user")).toBeNull();
-    expect(sidepanelState.chatHistory).toEqual([]);
+    expect(deps.messages.querySelector(".chat-msg-user")).toBeNull();
+    expect(chatSessionState.chatHistory).toEqual([]);
   });
 
   it("true（放行）：照常追加用户消息并发起 port（非 empty 不受影响）", async () => {
@@ -766,13 +766,13 @@ describe("sendMessage 无字幕拦截的提前返回", () => {
     await runtime.sendMessage();
 
     expect(deps.connectPort).toHaveBeenCalledTimes(1);
-    expect(deps.messages.querySelector(".sp-msg-user")?.textContent).toBe("总结一下这个视频");
+    expect(deps.messages.querySelector(".chat-msg-user")?.textContent).toBe("总结一下这个视频");
     expect(deps.input.value).toBe("");
     expect(deps.ports[0].port.postMessage).toHaveBeenCalledTimes(1);
   });
 
   // connectPort 失败（ensure offscreen 文档/建连抛错）必须回退：恢复流式 UI、
-  // 清理半置位状态、向用户可见的错误路径回报（.sp-msg-error 占位）。
+  // 清理半置位状态、向用户可见的错误路径回报（.chat-msg-error 占位）。
   it("connectPort 失败：退出流式 UI、isStreaming() 为 false、assistant 占位变错误占位、port 未建", async () => {
     const deps = makeDeps();
     deps.input.value = "总结一下这个视频";
@@ -785,7 +785,7 @@ describe("sendMessage 无字幕拦截的提前返回", () => {
 
     // 用户可见错误：占位节点变为错误占位（同 error 终态机制）
     const node = assistantNode(deps);
-    expect(node.querySelector(".sp-msg-error")?.textContent).toBe("错误：offscreen 文档创建失败");
+    expect(node.querySelector(".chat-msg-error")?.textContent).toBe("错误：offscreen 文档创建失败");
 
     // 状态回退：不卡流式态、无在途问答、无计时器残留（慢响应 notice 不弹）
     expect(runtime.isStreaming()).toBe(false);
@@ -806,7 +806,7 @@ describe("sendMessage 无字幕拦截的提前返回", () => {
     deps.input.value = "重试发送";
     await runtime.sendMessage();
     expect(deps.connectPort).toHaveBeenCalledTimes(2);
-    expect(deps.messages.querySelectorAll(".sp-msg-assistant")).toHaveLength(2);
+    expect(deps.messages.querySelectorAll(".chat-msg-assistant")).toHaveLength(2);
   });
 });
 
@@ -838,13 +838,13 @@ describe("resetStreamState 对挂起流式渲染帧的清理", () => {
 
     // 新帧渲染新节点
     raf.mock.calls[1][0]();
-    const node2 = deps.messages.querySelector(".sp-msg-assistant");
-    expect(node2.querySelector(".sp-stream-tail").textContent).toContain("新流正文");
+    const node2 = deps.messages.querySelector(".chat-msg-assistant");
+    expect(node2.querySelector(".chat-stream-tail").textContent).toContain("新流正文");
 
     // 旧帧执行：只渲染已脱离的旧节点，不污染消息区、不影响新节点
     raf.mock.calls[0][0]();
-    expect(deps.messages.querySelectorAll(".sp-msg-assistant")).toHaveLength(1);
-    expect(node2.querySelector(".sp-stream-tail").textContent).toContain("新流正文");
+    expect(deps.messages.querySelectorAll(".chat-msg-assistant")).toHaveLength(1);
+    expect(node2.querySelector(".chat-stream-tail").textContent).toContain("新流正文");
   });
 
   it("resetStreamState 后执行旧帧：消息区不被旧流残留渲染污染", async () => {
@@ -859,9 +859,9 @@ describe("resetStreamState 对挂起流式渲染帧的清理", () => {
 
     // 旧帧回调被执行（jsdom 手动驱动）：不得向消息区重建任何流式渲染
     raf.mock.calls[0][0]();
-    expect(deps.messages.querySelectorAll(".sp-msg-assistant")).toHaveLength(0);
-    expect(deps.messages.querySelectorAll(".sp-stream-stable")).toHaveLength(0);
-    expect(deps.messages.querySelectorAll(".sp-stream-tail")).toHaveLength(0);
-    expect(deps.messages.querySelectorAll(".sp-msg-cursor")).toHaveLength(0);
+    expect(deps.messages.querySelectorAll(".chat-msg-assistant")).toHaveLength(0);
+    expect(deps.messages.querySelectorAll(".chat-stream-stable")).toHaveLength(0);
+    expect(deps.messages.querySelectorAll(".chat-stream-tail")).toHaveLength(0);
+    expect(deps.messages.querySelectorAll(".chat-msg-cursor")).toHaveLength(0);
   });
 });

@@ -14,7 +14,7 @@
 //   "asr-failed"    语音识别失败 → 建议重新抓取或稍后再试
 //   "asr-empty"     未识别到语音内容 → 该视频没有人声
 
-import type { SidepanelContextSnapshot } from "./chat-state.js";
+import type { ChatSessionContextSnapshot } from "./chat-state.js";
 
 // ensureCurrentContextForSend 的类型化拦截信号：非 true 的返回值一律让
 // chat-runtime 的 sendMessage 提前返回（不追加用户消息、不落 chatHistory、
@@ -29,7 +29,7 @@ export type NoSubtitleReason = string | null | undefined;
 // 「当前快照是否为无字幕空上下文」判定（ensureCurrentContextForSend 用，纯函数）。
 // 与 isContextPending 的边界互补：pending 管"还在抓取/转写"（loading），
 // 这里管"已经无字幕收尾"（empty）。字幕体非空即放行，不受状态字段影响。
-export function isNoSubtitleEmptyContext(snapshot: SidepanelContextSnapshot | null | undefined): boolean {
+export function isNoSubtitleEmptyContext(snapshot: ChatSessionContextSnapshot | null | undefined): boolean {
   if (!snapshot) {
     return false;
   }

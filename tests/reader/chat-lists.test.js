@@ -2,7 +2,7 @@
 // createReaderChatLists（对话 tab 三列表渲染 + 预设提示词插入）行为契约。
 // PR5 自 tests/sidepanel/sidepanel-lists.test.js 随重建迁移（tests/sidepanel/
 // 对应文件已迁走）：逻辑断言保真，DOM 壳换新——元素为 reader 的 readingChat*
-// 节点，class 名沿用 .sp-*（样式段随对话区并入 reader.css）。
+// 节点，class 名沿用 .chat-*（样式段随对话区并入 reader.css）。
 //
 // 覆盖：
 // - renderSuggestions：有平台/无历史/视频上下文时渲染建议 chip，点击填入输入框
@@ -13,20 +13,20 @@
 //   open 点击 → applyById + 关历史 popover；remove 点击 → deleteById；
 // - insertPresetPrompt：空输入 / 追加换行拼接 / focus。
 //
-// 模块纪元注意：sidepanelState 是模块级单例，beforeEach resetModules 后与被测
+// 模块纪元注意：chatSessionState 是模块级单例，beforeEach resetModules 后与被测
 // 模块同纪元导入，并手动重置字段。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 
 let createReaderChatLists;
-let sidepanelState;
+let chatSessionState;
 
 async function importModule() {
   const module = await import("../../extension/reader/chat-lists.js");
-  const state = (await import("../../extension/chat/chat-state.js")).sidepanelState;
+  const state = (await import("../../extension/chat/chat-state.js")).chatSessionState;
   createReaderChatLists = module.createReaderChatLists;
-  sidepanelState = state;
+  chatSessionState = state;
 }
 
 function makeDeps(overrides = {}) {
@@ -76,17 +76,17 @@ const VIDEO_CONTEXT = { isVideoContext: true, title: "测试视频", url: "https
 beforeEach(async () => {
   resetModuleState();
   await importModule();
-  sidepanelState.providers = [{ id: "p1", name: "平台一", enabled: true }];
-  sidepanelState.contextData = { ...VIDEO_CONTEXT };
-  sidepanelState.chatHistory = [];
-  sidepanelState.aiPrefs.aiInitialQuickPrompts = ["总结视频", "整理笔记"];
-  sidepanelState.aiPrefs.aiPresetPrompts = [];
-  sidepanelState.savedConversations = [];
-  sidepanelState.currentConversationId = "";
-  sidepanelState.currentConversationMeta = null;
-  sidepanelState.liveContextData = null;
-  sidepanelState.liveTabUrl = "";
-  sidepanelState.liveContextKey = "";
+  chatSessionState.providers = [{ id: "p1", name: "平台一", enabled: true }];
+  chatSessionState.contextData = { ...VIDEO_CONTEXT };
+  chatSessionState.chatHistory = [];
+  chatSessionState.aiPrefs.aiInitialQuickPrompts = ["总结视频", "整理笔记"];
+  chatSessionState.aiPrefs.aiPresetPrompts = [];
+  chatSessionState.savedConversations = [];
+  chatSessionState.currentConversationId = "";
+  chatSessionState.currentConversationMeta = null;
+  chatSessionState.liveContextData = null;
+  chatSessionState.liveTabUrl = "";
+  chatSessionState.liveContextKey = "";
 });
 
 describe("renderSuggestions（建议提示词）", () => {
@@ -94,7 +94,7 @@ describe("renderSuggestions（建议提示词）", () => {
     const { lists, deps, input } = makeDeps();
     lists.renderSuggestions();
 
-    const chips = [...document.querySelectorAll(".sp-chip")];
+    const chips = [...document.querySelectorAll(".chat-chip")];
     expect(chips.map((btn) => btn.textContent)).toEqual(["总结视频", "整理笔记"]);
 
     clickOnce(chips[1]);
@@ -104,7 +104,7 @@ describe("renderSuggestions（建议提示词）", () => {
   });
 
   it("无上下文：清空建议区", () => {
-    sidepanelState.contextData = null;
+    chatSessionState.contextData = null;
     const { lists, setSuggestionsNode } = makeDeps();
     const node = document.createElement("div");
     setSuggestionsNode(node);
@@ -113,7 +113,7 @@ describe("renderSuggestions（建议提示词）", () => {
   });
 
   it("非视频上下文（isVideoContext === false）：清空建议区", () => {
-    sidepanelState.contextData = { ...VIDEO_CONTEXT, isVideoContext: false };
+    chatSessionState.contextData = { ...VIDEO_CONTEXT, isVideoContext: false };
     const { lists, setSuggestionsNode } = makeDeps();
     const node = document.createElement("div");
     setSuggestionsNode(node);
@@ -122,7 +122,7 @@ describe("renderSuggestions（建议提示词）", () => {
   });
 
   it("有会话历史（流式中）：清空建议区", () => {
-    sidepanelState.chatHistory = [{ role: "user", content: "hi" }];
+    chatSessionState.chatHistory = [{ role: "user", content: "hi" }];
     const { lists, setSuggestionsNode } = makeDeps();
     const node = document.createElement("div");
     setSuggestionsNode(node);
@@ -131,7 +131,7 @@ describe("renderSuggestions（建议提示词）", () => {
   });
 
   it("无可用平台：清空建议区", () => {
-    sidepanelState.providers = [];
+    chatSessionState.providers = [];
     const { lists, setSuggestionsNode } = makeDeps();
     const node = document.createElement("div");
     setSuggestionsNode(node);
@@ -144,16 +144,16 @@ describe("renderPresetPrompts（预设提示词）", () => {
   it("空列表：渲染占位文案", () => {
     const { lists, presetList } = makeDeps();
     lists.renderPresetPrompts();
-    expect(presetList.innerHTML).toContain("sp-preset-empty");
+    expect(presetList.innerHTML).toContain("chat-preset-empty");
   });
 
   it("chip 点击：插入提示词并关预设 popover", () => {
-    sidepanelState.aiPrefs.aiPresetPrompts = ["提示词A", "提示词B"];
+    chatSessionState.aiPrefs.aiPresetPrompts = ["提示词A", "提示词B"];
     const { lists, deps, input, presetList } = makeDeps();
     lists.renderPresetPrompts();
     const focusSpy = vi.spyOn(input, "focus");
 
-    const chip = presetList.querySelectorAll(".sp-preset-chip")[1];
+    const chip = presetList.querySelectorAll(".chat-preset-chip")[1];
     clickOnce(chip);
     expect(input.value).toBe("提示词B");
     expect(focusSpy).toHaveBeenCalled();
@@ -161,20 +161,20 @@ describe("renderPresetPrompts（预设提示词）", () => {
   });
 
   it("输入框已有内容：追加（换行拼接）而非覆盖", () => {
-    sidepanelState.aiPrefs.aiPresetPrompts = ["提示词A"];
+    chatSessionState.aiPrefs.aiPresetPrompts = ["提示词A"];
     const { lists, input, presetList } = makeDeps();
     input.value = "已有内容";
     lists.renderPresetPrompts();
-    clickOnce(presetList.querySelector(".sp-preset-chip"));
+    clickOnce(presetList.querySelector(".chat-preset-chip"));
     expect(input.value).toBe("已有内容\n提示词A");
   });
 
   it("remove 点击：调用 removePresetPrompt 回调", async () => {
-    sidepanelState.aiPrefs.aiPresetPrompts = ["提示词A", "提示词B"];
+    chatSessionState.aiPrefs.aiPresetPrompts = ["提示词A", "提示词B"];
     const { lists, deps, presetList } = makeDeps();
     lists.renderPresetPrompts();
 
-    clickOnce(presetList.querySelectorAll(".sp-preset-remove")[1]);
+    clickOnce(presetList.querySelectorAll(".chat-preset-remove")[1]);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(deps.removePresetPrompt).toHaveBeenCalledWith(1);
   });
@@ -184,38 +184,38 @@ describe("renderHistoryList（历史会话）", () => {
   it("空列表：占位文案 + 清空按钮隐藏", () => {
     const { lists, historyList, historyClearBtn } = makeDeps();
     lists.renderHistoryList();
-    expect(historyList.innerHTML).toContain("sp-history-empty");
+    expect(historyList.innerHTML).toContain("chat-history-empty");
     expect(historyClearBtn.hidden).toBe(true);
   });
 
   it("有会话：清空按钮显示，渲染条目，open 点击触发 applyById + 关历史 popover", () => {
-    sidepanelState.savedConversations = [
+    chatSessionState.savedConversations = [
       { id: "c1", title: "会话一", contextKey: "", contextTitle: "", contextUrl: "", isVideoContext: true, createdAt: 0, updatedAt: 0, contextRef: null, messages: [] },
       { id: "c2", title: "会话二", contextKey: "", contextTitle: "", contextUrl: "", isVideoContext: true, createdAt: 0, updatedAt: 0, contextRef: null, messages: [] }
     ];
-    sidepanelState.currentConversationId = "c2";
+    chatSessionState.currentConversationId = "c2";
     const { lists, deps, historyList, historyClearBtn } = makeDeps();
     lists.renderHistoryList();
 
     expect(historyClearBtn.hidden).toBe(false);
-    const items = [...historyList.querySelectorAll(".sp-history-item")];
+    const items = [...historyList.querySelectorAll(".chat-history-item")];
     expect(items).toHaveLength(2);
     expect(items[0].classList.contains("is-active")).toBe(false);
     expect(items[1].classList.contains("is-active")).toBe(true);
 
-    clickOnce(items[0].querySelector(".sp-history-open"));
+    clickOnce(items[0].querySelector(".chat-history-open"));
     expect(deps.applyById).toHaveBeenCalledWith("c1");
     expect(deps.hideHistoryPopover).toHaveBeenCalledTimes(1);
   });
 
   it("remove 点击：调用 deleteById 回调", async () => {
-    sidepanelState.savedConversations = [
+    chatSessionState.savedConversations = [
       { id: "c1", title: "会话一", contextKey: "", contextTitle: "", contextUrl: "", isVideoContext: true, createdAt: 0, updatedAt: 0, contextRef: null, messages: [] }
     ];
     const { lists, deps, historyList } = makeDeps();
     lists.renderHistoryList();
 
-    clickOnce(historyList.querySelector(".sp-history-remove"));
+    clickOnce(historyList.querySelector(".chat-history-remove"));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(deps.deleteById).toHaveBeenCalledWith("c1");
   });
