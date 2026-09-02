@@ -398,6 +398,14 @@ const aiProviderRow = createProviderRow({
     apikeyInput.placeholder = row.dataset.hasSavedKey === "1"
       ? "已保存"
       : (next.requiresKey ? "API Key" : "API Key（可选）");
+    // 选择平台即代申请新 baseUrl 的 host 权限：change 事件持有用户手势，经一次
+    // runtime 消息传导到 SW 的 chrome.permissions.request（零先行 await）。已授权
+    // 的 origin Chrome 不会再弹窗，重复触发无害；baseUrl 为空（自定义）不申请。
+    // 失败静默——保存/探针/模型列表的权限预检仍有兜底提示。
+    const baseUrl = (row.querySelector(".ai-provider-baseurl") as HTMLInputElement).value.trim();
+    if (baseUrl) {
+      requestProviderOriginsViaBackground([baseUrl]).catch(() => {});
+    }
   },
   wireRowExtras: wireAiModelControls,
   // 连通性测试直调 ai/provider-test.js（不再走 ai-providers-test 消息往返）：
@@ -569,4 +577,21 @@ export function setTestSuccessHandler(handler: Parameters<typeof aiProviderRow.s
 // 删除动作前先执行的钩子（回收 host 权限），由 options.js 注入
 export function setAiBeforeDeleteHandler(handler: Parameters<typeof aiProviderRow.setBeforeDeleteHandler>[0]): void {
   aiProviderRow.setBeforeDeleteHandler(handler);
+}
+
+// host 权限代申请：content script 语境没有 chrome.permissions API（Chromium 该
+// API 仅扩展自有页面/SW 可用），与 ui/settings-panel.ts 的保存链共用同一条
+// request-provider-origins 消息，由 background SW 代为申请（手势经一次 runtime
+// 消息传导，SW 监听器调用 chrome.permissions.request 前零 await，见
+// entry/background.ts handleRequestProviderOrigins）。预设切换的 change 事件
+// 即用户手势，调用链在 sendMessage 前零 await；手势缺失时 Chrome 拒绝弹窗、
+// 返回失败，由调用方静默处理——保存设置时的正式申请仍在。
+export async function requestProviderOriginsViaBackground(baseUrls: string[]): Promise<void> {
+  if (typeof globalThis.chrome?.permissions?.request === "function") {
+    // 扩展页面语境（防御性分支）：直接申请，不走消息。
+    const { requestProviderOrigins } = await import("../core/host-permissions.js");
+    await requestProviderOrigins(baseUrls);
+    return;
+  }
+  await sendRuntimeMessage({ type: "request-provider-origins", baseUrls });
 }
