@@ -1,6 +1,6 @@
 // UI 壳（面板 + 阅读视图模板）的按需加载器（候选3 常驻瘦身）。
 //
-// ui/ui-renderer.js 承担 buildUiHtml / bindUiEvents / ensureUiReady / setBusyState
+// ui/ui-renderer.js 承担 buildUiHtml / bindUiEvents / ensureUiReady
 // 等壳构建与事件绑定逻辑，静态引用方较多时会被 esbuild 提升为常驻共享 chunk。
 // 本模块把它改为动态 import 边：普通页启动不构建壳，只在面板打开或进入阅读
 // 模式前才加载。

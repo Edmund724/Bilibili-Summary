@@ -43,7 +43,6 @@ declare module "../ui/ui-renderer.js" {
   export function buildUiHtml(): string;
   export function bindUiEvents(): void;
   export function ensureUiReady(options?: { forceRecreate?: boolean }): void;
-  export function setBusyState(disabled: boolean): void;
   export function setStatus(text: string): void;
   export function setMessage(text: string): void;
 }

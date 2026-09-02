@@ -33,7 +33,6 @@ vi.mock("../../extension/reader/presenter.js", () => ({
 vi.mock("../../extension/ui/ui-renderer.js", () => ({
   renderMeta: vi.fn(),
   renderSubtitleSelect: vi.fn(),
-  setBusyState: vi.fn(),
   setStatus: vi.fn(),
   setMessage: vi.fn()
 }));

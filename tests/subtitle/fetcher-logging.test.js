@@ -52,15 +52,13 @@ vi.mock("../../extension/subtitle/core.js", () => ({
   readUploadDate: vi.fn(() => "2026-01-01"),
   refreshDerivedContent: vi.fn(async () => {})
 }));
-// 候选02 分层惰性：renderMeta/renderSubtitleSelect/setBusyState 已自
-// ui/ui-renderer.js 移入 subtitle/ui.js，fetcher 的 import 随之指向本模块，
-// mock 需补齐这三个导出。（applyNoSubtitleState 已迁入 subtitle/commit.js，
-// 不再是 ui.js 的导出。）
+// fetcher 对 subtitle/ui.js 的消费只剩 readVideoDescription。renderMeta/
+// renderSubtitleSelect 是候选02 分层惰性后的历史 mock（现无调用方）；
+// setBusyState 死 mock 已随工单 arch-slim/03 退役。
 vi.mock("../../extension/subtitle/ui.js", () => ({
   readVideoDescription: vi.fn(() => ""),
   renderMeta: vi.fn(),
-  renderSubtitleSelect: vi.fn(),
-  setBusyState: vi.fn()
+  renderSubtitleSelect: vi.fn()
 }));
 vi.mock("../../extension/subtitle/cache.js", () => ({
   buildSubtitleCandidates: vi.fn((tracks, preferred) => {

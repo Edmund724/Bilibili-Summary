@@ -83,15 +83,10 @@ export const MAX_ANALYSIS_QUOTES = 50;
 // 系统提示词（全静态，逐字节可前缀缓存；变量全部在用户提示词侧）
 // ============================================================
 
-// 整搬自 .scratch/bilibili-digest/prompts/analysis.md「系统提示词」代码块；
-// digest-only-ui 起 JSON 输出 schema 顶层的 "summary" 概述字段已移除。
-const ANALYSIS_SYSTEM_PROMPT = `你是我的内容助理。我在看一个 B 站视频，请阅读下面的字幕，产出一份结构化概览：章节 + 金句。
-
-你需要给出：
-- 覆盖**本次给到的全部字幕**的章节。章节数量由你判断——在话题真正发生转折的地方分章，该多则多、该少则少。唯一的硬性要求是覆盖度：章节必须贯穿这段字幕的整条时间线，**最后一个章节的时间戳必须晚于用户消息中给出的「后段门槛」**。不要只覆盖前半段，也不要把章节全挤在开头。
-- 3-5 条金句，附上它们在字幕中的时间戳。
-
-金句要挑这几类：
+// 两份系统提示词逐字共享的「ASR 纠错块」（工单 arch-slim/03 提取）：金句挑选
+// 标准 + ASR 字幕两大特点 + 金句纠错打磨。只此一份声明，两份提示词拼接引用；
+// 合成串由 tests/ai/analysis-prompt-freeze.test.js 冻结断言逐字节把关。
+const ASR_CORRECTION_BLOCK = `金句要挑这几类：
 - 反直觉的观点，或者跟常识拧着来的判断
 - 让人「原来如此」的事实、数据、冷知识
 - 能把道理讲透的具体事例或故事
@@ -107,9 +102,11 @@ B 站的 AI 字幕有两个特点，会直接影响你的工作：
 - 用上下文和视频标题、简介来**修正同音错别字**，尤其是人名、品牌名、专业术语
 - 删掉口头禅和语气词：「就是」「然后」「那个」「这个」「呃」「啊」「对吧」，以及重复啰嗦的字词
 - 保留说话人本来的意思和用词风格，只做可读性打磨，**不要概括、不要缩写、不要添加他没说过的内容**
-- 如果某段实在识别得太糟、无法还原原意，就别选它当金句
+- 如果某段实在识别得太糟、无法还原原意，就别选它当金句`;
 
-⚠️ 关键：时间戳的取法 ⚠️
+// 两份系统提示词逐字共享的「时间戳教学块」：字幕行格式、取时间戳的规则与
+// 秒数换算示例。只此一份声明，两份提示词拼接引用。
+const TIMESTAMP_TEACHING_BLOCK = `⚠️ 关键：时间戳的取法 ⚠️
 字幕的格式严格如下：
 [0:00] 大家好今天我们来聊聊这个话题
 [0:15] 先说第一点
@@ -126,7 +123,20 @@ B 站的 AI 字幕有两个特点，会直接影响你的工作：
 [2:30] 这里有个很反直觉的地方
 那么「这里有个很反直觉的地方」的时间戳就是：
 - timestamp: "2:30"
-- timestampSeconds: 150
+- timestampSeconds: 150`;
+
+// 整搬自 .scratch/bilibili-digest/prompts/analysis.md「系统提示词」代码块；
+// digest-only-ui 起 JSON 输出 schema 顶层的 "summary" 概述字段已移除。
+// 导出仅测试面：冻结断言（tests/ai/analysis-prompt-freeze.test.js）逐字节比对合成串。
+export const ANALYSIS_SYSTEM_PROMPT = `你是我的内容助理。我在看一个 B 站视频，请阅读下面的字幕，产出一份结构化概览：章节 + 金句。
+
+你需要给出：
+- 覆盖**本次给到的全部字幕**的章节。章节数量由你判断——在话题真正发生转折的地方分章，该多则多、该少则少。唯一的硬性要求是覆盖度：章节必须贯穿这段字幕的整条时间线，**最后一个章节的时间戳必须晚于用户消息中给出的「后段门槛」**。不要只覆盖前半段，也不要把章节全挤在开头。
+- 3-5 条金句，附上它们在字幕中的时间戳。
+
+${ASR_CORRECTION_BLOCK}
+
+${TIMESTAMP_TEACHING_BLOCK}
 
 ⚠️ 关于「现成章节目录」⚠️
 用户消息里如果给出「视频简介/评论中的章节目录」（形如「00:00 开场」的时间戳行），
@@ -168,48 +178,15 @@ B 站的 AI 字幕有两个特点，会直接影响你的工作：
 - 所有文字用简体中文输出`;
 
 // 自带章节短路径的「只挑金句」短提示词：金句规则 + ASR 纠错段；
-// 章节由稿件自带，不再让模型分章（概览票 07 决议）。
-const QUOTES_SYSTEM_PROMPT = `你是我的内容助理。我在看一个 B 站视频，请阅读下面的字幕，为它挑选金句。
+// 章节由稿件自带，不再让模型分章（概览票 07 决议）。导出仅测试面（同上）。
+export const QUOTES_SYSTEM_PROMPT = `你是我的内容助理。我在看一个 B 站视频，请阅读下面的字幕，为它挑选金句。
 
 你需要给出：
 - 3-5 条金句，附上它们在字幕中的时间戳。
 
-金句要挑这几类：
-- 反直觉的观点，或者跟常识拧着来的判断
-- 让人「原来如此」的事实、数据、冷知识
-- 能把道理讲透的具体事例或故事
-- 一句话就说清全部要点的表达
+${ASR_CORRECTION_BLOCK}
 
-⚠️ 关键：这是自动语音识别（ASR）生成的字幕 ⚠️
-B 站的 AI 字幕有两个特点，会直接影响你的工作：
-1. **没有任何标点**，整段是连续的字流，句子边界要靠语义自己判断。
-2. **大量同音错别字**：人名、专有名词、外来词、数字尤其容易错（例如「机器学习」可能写成「机器学系」，品牌名可能整个音译错）。
-
-因此，输出金句时请：
-- 按语义补全标点，切成通顺的句子
-- 用上下文和视频标题、简介来**修正同音错别字**，尤其是人名、品牌名、专业术语
-- 删掉口头禅和语气词：「就是」「然后」「那个」「这个」「呃」「啊」「对吧」，以及重复啰嗦的字词
-- 保留说话人本来的意思和用词风格，只做可读性打磨，**不要概括、不要缩写、不要添加他没说过的内容**
-- 如果某段实在识别得太糟、无法还原原意，就别选它当金句
-
-⚠️ 关键：时间戳的取法 ⚠️
-字幕的格式严格如下：
-[0:00] 大家好今天我们来聊聊这个话题
-[0:15] 先说第一点
-[0:32] 这里有个很反直觉的地方
-[1:05] 结果非常出乎意料
-
-取时间戳的规则：
-1. 每一行都以 [M:SS] 或 [MM:SS] 开头
-2. 要取某句话的时间戳，先找到**包含这句话的那一行**
-3. 时间戳就是那一行开头的 [X:XX]
-4. 换算成秒：[2:30] = 150 秒，[0:45] = 45 秒
-
-举例：如果字幕里有这一行
-[2:30] 这里有个很反直觉的地方
-那么「这里有个很反直觉的地方」的时间戳就是：
-- timestamp: "2:30"
-- timestampSeconds: 150
+${TIMESTAMP_TEACHING_BLOCK}
 
 ⚠️ 关于「前情回顾」⚠️
 长视频会切成多段分别处理。用户消息里如果出现「前情回顾」，那是上一段结尾的字幕，
@@ -237,6 +214,7 @@ B 站的 AI 字幕有两个特点，会直接影响你的工作：
 - 除非内容真的从 [0:00] 开始，否则不要用 0:00 / 0
 - 每一个时间戳都必须在字幕里真实存在——去查！
 - 所有文字用简体中文输出`;
+
 
 // 用户提示词模板：整搬参考仓库 prompts/analysis.md「用户提示词」代码块。
 // {rangeNote} / {contextNote} 不分块时为空串（与参考实现一致，留空行）。
@@ -882,8 +860,16 @@ function isOverviewShape(value: unknown): value is OverviewAnalysis {
   );
 }
 
-/** 读取整份概览缓存：命中返回产物，未命中/读失败/形状损坏返回 null。 */
-export async function loadAnalysisFinal(key: string): Promise<OverviewAnalysis | null> {
+// 概览缓存统一读写（工单 arch-slim/03 参数化）：final / segment 两族的读写
+// 函数除族前缀外逐字相同，参数化为一对——落盘形状（{ analysis, timestamp }）、
+// LRU 淘汰、失败口径从此一处可改。family 传 ANALYSIS_FINAL_PREFIX
+// （整份）或 ANALYSIS_SEGMENT_PREFIX（分段）。
+
+/**
+ * 读取概览缓存：命中返回产物，未命中/读失败/形状损坏返回 null。
+ * 两族落盘形状相同，读路径不消费族前缀；family 与 saveAnalysisCache 成对对齐。
+ */
+export async function loadAnalysisCache(key: string, family: string): Promise<OverviewAnalysis | null> {
   try {
     const result = await chrome.storage.local.get(key);
     const value = (result[key] as { analysis?: unknown } | undefined)?.analysis;
@@ -893,11 +879,11 @@ export async function loadAnalysisFinal(key: string): Promise<OverviewAnalysis |
   }
 }
 
-/** 保存整份概览产物：落盘 { analysis, timestamp }，走统一 LRU 淘汰；最终失败 logError 不抛。 */
-export async function saveAnalysisFinal(key: string, analysis: OverviewAnalysis): Promise<SaveResult> {
+/** 保存概览产物：落盘 { analysis, timestamp }，走统一 LRU 淘汰；最终失败 logError 不抛。 */
+export async function saveAnalysisCache(key: string, family: string, analysis: OverviewAnalysis): Promise<SaveResult> {
   const result = await writeWithEviction({
-    family: ANALYSIS_FINAL_PREFIX,
-    bvid: parseBvidFromCacheKey(key, ANALYSIS_FINAL_PREFIX),
+    family,
+    bvid: parseBvidFromCacheKey(key, family),
     keys: [key],
     pruneFamilies: ANALYSIS_CACHE_FAMILIES,
     write: () =>
@@ -909,43 +895,9 @@ export async function saveAnalysisFinal(key: string, analysis: OverviewAnalysis)
       })
   });
   if (!result.ok) {
-    logError("[BOC] failed to save final analysis cache after eviction", {
+    logError("[BOC] failed to save analysis cache after eviction", {
       key,
-      error: result.error?.message || result.error
-    });
-  }
-  return result;
-}
-
-/** 读取概览分段产物：命中返回产物，未命中/读失败/形状损坏返回 null。 */
-export async function loadAnalysisSegment(key: string): Promise<OverviewAnalysis | null> {
-  try {
-    const result = await chrome.storage.local.get(key);
-    const value = (result[key] as { analysis?: unknown } | undefined)?.analysis;
-    return isOverviewShape(value) ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-/** 保存概览分段产物：落盘 { analysis, timestamp }，容错语义同 saveAnalysisFinal。 */
-export async function saveAnalysisSegment(key: string, analysis: OverviewAnalysis): Promise<SaveResult> {
-  const result = await writeWithEviction({
-    family: ANALYSIS_SEGMENT_PREFIX,
-    bvid: parseBvidFromCacheKey(key, ANALYSIS_SEGMENT_PREFIX),
-    keys: [key],
-    pruneFamilies: ANALYSIS_CACHE_FAMILIES,
-    write: () =>
-      chrome.storage.local.set({
-        [key]: {
-          analysis,
-          timestamp: Date.now()
-        }
-      })
-  });
-  if (!result.ok) {
-    logError("[BOC] failed to save analysis segment cache after eviction", {
-      key,
+      family,
       error: result.error?.message || result.error
     });
   }
@@ -1206,7 +1158,7 @@ async function executeOverviewRun({
   const buildPrompt = shortPath ? buildQuotesPrompt : buildAnalysisPrompt;
   // 整份缓存命中直接复用（短路径的章节取自稿件，返回前以稿件现值覆盖，防章节晚于字幕更新）。
   if (!forceRefresh) {
-    const cached = await loadAnalysisFinal(finalKey);
+    const cached = await loadAnalysisCache(finalKey, ANALYSIS_FINAL_PREFIX);
     if (cached) {
       return shortPath
         ? { ...cached, chapters: normalizeManuscriptChapters(manuscriptChapters, cached.chapters.at(-1)?.to ?? 0) }
@@ -1274,7 +1226,7 @@ async function executeOverviewRun({
     if (!analysis.chapters.length && !analysis.quotes.length) {
       throw makeEmptyAnalysisError();
     }
-    await saveAnalysisFinal(finalKey, analysis);
+    await saveAnalysisCache(finalKey, ANALYSIS_FINAL_PREFIX, analysis);
     return analysis;
   }
 
@@ -1284,7 +1236,7 @@ async function executeOverviewRun({
 
   const analyzeSegment = async (segment: BudgetPlanSegment, index: number): Promise<OverviewAnalysis> => {
     const segKey = buildAnalysisSegmentCacheKey(ctx, segment.index, 1);
-    const cached = await loadAnalysisSegment(segKey);
+    const cached = await loadAnalysisCache(segKey, ANALYSIS_SEGMENT_PREFIX);
     if (cached) {
       return cached;
     }
@@ -1313,7 +1265,7 @@ async function executeOverviewRun({
       chatCompletionImpl
     });
     // 先落盘再返回：失败重试只重跑未落盘段（segment-cache 复用语义）。
-    await saveAnalysisSegment(segKey, part);
+    await saveAnalysisCache(segKey, ANALYSIS_SEGMENT_PREFIX, part);
     return part;
   };
 
@@ -1377,6 +1329,6 @@ async function executeOverviewRun({
     analysis.failedRanges = failedRanges;
   }
   // 部分结果照常落缓存（含 failedRanges）：重试走 forceRefresh，段缓存让已成功段免重付费。
-  await saveAnalysisFinal(finalKey, analysis);
+  await saveAnalysisCache(finalKey, ANALYSIS_FINAL_PREFIX, analysis);
   return analysis;
 }

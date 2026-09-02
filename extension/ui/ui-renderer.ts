@@ -40,6 +40,25 @@ type ReaderDomain = typeof import("../reader/index.js");
 type UiReaderDomain = Awaited<ReturnType<typeof ensureReaderDomain>> & ReaderDomain;
 const loadReaderDomain = ensureReaderDomain as () => Promise<UiReaderDomain>;
 
+// ===== reader 域懒加载样板收口（工单 arch-slim/03）=====
+// 「装载 reader 域 → 转发回调 → 失败口径」原散落 17 处手抄
+//（loadReaderDomain().then(...).catch(...)），收口为两个助手，loadReaderDomain
+// 的裸调用只剩 whenReaderReady 内一处声明：
+// - withReader(label, fn)：失败记 logWarn，错误标签一处声明（调用点只传
+//   label，文案恒为 "[BOC] <label> failed"，与收口前逐字一致）；label 传 null
+//   表示静默——高频滚动/点击路径装载失败不打日志、下次交互自然重试（原语义）。
+// - whenReaderReady(fn)：不吞错的内核，供需沿调用方链传播错误的场景
+//   （字幕切换链的统一 catch）复用。
+function whenReaderReady(fn: (reader: UiReaderDomain) => unknown): Promise<unknown> {
+  return loadReaderDomain().then(fn);
+}
+
+function withReader(label: string | null, fn: (reader: UiReaderDomain) => unknown): void {
+  whenReaderReady(fn).catch((error) => {
+    if (label) logWarn(`[BOC] ${label} failed`, error);
+  });
+}
+
 export function buildUiHtml(): string {
   return `
     <section id="${ids.readingView}" aria-hidden="true" data-boc-reader-ready="0" aria-busy="true">
@@ -304,9 +323,7 @@ export function activateReaderChatTab(): void {
 // 在抽屉打开时装载设置面板。
 export function openReaderSettingsPanel(): void {
   state.reader.setSettingsExpanded(true);
-  loadReaderDomain()
-    .then((reader) => reader.renderReaderPanels())
-    .catch((error) => logWarn("[BOC] reader panels render failed", error));
+  withReader("reader panels render", (reader) => reader.renderReaderPanels());
 }
 
 export function bindUiEvents(): void {
@@ -332,9 +349,7 @@ export function bindUiEvents(): void {
         activateReaderChatTab();
       }
       if (def.name === "overview") {
-        loadReaderDomain()
-          .then((reader) => reader.ensureReaderOverviewTab())
-          .catch((error) => logWarn("[BOC] overview tab enter failed", error));
+        withReader("overview tab enter", (reader) => reader.ensureReaderOverviewTab());
       }
     });
   }
@@ -354,20 +369,16 @@ export function bindUiEvents(): void {
     const themes = ["light", "dark", "paper"];
     const current = state.reader.readingTheme || "light";
     const nextIndex = (themes.indexOf(current) + 1) % themes.length;
-    loadReaderDomain()
-      .then((reader) => {
-        reader.updateReaderPreferences({ readerTheme: themes[nextIndex] }, { persist: true });
-        readingThemeSelect.classList.add("is-active");
-        setTimeout(() => readingThemeSelect.classList.remove("is-active"), 300);
-      })
-      .catch((error) => logWarn("[BOC] reader theme switch failed", error));
+    withReader("reader theme switch", (reader) => {
+      reader.updateReaderPreferences({ readerTheme: themes[nextIndex] }, { persist: true });
+      readingThemeSelect.classList.add("is-active");
+      setTimeout(() => readingThemeSelect.classList.remove("is-active"), 300);
+    });
   });
   readingSettingsToggleBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     state.reader.setSettingsExpanded(!state.reader.readingSettingsExpanded);
-    loadReaderDomain()
-      .then((reader) => reader.renderReaderPanels())
-      .catch((error) => logWarn("[BOC] reader panels render failed", error));
+    withReader("reader panels render", (reader) => reader.renderReaderPanels());
   });
 
   // digest-only-ui：无平台提示的「前往设置」打开侧边栏设置抽屉（原 open-options
@@ -393,11 +404,10 @@ export function bindUiEvents(): void {
       .then((chain) =>
         chain.loadSubtitle(url, String(option.dataset.lang || "unknown"), state.clip.fetchRunId, String(option.dataset.id || ""))
       )
-      .then(() => loadReaderDomain())
-      .then((reader) => {
+      .then(() => whenReaderReady((reader) => {
         reader.renderReadingView();
         reader.syncReadingViewPlayback(true);
-      })
+      }))
       .catch((error) => {
         logWarn("[BOC] failed to switch subtitle in reading view", error);
       });
@@ -409,9 +419,7 @@ export function bindUiEvents(): void {
   // import，其后命中缓存 promise，与滚动/点击回调同款）。
   const readingSearchInput = byId(ids.readingSearchInput) as HTMLInputElement;
   const searchRefresh = () => {
-    loadReaderDomain()
-      .then((reader) => reader.refreshReadingSubtitleSearch())
-      .catch((error) => logWarn("[BOC] subtitle search refresh failed", error));
+    withReader("subtitle search refresh", (reader) => reader.refreshReadingSubtitleSearch());
   };
   readingSearchInput.addEventListener("input", searchRefresh);
   readingSearchInput.addEventListener("keydown", (event) => {
@@ -419,28 +427,22 @@ export function bindUiEvents(): void {
       return;
     }
     event.preventDefault();
-    loadReaderDomain()
-      .then((reader) => {
-        if (event.key === "Enter") {
-          reader.moveReadingSubtitleSearch(event.shiftKey ? -1 : 1);
-          return;
-        }
-        // Escape：清输入恢复原文本（焦点留在输入框便于再次输入）
-        readingSearchInput.value = "";
-        reader.refreshReadingSubtitleSearch({ scroll: false });
-        readingSearchInput.focus();
-      })
-      .catch((error) => logWarn("[BOC] subtitle search keydown failed", error));
+    withReader("subtitle search keydown", (reader) => {
+      if (event.key === "Enter") {
+        reader.moveReadingSubtitleSearch(event.shiftKey ? -1 : 1);
+        return;
+      }
+      // Escape：清输入恢复原文本（焦点留在输入框便于再次输入）
+      readingSearchInput.value = "";
+      reader.refreshReadingSubtitleSearch({ scroll: false });
+      readingSearchInput.focus();
+    });
   });
   byId(ids.readingSearchPrevBtn).addEventListener("click", () => {
-    loadReaderDomain()
-      .then((reader) => reader.moveReadingSubtitleSearch(-1))
-      .catch((error) => logWarn("[BOC] subtitle search prev failed", error));
+    withReader("subtitle search prev", (reader) => reader.moveReadingSubtitleSearch(-1));
   });
   byId(ids.readingSearchNextBtn).addEventListener("click", () => {
-    loadReaderDomain()
-      .then((reader) => reader.moveReadingSubtitleSearch(1))
-      .catch((error) => logWarn("[BOC] subtitle search next failed", error));
+    withReader("subtitle search next", (reader) => reader.moveReadingSubtitleSearch(1));
   });
 
   // ===== PR3 字幕 tab：复制 / 导出（纯接线，逻辑在总结链） =====
@@ -461,9 +463,7 @@ export function bindUiEvents(): void {
   // 显隐由 data-boc-reader-follow 的 CSS 驱动；点击恢复跟随并跳回当前句
   //（resumeReaderFollowPlayback，不改播放进度）。
   byId(ids.readingFollowBtn).addEventListener("click", () => {
-    loadReaderDomain()
-      .then((reader) => reader.resumeReaderFollowPlayback())
-      .catch((error) => logWarn("[BOC] resume reader follow failed", error));
+    withReader("resume reader follow", (reader) => reader.resumeReaderFollowPlayback());
   });
 
   // ===== 字幕 tab：选区「解释」浮层 =====
@@ -563,18 +563,14 @@ export function bindUiEvents(): void {
     hideExplainPop();
     // 解释卡片属 reader 动态域（要发 AI 请求），经 ensure 装载后调用；
     // 装载失败只记日志（解释不可用不拖垮字幕 tab 其余交互）。
-    loadReaderDomain()
-      .then((reader) => reader.openReaderExplainCard(payload))
-      .catch((error) => logWarn("[BOC] open explain card failed", error));
+    withReader("open explain card", (reader) => reader.openReaderExplainCard(payload));
   });
 
   // 解释卡片内点击委托（关闭 / 重试 / 去对话追问）：宿主容器不换、内容整块
   // 重建，与概览 tab 同款容器级委托；实现在 reader/explain-card.js。
   const readingExplainCard = byId(ids.readingExplainCard);
   readingExplainCard.addEventListener("click", (event) => {
-    loadReaderDomain()
-      .then((reader) => reader.onReaderExplainCardClick(event as MouseEvent))
-      .catch((error) => logWarn("[BOC] explain card click failed", error));
+    withReader("explain card click", (reader) => reader.onReaderExplainCardClick(event as MouseEvent));
   });
 
   // Click outside settings panel to close（单一文档级 click 委托：PR5 起同时
@@ -591,9 +587,7 @@ export function bindUiEvents(): void {
       }
       if (!settingsPanel.contains(e.target as Node | null) && !settingsBtnEl.contains(e.target as Node | null)) {
         state.reader.setSettingsExpanded(false);
-        loadReaderDomain()
-          .then((reader) => reader.renderReaderPanels())
-          .catch(() => {});
+        withReader(null, (reader) => reader.renderReaderPanels());
       }
     });
     state.reader.readingDocumentClickBound = true;
@@ -605,21 +599,15 @@ export function bindUiEvents(): void {
     }
     // 高频路径：首次交互装载 reader 域，其后命中缓存 promise；装载失败静默
     // （下次交互自然重试，避免滚动期间刷日志）。
-    loadReaderDomain()
-      .then((reader) => reader.noteManualReaderInteraction())
-      .catch(() => {});
+    withReader(null, (reader) => reader.noteManualReaderInteraction());
   };
   subtitleList.addEventListener("scroll", handleReaderManualScroll);
   subtitleList.addEventListener("wheel", handleReaderManualScroll, { passive: true });
   subtitleList.addEventListener("pointerdown", () => {
-    loadReaderDomain()
-      .then((reader) => reader.noteManualReaderInteraction(3500))
-      .catch(() => {});
+    withReader(null, (reader) => reader.noteManualReaderInteraction(3500));
   });
   subtitleList.addEventListener("click", (event) => {
-    loadReaderDomain()
-      .then((reader) => reader.onReadingSubtitleClick(event))
-      .catch(() => {});
+    withReader(null, (reader) => reader.onReadingSubtitleClick(event));
   });
   // ===== PR4 概览 tab：章节/金句点击跳播 + 重试/笔记按钮 =====
   // 事件委托挂概览渲染宿主（内容被状态机整块重建，容器不换）；逻辑在
@@ -627,16 +615,12 @@ export function bindUiEvents(): void {
   // 装载后转发，与章节 rail / 字幕句点击同款接线。
   const readingOverviewBody = byId(ids.readingOverviewBody);
   readingOverviewBody.addEventListener("click", (event) => {
-    loadReaderDomain()
-      .then((reader) => reader.onReadingOverviewClick(event))
-      .catch((error) => logWarn("[BOC] overview click failed", error));
+    withReader("overview click", (reader) => reader.onReadingOverviewClick(event));
   });
 
   readingView.addEventListener("transitionend", () => {
     if (!isReaderViewOpen()) {
-      loadReaderDomain()
-        .then((reader) => reader.stopReadingViewSync())
-        .catch(() => {});
+      withReader(null, (reader) => reader.stopReadingViewSync());
     }
   });
 }
@@ -661,11 +645,6 @@ export function ensureUiReady({ forceRecreate = false }: { forceRecreate?: boole
     bindUiEvents();
     uiState.setEventsBound(true);
   }
-}
-
-export function setBusyState(): void {
-  // digest-only-ui：经典侧栏面板按钮已删除（见 buildUiHtml），字幕 tab 的
-  // 复制/导出按钮忙态由字幕工具条自己的渲染逻辑驱动，不再有全局忙态开关。
 }
 
 // renderMeta / renderSubtitleSelect / setBusyState 已随经典侧栏面板删除
