@@ -89,11 +89,14 @@ export function syncReadingViewPlayback(forceScroll = false) {
   const currentTime = Number(bound.currentTime || 0) || 0;
   const subtitleIndex = findActiveSubtitleIndex(currentTime);
   const chapterIndex = findActiveChapterIndex(currentTime);
-  const changed =
+  // 三开关退役后自动滚动恒开：目标句变化即触发滚动（手动暂停只临时压制，
+  // 不改变“开着”语义）。forceScroll 由 seek/恢复跟随路径显式传入。
+  const shouldScroll =
+    forceScroll ||
     subtitleIndex !== state.reader.readingActiveSubtitleIndex ||
     chapterIndex !== state.reader.readingActiveChapterIndex;
 
-  setActiveReadingItems(subtitleIndex, chapterIndex, forceScroll || changed);
+  setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll);
   updateReaderFollowState();
   renderReadingStatus(`当前进度 ${formatCompactTimestamp(currentTime, currentTime >= 3600)}`);
   // PR3：转写横幅随 tick 收敛（转写期间 onProgress 持续改写状态栏文本，进度行
@@ -148,7 +151,7 @@ function setActiveReadingItems(subtitleIndex: number, chapterIndex: number, shou
     lastActiveItems.subtitle.node = subtitleHit.next;
   }
 
-  if (shouldScroll && state.reader.readingAutoScroll) {
+  if (shouldScroll) {
     if (isManualScrollPaused()) {
       updateReaderFollowState();
       state.reader.setActiveSubtitleIndex(subtitleIndex);
@@ -298,30 +301,18 @@ export function onReadingSubtitleClick(event: MouseEvent) {
 }
 
 export function noteManualReaderInteraction(durationMs = 3000) {
-  if (!state.reader.readingAutoScroll) {
-    updateReaderFollowState();
-    return;
-  }
   setManualScrollPaused(Date.now() + durationMs);
   updateReaderFollowState();
 }
 
-// PR3 Follow playback 悬浮按钮的回调：把跟随从「关闭（off）/手动暂停（manual）」
-// 拉回自动。按钮显隐由 data-boc-reader-follow 三态的 CSS 驱动（reader.css），
+// PR3 Follow playback 悬浮按钮的回调：把跟随从「手动暂停（manual）」拉回自动。
+// 按钮显隐由 data-boc-reader-follow 两态（manual/auto）的 CSS 驱动（reader.css），
 // 本函数只负责行为：
-//   - off 态 = 用户在设置面板关了自动滚动 → 重新打开并同步 checkbox；
 //   - manual 态 = 手动滚动暂停中 → 清暂停；
 //   - 随后 forceScroll 同步一次高亮与滚动，跳回「当前正在播的句子」——不改
 //     播放进度（按钮语义是「回去继续跟随」，不是 seek；与 youtube-digest
 //     sidepanel.js 的 Follow playback 按钮行为一致）。
 export function resumeReaderFollowPlayback() {
-  if (!state.reader.readingAutoScroll) {
-    state.reader.setAutoScroll(true);
-    const checkbox = document.getElementById(ids.readingAutoScroll) as HTMLInputElement | null;
-    if (checkbox) {
-      checkbox.checked = true;
-    }
-  }
   resetManualScrollPause();
   updateReaderFollowState();
   syncReadingViewPlayback(true);
@@ -332,8 +323,7 @@ export function updateReaderFollowState() {
   if (!readingView) {
     return;
   }
-  const mode =
-    !state.reader.readingAutoScroll ? "off" : isManualScrollPaused() ? "manual" : "auto";
+  const mode = isManualScrollPaused() ? "manual" : "auto";
   // 候选10 批1：值未变时跳过 setAttribute。先读现值而非缓存上次写入值：
   // closeReadingView 会 removeAttribute，读现值能自动从外部移除中自愈。
   if (readingView.getAttribute("data-boc-reader-follow") === mode) {

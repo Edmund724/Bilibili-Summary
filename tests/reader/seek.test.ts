@@ -48,7 +48,6 @@ beforeEach(async () => {
     { from: 30, to: 60, content: "第三句" }
   ];
   state.reader.readingViewOpen = true;
-  state.reader.readingAutoScroll = true;
   shell.renderReadingView();
   shell.bindReadingViewVideo(video);
 });

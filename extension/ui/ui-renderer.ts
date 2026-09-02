@@ -25,7 +25,6 @@ import { dispatchChatTabOutsideClick } from "../reader/chat-tab-bridge.js";
 import {
   ids,
   isReaderViewOpen,
-  resetManualScrollPause,
   isProgrammaticScrolling
 } from "../reader/state.js";
 // 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
@@ -75,33 +74,10 @@ export function buildUiHtml(): string {
             <p id="${ids.readingStatus}" class="boc-reading-status">使用页面原生播放器联动章节和字幕。</p>
 
             <section id="${ids.readingSettingsPanel}" class="boc-reading-panel boc-reading-settings-panel" hidden>
-              <section class="boc-reading-settings-group">
-                <div class="boc-reading-controls">
-                  <label class="boc-reading-toggle boc-reading-toggle-inline">
-                    <input id="${ids.readingAutoScroll}" type="checkbox" checked />
-                    <span>滚动</span>
-                  </label>
-                  <label class="boc-reading-toggle boc-reading-toggle-inline">
-                    <input id="${ids.readingSubtitleVisible}" type="checkbox" checked />
-                    <span>字幕</span>
-                  </label>
-                  <label class="boc-reading-toggle boc-reading-toggle-inline">
-                    <input id="${ids.readingChapterVisible}" type="checkbox" checked />
-                    <span>章节</span>
-                  </label>
-                </div>
-              </section>
-
-              <section class="boc-reading-settings-group">
-                <div class="boc-reading-controls">
-                  <select id="${ids.readingSubtitleSelect}" class="boc-reading-select boc-reading-select-sm" aria-label="字幕语言">
-                  </select>
-                </div>
-              </section>
-
               <!-- 扩展设置宿主（digest-only-ui）：原独立 options 页的全部设置项
                    由 ui/settings-panel.js 渲染进此容器（分节、可滚动），options
-                   页面本体已删除。 -->
+                   页面本体已删除。顶部滚动/字幕/章节三开关与字幕语言下拉已随
+                   三开关退役移除——语言下拉移入字幕 tab 工具条（复制按钮左侧）。 -->
               <section class="boc-reading-settings-group boc-reading-settings-extension">
                 <div id="${ids.readingSettingsHost}" class="boc-reading-settings-host"></div>
               </section>
@@ -145,6 +121,7 @@ export function buildUiHtml(): string {
                     disabled
                   >↓</button>
                 </div>
+                <select id="${ids.readingSubtitleSelect}" class="boc-reading-select boc-reading-select-sm" aria-label="字幕语言"></select>
                 <button id="${ids.readingCopySubtitleBtn}" type="button" class="boc-reading-mini-btn">复制</button>
                 <button id="${ids.readingExportSubtitleBtn}" type="button" class="boc-reading-mini-btn">导出</button>
               </div>
@@ -163,8 +140,8 @@ export function buildUiHtml(): string {
                 <div id="${ids.readingSubtitleList}" class="boc-reading-subtitle"></div>
               </section>
 
-              <!-- Follow playback 悬浮按钮：显隐只由 data-boc-reader-follow 三态
-                   （off/manual/auto）的 CSS 驱动，点击恢复跟随并跳回当前句 -->
+              <!-- Follow playback 悬浮按钮：显隐只由 data-boc-reader-follow
+                   （manual/auto）的 CSS 驱动，点击恢复跟随并跳回当前句 -->
               <button id="${ids.readingFollowBtn}" type="button" class="boc-reading-follow-btn">↓ 跟随播放</button>
 
               <!-- 选区「解释」浮层：单实例、绝对定位在 tab body（不进列表滚动
@@ -339,8 +316,6 @@ export function bindUiEvents(): void {
   //（boc-panel/boc-status/boc-preview 等）；面板交互只有阅读视图（Digest）。
   const readingView = byId(ids.readingView);
   const readingCloseBtn = byId(ids.readingCloseBtn);
-  const readingAutoScroll = byId(ids.readingAutoScroll);
-  const readingSubtitleVisible = byId(ids.readingSubtitleVisible);
   const readingThemeSelect = byId(ids.readingThemeSelect);
   const readingSettingsToggleBtn = byId(ids.readingSettingsBtn);
   // rail 章节列表 DOM 已随整页接管退役（章节跳转/手动滚动接管由概览
@@ -382,43 +357,6 @@ export function bindUiEvents(): void {
       .then((reader) => reader.closeReadingView())
       .catch((error) => logWarn("[BOC] close reading view failed", error));
   });
-  readingAutoScroll.addEventListener("change", (event) => {
-    state.reader.setAutoScroll(Boolean((event.target as HTMLInputElement).checked));
-    if (state.reader.readingAutoScroll) {
-      resetManualScrollPause();
-    }
-    loadReaderDomain()
-      .then((reader) => {
-        if (state.reader.readingAutoScroll) {
-          reader.syncReadingViewPlayback(true);
-        }
-        reader.updateReaderFollowState();
-      })
-      .catch((error) => logWarn("[BOC] reader autoscroll sync failed", error));
-  });
-  readingSubtitleVisible.addEventListener("change", (event) => {
-    // 候选02：updateReaderPreferences 属 reader 动态 chunk（视图开着 ⇒ 已装载），
-    // 经 ensure 转发；手动兜底的 main 显隐写在偏好应用之后（与旧顺序一致）。
-    loadReaderDomain()
-      .then((reader) => {
-        reader.updateReaderPreferences({ readerTranscriptVisible: Boolean((event.target as HTMLInputElement).checked) }, { persist: true });
-        const main = document.querySelector(".boc-reading-main") as HTMLElement | null;
-        if (main) {
-          main.style.display = (event.target as HTMLInputElement).checked ? "" : "none";
-        }
-      })
-      .catch((error) => logWarn("[BOC] reader subtitle visibility failed", error));
-  });
-  const readingChapterVisible = byId(ids.readingChapterVisible);
-  if (readingChapterVisible) {
-    readingChapterVisible.addEventListener("change", (event) => {
-      loadReaderDomain()
-        .then((reader) =>
-          reader.updateReaderPreferences({ readerChapterVisible: Boolean((event.target as HTMLInputElement).checked) }, { persist: true })
-        )
-        .catch((error) => logWarn("[BOC] reader chapter visibility failed", error));
-    });
-  }
   readingThemeSelect.addEventListener("click", () => {
     const themes = ["light", "dark", "paper"];
     const current = state.reader.readingTheme || "light";
@@ -527,7 +465,7 @@ export function bindUiEvents(): void {
   });
 
   // ===== PR3 字幕 tab：Follow playback 悬浮按钮 =====
-  // 显隐由 data-boc-reader-follow 三态的 CSS 驱动；点击恢复跟随并跳回当前句
+  // 显隐由 data-boc-reader-follow 的 CSS 驱动；点击恢复跟随并跳回当前句
   //（resumeReaderFollowPlayback，不改播放进度）。
   byId(ids.readingFollowBtn).addEventListener("click", () => {
     loadReaderDomain()

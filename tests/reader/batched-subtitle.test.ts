@@ -10,7 +10,7 @@
 // - spacer 最终高度与整段重建一致（经 updateReadingSubtitleTailSpacer 收敛）；
 // - closeReadingView 取消挂起的追加任务。
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
 import { mountPlayerChain, mountReaderSkeleton } from "../helpers/reader-skeleton.js";
 import type { TestState } from "./reader-test-env.js";
@@ -157,7 +157,6 @@ describe("字幕列表分批渲染", () => {
   it("follow 跳转到未渲染区：同步补渲染到目标 index 再滚动，不依赖后续帧", () => {
     state.clip.subtitleBody = makeBody(800);
     state.reader.readingViewOpen = true;
-    state.reader.readingAutoScroll = true;
     shell.renderReadingView();
     expect(renderedItemCount()).toBe(120); // 目标 index 600 尚未上屏
 
@@ -178,20 +177,26 @@ describe("字幕列表分批渲染", () => {
     expect(renderedItemCount()).toBe(800);
   });
 
-  it("激活计算对未渲染条目照旧：不产生高亮 DOM，上屏后下一拍补上", () => {
+  it("手动暂停中的激活计算照旧：不补渲染/滚动，恢复后下一拍补高亮", () => {
+    // 三开关退役后自动滚动恒开：未暂停时 index 变化会立即同步补渲染并滚动
+    //（见上面 follow 用例）。真正不产生滚动/补渲染的是手动暂停分支——此处
+    // 验证暂停中的激活计算照旧，恢复跟随后再滚动到目标句并补上高亮。
     state.clip.subtitleBody = makeBody(800);
     state.reader.readingViewOpen = true;
-    state.reader.readingAutoScroll = false; // 关闭自动滚动：只验证激活计算
     shell.renderReadingView();
     shell.bindReadingViewVideo(video);
+    shell.noteManualReaderInteraction(60_000); // 手动暂停跟随
     video.currentTime = 1200; // index 600 未渲染
     shell.syncReadingViewPlayback();
     expect(state.reader.readingActiveSubtitleIndex).toBe(600); // 计算照旧
-    expect(subtitleList().querySelector(".boc-reading-item.is-active")).toBeNull(); // 无高亮 DOM
+    expect(subtitleList().querySelector(".boc-reading-item.is-active")).toBeNull(); // 暂停分支不补渲染/滚动
 
-    flushAnimationFrames(); // 条目上屏
-    shell.syncReadingViewPlayback(); // 下一拍：同一 index，缓存节点为 null 必然现查
-    expect((subtitleList().querySelector('.boc-reading-item.is-active') as HTMLElement).dataset.index).toBe("600");
+    // 手动暂停过期后恢复跟随（等价 resumeReaderFollowPlayback 的 forceScroll
+    // 路径）：flush 补渲染 + 高亮 + scrollIntoView
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
+    shell.syncReadingViewPlayback(true);
+    expect(renderedItemCount()).toBeGreaterThanOrEqual(601);
+    expect((subtitleList().querySelector(".boc-reading-item.is-active") as HTMLElement).dataset.index).toBe("600");
   });
 
   it("渲染期间再次 renderReadingView（切轨）：取消上一轮任务，新数据不重不漏", () => {

@@ -9,7 +9,9 @@
 //   D. 源码扫描：消费方与 CSS 中出现的每个 data-boc-* 属性要么在表里、
 //      要么在 LOCAL_FLAG_ATTRIBUTES（防止手抄清单复活）
 //   E. 行为：apply 真的写全 writtenByApply 字段；close 真的清全 clearOnClose
-//      字段（含走样修正的 subtitle-visible）；守卫真的收敛 body 全集
+//      字段；守卫真的收敛 body 全集
+//（三开关退役 2026-09：subtitle-visible / chapter-visibility 字段随滚动/字幕/
+// 章节开关删除，表内排版字段只剩 theme；相关走样修正锚点用例改为否定断言。）
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -170,10 +172,12 @@ describe("B. 派生清单与表标志一致（真实差异显式化）", () => {
     }
   });
 
-  it("修正锚点：subtitle-visible 同时在 close 与守卫两份清理清单（html/body）", () => {
+  it("修正锚点：close 与守卫清理清单已无 subtitle-visible / chapter-visibility（三开关退役删除）", () => {
     for (const target of ["html", "body"] as const) {
-      expect(READER_CLOSE_ATTRS[target]).toContain("data-boc-reader-subtitle-visible");
-      expect(READER_GUARD_CLEAR_ATTRS[target]).toContain("data-boc-reader-subtitle-visible");
+      expect(READER_CLOSE_ATTRS[target]).not.toContain("data-boc-reader-subtitle-visible");
+      expect(READER_CLOSE_ATTRS[target]).not.toContain("data-boc-reader-chapter-visibility");
+      expect(READER_GUARD_CLEAR_ATTRS[target]).not.toContain("data-boc-reader-subtitle-visible");
+      expect(READER_GUARD_CLEAR_ATTRS[target]).not.toContain("data-boc-reader-chapter-visibility");
     }
   });
 
@@ -188,17 +192,20 @@ describe("B. 派生清单与表标志一致（真实差异显式化）", () => {
     expect(READER_CLOSE_ATTRS.readingView).toEqual(["data-boc-reader-follow"]);
     expect(READER_GUARD_CLEAR_ATTRS.readingView).toEqual([]);
     expect(READER_GUARD_FILTER.readingView).toEqual([]);
-    // html/body 侧修正后两份清单完全一致（旧差异：close 漏 subtitle-visible、
-    // 守卫 body 过窄——均已按正确超集对齐）
+    // 三开关退役后 close/守卫清理清单只剩 theme + mode/reading-active 等
+    // 页面级标志（subtitle-visible/chapter-visibility 随 2026-09 删除），
+    // html/body 两侧清单仍完全一致。
     expect(READER_CLOSE_ATTRS.html).toEqual(READER_GUARD_CLEAR_ATTRS.html);
     expect(READER_CLOSE_ATTRS.body).toEqual(READER_GUARD_CLEAR_ATTRS.body);
   });
 
-  it("监听键集合包含实际读写键 readerChapterVisible 与旧键 readerChapterVisibility", () => {
-    expect(READER_SETTINGS_WATCH_KEYS).toContain("readerChapterVisible");
-    expect(READER_SETTINGS_WATCH_KEYS).toContain("readerChapterVisibility");
+  it("监听键集合只含存活读写键（readerChapterVisible/Visibility 已随开关删除）", () => {
+    expect(READER_SETTINGS_WATCH_KEYS).toContain("readerTheme");
     expect(READER_SETTINGS_WATCH_KEYS).toContain("enablePlayerAiQuickAction");
     expect(READER_SETTINGS_WATCH_KEYS).toContain("playerAiQuickPrompt");
+    expect(READER_SETTINGS_WATCH_KEYS).not.toContain("readerChapterVisible");
+    expect(READER_SETTINGS_WATCH_KEYS).not.toContain("readerChapterVisibility");
+    expect(READER_SETTINGS_WATCH_KEYS).not.toContain("readerTranscriptVisible");
     expect(new Set(READER_SETTINGS_WATCH_KEYS).size).toBe(READER_SETTINGS_WATCH_KEYS.length);
   });
 });
@@ -281,8 +288,6 @@ describe("D. 源码扫描：data-boc-* 属性字面量必须登记在案", () =>
 describe("E. 行为：表声明的职责与 DOM 真实读写一致", () => {
   it("E1. apply 写全 writtenByApply 字段的三处目标，且不触碰其他字段", () => {
     state.reader.setTheme("dark");
-    state.reader.setChapterVisible(false);
-    state.reader.setSubtitleVisible(false);
 
     // 非 apply 字段预置值：apply 不得清除/覆写它们
     document.documentElement.setAttribute("data-boc-reader-mode", "1");
@@ -309,7 +314,7 @@ describe("E. 行为：表声明的职责与 DOM 真实读写一致", () => {
     expect(readingView.getAttribute("data-has-chapters")).toBe("1");
   });
 
-  it("E2. closeReadingView 清全 clearOnClose 字段（含走样修正的 subtitle-visible）", async () => {
+  it("E2. closeReadingView 清全 clearOnClose 字段（现只含 theme + 页面级标志）", async () => {
     state.clip.chapters = [{ title: "开场", from: 0 }];
     state.clip.subtitleBody = [{ from: 0, to: 10, content: "大家好" }];
     // 组合根语义：进入前 mode 由 content.js/message-handler 写
@@ -318,7 +323,7 @@ describe("E. 行为：表声明的职责与 DOM 真实读写一致", () => {
 
     await shell.enterReaderMode();
     // 进入后确认属性确实已落位（否则 close 断言空转）
-    expect(document.documentElement.getAttribute("data-boc-reader-subtitle-visible")).toBeTruthy();
+    expect(document.documentElement.getAttribute("data-boc-reader-theme")).toBeTruthy();
     expect(document.documentElement.getAttribute("data-boc-reader-has-chapters")).toBeTruthy();
     expect(document.body.getAttribute("data-boc-reading-active")).toBe("1");
 
@@ -335,21 +340,18 @@ describe("E. 行为：表声明的职责与 DOM 真实读写一致", () => {
     }
   });
 
-  it("E3. 守卫收敛：body 全集属性在非阅读页被清（filter 加宽生效），视图内 follow 不受守卫管辖", async () => {
+  it("E3. 守卫收敛：body 全集属性在非阅读页被清，视图内 follow 不受守卫管辖", async () => {
     setLocationUrl(NORMAL_PAGE_URL);
     const pageState = await import("../../extension/reader/state.js");
     pageState.bindNormalPageStateGuard();
 
-    // 旧 body filter 只有 3 项，theme/subtitle-visible 写入不触发收敛；
-    // 表派生后为全集，写入即收敛清除。
+    // 表派生后为全集，theme 写入即触发收敛清除。
     document.body.setAttribute("data-boc-reader-theme", "dark");
-    document.body.setAttribute("data-boc-reader-subtitle-visible", "0");
-    document.documentElement.setAttribute("data-boc-reader-subtitle-visible", "0");
+    document.documentElement.setAttribute("data-boc-reader-theme", "dark");
 
     await vi.waitFor(() => {
       expect(document.body.getAttribute("data-boc-reader-theme")).toBe(null);
-      expect(document.body.getAttribute("data-boc-reader-subtitle-visible")).toBe(null);
-      expect(document.documentElement.getAttribute("data-boc-reader-subtitle-visible")).toBe(null);
+      expect(document.documentElement.getAttribute("data-boc-reader-theme")).toBe(null);
     });
 
     // follow 是视图内标志（watchedByGuard=false）：守卫不监听也不清理

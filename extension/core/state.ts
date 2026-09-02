@@ -42,10 +42,7 @@ export type ChapterItem = {
 
 type ReaderBusinessState = {
   readingViewOpen: boolean;
-  readingAutoScroll: boolean;
   readingTheme: string;
-  readingChapterVisible: boolean;
-  readingSubtitleVisible: boolean;
   readingSettingsExpanded: boolean;
   readingActiveSubtitleIndex: number;
   readingActiveChapterIndex: number;
@@ -60,10 +57,7 @@ type ReaderInternalState = {
 
 type ReaderSetters = {
   setViewOpen(value: boolean): void;
-  setAutoScroll(value: boolean): void;
   setTheme(value: string): void;
-  setChapterVisible(value: boolean): void;
-  setSubtitleVisible(value: boolean): void;
   setSettingsExpanded(value: boolean): void;
   setActiveSubtitleIndex(value: number): void;
   setActiveChapterIndex(value: number): void;
@@ -76,10 +70,7 @@ type ReaderStateWritable = ReaderBusinessState & ReaderInternalState & ReaderSet
 
 const readerState: ReaderStateWritable = {
   readingViewOpen: false,
-  readingAutoScroll: true,
   readingTheme: "light",
-  readingChapterVisible: true,
-  readingSubtitleVisible: true,
   readingSettingsExpanded: false,
   readingActiveSubtitleIndex: -1,
   readingActiveChapterIndex: -1,
@@ -88,10 +79,7 @@ const readerState: ReaderStateWritable = {
   readingDocumentClickBound: false,
   readingViewReady: false,
   setViewOpen(value) { this.readingViewOpen = value; },
-  setAutoScroll(value) { this.readingAutoScroll = value; },
   setTheme(value) { this.readingTheme = value; },
-  setChapterVisible(value) { this.readingChapterVisible = value; },
-  setSubtitleVisible(value) { this.readingSubtitleVisible = value; },
   setSettingsExpanded(value) { this.readingSettingsExpanded = value; },
   setActiveSubtitleIndex(value) { this.readingActiveSubtitleIndex = value; },
   setActiveChapterIndex(value) { this.readingActiveChapterIndex = value; },

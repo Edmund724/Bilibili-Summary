@@ -72,9 +72,6 @@ export interface Settings {
   includeTimestampInBody: boolean;
   enableDebugLogs: boolean;
   readerTheme: string;
-  readerChapterVisibility: string;
-  readerChapterVisible: boolean;
-  readerTranscriptVisible: boolean;
   frontmatterFields: string[];
   fixedFrontmatterProperties: FixedFrontmatterProperty[];
   notePlaceholderSections: NotePlaceholderSection[];
@@ -99,9 +96,6 @@ export const DEFAULT_SETTINGS: Settings = {
   includeTimestampInBody: true,
   enableDebugLogs: false,
   readerTheme: "light",
-  readerChapterVisibility: "show",
-  readerChapterVisible: true,
-  readerTranscriptVisible: true,
   frontmatterFields: [
     "title",
     "url",

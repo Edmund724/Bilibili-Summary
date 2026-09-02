@@ -1,8 +1,9 @@
-// 设置变更测试：主题 / 章节与字幕可见性
+// 设置变更测试：主题
 // 通过 hydrateReaderStateFromSettings 与 updateReaderPreferences 驱动，
 // 校验 data-attribute 在阅读视图、documentElement、body 三处的应用。
 //（digest-only-ui：排版档位机制退役，字号/字距/行距/面板宽度不再可调，
-// 相关字段与 data-attribute 一并移除。）
+// 相关字段与 data-attribute 一并移除；三开关退役后章节/字幕可见性设置项
+// 与 data-attribute 也随之删除，设置只剩主题。）
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NORMAL_PAGE_URL, READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
@@ -56,23 +57,17 @@ afterEach(() => {
 });
 
 describe("设置变更与 data-attribute", () => {
-  it("hydrateReaderStateFromSettings：应用主题/章节与字幕可见性设置", () => {
+  it("hydrateReaderStateFromSettings：应用主题设置（三开关退役后只剩主题）", () => {
     presentation.hydrateReaderStateFromSettings({
-      readerTheme: "dark",
-      readerChapterVisible: false,
-      readerTranscriptVisible: true
+      readerTheme: "dark"
     });
 
     expect(state.reader.readingTheme).toBe("dark");
-    expect(state.reader.readingChapterVisible).toBe(false);
-    expect(state.reader.readingSubtitleVisible).toBe(true);
   });
 
-  it("applyReadingViewPresentation：在视图/html/body 三处写 data-attribute", () => {
+  it("applyReadingViewPresentation：在视图/html/body 三处写 theme data-attribute", () => {
     presentation.hydrateReaderStateFromSettings({
-      readerTheme: "paper",
-      readerChapterVisible: true,
-      readerTranscriptVisible: true
+      readerTheme: "paper"
     });
     presentation.applyReadingViewPresentation();
 
@@ -80,31 +75,18 @@ describe("设置变更与 data-attribute", () => {
     const htmlEl = document.documentElement;
     const bodyEl = document.body;
 
-    const expected = {
-      theme: "paper",
-      chapterVisibility: "auto",
-      subtitleVisible: "1"
-    };
-
-    expect(readingView.dataset.theme).toBe(expected.theme);
-    expect(readingView.dataset.chapterVisibility).toBe(expected.chapterVisibility);
-    expect(readingView.dataset.subtitleVisible).toBe(expected.subtitleVisible);
-
-    expect(htmlEl.dataset.bocReaderTheme).toBe(expected.theme);
-    expect(htmlEl.dataset.bocReaderChapterVisibility).toBe(expected.chapterVisibility);
-
-    expect(bodyEl.dataset.bocReaderTheme).toBe(expected.theme);
+    expect(readingView.dataset.theme).toBe("paper");
+    expect(htmlEl.dataset.bocReaderTheme).toBe("paper");
+    expect(bodyEl.dataset.bocReaderTheme).toBe("paper");
   });
 
-  it("updateReaderPreferences：变更主题/可见性并持久化到 chrome.runtime", () => {
-    lifecycle.updateReaderPreferences({ readerTheme: "dark", readerChapterVisible: false }, { persist: true });
+  it("updateReaderPreferences：变更主题并持久化到 chrome.runtime", () => {
+    lifecycle.updateReaderPreferences({ readerTheme: "dark" }, { persist: true });
 
     expect(state.reader.readingTheme).toBe("dark");
-    expect(state.reader.readingChapterVisible).toBe(false);
 
     const readingView = document.getElementById(ids.readingView) as HTMLElement;
     expect(readingView.dataset.theme).toBe("dark");
-    expect(readingView.dataset.chapterVisibility).toBe("hide");
 
     expect(chromeStub.runtime.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: "save-settings" }),
@@ -138,9 +120,7 @@ describe("设置变更与 data-attribute", () => {
         callback?.({
           ok: true,
           settings: {
-            readerTheme: "dark",
-            readerChapterVisible: true,
-            readerTranscriptVisible: true
+            readerTheme: "dark"
           }
         });
         return undefined;

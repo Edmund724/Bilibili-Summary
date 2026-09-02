@@ -29,10 +29,10 @@ import type * as DebugSnapshotModule from "./debug-snapshot.js";
 // 相对旧手抄清单的修正与保留：
 //   - 补进实际读写键 readerChapterVisible（旧清单盯的是改名前的旧键
 //     readerChapterVisibility，属 8c2e4ff 改名后的手抄走样）；
-//   - 旧键 readerChapterVisibility 仍在监听（settings-store 依旧归一化/落盘
-//     它以兼容旧存储数据），经表的 legacyStorageKey 覆盖；
 //   - enablePlayerAiQuickAction / playerAiQuickPrompt 两枚非呈现设置键以
 //     kind:"settings" 收进表（无属性落位，只为本监听键清单服务）。
+//（三开关退役 2026-09：readerChapterVisible/Visibility/TranscriptVisible 键已
+// 随滚动/字幕/章节开关删除，监听键只剩 readerTheme 与上述两枚 settings 键。）
 import { READER_SETTINGS_WATCH_KEYS } from "./presentation-fields.js";
 import type { Settings } from "../core/defaults.js";
 

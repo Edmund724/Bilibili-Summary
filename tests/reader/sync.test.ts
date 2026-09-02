@@ -81,8 +81,6 @@ beforeEach(async () => {
   video = mountPlayerChain();
   mockPlayerRects();
   setStateClip();
-  // 大多数用例聚焦高亮切换本身；自动滚动路径单独覆盖
-  state.reader.readingAutoScroll = false;
 });
 
 afterEach(() => {
@@ -201,26 +199,24 @@ describe("播放同步与高亮", () => {
     expect(video.play).toHaveBeenCalled();
   });
 
-  it("updateReaderFollowState：按自动滚动/手动暂停状态写入 data-boc-reader-follow", () => {
+  it("updateReaderFollowState：按手动暂停状态写入 data-boc-reader-follow", () => {
     const readingView = document.getElementById(ids.readingView) as HTMLElement;
     state.reader.readingViewOpen = true;
-    state.reader.readingAutoScroll = true;
 
     // 手动交互暂停跟随（等价于原状态字段直接赋值：手动暂停 5s）
     sync.noteManualReaderInteraction(5000);
     sync.updateReaderFollowState();
     expect(readingView.getAttribute("data-boc-reader-follow")).toBe("manual");
 
-    // 关闭自动滚动后跟随关闭
-    state.reader.readingAutoScroll = false;
+    // 暂停过期后跟随回到 auto
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 6000);
     sync.updateReaderFollowState();
-    expect(readingView.getAttribute("data-boc-reader-follow")).toBe("off");
+    expect(readingView.getAttribute("data-boc-reader-follow")).toBe("auto");
   });
 
-  it("noteManualReaderInteraction：自动滚动开启时暂停跟随（data-boc-reader-follow=manual）", () => {
+  it("noteManualReaderInteraction：手动交互暂停跟随（data-boc-reader-follow=manual）", () => {
     const readingView = document.getElementById(ids.readingView) as HTMLElement;
     state.reader.readingViewOpen = true;
-    state.reader.readingAutoScroll = true;
 
     sync.noteManualReaderInteraction(5000);
 

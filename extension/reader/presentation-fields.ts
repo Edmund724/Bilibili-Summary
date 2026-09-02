@@ -11,6 +11,9 @@
 // 本表是这些清单的唯一声明处，五个消费方一律从表派生；「真实差异」用字段标志
 // （clearOnClose / clearOnGuard / watchedByGuard）显式化，不再靠各处手抄对齐。
 //
+// 三开关退役（滚动/字幕/章节不再可关，2026-09）：排版字段只剩 theme 一项，
+// chapterVisibility / subtitleVisible 两字段连同其存储键随开关一并删除。
+//
 // 纯常量模块：零 import（连 core/state 都不碰），readValue 是注入 reader 状态
 // 对象的纯函数。content / pages / reader 任意侧都可安全 import，无循环依赖。
 
@@ -62,9 +65,7 @@ export interface ReaderPresentationField {
 //                     readingView = #boc-reading-view（短名属性）。
 //   datasetKeys     与 targets 同序的 dataset 驼峰键（attr 去掉 "data-" 转驼峰；
 //                   不变量测试会校验两者一致，防手抄漂移）。
-//   storageKey      对应 chrome.storage 设置键（无则 null）。注意章节可见性
-//                   实际读写的是布尔键 readerChapterVisible（8c2e4ff 从旧键
-//                   readerChapterVisibility 改名而来）。
+//   storageKey      对应 chrome.storage 设置键（无则 null）。
 //   legacyStorageKey 旧版设置键：settings-store 仍会归一化/落盘它（兼容旧存
 //                   储数据），storage 监听需继续覆盖（无则 null）。
 //   watchedByGuard  守卫 observer（page-state.bindNormalPageStateGuard）是否把
@@ -101,20 +102,6 @@ export const READER_PRESENTATION_FIELDS: ReaderPresentationField[] = [
     readValue: (reader) => reader.readingTheme
   },
   {
-    id: "chapterVisibility",
-    kind: "presentation",
-    targets: { html: "data-boc-reader-chapter-visibility", body: "data-boc-reader-chapter-visibility", readingView: "data-chapter-visibility" },
-    datasetKeys: { html: "bocReaderChapterVisibility", body: "bocReaderChapterVisibility", readingView: "chapterVisibility" },
-    storageKey: "readerChapterVisible",
-    legacyStorageKey: "readerChapterVisibility",
-    watchedByGuard: true,
-    clearOnGuard: true,
-    clearOnClose: true,
-    clearViewOnClose: false,
-    writtenByApply: true,
-    readValue: (reader) => (reader.readingChapterVisible ? "auto" : "hide")
-  },
-  {
     id: "hasChapters",
     kind: "derived",
     // 非 storage 设置：由 state.clip.chapters 派生，无对应键。
@@ -130,23 +117,6 @@ export const READER_PRESENTATION_FIELDS: ReaderPresentationField[] = [
     // 按章节数据调用）。表只声明它的目标/清理职责，防止移除清单再漂移。
     writtenByApply: false,
     readValue: null
-  },
-  {
-    id: "subtitleVisible",
-    kind: "presentation",
-    targets: { html: "data-boc-reader-subtitle-visible", body: "data-boc-reader-subtitle-visible", readingView: "data-subtitle-visible" },
-    datasetKeys: { html: "bocReaderSubtitleVisible", body: "bocReaderSubtitleVisible", readingView: "subtitleVisible" },
-    storageKey: "readerTranscriptVisible",
-    legacyStorageKey: null,
-    watchedByGuard: true,
-    clearOnGuard: true,
-    // 修正走样：旧 closeReadingView 手抄清单漏了 subtitle-visible（153b976
-    // 引入该属性时只加了写入、漏补 close 清单；守卫清理清单与 CSS 消费方均按
-    // 可清除对待）。close 与守卫在此对齐，避免关闭后残留陈旧值。
-    clearOnClose: true,
-    clearViewOnClose: false,
-    writtenByApply: true,
-    readValue: (reader) => (reader.readingSubtitleVisible ? "1" : "0")
   },
   // —— 进入标记：apply 不写（组合根/enterReaderMode 写 "1"），close/守卫都清 ——
   {
@@ -268,8 +238,6 @@ export const READER_APPLY_FIELDS = READER_PRESENTATION_FIELDS.filter(
 );
 
 // storage 变更监听键全集：所有 storageKey ∪ legacyStorageKey（去重）。
-// （init-essentials.bindSettingsWatcher 从此派生：含实际读写键
-// readerChapterVisible 的修正 + 旧键 readerChapterVisibility 的兼容。）
 export const READER_SETTINGS_WATCH_KEYS = [
   ...new Set(
     READER_PRESENTATION_FIELDS.flatMap((field) =>

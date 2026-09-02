@@ -19,10 +19,7 @@
 import { state } from "../core/state.js";
 import { type Settings } from "../core/defaults.js";
 import { getReaderElement } from "../shared/dom-utils.js";
-import {
-  normalizeReaderTheme,
-  normalizeReaderSubtitleVisible
-} from "../core/validators.js";
+import { normalizeReaderTheme } from "../core/validators.js";
 import { ids } from "./state.js";
 import { READER_APPLY_FIELDS } from "./presentation-fields.js";
 
@@ -42,15 +39,16 @@ export function renderReadingStatus(text: string | number | null | undefined) {
 // ===== 内联宿主呈现（PR2 移除） =====
 //
 // applyInlineHostPresentation 随字幕列表搬进统一面板「字幕」tab 一并移除：
-// 内联宿主（boc-reading-inline-host）形态不复存在，字幕显隐由
-// applyReadingViewPresentation 直接写 .boc-reading-main 的 display 表达。
+// 内联宿主（boc-reading-inline-host）形态不复存在，字幕显隐不再经
+// .boc-reading-main 的 display 表达（字幕常显，三开关退役后无隐藏通道）。
 
 // ===== 设置水合与排版应用（自 lifecycle.js 迁入） =====
+//
+// 三开关退役（滚动/字幕/章节不再可关，2026-09）：水合只剩主题一项，不再
+// 读取 readerChapterVisible / readerTranscriptVisible（其存储键已随开关删除）。
 
 export function hydrateReaderStateFromSettings(settings: Partial<Settings> = state.settings) {
   state.reader.setTheme(normalizeReaderTheme(settings?.readerTheme));
-  state.reader.setChapterVisible(settings?.readerChapterVisible !== undefined ? Boolean(settings.readerChapterVisible) : true);
-  state.reader.setSubtitleVisible(normalizeReaderSubtitleVisible(settings?.readerTranscriptVisible));
 }
 
 export function applyReadingViewPresentation() {
@@ -77,14 +75,8 @@ export function applyReadingViewPresentation() {
       document.body.dataset[field.datasetKeys.body] = values[field.id];
     }
   }
-  const readingChapterVisibleEl = getReaderElement(ids.readingChapterVisible) as HTMLInputElement;
-  if (readingChapterVisibleEl) {
-    readingChapterVisibleEl.checked = state.reader.readingChapterVisible;
-  }
-  const main = document.querySelector<HTMLElement>(".boc-reading-main");
-  if (main) {
-    main.style.display = state.reader.readingSubtitleVisible ? "" : "none";
-  }
+  // 字幕/章节的 checkbox 同步与 .boc-reading-main 显隐已随三开关退役删除
+  //（字幕常显，开关与 data 属性不再存在）。
 }
 
 // updateReaderPreferences / persistReaderSettings / renderReaderPanels 已移回

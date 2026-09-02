@@ -1,5 +1,5 @@
 // extension/core/settings-store.ts
-// 全局设置（reader/AI/ASR/下载域共 21 个受管字段）的归一化 + 读写存储。
+// 全局设置（reader/AI/ASR/下载域，键面见 DEFAULT_SETTINGS）的归一化 + 读写存储。
 // 从 extension/core/ai-provider-store.ts 拆出：原先「AI provider 存储」文件
 // 实际承载了全部设置域的归一化，导致 ASR 域（asr/asr-provider-store.js）
 // 反向依赖「AI 域」文件，名实不符。本模块只与 chrome.storage 交互，
@@ -15,8 +15,6 @@ import {
   normalizeEnablePlayerAiQuickAction,
   normalizePlayerAiQuickPrompt,
   normalizeReaderTheme,
-  normalizeReaderChapterVisibility,
-  normalizeReaderSubtitleVisible,
   normalizeFixedFrontmatterProperties,
   normalizeNotePlaceholderSections,
   normalizeAiSystemPrompt,
@@ -43,8 +41,6 @@ const SETTINGS_NORMALIZER_STEPS: NormalizerStep[] = [
   ["enablePlayerAiQuickAction", (m) => normalizeEnablePlayerAiQuickAction(m.enablePlayerAiQuickAction)],
   ["playerAiQuickPrompt", (m) => normalizePlayerAiQuickPrompt(m.playerAiQuickPrompt)],
   ["readerTheme", (m) => normalizeReaderTheme(m.readerTheme)],
-  ["readerChapterVisibility", (m) => normalizeReaderChapterVisibility(m.readerChapterVisibility)],
-  ["readerTranscriptVisible", (m) => normalizeReaderSubtitleVisible(m.readerTranscriptVisible)],
   ["fixedFrontmatterProperties", (m) => normalizeFixedFrontmatterProperties(m.fixedFrontmatterProperties)],
   ["notePlaceholderSections", (m) => normalizeNotePlaceholderSections(m.notePlaceholderSections)],
   ["aiSystemPrompt", (m) => normalizeAiSystemPrompt(m.aiSystemPrompt)],
@@ -57,7 +53,7 @@ const SETTINGS_NORMALIZER_STEPS: NormalizerStep[] = [
   ["asrLanguage", (m) => normalizeAsrLanguage(m.asrLanguage)]
 ];
 
-// 设置归一化的唯一收口：对 21 个受管字段按步骤表逐项归一化，返回新对象
+// 设置归一化的唯一收口：对步骤表内的受管字段逐项归一化，返回新对象
 // （不改入参）。读路径（getMergedSettings）、写路径（saveSettings）与安装/
 // 更新迁移（background 的 initializeSettingsStorage）统一经由这里。
 // aiSystemPrompt 在此把 LEGACY 默认提示词映射为当前默认（LEGACY 常量保留
@@ -83,8 +79,8 @@ export async function getMergedSettings(timeoutMs = 5000): Promise<Settings> {
 }
 
 // 写入白名单：settings 域的键面 = DEFAULT_SETTINGS 声明的键集。除归一化步骤表
-// 覆盖的字段外，tags / readerChapterVisible 等透传字段也经 save-settings 落盘，
-// 因此白名单取键面全集而非步骤表键集。saveSettings 据此剔除键面外的键。
+// 覆盖的字段外，tags 等透传字段也经 save-settings 落盘，因此白名单取键面全集
+// 而非步骤表键集。saveSettings 据此剔除键面外的键。
 const SETTINGS_STORAGE_KEYS = new Set<string>(Object.keys(DEFAULT_SETTINGS));
 
 export async function saveSettings(settings: unknown): Promise<void> {

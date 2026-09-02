@@ -92,8 +92,7 @@
   }
 }
 
-.boc-reading-actions button,
-.boc-reading-toggle {
+.boc-reading-actions button {
   border: 1px solid #e5e7eb;
   background: #fff;
   border-radius: 999px;
@@ -102,20 +101,7 @@
   font-size: 13px;
   color: #1f2937;
   box-sizing: border-box;
-}
-
-.boc-reading-actions button {
   cursor: pointer;
-}
-
-.boc-reading-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.boc-reading-toggle input {
-  margin: 0;
 }
 
 .boc-reading-icon-btn {
@@ -489,7 +475,6 @@
 }
 
 #boc-reading-view .boc-reading-actions button,
-#boc-reading-view .boc-reading-toggle,
 #boc-reading-view .boc-reading-select {
   border: 1px solid var(--boc-reader-border);
   background: var(--boc-reader-surface);
@@ -498,7 +483,6 @@
 }
 
 #boc-reading-view .boc-reading-actions button.is-active,
-#boc-reading-view .boc-reading-toggle.is-active,
 #boc-reading-view .boc-reading-select:focus {
   background: var(--boc-reader-accent-soft);
   color: var(--boc-reader-accent);
@@ -510,6 +494,26 @@
   padding: 0 12px;
   width: auto;
   margin: 0;
+}
+
+/* 字幕 tab 工具条内的语言下拉（三开关退役后自设置面板移入，2026-09）：
+ * 基础段仍走上面的主题 token（border/surface 底/text 字）；这里覆盖
+ * select-sm 的圆角小框样式，与工具条 mini-btn 同形（radius 10px、紧凑
+ * 高度），行内对齐由 flex 工具条的 align-items:center 保证。 */
+#boc-reading-view .boc-reading-sub-toolbar .boc-reading-select-sm {
+  min-height: 0;
+  height: 31px;
+  border-radius: 10px;
+  border-color: var(--boc-reader-border);
+  background: var(--boc-reader-card);
+  color: var(--boc-reader-muted);
+  font-size: 12px;
+  max-width: 130px;
+}
+
+#boc-reading-view .boc-reading-sub-toolbar .boc-reading-select-sm:hover {
+  border-color: var(--boc-reader-accent);
+  color: var(--boc-reader-accent);
 }
 
 #boc-reading-view .boc-reading-panel {
@@ -597,23 +601,10 @@
   color: var(--boc-reader-text);
 }
 
-/* 设置面板分组与三态开关行（窄容器适配） */
+/* 设置面板分组（窄容器适配） */
 #boc-reading-view .boc-reading-settings-group {
   display: grid;
   gap: 7px;
-}
-
-#boc-reading-view .boc-reading-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-}
-
-#boc-reading-view .boc-reading-toggle-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 28px;
 }
 
 /* ===== PR3 字幕 tab：搜索工具条 / 转写横幅 / 跟随按钮 / 句上解释浮层 / 意图卡
@@ -799,8 +790,8 @@
   pointer-events: none;
 }
 
-/* Follow playback 悬浮按钮：显隐只由 data-boc-reader-follow 三态驱动——
- * auto（跟随中）隐藏；manual（手动滚动暂停）/off（自动滚动关闭）时显示，
+/* Follow playback 悬浮按钮：显隐只由 data-boc-reader-follow 驱动——
+ * auto（跟随中）隐藏；manual（手动滚动暂停）时显示，
  * 点击由 resumeReaderFollowPlayback 拉回 auto 并跳回当前句。 */
 .boc-reading-follow-btn {
   display: none;
@@ -821,8 +812,7 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
-#boc-reading-view[data-boc-reader-follow="manual"] .boc-reading-follow-btn,
-#boc-reading-view[data-boc-reader-follow="off"] .boc-reading-follow-btn {
+#boc-reading-view[data-boc-reader-follow="manual"] .boc-reading-follow-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;

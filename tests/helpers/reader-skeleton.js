@@ -253,23 +253,12 @@ export function mountReaderSkeleton(ids) {
   intentQuote.className = "boc-reading-chat-intent-quote";
   chatIntent.appendChild(intentQuote);
 
-  const readingAutoScroll = doc.createElement("input");
-  readingAutoScroll.type = "checkbox";
-  readingAutoScroll.checked = true;
-  readingAutoScroll.id = ids.readingAutoScroll;
-  digestPanel.appendChild(readingAutoScroll);
-
-  const readingSubtitleVisible = doc.createElement("input");
-  readingSubtitleVisible.type = "checkbox";
-  readingSubtitleVisible.checked = true;
-  readingSubtitleVisible.id = ids.readingSubtitleVisible;
-  digestPanel.appendChild(readingSubtitleVisible);
-
-  const readingChapterVisible = doc.createElement("input");
-  readingChapterVisible.type = "checkbox";
-  readingChapterVisible.checked = true;
-  readingChapterVisible.id = ids.readingChapterVisible;
-  digestPanel.appendChild(readingChapterVisible);
+  // 三开关退役（2026-09）：滚动/字幕/章节三个 checkbox 从设置面板删除，不再
+  // 在骨架中搭建（对应 id 已从 ids 表移除）。
+  const readingSubtitleSelect = doc.createElement("select");
+  readingSubtitleSelect.id = ids.readingSubtitleSelect;
+  readingSubtitleSelect.className = "boc-reading-select boc-reading-select-sm";
+  subToolbar.insertBefore(readingSubtitleSelect, copySubtitleBtn);
 
   const readingSettingsBtn = doc.createElement("button");
   readingSettingsBtn.id = ids.readingSettingsBtn;
@@ -278,10 +267,6 @@ export function mountReaderSkeleton(ids) {
   const readingInfoHost = doc.createElement("div");
   readingInfoHost.id = ids.readingSettingsHost;
   digestPanel.appendChild(readingInfoHost);
-
-  const readingSubtitleSelect = doc.createElement("select");
-  readingSubtitleSelect.id = ids.readingSubtitleSelect;
-  digestPanel.appendChild(readingSubtitleSelect);
 
   return { readingView, readingMain, digestPanel };
 }

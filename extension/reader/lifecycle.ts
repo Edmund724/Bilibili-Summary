@@ -17,11 +17,8 @@ import { state } from "../core/state.js";
 import { getReaderElement } from "../shared/dom-utils.js";
 import { sleep } from "../shared/utils.js";
 // 候选02：updateReaderPreferences/renderReaderPanels 自 presentation.js 移回
-//（digest-only-ui：排版档位机制退役，validators 只剩主题与字幕可见性）。
-import {
-  normalizeReaderTheme,
-  normalizeReaderSubtitleVisible
-} from "../core/validators.js";
+//（digest-only-ui：排版档位机制退役，validators 只剩主题归一化）。
+import { normalizeReaderTheme } from "../core/validators.js";
 import { getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
 import {
@@ -282,9 +279,9 @@ export function closeReadingView() {
   readingView.setAttribute("aria-hidden", "true");
   readingView.setAttribute("data-boc-reader-ready", "0");
   // 候选06：移除清单从呈现属性表派生（presentation-fields.js 的 clearOnClose
-  // 标志），不再手抄。相对旧清单的修正：html/body 补清 subtitle-visible——
-  // 153b976 引入该属性时只加了写入、漏补 close 清单，属走样而非故意（守卫
-  // 清理清单与 CSS 消费方均按可清除对待，详见 presentation-fields.js 头注）。
+  // 标志），不再手抄。清单现只含 theme/follow（subtitle-visible 走样修正与
+  // chapter-visibility 已随 2026-09 三开关退役一并删除，见 presentation-fields.js
+  // 头注）。
   for (const attr of READER_CLOSE_ATTRS.readingView) {
     readingView.removeAttribute(attr);
   }
@@ -405,15 +402,9 @@ export function updateReaderChapterPresence(hasChapters: boolean) {
 
 export function updateReaderPreferences(next: Partial<Record<string, unknown>>, { persist = true } = {}) {
   state.reader.setTheme(normalizeReaderTheme(next.readerTheme ?? state.reader.readingTheme));
-  state.reader.setChapterVisible(next.readerChapterVisible !== undefined ? Boolean(next.readerChapterVisible) : state.reader.readingChapterVisible);
-  state.reader.setSubtitleVisible(
-    normalizeReaderSubtitleVisible(next.readerTranscriptVisible ?? state.reader.readingSubtitleVisible)
-  );
   state.setSettings({
     ...state.settings,
-    readerTheme: state.reader.readingTheme,
-    readerChapterVisible: state.reader.readingChapterVisible,
-    readerTranscriptVisible: state.reader.readingSubtitleVisible
+    readerTheme: state.reader.readingTheme
   });
   applyReadingViewPresentation();
   renderReaderPanels();
@@ -431,8 +422,6 @@ export function renderReaderPanels() {
   const settingsBtn = getReaderElement(ids.readingSettingsBtn);
   settingsPanel.hidden = !state.reader.readingSettingsExpanded;
   settingsBtn.classList.toggle("is-active", state.reader.readingSettingsExpanded);
-  (getReaderElement(ids.readingAutoScroll) as HTMLInputElement).checked = state.reader.readingAutoScroll;
-  (getReaderElement(ids.readingSubtitleVisible) as HTMLInputElement).checked = state.reader.readingSubtitleVisible;
   // digest-only-ui：设置抽屉展开时装载原 options 页的全部设置项（宿主容器在
   // ui-renderer 模板内；模板与数据装载在 settings-panel 内，展开即刷新）。
   if (!settingsPanel.hidden) {
