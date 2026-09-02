@@ -6,21 +6,18 @@
 // 经 rAF 每帧追加 TRANSCRIPT_APPEND_BATCH 条：
 //   - 事件委托在容器层（ui-renderer 绑定 + sync.js closest 委托），追加的节点
 //     天然可交互，无需逐条重绑；
-//   - 每批追加后调 updateReadingSubtitleTailSpacer 廉价收敛 spacer（其内部
-//     带脏检查），全部渲染完成后的最终布局与整段重建等价；
 //   - 跳转/跟随目标未上屏时经 ensureReadingSubtitleRenderedUpTo 同步补渲染
 //     （由 lifecycle.js 的 registerReaderPorts 单点注册进显式端口，供 sync.js
 //     经 readerPorts.flushReadingSubtitleToIndex 回调）；
 //   - 渲染期间再次 renderReadingView（切轨/重进阅读模式）先取消上一轮任务。
 // 章节列表量小（几十条），保持整段渲染不变。
 //
-// 依赖方向（无环叶子）：shared 字符串工具 + state 的 ids/尾部留白。
+// 依赖方向（无环叶子）：shared 字符串工具。
 // 首屏批与任务启动入口（buildReadingSubtitleItemHtml /
 // startReadingSubtitleAppendTask / cancelReadingSubtitleAppend /
 // ensureReadingSubtitleRenderedUpTo / SUBTITLE_FIRST_BATCH）由 lifecycle.js
 // 的 renderReadingView/closeReadingView/端口注册调用；本模块不 import lifecycle。
 import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
-import { ids, updateReadingSubtitleTailSpacer } from "./state.js";
 import type { ReadingSubtitleItem } from "../subtitle/core.js";
 
 const SUBTITLE_FIRST_BATCH = 120;
@@ -55,8 +52,8 @@ export function buildReadingSubtitleItemHtml(item: ReadingSubtitleItem, withHour
   `;
 }
 
-// 把 items[from, to) 追加进列表。tail spacer 必须始终是列表最后一个子节点
-// （滚动定位的尾部留白依赖它），因此插入点固定在 spacer 之前。
+// 把 items[from, to) 追加进列表（尾部追加）。digest-only-ui 退役尾部 spacer 后
+// 条目顺序即 DOM 顺序，无需再维护锚节点。
 function insertReadingSubtitleRange(
   listEl: HTMLElement,
   items: ReadingSubtitleItem[],
@@ -71,13 +68,7 @@ function insertReadingSubtitleRange(
   for (let i = from; i < to; i += 1) {
     html += buildReadingSubtitleItemHtml(items[i], withHours);
   }
-  const spacer = document.getElementById(ids.readingSubtitleTailSpacer);
-  if (spacer && spacer.parentElement === listEl) {
-    spacer.insertAdjacentHTML("beforebegin", html);
-  } else {
-    // spacer 缺失（异常形态）时退化为尾部追加，不影响条目可用性
-    listEl.insertAdjacentHTML("beforeend", html);
-  }
+  listEl.insertAdjacentHTML("beforeend", html);
 }
 
 // ===== 批次回执 hook（PR3 句内搜索） =====
@@ -137,8 +128,6 @@ function appendReadingSubtitleBatch() {
   const batchFrom = task.cursor;
   insertReadingSubtitleRange(task.listEl, task.items, task.cursor, end, task.withHours);
   task.cursor = end;
-  // 每批追加后廉价收敛 spacer 高度（内部脏检查：高度没变只多一次 clientHeight 读）
-  updateReadingSubtitleTailSpacer();
   // 批次回执：搜索激活时给本批条目补高亮（hook 内部吞异常）
   notifyReadingSubtitleBatchAppended(batchFrom, end);
   if (task.cursor < task.items.length) {
@@ -169,7 +158,6 @@ export function ensureReadingSubtitleRenderedUpTo(targetIndex: number) {
   const flushFrom = task.cursor;
   insertReadingSubtitleRange(task.listEl, task.items, task.cursor, end, task.withHours);
   task.cursor = end;
-  updateReadingSubtitleTailSpacer();
   // 批次回执：同步补渲染出的条目同样要带搜索高亮（跳转落点即命中时，当前命中
   // 标记由搜索模块在补渲染后现查落位）
   notifyReadingSubtitleBatchAppended(flushFrom, end);

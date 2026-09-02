@@ -289,46 +289,9 @@
   pointer-events: auto;
 }
 
-/* 字幕列表内置滚动条：常驻可见。B 站页面样式会把默认滚动条压成 overlay 态
- *（只在滚动瞬间闪现），显式定义 ::-webkit-scrollbar 让 Chrome 对该容器回落成
- * 经典滚动条并常驻；scrollbar-gutter 预留槽位，滚动条出现/消失不抖布局。
- * 配色走 --boc-reader-* token，三主题自动跟随。
- *
- * digest-only-ui 修复（不可见双根因）：
- * 1. 页面侧存在作用于任意元素的 ::-webkit-scrollbar 规则（B 站全局压窄/压成
- *    overlay），注入样式与页面同文档、同特异性时谁后声明谁生效——滚动条规则
- *    所在 reader.css 是运行时 link 挂载，多数情况下晚于页面样式，但页面样式
- *    若带更高优先级（如 html 上 !important 或更晚的 CSSOM 插入）仍会覆盖。
- *    width/track/thumb 全部加 !important，让扩展容器滚动条不被页面规则改写。
- * 2. 原 thumb 色（--boc-reader-surface-3，light 主题 #e7dfd4）与面板底色
- *    （surface #fdfbf7）对比度过低，10px 槽里实际 6px 的可视条近乎隐形——
- *    加深为 faint（#a39a8d），hover 再加深为 muted，三主题下都可见。 */
-.boc-reading-subtitle {
-  scrollbar-gutter: stable;
-  scrollbar-width: auto;
-}
-
-.boc-reading-subtitle::-webkit-scrollbar {
-  width: 10px !important;
-}
-
-.boc-reading-subtitle::-webkit-scrollbar-track {
-  background: transparent !important;
-}
-
-.boc-reading-subtitle::-webkit-scrollbar-thumb {
-  background: var(--boc-reader-faint, #a39a8d) !important;
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background-clip: content-box;
-}
-
-.boc-reading-subtitle::-webkit-scrollbar-thumb:hover {
-  background: var(--boc-reader-muted, #6f675c) !important;
-  border: 2px solid transparent;
-  background-clip: content-box;
-}
-
+/* 字幕列表滚动条不做任何定制：概览 tab（.boc-reading-overview）已验证
+ * 浏览器默认滚动条在面板内清晰可见，字幕列表直接沿用同款默认样式——
+ * 曾经在此处的 ::-webkit-scrollbar 定制反而让滚动条不可见，已移除。 */
 .boc-reading-chapter,
 .boc-reading-item {
   width: 100%;

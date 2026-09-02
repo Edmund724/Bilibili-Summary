@@ -1,13 +1,12 @@
 // 候选10 批2：阅读视图字幕列表分批渲染回归测试。
 //
 // 覆盖：
-// - 首屏只渲染前 120 条，tail spacer 始终是列表最后一个子节点；
+// - 首屏只渲染前 120 条，其余按序 rAF 分批追加；
 // - rAF 每帧追加一批直至渲染完成（fake rAF 手动 flush）；
 // - 分批追加后的条目可点击跳转（事件委托在容器层，无需逐条绑定）；
 // - follow 跳转到未渲染区：先同步补渲染到目标 index 再滚动（不许跳不过去）；
 // - 激活计算对未渲染条目照旧（不产生高亮 DOM，条目上屏后下一拍补上高亮）；
 // - 渲染期间再次 renderReadingView（切轨）：取消上一轮任务，从头分批不重不漏；
-// - spacer 最终高度与整段重建一致（经 updateReadingSubtitleTailSpacer 收敛）；
 // - closeReadingView 取消挂起的追加任务。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -106,33 +105,23 @@ function renderedItemCount() {
   return subtitleList().querySelectorAll(".boc-reading-item").length;
 }
 
-function tailSpacer() {
-  const list = subtitleList();
-  const spacer = document.getElementById(ids.readingSubtitleTailSpacer) as HTMLElement | null;
-  // spacer 必须始终是列表最后一个子节点（滚动定位的尾部留白依赖它）
-  if (spacer && spacer.parentElement === list && spacer === list.lastElementChild) {
-    return spacer;
-  }
-  return null;
-}
-
 describe("字幕列表分批渲染", () => {
-  it("首屏只渲染前 120 条，spacer 收尾，追加任务挂起", () => {
+  it("首屏只渲染前 120 条，按序收尾，追加任务挂起", () => {
     state.clip.subtitleBody = makeBody(800);
     shell.renderReadingView();
     expect(renderedItemCount()).toBe(120);
-    expect(tailSpacer()).not.toBeNull();
+    expect(subtitleList().lastElementChild?.getAttribute("data-index")).toBe("119");
     expect(rafPending.size).toBe(1); // 追加任务已登记，等待下一帧
   });
 
-  it("rAF 每帧追加直至完成：800 条不重不漏，spacer 仍收尾", () => {
+  it("rAF 每帧追加直至完成：800 条不重不漏，按序收尾", () => {
     state.clip.subtitleBody = makeBody(800);
     shell.renderReadingView();
     flushAnimationFrames();
     expect(renderedItemCount()).toBe(800);
-    expect(tailSpacer()).not.toBeNull();
-    // data-index 0..799 各恰好一个（不重不漏）
     const list = subtitleList();
+    expect(list.lastElementChild?.getAttribute("data-index")).toBe("799");
+    // data-index 0..799 各恰好一个（不重不漏）
     for (let i = 0; i < 800; i += 50) {
       expect(list.querySelectorAll(`[data-index="${i}"]`).length).toBe(1);
     }
@@ -218,22 +207,7 @@ describe("字幕列表分批渲染", () => {
     expect(list.querySelectorAll('[data-index="0"]').length).toBe(1);
     expect(list.querySelectorAll('[data-index="399"]').length).toBe(1);
     expect(list.querySelector('[data-index="400"]')).toBeNull(); // 旧任务的条目没有串进来
-    expect(tailSpacer()).not.toBeNull();
-  });
-
-  it("spacer 最终高度与整段重建等价（经 updateReadingSubtitleTailSpacer 收敛）", () => {
-    state.clip.subtitleBody = makeBody(800);
-    shell.renderReadingView();
-    flushAnimationFrames();
-    const batchedHeight = tailSpacer()?.style.height;
-    expect(batchedHeight).toBeTruthy();
-
-    // 再次整段触发（同数据）：首屏 spacer 与分批收敛后的最终高度一致
-    shell.renderReadingView();
-    const fullRebuildHeight = tailSpacer()?.style.height;
-    expect(fullRebuildHeight).toBe(batchedHeight);
-    flushAnimationFrames();
-    expect(tailSpacer()?.style.height).toBe(batchedHeight);
+    expect(list.lastElementChild?.getAttribute("data-index")).toBe("399");
   });
 
   it("closeReadingView 取消挂起的追加任务，关闭后不再追加", () => {

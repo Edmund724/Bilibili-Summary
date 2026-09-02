@@ -30,7 +30,6 @@ export const ids = {
   readingSettingsHost: "boc-reading-settings-host",
   readingMeta: "boc-reading-meta",
   readingSubtitleList: "boc-reading-subtitle",
-  readingSubtitleTailSpacer: "boc-reading-tail-spacer",
   // 统一 Digest 面板（PR2）：右侧面板壳 + 三标签（字幕/概览/AI 对话）分段控件。
   // 字幕列表（readingSubtitleList）整体挂进字幕 tab body；概览/AI 对话为诚实占位。
   readingDigestPanel: "boc-reading-digest-panel",
@@ -129,28 +128,6 @@ export function setManualScrollPaused(until: number) {
 
 export function setProgrammaticScrollUntil(until: number) {
   programmaticScrollUntil = until;
-}
-
-// ===== 转写尾部留白（自 page-frame.js 并入） =====
-//
-// 消费方：batched-render 分批追加、lifecycle 的整段渲染，均属 reader 动态
-// chunk，故随消费方落在本动态域聚合文件；此处不得 import 其他 reader 域模块
-//（保持本文件只依赖 core/state 的既有边界）。
-export function updateReadingSubtitleTailSpacer() {
-  const spacer = document.getElementById(ids.readingSubtitleTailSpacer);
-  if (!spacer) {
-    return;
-  }
-  const subtitleList = document.getElementById(ids.readingSubtitleList);
-  const hostHeight = subtitleList?.clientHeight || 0;
-  const spacerHeight = Math.max(hostHeight, Math.round(window.innerHeight * 0.92), 320);
-  // 候选10 批1 脏检查：现值与目标一致则跳写（250ms tick / 每帧追加都会调到）。
-  // 读现值而非缓存快照：换新 spacer 节点（重建后 style.height 为空）或外部
-  // 篡改时自动重写，无需额外的节点身份失效逻辑。
-  if (spacer.style.height === `${spacerHeight}px`) {
-    return;
-  }
-  spacer.style.height = `${spacerHeight}px`;
 }
 
 // ===== page-state.js：reader 页面状态守卫 =====

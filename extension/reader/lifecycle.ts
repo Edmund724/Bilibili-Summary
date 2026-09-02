@@ -51,12 +51,7 @@ import {
 import { READER_CLOSE_ATTRS } from "./presentation-fields.js";
 
 // LAYOUT (state) functions this module drives:
-import {
-  ids,
-  // 候选06：转写尾部留白（PR2 起高度基准为字幕列表容器自身；后自 page-frame
-  // 并入 state）。
-  updateReadingSubtitleTailSpacer
-} from "./state.js";
+import { ids } from "./state.js";
 // B 形态右栏 Digest 面板定位器：进入时开始贴栏定位，关闭时拆除。LAYOUT 层
 // 只剩 video-bind + digest-host。
 import { openDigestHost, closeDigestHost } from "./digest-host.js";
@@ -353,10 +348,6 @@ export function renderReadingView() {
       firstHtml += buildReadingSubtitleItemHtml(subtitleItems[i], withHours);
     }
     subtitleList.innerHTML = firstHtml;
-    subtitleList.insertAdjacentHTML(
-      "beforeend",
-      `<div id="${ids.readingSubtitleTailSpacer}" class="boc-reading-tail-spacer" aria-hidden="true"></div>`
-    );
     if (firstEnd < subtitleItems.length) {
       startReadingSubtitleAppendTask({
         listEl: subtitleList,
@@ -371,7 +362,6 @@ export function renderReadingView() {
   renderReadingSubtitleSelect();
   renderReaderPanels();
   applyReadingViewPresentation();
-  updateReadingSubtitleTailSpacer();
   // PR3：渲染尾部收敛字幕 tab 的会话态——
   //   - 句内搜索重放（列表刚被整体重建，高亮/计数按当前输入重算；scroll:false
   //     不打断阅读位置）；
