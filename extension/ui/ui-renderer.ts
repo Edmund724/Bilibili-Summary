@@ -325,9 +325,8 @@ export function bindUiEvents(): void {
   // Digest 面板三标签切换（纯壳交互，见上方 setReaderDigestTab 注释）。
   // 切到 AI 对话 tab（PR5）：二级惰性激活对话组合根（首次装载 + 恢复路径 +
   // 消费待解释意图，见 activateReaderChatTab）。
-  // 切到概览 tab（PR4）：未生成则自动触发生成并刷新笔记一节快照（idle 才触发，
-  // 生成中复用进行中 promise，已生成不重跑）；reader 域交互按惯例经
-  // loadReaderDomain 装载后转发。
+  // 切到概览 tab（PR4）：未生成则自动触发生成（idle 才触发，生成中复用进行中
+  // promise，已生成不重跑）；reader 域交互按惯例经 loadReaderDomain 装载后转发。
   for (const def of DIGEST_TAB_DEFS) {
     byId(def.buttonId).addEventListener("click", () => {
       setReaderDigestTab(def.name);

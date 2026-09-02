@@ -14,19 +14,9 @@
 //      重试一律显式 forceRefresh（段缓存让已成功段免重付费）。
 //   3. 签名守卫：generatedFor 记录生成时的 (bvid, cid, 字幕签名)（与缓存键同一
 //      构成），换轨/切分P/重抓后旧产物立即退场，渲染层自愈不串片展示。
-//   4. 笔记一节（独立于概览生成，读既有产物，不造假数据）：
-//        - 判定复用 ai/followup-context 的 hasFinalNote（用法对齐
-//          followup-router：note = 会话存储里匹配当前视频的最新会话最后一条
-//          assistant 消息；segmentSummaries = 按预算计划重建段键位读段缓存）；
-//        - 成稿 → 预览卡（标题 + 首行摘要）+「查看完整笔记」面板内展开/收起，
-//          Markdown 渲染复用 ui/markdown 的 renderMarkdown；
-//        - 未成稿 → 引导按钮走对话 tab 直发链路（PR5 起：reader/chat-tab.ts 的
-//          runQuickActionPrompt seam——定位 AI 对话 tab + 自动发送
-//          playerAiQuickPrompt，不再绕侧边栏），流式进度与失败反馈沿用对话
-//          tab 现有状态，本模块只反馈发起层面的失败。
-//   5. 点击跳播：章节/金句复用 seekReadingTarget 通道（jumpReadingTarget，
+//   4. 点击跳播：章节/金句复用 seekReadingTarget 通道（jumpReadingTarget，
 //      阅读视图内点击语义 resumePlayback:true）；金句卡选中文本时不跳转。
-//   6. 清理：closeReadingView 调 resetReaderOverviewState 归位状态；不取消进行中
+//   5. 清理：closeReadingView 调 resetReaderOverviewState 归位状态；不取消进行中
 //      的生成（管线后台跑完落缓存，重开阅读模式读缓存命中；落定回执因
 //      generatedFor 已清而被丢弃，不会写进新会话）。
 //
@@ -37,9 +27,7 @@
 import { state } from "../core/state.js";
 import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
-import { DEFAULT_PLAYER_AI_QUICK_PROMPT } from "../core/defaults.js";
-// PR5：概览笔记引导改走 reader 内对话 tab 的快捷动作消费 seam（二级惰性叶子）。
-import { ensureReaderChatTab } from "../core/lazy-chat-tab.js";
+import { setMessage } from "../shared/ui-status.js";
 // 「选中平台 + 其 API Key」解析（与选区解释共用）。
 import { resolveActiveProvider } from "../ai/active-provider.js";
 import {
@@ -47,16 +35,6 @@ import {
   buildSubtitleSignature,
   type OverviewAnalysis
 } from "../ai/analysis.js";
-import { buildBudgetPlan } from "../ai/budgeter.js";
-import { loadSegmentSummaries, lastAssistantContent } from "../ai/followup-router.js";
-import { hasFinalNote } from "../ai/followup-context.js";
-import {
-  buildAiContextRef,
-  buildContextKey,
-  doesConversationMatchCurrentContext,
-  normalizeConversations
-} from "../ai/conversation.js";
-import { renderMarkdown, stripThinkBlocks } from "../ui/markdown.js";
 import { shouldShowHoursInNote } from "../notes/render.js";
 import { ids } from "./state.js";
 import { isReaderTranscribing } from "./transcribe-banner.js";
@@ -67,15 +45,6 @@ import { jumpReadingTarget } from "./sync.js";
 // ============================================================
 
 export type ReaderOverviewPhase = "idle" | "generating" | "ready" | "partial" | "error" | "empty";
-
-// 笔记一节快照：checking（读取中）/ ready（hasFinalNote 成立，存全文）/
-// none（未成稿或读取失败——两者对用户是同一个诚实空态）。
-interface ReaderNoteSnapshot {
-  phase: "checking" | "ready" | "none";
-  title: string;
-  excerpt: string;
-  full: string;
-}
 
 interface ReaderOverviewState {
   phase: ReaderOverviewPhase;
@@ -88,11 +57,6 @@ interface ReaderOverviewState {
   generatedFor: string;
   /** 进行中的生成编排 promise：重复触发复用，落定置回 null */
   inflight: Promise<void> | null;
-  note: ReaderNoteSnapshot;
-  noteExpanded: boolean;
-  /** 已发起笔记生成（player-ai-quick-action 受理成功）：显示进度去向提示 */
-  noteRequested: boolean;
-  noteError: string;
 }
 
 const overview: ReaderOverviewState = {
@@ -102,18 +66,8 @@ const overview: ReaderOverviewState = {
   progressText: "",
   errorText: "",
   generatedFor: "",
-  inflight: null,
-  note: { phase: "checking", title: "", excerpt: "", full: "" },
-  noteExpanded: false,
-  noteRequested: false,
-  noteError: ""
+  inflight: null
 };
-
-// 会话持久化键（sidepanel-conversation-store 写入侧的同键常量；存储侧无共享
-// 常量模块，与写入侧字面量保持一致）。
-const NOTE_CONVERSATIONS_STORAGE_KEY = "boc_ai_conversations_v1";
-// 笔记首行摘要截断长度（原型 note-preview 的摘要式预览量级）。
-const NOTE_PREVIEW_CHARS = 120;
 
 function getClipBody(): { from: number; to: number; content: string }[] {
   return Array.isArray(state.clip.subtitleBody) ? state.clip.subtitleBody : [];
@@ -133,9 +87,11 @@ function currentOverviewKey(): string {
   return `${clip.bvid}|${clip.cid}|${signature}`;
 }
 
-// AI 上下文（runOverviewAnalysis 入参）：三键位 + 元信息 + 字幕体 + 章节。
+// AI 上下文（runOverviewAnalysis 入参）：三键位 + 元信息 + 字幕体 + 章节 + 热评。
 // 字段名对齐 segmentCacheKeyFields（selectedSubtitleId/selectedSubtitleUrl/
 // subtitleLang），保证缓存键位与 sidepanel/offscreen 侧同构。
+// 热评透传给管线：与简介一起供「现成章节目录」解析（简介/评论里的时间戳目录
+// 优先决定章节边界，AI 只补每章大意）；无目录/解析失败不影响现状行为。
 function buildOverviewContext(): Record<string, unknown> {
   const clip = state.clip;
   return {
@@ -145,6 +101,7 @@ function buildOverviewContext(): Record<string, unknown> {
     title: clip.title,
     author: clip.author,
     videoDescription: clip.description,
+    hotComments: Array.isArray(clip.hotComments) ? clip.hotComments : [],
     videoDuration: clip.videoDuration,
     subtitleLang: clip.selectedSubtitleLang,
     selectedSubtitleId: clip.selectedSubtitleId,
@@ -264,8 +221,6 @@ async function startOverviewRun(clipKey: string, forceRefresh: boolean): Promise
     overview.progressText = "";
     overview.errorText = "";
     renderIfOpen();
-    // 概览生成期间笔记可能已在侧边栏成稿：顺手刷新笔记一节快照。
-    void refreshReaderNoteSnapshot();
   } catch (error) {
     if (overview.generatedFor !== clipKey) {
       return; // 同上：过期回执丢弃
@@ -290,12 +245,11 @@ async function startOverviewRun(clipKey: string, forceRefresh: boolean): Promise
 
 /**
  * 切到概览 tab 的入口（ui-renderer 标签切换回调）：先收敛渲染（含换片自愈），
- * 未生成就触发生成，并刷新笔记一节快照。幂等：已生成不重跑，生成中复用。
+ * 未生成就触发生成。幂等：已生成不重跑，生成中复用。
  */
 export function ensureReaderOverviewTab(): void {
   renderReadingOverview();
   void triggerReaderOverviewGeneration();
-  void refreshReaderNoteSnapshot();
 }
 
 // ============================================================
@@ -336,13 +290,13 @@ function buildOverviewBodyHtml(): string {
     case "empty":
       return buildEmptyStateHtml();
     case "generating":
-      return buildGeneratingStrip() + buildResultSectionsHtml() + buildNoteSectionHtml();
+      return buildGeneratingStrip() + buildResultSectionsHtml();
     case "partial":
-      return buildPartialStrip() + buildResultSectionsHtml() + buildNoteSectionHtml();
+      return buildPartialStrip() + buildResultSectionsHtml();
     case "error":
-      return buildErrorStrip() + buildNoteSectionHtml();
+      return buildErrorStrip();
     case "ready":
-      return buildResultSectionsHtml() + buildNoteSectionHtml();
+      return buildResultSectionsHtml();
     case "idle":
     default:
       return `
@@ -455,7 +409,7 @@ function buildResultSectionsHtml(): string {
     </section>
   `);
 
-  // —— 金句卡（白底 + 左 3px accent 边 + 右下角时间戳）——
+  // —— 金句卡（白底 + 左 3px accent 边 + 右下角时间戳 + Copy 按钮）——
   const quotes = Array.isArray(analysis.quotes) ? analysis.quotes : [];
   sections.push(`
     <section class="boc-reading-ov-section">
@@ -473,7 +427,10 @@ function buildResultSectionsHtml(): string {
                 return `
                   <button type="button" class="boc-reading-ov-quote" data-seconds="${from}">
                     <span class="boc-reading-ov-quote-text">「${escapeHtml(content)}」</span>
-                    <span class="boc-reading-ov-quote-foot"><span class="boc-reading-time">${escapeHtml(formatCompactTimestamp(from, withHours))}</span></span>
+                    <span class="boc-reading-ov-quote-foot">
+                      <span class="boc-reading-time">${escapeHtml(formatCompactTimestamp(from, withHours))}</span>
+                      <span class="boc-reading-ov-quote-copy" role="button" data-overview-action="copy-quote" data-quote="${escapeHtml(content)}" data-seconds="${from}">Copy</span>
+                    </span>
                   </button>
                 `;
               })
@@ -485,55 +442,8 @@ function buildResultSectionsHtml(): string {
   return sections.join("");
 }
 
-// —— 笔记一节（三态：读取中 / 成稿预览卡 / 未成稿引导卡）——
-function buildNoteSectionHtml(): string {
-  const head = '<section class="boc-reading-ov-section"><div class="boc-reading-ov-h">笔记</div>';
-  if (overview.note.phase === "checking") {
-    return `${head}<div class="boc-reading-ov-empty">笔记状态读取中…</div></section>`;
-  }
-  if (overview.note.phase === "ready") {
-    const fullHtml = overview.noteExpanded
-      ? `<div class="boc-reading-ov-note-full">${renderMarkdown(overview.note.full)}</div>`
-      : "";
-    return `
-      ${head}
-      <div class="boc-reading-ov-note-preview">
-        <div class="boc-reading-ov-note-title">${escapeHtml(overview.note.title || "视频笔记")}</div>
-        <p class="boc-reading-ov-note-excerpt">${escapeHtml(overview.note.excerpt)}</p>
-        ${fullHtml}
-        <button type="button" class="boc-reading-text-btn" data-overview-action="toggle-note">
-          ${overview.noteExpanded ? "收起笔记" : "查看完整笔记 →"}
-        </button>
-      </div>
-    </section>
-    `;
-  }
-  // 未成稿：引导走 reader 内对话 tab 的笔记生成链路（playerAiQuickPrompt 直发，
-  // PR5 起不再绕侧边栏）。流式进度与生成失败在对话 tab 沿用其现有状态反馈，
-  // 这里只反馈发起层面的失败。
-  const requestHint = overview.noteRequested
-    ? '<p class="boc-reading-ov-note-hint">已在 AI 对话发起笔记生成，完成后回到概览即可查看。</p>'
-    : "";
-  const errorHint = overview.noteError
-    ? `<p class="boc-reading-ov-note-hint is-error">${escapeHtml(overview.noteError)}</p>`
-    : "";
-  const generateBtn = overview.noteRequested
-    ? ""
-    : '<button type="button" class="boc-reading-ov-note-btn" data-overview-action="generate-note">生成完整笔记</button>';
-  return `
-    ${head}
-    <div class="boc-reading-ov-note-preview is-empty">
-      <p class="boc-reading-ov-note-hint">完整笔记还没有生成。</p>
-      ${generateBtn}
-      ${requestHint}
-      ${errorHint}
-    </div>
-  </section>
-  `;
-}
-
 // ============================================================
-// 交互（章节/金句点击跳播 + 重试/笔记按钮；ui-renderer 事件委托入口）
+// 交互（章节/金句点击跳播 + 复制金句 + 重试；ui-renderer 事件委托入口）
 // ============================================================
 
 export function onReadingOverviewClick(event: MouseEvent): void {
@@ -545,13 +455,8 @@ export function onReadingOverviewClick(event: MouseEvent): void {
       void triggerReaderOverviewGeneration({ forceRefresh: true });
       return;
     }
-    if (action === "toggle-note") {
-      overview.noteExpanded = !overview.noteExpanded;
-      renderIfOpen();
-      return;
-    }
-    if (action === "generate-note") {
-      void generateReaderNoteFromOverview();
+    if (action === "copy-quote") {
+      void copyQuoteToClipboard(target);
       return;
     }
     return;
@@ -572,107 +477,26 @@ export function onReadingOverviewClick(event: MouseEvent): void {
   jumpReadingTarget(seekTarget.dataset.seconds ?? 0);
 }
 
-// ============================================================
-// 笔记一节（快照读取 + 引导生成）
-// ============================================================
-
-// 笔记快照请求令牌：并发刷新（切 tab / 生成落定）时只应用最后一次结果。
-let noteSnapshotToken = 0;
-
-async function refreshReaderNoteSnapshot(): Promise<void> {
-  const token = ++noteSnapshotToken;
-  overview.note = { phase: "checking", title: "", excerpt: "", full: "" };
-  renderIfOpen();
-  const snapshot = await loadReaderNoteSnapshot().catch(() => null);
-  if (token !== noteSnapshotToken) {
-    return; // 过期快照丢弃
+// 复制单条金句（含时间戳）到剪贴板：取数与反馈照抄 copySubtitleTranscript
+// （subtitle/ui.js）——navigator.clipboard.writeText + setMessage；文本取
+// 卡片 data-quote（无 HTML 实体顾虑）。金句点击默认是跳播，本按钮在
+// onReadingOverviewClick 顶部分流拦下。
+async function copyQuoteToClipboard(quoteEl: HTMLElement): Promise<void> {
+  const seconds = Number(quoteEl.dataset.seconds) || 0;
+  const content = quoteEl.dataset.quote || "";
+  const withHours = shouldShowHoursInNote(state, getClipBody());
+  const text = `${formatCompactTimestamp(seconds, withHours)} 「${content}」`;
+  if (!content) {
+    setMessage("没有可复制的金句。");
+    return;
   }
-  overview.note = snapshot
-    ? { phase: "ready", ...snapshot }
-    : { phase: "none", title: "", excerpt: "", full: "" };
-  renderIfOpen();
-}
 
-/**
- * 读取笔记产物（不造假数据，读不到就是未成稿）：
- *   - note：会话存储里匹配当前视频的最新会话的最后一条 assistant 消息
- *     （normalizeConversations 按 updatedAt 降序，matched[0] 即最新）；
- *   - segmentSummaries：按预算计划重建段键位读段缓存（followup-router 同款）；
- *   - hasFinalNote 判定成稿（笔记正文 + 分段小结齐备，CONTEXT.md 笔记词条）。
- * 无字幕 / 未匹配会话 / 判定不成立 → null（未成稿）。
- */
-async function loadReaderNoteSnapshot(): Promise<{ title: string; excerpt: string; full: string } | null> {
-  const clip = state.clip;
-  if (getClipBody().length === 0) {
-    return null;
-  }
-  const ref = buildAiContextRef({
-    title: clip.title,
-    url: location.href,
-    author: clip.author,
-    bvid: clip.bvid,
-    cid: clip.cid,
-    aid: clip.aid,
-    pageIndex: clip.pageIndex
-  });
-  const contextKey = buildContextKey(ref);
-
-  let noteText = "";
-  let conversationTitle = "";
   try {
-    const data = await chrome.storage.local.get([NOTE_CONVERSATIONS_STORAGE_KEY]);
-    const conversations = normalizeConversations(data?.[NOTE_CONVERSATIONS_STORAGE_KEY]);
-    const matched = conversations.filter((conversation) =>
-      doesConversationMatchCurrentContext(conversation, ref, contextKey)
-    );
-    noteText = lastAssistantContent(matched[0]?.messages || []);
-    conversationTitle = String(matched[0]?.title || "").trim();
-  } catch {
-    noteText = "";
-  }
-  if (!noteText.trim()) {
-    return null;
-  }
-
-  // hasFinalNote 第二半：分段小结（Map-Reduce 路径的段缓存）。
-  const plan = buildBudgetPlan({ body: getClipBody(), chapters: Array.isArray(clip.chapters) ? clip.chapters : [] });
-  const summaries = await loadSegmentSummaries({ context: buildOverviewContext(), plan }).catch(() => [] as string[]);
-  if (!hasFinalNote({ note: noteText, segmentSummaries: summaries })) {
-    return null;
-  }
-
-  // 首行摘要式预览：剥掉 think 块取第一个非空行，超长截断。
-  const plain = stripThinkBlocks(noteText);
-  const firstLine = plain.split("\n").map((line) => line.trim()).find((line) => line) || "";
-  const excerpt =
-    firstLine.length > NOTE_PREVIEW_CHARS ? `${firstLine.slice(0, NOTE_PREVIEW_CHARS)}……` : firstLine;
-
-  return {
-    title: conversationTitle || String(clip.title || "").trim() || "视频笔记",
-    excerpt,
-    full: noteText
-  };
-}
-
-// 引导按钮 → reader 内对话 tab 直发（PR5 改道：原 player-ai-quick-action 消息
-// 打开 AI 侧边栏，现走对话组合根的快捷动作消费 seam——定位对话 tab +
-// startNewConversation + 填 playerAiQuickPrompt + 自动发送，同一 seam、不再绕
-// 侧边栏）。流式进度与失败反馈在对话 tab 沿用其现有状态；受理失败在此如实反馈。
-async function generateReaderNoteFromOverview(): Promise<void> {
-  try {
-    const chat = await ensureReaderChatTab();
-    const prompt = String(state.settings?.playerAiQuickPrompt || DEFAULT_PLAYER_AI_QUICK_PROMPT).trim();
-    const accepted = await chat.runQuickActionPrompt(prompt);
-    if (accepted) {
-      overview.noteRequested = true;
-      overview.noteError = "";
-    } else {
-      overview.noteError = "对话暂未就绪（未配置平台或上下文未就绪），请稍后重试。";
-    }
+    await navigator.clipboard.writeText(text);
+    setMessage("金句已复制到剪贴板。");
   } catch (error) {
-    overview.noteError = `发起笔记生成失败：${getErrorMessage(error)}`;
+    setMessage(`复制失败：${getErrorMessage(error)}`);
   }
-  renderIfOpen();
 }
 
 // ============================================================
@@ -692,8 +516,4 @@ export function resetReaderOverviewState(): void {
   overview.errorText = "";
   overview.generatedFor = "";
   overview.inflight = null;
-  overview.note = { phase: "checking", title: "", excerpt: "", full: "" };
-  overview.noteExpanded = false;
-  overview.noteRequested = false;
-  overview.noteError = "";
 }

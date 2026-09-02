@@ -150,7 +150,7 @@ function buildSettingsHtml(): string {
       <div class="boc-set-h">导出</div>
       <div class="boc-set-row">
         <label class="boc-set-label" for="tags">默认标签（逗号分隔）</label>
-        <input id="tags" type="text" placeholder="例如：clippings,bilibili,subtitle" />
+        <input id="tags" class="boc-set-input" type="text" placeholder="例如：clippings,bilibili,subtitle" />
       </div>
       <div class="boc-set-row">
         <label class="boc-set-label" for="downloadFormat">下载格式</label>

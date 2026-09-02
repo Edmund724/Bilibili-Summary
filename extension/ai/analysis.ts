@@ -29,6 +29,16 @@ import { runMapBounded, DEFAULT_MAP_CONCURRENCY } from "./pool.js";
 import { budgetScaleSuffix, segmentCacheKeyFields } from "./segment-cache.js";
 import type { BudgetPlan, BudgetPlanSegment, ChatMessage, SubtitleBodyItem } from "./types.js";
 
+// 热门评论（HotComment[]）→ 可解析文本：只取 message 正文，一行一条。
+// 评论缺失/形状不对返回空串；作者与点赞数不参与目录解析（避免噪声行）。
+function hotCommentsText(hotComments: unknown): string {
+  if (!Array.isArray(hotComments)) return "";
+  return hotComments
+    .map((item) => String((item as { message?: unknown })?.message ?? ""))
+    .filter(Boolean)
+    .join("\n");
+}
+
 // ============================================================
 // 类型与常量
 // ============================================================
@@ -117,6 +127,13 @@ B 站的 AI 字幕有两个特点，会直接影响你的工作：
 那么「这里有个很反直觉的地方」的时间戳就是：
 - timestamp: "2:30"
 - timestampSeconds: 150
+
+⚠️ 关于「现成章节目录」⚠️
+用户消息里如果给出「视频简介/评论中的章节目录」（形如「00:00 开场」的时间戳行），
+**章节边界必须完全采用那份目录**：目录里的每个时间戳 = 一章的起点，标题也用目录里的标题，
+不得增删章节、不得改动任何时间戳——哪怕目录的分章与字幕的话题转折对不上。
+你的职责只是为每一章补写 summary（这一段讲了什么），依据是目录时间戳之间的字幕内容。
+前情回顾（分段路径）里的时间戳依然不能用：目录时间戳早于本段起点时，那一章归上一段管。
 
 ⚠️ 关于「前情回顾」⚠️
 长视频会切成多段分别处理。用户消息里如果出现「前情回顾」，那是上一段结尾的字幕，
@@ -231,7 +248,7 @@ UP 主：{ownerName}
 
 视频简介（用它来校正人名、品牌名与术语的写法）：
 {videoDescription}
-{contextNote}
+{chapterOutlineNote}{contextNote}
 字幕：
 {transcriptText}`;
 
@@ -312,6 +329,15 @@ function fnv1a32(text: string): number {
   return hash >>> 0;
 }
 
+// 现成目录 → 签名用指纹文本：确定性的（时间戳, 标题）序列。
+function chapterOutlineText(chapterOutline: unknown): string {
+  return Array.isArray(chapterOutline)
+    ? chapterOutline.map((item) => `${Number(item?.seconds) || 0}|${String(item?.title ?? "")}`).join("\n")
+    : "";
+}
+
+// 「自带章节（模式位）」：非空切换只挑金句短路径，产物形态不同，签名须区分；
+// 「chapterOutline」：简介/评论现成目录（切进「照抄边界」提示词路径），同样改变产物形态。
 export interface SubtitleSignatureInput {
   lang?: unknown;
   subtitleId?: unknown;
@@ -319,6 +345,8 @@ export interface SubtitleSignatureInput {
   body?: unknown;
   /** 自带章节（模式位）：非空切换只挑金句短路径，产物形态不同，签名须区分。 */
   chapters?: unknown;
+  /** 简介/评论现成章节目录（OutlineChapter[]）：目录出现/消失改变分章来源，签名须区分。 */
+  chapterOutline?: unknown;
 }
 
 /**
@@ -328,7 +356,7 @@ export interface SubtitleSignatureInput {
  * 文本量变化即签名变化，概览缓存自然 miss，不做主动失效（07 票决议）。
  * 模式位（有无自带章节）一并纳入：章节出现/消失会切换短路径，产物形态不同。
  */
-export function buildSubtitleSignature({ lang, subtitleId, subtitleUrl, body, chapters }: SubtitleSignatureInput = {}): string {
+export function buildSubtitleSignature({ lang, subtitleId, subtitleUrl, body, chapters, chapterOutline }: SubtitleSignatureInput = {}): string {
   const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
   let count = 0;
   let totalChars = 0;
@@ -353,7 +381,9 @@ export function buildSubtitleSignature({ lang, subtitleId, subtitleUrl, body, ch
     String(lastTo),
     String(totalChars),
     // 模式位：自带章节非空（短路径）与空（AI 分章）产物不同构，签名必须区分
-    String(Array.isArray(chapters) && chapters.length > 0)
+    String(Array.isArray(chapters) && chapters.length > 0),
+    // 模式位：现成目录的 FNV 指纹（出现/消失/换目录 → 缓存 miss 重生成）
+    String(fnv1a32(chapterOutlineText(chapterOutline)))
   ].join("|");
   return `sig${fnv1a32(basis).toString(36)}`;
 }
@@ -629,6 +659,69 @@ export function estimateOutputTokens(
 // 用户提示词装配（单一渲染收口：变量全部在这里从 body / 段 items 现场装配）
 // ============================================================
 
+/** 简介/评论时间戳目录里的单条章节：秒数 + 标题（原样保留，不让模型改写）。 */
+export interface OutlineChapter {
+  seconds: number;
+  title: string;
+}
+
+// 时间戳行识别：行首（可带列表符号/引用符号）后跟 M:SS / MM:SS / H:MM:SS，
+// 后接标题文字（标题与时间戳之间也可用「・」「·」等间隔符）。纯时间戳行（无标题）
+// 不算章节条目。
+const OUTLINE_LINE_RE = /^(?:[-*•>#\s]|\d+[.、)])*\s*(\d{1,2}:\d{2}(?::\d{2})?)[\s・·]+(.{1,120}?)\s*$/;
+
+function parseOutlineClock(text: string): number {
+  const parts = text.split(":").map(Number);
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return -1;
+}
+
+/**
+ * 从简介/评论文本提取「时间戳目录」：形如「00:00 开场 / 03:25 安装」的行。
+ * 至少 2 条才认定为现成章节划分（单条时间戳行不构成划分）；重复秒数去重、
+ * 按秒排序；上限 MAX_ANALYSIS_CHAPTERS 对齐产物裁剪。不足 2 条或识别不了
+ * 返回空数组，调用方回落到 AI 自由分章（现状行为）。
+ */
+export function parseChapterOutline(text: unknown): OutlineChapter[] {
+  const lines = String(text ?? "").split(/\r?\n/);
+  const out: OutlineChapter[] = [];
+  const seen = new Set<number>();
+  for (const line of lines) {
+    const match = line.match(OUTLINE_LINE_RE);
+    if (!match) continue;
+    const seconds = parseOutlineClock(match[1]);
+    const title = match[2].trim();
+    if (seconds < 0 || !title || seen.has(seconds)) continue;
+    seen.add(seconds);
+    out.push({ seconds, title });
+  }
+  if (out.length < 2) {
+    return [];
+  }
+  out.sort((a, b) => a.seconds - b.seconds);
+  return out.slice(0, MAX_ANALYSIS_CHAPTERS);
+}
+
+/**
+ * 现成章节目录 → 用户提示词注入块。有空目录返回空串（模板行变空行），
+ * 有目录时给出「边界照抄、只补大意」的硬约束（措辞与系统提示词的
+ * 「现成章节目录」节呼应）。
+ */
+export function buildChapterOutlineNote(outline: OutlineChapter[] | undefined): string {
+  if (!Array.isArray(outline) || outline.length === 0) {
+    return "";
+  }
+  const lines = outline.map(
+    (item) => `${formatAnalysisClock(item.seconds)} ${item.title}`
+  );
+  return (
+    `\n现成章节目录（来自视频简介/评论，共 ${outline.length} 章）：\n` +
+    `${lines.join("\n")}\n` +
+    `按系统提示词的要求：章节边界与标题必须完全照抄这份目录，不要增删或改动时间戳，只需为每章补写 summary。\n`
+  );
+}
+
 export interface BuildAnalysisPromptInput {
   title?: unknown;
   ownerName?: unknown;
@@ -644,6 +737,8 @@ export interface BuildAnalysisPromptInput {
   /** 分段信息（1-based）；与 totalSegments 一起 >1 时产出 rangeNote。 */
   segmentIndex?: unknown;
   totalSegments?: unknown;
+  /** 简介/评论中解析出的现成章节目录（parseChapterOutline 产物）；非空时章节边界照抄目录。 */
+  chapterOutline?: OutlineChapter[];
 }
 
 export interface BuiltAnalysisPrompt {
@@ -709,6 +804,7 @@ function buildAnalysisUserPrompt(mode: "full" | "quotes", input: BuildAnalysisPr
     maxTimestampSeconds: timing.maxTimestampSeconds,
     lateThreshold: timing.lateThreshold,
     videoDescription: String(input.videoDescription ?? "").trim() || "（无简介）",
+    chapterOutlineNote: buildChapterOutlineNote(input.chapterOutline),
     contextNote: buildContextNote(mode, input.contextItems),
     transcriptText
   });
@@ -1019,13 +1115,17 @@ export function runOverviewAnalysis(
   // 短路径判定：自带章节非空 → 只挑金句（章节取稿件标题）。
   const manuscriptChapters = Array.isArray(ctx.chapters) ? ctx.chapters : [];
   const shortPath = manuscriptChapters.length > 0;
+  // 现成章节目录：简介 + 热门评论里的时间戳目录（「00:00 开场」行）。
+  // 短路径（稿件自带章节）不需要目录——章节边界已有权威来源。
+  const chapterOutline = shortPath ? [] : parseChapterOutline([ctx.videoDescription, hotCommentsText(ctx.hotComments)].join("\n"));
 
   const signature = buildSubtitleSignature({
     lang: ctx.subtitleLang,
     subtitleId: ctx.selectedSubtitleId,
     subtitleUrl: ctx.selectedSubtitleUrl,
     body,
-    chapters: manuscriptChapters
+    chapters: manuscriptChapters,
+    chapterOutline
   });
   const finalKey = buildAnalysisFinalCacheKey(ctx, signature);
 
@@ -1040,6 +1140,7 @@ export function runOverviewAnalysis(
     body,
     shortPath,
     manuscriptChapters,
+    chapterOutline,
     finalKey,
     signal,
     thinkingLevel,
@@ -1069,6 +1170,7 @@ interface ExecuteOverviewRunArgs {
   body: unknown[];
   shortPath: boolean;
   manuscriptChapters: unknown[];
+  chapterOutline: OutlineChapter[];
   finalKey: string;
   signal?: AbortSignal | null;
   thinkingLevel?: string;
@@ -1086,6 +1188,7 @@ async function executeOverviewRun({
   body,
   shortPath,
   manuscriptChapters,
+  chapterOutline,
   finalKey,
   signal,
   thinkingLevel,
@@ -1114,7 +1217,8 @@ async function executeOverviewRun({
   const promptVars = {
     title: ctx.title,
     ownerName: ctx.author,
-    videoDescription: ctx.videoDescription
+    videoDescription: ctx.videoDescription,
+    chapterOutline
   };
   const plan = buildBudgetPlanImpl({ body, chapters: manuscriptChapters });
   const segments = Array.isArray(plan.segments) ? plan.segments : [];

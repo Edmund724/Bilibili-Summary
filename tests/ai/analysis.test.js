@@ -672,6 +672,174 @@ describe("groupQuotesIntoChapters 归章", () => {
   });
 });
 
+// ============================================================
+// 现成章节目录（简介/评论时间戳目录 → 章节边界照抄）
+// ============================================================
+
+describe("parseChapterOutline 简介/评论时间戳目录解析", () => {
+  it("标准「00:00 标题」行：秒数正确、按秒排序、重复秒数去重", () => {
+    const outline = mod.parseChapterOutline(
+      [
+        "03:25 安装与配置",
+        "00:00 开场",
+        "12:00 进阶用法",
+        "3:25 安装（重复秒数，丢弃）"
+      ].join("\n")
+    );
+    expect(outline).toEqual([
+      { seconds: 0, title: "开场" },
+      { seconds: 205, title: "安装与配置" },
+      { seconds: 720, title: "进阶用法" }
+    ]);
+  });
+
+  it("容忍列表符号 / 引用 / 带序号行、H:MM:SS 与全角间隔", () => {
+    const text = [
+      "- 00:00 开场",
+      "> 01:30 背景介绍",
+      "1) 02:00 准备工作",
+      "1:02:03 长视频章节",
+      "04:00・收尾"
+    ].join("\n");
+    const outline = mod.parseChapterOutline(text);
+    expect(outline).toEqual([
+      { seconds: 0, title: "开场" },
+      { seconds: 90, title: "背景介绍" },
+      { seconds: 120, title: "准备工作" },
+      { seconds: 240, title: "收尾" },
+      { seconds: 3723, title: "长视频章节" }
+    ]);
+  });
+
+  it("纯时间戳行 / 字幕式 [M:SS] / 单条目录 / 普通文本：不算现成划分", () => {
+    expect(mod.parseChapterOutline("00:00\n01:30\n02:00")).toEqual([]); // 无标题
+    expect(mod.parseChapterOutline("[00:00] 开场 [01:30] 正文")).toEqual([]); // 行首非时间戳
+    expect(mod.parseChapterOutline("00:00 只有单条")).toEqual([]); // 单条不构成划分
+    expect(mod.parseChapterOutline("这是一段没有任何时间戳的普通简介。")).toEqual([]);
+    expect(mod.parseChapterOutline("")).toEqual([]);
+    expect(mod.parseChapterOutline(null)).toEqual([]);
+  });
+
+  it("正文里夹带的时间戳词组不误判：只认「时间戳 + 空白 + 文字」的行", () => {
+    expect(mod.parseChapterOutline("视频从 00:00 开始讲起")).toEqual([]);
+    expect(mod.parseChapterOutline("参考 3:25 处的演示和 10:00 的总结")).toEqual([]);
+  });
+
+  it("章节数按 MAX_ANALYSIS_CHAPTERS 裁剪", () => {
+    const lines = Array.from({ length: 120 }, (_, i) => `${String(i).padStart(2, "0")}:00 第${i}章`);
+    expect(mod.parseChapterOutline(lines.join("\n"))).toHaveLength(mod.MAX_ANALYSIS_CHAPTERS);
+  });
+});
+
+describe("buildAnalysisPrompt 现成目录注入", () => {
+  const outline = [
+    { seconds: 0, title: "开场" },
+    { seconds: 205, title: "安装与配置" }
+  ];
+
+  it("有目录：注入「现成章节目录」块与照抄约束；无目录：不注入", () => {
+    const withOutline = mod.buildAnalysisPrompt({
+      items: [{ from: 0, to: 10, content: "开场白" }],
+      chapterOutline: outline
+    });
+    expect(withOutline.prompt).toContain("现成章节目录（来自视频简介/评论，共 2 章）：");
+    expect(withOutline.prompt).toContain("0:00 开场");
+    expect(withOutline.prompt).toContain("3:25 安装与配置");
+    expect(withOutline.prompt).toContain("章节边界与标题必须完全照抄这份目录");
+
+    const without = mod.buildAnalysisPrompt({
+      items: [{ from: 0, to: 10, content: "开场白" }]
+    });
+    expect(without.prompt).not.toContain("现成章节目录");
+    expect(without.prompt).not.toContain("照抄这份目录");
+  });
+
+  it("空目录 / undefined：同样不注入（模板行塌缩为空行）", () => {
+    const empty = mod.buildAnalysisPrompt({
+      items: [{ from: 0, to: 10, content: "开场白" }],
+      chapterOutline: []
+    });
+    expect(empty.prompt).not.toContain("现成章节目录");
+  });
+});
+
+describe("buildSubtitleSignature 现成目录模式位", () => {
+  const base = { lang: "zh-CN", subtitleId: "sub-1", body: makeSubtitleBody(3000) };
+  const outline = [
+    { seconds: 0, title: "开场" },
+    { seconds: 90, title: "正文" }
+  ];
+
+  it("目录出现/消失/换内容 → 签名变化；同目录确定性一致", () => {
+    const sig = mod.buildSubtitleSignature(base);
+    const withOutline = mod.buildSubtitleSignature({ ...base, chapterOutline: outline });
+    expect(withOutline).not.toBe(sig);
+    expect(mod.buildSubtitleSignature({ ...base, chapterOutline: outline })).toBe(withOutline); // 确定性
+    expect(
+      mod.buildSubtitleSignature({ ...base, chapterOutline: [...outline, { seconds: 200, title: "结尾" }] })
+    ).not.toBe(withOutline); // 换目录
+  });
+});
+
+describe("双路径 × 现成章节目录（简介/评论）", () => {
+  it("单次路径：简介含时间戳目录 → 注入 prompt；无目录 → 走自由分章（不注入）", async () => {
+    const { chatCompletion, calls } = buildCompletionFake();
+    const body = makeSubtitleBody(50000);
+    const description = "时间轴：\n00:00 开场\n03:25 安装与配置\n12:00 进阶用法";
+    await mod.runOverviewAnalysis(
+      { provider: makeProvider(), context: makeContext({ subtitleBody: body, videoDescription: description }) },
+      { chatCompletion }
+    );
+    const user = calls[0].messages.at(-1).content;
+    expect(user).toContain("现成章节目录（来自视频简介/评论，共 3 章）：");
+    expect(user).toContain("0:00 开场");
+    expect(user).toContain("3:25 安装与配置");
+
+    // 同一视频、无目录：不注入（现状自由分章行为不变）
+    chatCompletion.mockClear();
+    await mod.runOverviewAnalysis(
+      { provider: makeProvider(), context: makeContext({ subtitleBody: body, videoDescription: "普通简介，无目录" }), forceRefresh: true },
+      { chatCompletion }
+    );
+    expect(chatCompletion.mock.calls[0][0].messages.at(-1).content).not.toContain("现成章节目录");
+  });
+
+  it("评论含时间戳目录：热评 message 参与解析注入（与简介合并去重）", async () => {
+    const { chatCompletion, calls } = buildCompletionFake();
+    const body = makeSubtitleBody(50000);
+    await mod.runOverviewAnalysis(
+      {
+        provider: makeProvider(),
+        context: makeContext({
+          subtitleBody: body,
+          hotComments: [
+            { uname: "UP", like: 999, message: "本课时间线：\n00:00 开场\n05:00 数据结构\n10:00 算法实战" },
+            { uname: "路人", like: 3, message: "讲得真好" }
+          ]
+        })
+      },
+      { chatCompletion }
+    );
+    const user = calls[0].messages.at(-1).content;
+    expect(user).toContain("现成章节目录（来自视频简介/评论，共 3 章）：");
+    expect(user).toContain("5:00 数据结构");
+  });
+
+  it("分段路径：目录注入每段提示词（各段只对落在本段区间的目录条目出章）", async () => {
+    const { chatCompletion, calls } = buildCompletionFake();
+    const body = makeSubtitleBody(110000); // 3 段
+    const description = "00:00 开场\n00:10 第一节\n04:20 第二节\n08:30 第三节";
+    await mod.runOverviewAnalysis(
+      { provider: makeProvider(), context: makeContext({ subtitleBody: body, videoDescription: description }) },
+      { chatCompletion }
+    );
+    expect(chatCompletion).toHaveBeenCalledTimes(3);
+    for (const call of calls) {
+      expect(call.messages.at(-1).content).toContain("现成章节目录（来自视频简介/评论，共 4 章）：");
+    }
+  });
+});
+
 describe("buildAnalysisPrompt 变量装配", () => {
   it("后段门槛 = 75% 处、起止时刻与秒数同源、简介缺省兜底", () => {
     const body = [

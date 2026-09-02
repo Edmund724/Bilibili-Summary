@@ -1,5 +1,5 @@
 // PR4 概览 tab 回归测试：状态机（reader/overview.js）+ 渲染 + 点击 seek +
-// partial 重试 + 无字幕空态 + 笔记一节 + closeReadingView 清理。
+// 金句复制 + partial 重试 + 无字幕空态 + closeReadingView 清理。
 //
 // 手法（对齐 tests/reader 现有套路）：
 //   - 真实模板/骨架（mountReaderSkeleton 补 PR4 概览渲染宿主）+ 真实状态机；
@@ -7,10 +7,10 @@
 //     已有独立测试；这里只测接线与状态机迁移），其余导出（buildSubtitleSignature
 //     等签名守卫用）保留真实实现；
 //   - provider 解析链（get-settings / ai-providers-list / get-ai-provider-key）
-//     与笔记存储（会话 + 段缓存）经 chrome stub 的 sendMessage/storage.get 注入。
+//     经 chrome stub 的 sendMessage 注入。
 
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { READER_MODE_URL, makeSubtitleBody, resetModuleState, setLocationUrl } from "../setup.js";
+import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
 import { mountPlayerChain, mountReaderSkeleton } from "../helpers/reader-skeleton.js";
 import type { OverviewAnalysis } from "../../extension/ai/analysis.js";
 import type { TestState } from "./reader-test-env.d.ts";
@@ -22,18 +22,8 @@ vi.mock("../../extension/ai/analysis.js", async (importActual) => {
   return { ...actual, runOverviewAnalysis: vi.fn() };
 });
 
-// PR5：概览笔记引导改走对话 tab 组合根的快捷动作 seam——本套件只测概览自身
-// 的接线与反馈语义，对话域（壳 DOM + 组合根）以 mock 替身解耦（对话 seam 的
-// 行为回归在 tests/reader/chat-tab.test.ts）。
-const chatTabMock = vi.hoisted(() => ({
-  ensureChatTabActivated: vi.fn(async () => {}),
-  closeChatSession: vi.fn(),
-  runQuickActionPrompt: vi.fn(async (_prompt: string) => true)
-}));
-vi.mock("../../extension/core/lazy-chat-tab.js", () => ({
-  ensureReaderChatTab: vi.fn(async () => chatTabMock),
-  isReaderChatTabLoaded: vi.fn(() => true)
-}));
+// PR5：概览笔记引导已随笔记区块删除——对话域不再由本套件解耦 mock（对话 seam
+// 的行为回归在 tests/reader/chat-tab.test.ts）。
 
 let state: TestState;
 let reader: typeof import("../../extension/reader/index.js");
@@ -108,6 +98,11 @@ function overviewText(): string {
   return overviewBody().textContent || "";
 }
 
+// 金句复制反馈走 setMessage（digest-only-ui：宿主收敛到 #boc-reading-status）
+function messageText(): string {
+  return (document.getElementById(ids.readingStatus) as HTMLElement).textContent || "";
+}
+
 // 概览渲染宿主上的手动委托（真实接线在 bindUiEvents，这里等价绑定以验证
 // closest 委托与 data-seconds/data-overview-action 分流）。
 function bindOverviewDelegation() {
@@ -151,8 +146,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("概览状态机与触发", () => {
-  it("无字幕：不触发生成，展示诚实空态（转写中给出预期文案）", async () => {
+describe("概览状态机与触发", () => {  it("无字幕：不触发生成，展示诚实空态（转写中给出预期文案）", async () => {
     seedClip();
     state.clip.subtitleBody = [];
 
@@ -331,7 +325,7 @@ describe("概览状态机与触发", () => {
   });
 });
 
-describe("概览点击 seek（章节/金句跳播）", () => {
+describe("概览点击 seek（章节/金句跳播）与金句复制", () => {
   beforeEach(async () => {
     seedClip();
     runOverviewMock.mockResolvedValue(SAMPLE_ANALYSIS);
@@ -358,6 +352,45 @@ describe("概览点击 seek（章节/金句跳播）", () => {
     quote.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 
     expect(video.currentTime).toBe(125);
+  });
+
+  it("点击 Copy：剪贴板写入金句文本（含时间戳），反馈「金句已复制到剪贴板」；不触发跳播", async () => {
+    const video = document.querySelector("video") as HTMLVideoElement;
+    video.play = vi.fn(() => Promise.resolve()) as unknown as HTMLVideoElement["play"];
+    const clipboardWriteText = vi.fn<(text: string) => Promise<void>>(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: clipboardWriteText },
+      configurable: true
+    });
+
+    const copyBtn = overviewBody().querySelector<HTMLElement>("[data-overview-action='copy-quote']")!;
+    copyBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1));
+    // 金句复制 = 文本 + 时间戳（概览时间戳同款紧凑格式）
+    const copied = String(clipboardWriteText.mock.calls[0][0]);
+    expect(copied).toContain("测试不是目的，而是反馈。");
+    expect(copied).toMatch(/\d{1,2}:\d{2}/);
+    // Copy 分流在跳播判定之前：金句卡不 seek
+    expect(video.currentTime).toBe(0);
+    expect(video.play).not.toHaveBeenCalled();
+  });
+
+  it("点击 Copy 失败（剪贴板拒绝写入）：反馈「复制失败：…」", async () => {
+    const clipboardWriteText = vi.fn(async () => {
+      throw new Error("denied");
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: clipboardWriteText },
+      configurable: true
+    });
+
+    overviewBody()
+      .querySelector<HTMLElement>("[data-overview-action='copy-quote']")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => expect(messageText()).toContain("复制失败"));
+    expect(messageText()).toContain("denied");
   });
 
   it("金句卡选中文本（复制场景）时不跳转", () => {
@@ -446,124 +479,3 @@ describe("closeReadingView 清理", () => {
   });
 });
 
-describe("笔记一节", () => {
-  const NOTE_MARKDOWN = "# 笔记标题\n\n第一段内容。";
-
-  // vi.restoreAllMocks（afterEach）会抹掉 vi.fn 的缺省实现：每用例重新归位
-  beforeEach(() => {
-    chatTabMock.runQuickActionPrompt.mockReset();
-    chatTabMock.runQuickActionPrompt.mockImplementation(async () => true);
-    chatTabMock.ensureChatTabActivated.mockClear();
-  });
-
-  // 成稿判定（hasFinalNote）需要笔记正文 + 分段小结：会话存储给一条匹配当前
-  // 视频的会话，段缓存按任意 boc_lvs_summary_ 键回一條小结。
-  function seedNoteStorage({ withConversation = true, segmentSummaries = true } = {}) {
-    chromeStub().storage.local.get.mockImplementation(async (keys: unknown) => {
-      if (Array.isArray(keys) && keys.includes("boc_ai_conversations_v1")) {
-        if (!withConversation) {
-          return {};
-        }
-        return {
-          boc_ai_conversations_v1: [
-            {
-              id: "conv_1",
-              title: "测试视频 · 总结",
-              contextKey: "video:BV1test000000|1000",
-              contextRef: { bvid: "BV1test000000", cid: "1000" },
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-              messages: [
-                { role: "user", content: "总结这个视频" },
-                { role: "assistant", content: NOTE_MARKDOWN }
-              ]
-            }
-          ]
-        };
-      }
-      if (typeof keys === "string" && keys.startsWith("boc_lvs_summary_")) {
-        if (!segmentSummaries) {
-          return {};
-        }
-        return { [keys]: { summary: "分段小结内容", timestamp: 1 } };
-      }
-      return {};
-    });
-  }
-
-  it("hasFinalNote 成立（笔记 + 分段小结）：预览卡 + 查看完整笔记展开/收起（Markdown 渲染）", async () => {
-    // Map-Reduce 路径（>100k 字符）才有分段小结段缓存
-    seedClip();
-    state.clip.subtitleBody = makeSubtitleBody(110000);
-    seedNoteStorage();
-
-    reader.ensureReaderOverviewTab();
-    await vi.waitFor(() => expect(overviewText()).toContain("查看完整笔记"));
-
-    expect(overviewText()).toContain("测试视频");
-    expect(overviewText()).toContain("# 笔记标题");
-
-    bindOverviewDelegation();
-    const openBtn = overviewBody().querySelector<HTMLButtonElement>("button[data-overview-action='toggle-note']")!;
-    openBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      const full = overviewBody().querySelector<HTMLElement>(".boc-reading-ov-note-full");
-      expect(full).not.toBe(null);
-      expect(full!.innerHTML).toContain("<h3>笔记标题</h3>");
-      expect(full!.textContent).toContain("第一段内容。");
-    });
-    expect(overviewText()).toContain("收起笔记");
-
-    const closeBtn = overviewBody().querySelector<HTMLButtonElement>("button[data-overview-action='toggle-note']")!;
-    closeBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    await vi.waitFor(() => expect(overviewBody().querySelector(".boc-reading-ov-note-full")).toBe(null));
-    expect(overviewText()).toContain("查看完整笔记");
-  });
-
-  it("未成稿（无会话/无分段小结）：引导按钮走 reader 对话 tab 直发 seam（PR5 改道）", async () => {
-    seedClip();
-    seedNoteStorage({ withConversation: false });
-
-    reader.ensureReaderOverviewTab();
-    await vi.waitFor(() => expect(overviewText()).toContain("完整笔记还没有生成。"));
-
-    bindOverviewDelegation();
-    const generateBtn = overviewBody().querySelector<HTMLButtonElement>("button[data-overview-action='generate-note']")!;
-    expect(generateBtn).not.toBe(null);
-    generateBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-
-    // 走对话组合根的 runQuickActionPrompt seam（提示词取设置的 playerAiQuickPrompt）
-    await vi.waitFor(() => expect(chatTabMock.runQuickActionPrompt).toHaveBeenCalledTimes(1));
-    expect(String(chatTabMock.runQuickActionPrompt.mock.calls[0][0])).toContain("结构化总结");
-    // 受理成功：如实提示生成去向，不伪造本地面板进度
-    await vi.waitFor(() => expect(overviewText()).toContain("已在 AI 对话发起笔记生成"));
-  });
-
-  it("短视频（预算内单次路径）无分段小结：hasFinalNote 不成立，按未成稿引导（忠实管线判定）", async () => {
-    seedClip();
-    // 60k 字符 → buildBudgetPlan mode=single，无段缓存可言
-    state.clip.subtitleBody = makeSubtitleBody(60000);
-    seedNoteStorage();
-
-    reader.ensureReaderOverviewTab();
-    await vi.waitFor(() => expect(overviewText()).toContain("完整笔记还没有生成。"));
-    expect(overviewBody().querySelector("button[data-overview-action='generate-note']")).not.toBe(null);
-  });
-
-  it("发起笔记生成失败（对话 seam 报错/未受理）：在笔记一节如实反馈", async () => {
-    seedClip();
-    seedNoteStorage({ withConversation: false });
-    chatTabMock.runQuickActionPrompt.mockRejectedValueOnce(new Error("AI 对话暂不可用"));
-
-    reader.ensureReaderOverviewTab();
-    await vi.waitFor(() => expect(overviewText()).toContain("完整笔记还没有生成。"));
-
-    bindOverviewDelegation();
-    overviewBody()
-      .querySelector<HTMLButtonElement>("button[data-overview-action='generate-note']")!
-      .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => expect(overviewText()).toContain("AI 对话暂不可用"));
-  });
-});
