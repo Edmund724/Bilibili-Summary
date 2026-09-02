@@ -44,7 +44,7 @@
 }
 
 .boc-reading-eyebrow {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.08em;
   color: #9ca3af;
@@ -54,7 +54,7 @@
 .boc-reading-title {
   display: block;
   margin: 0;
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1.15;
   color: #0f172a;
   word-break: break-word;
@@ -62,7 +62,7 @@
 
 .boc-reading-meta,
 .boc-reading-status {
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.5;
   color: #6b7280;
 }
@@ -98,7 +98,7 @@
   border-radius: 999px;
   min-height: 36px;
   padding: 0 14px;
-  font-size: 13px;
+  font-size: 15px;
   color: #1f2937;
   box-sizing: border-box;
   cursor: pointer;
@@ -138,7 +138,7 @@
 .boc-reading-select-sm {
   min-height: 28px;
   padding: 0 6px;
-  font-size: 12px;
+  font-size: 14px;
   border-radius: 6px;
   border: 1px solid #e5e7eb;
   background: #fff;
@@ -211,7 +211,7 @@
   cursor: pointer;
   padding: 7px 0;
   border-radius: 9px;
-  font-size: 13.5px;
+  font-size: 15.5px;
   font-weight: 600;
   font-family: inherit;
   color: var(--boc-reader-muted, #6f675c);
@@ -256,14 +256,14 @@
 }
 
 .boc-reading-placeholder-title {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--boc-reader-text, #2b2620);
   margin-bottom: 6px;
 }
 
 .boc-reading-placeholder-copy {
-  font-size: 12.5px;
+  font-size: 14.5px;
   line-height: 1.6;
   color: var(--boc-reader-muted, #6f675c);
   margin: 0;
@@ -319,11 +319,11 @@
   padding: 6px 8px;
   color: #111827;
   position: relative;
-  /* 视口外条目跳过布局：估计高度按默认字号单行取 42px（视图内实际内边距
-   * 10px×2 + max(时间 pill 11.5px×1.5+2px, 文本列 14px×1.5)≈41px），auto 让
+  /* 视口外条目跳过布局：估计高度按默认字号单行取 44px（视图内实际内边距
+   * 10px×2 + max(时间 pill 13.5px×1.5+2px, 文本列 16px×1.5)≈44px），auto 让
    * 浏览器记住首次绘制后的实际尺寸，多行/调字号条目上屏后即用真实值。 */
   content-visibility: auto;
-  contain-intrinsic-size: auto 42px;
+  contain-intrinsic-size: auto 44px;
 }
 
 .boc-reading-chapter:hover {
@@ -341,7 +341,7 @@
 .boc-reading-chapter-time,
 .boc-reading-time {
   font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
-  font-size: 11.5px;
+  font-size: 13.5px;
   font-weight: 600;
   line-height: 1.5;
   color: var(--boc-reader-accent, #fb7299);
@@ -354,7 +354,7 @@
 }
 
 .boc-reading-chapter-title {
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.45;
   color: inherit;
 }
@@ -368,14 +368,14 @@
 }
 
 .boc-reading-text {
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
   color: inherit;
 }
 
 .boc-reading-empty {
   padding: 12px 4px;
-  font-size: 14px;
+  font-size: 16px;
   color: #94a3b8;
 }
 
@@ -388,7 +388,7 @@
   }
 
   .boc-reading-title {
-    font-size: 16px;
+    font-size: 18px;
   }
 }
 
@@ -404,7 +404,7 @@
   }
 
   .boc-reading-text {
-    font-size: 13px;
+    font-size: 15px;
   }
 }
 
@@ -420,7 +420,7 @@
 }
 
 #boc-reading-view .boc-reading-title {
-  font-size: 20px;
+  font-size: 22px;
   color: var(--boc-reader-text);
   margin-top: 10px;
 }
@@ -429,7 +429,7 @@
 #boc-reading-view .boc-reading-status,
 #boc-reading-view .boc-reading-panel-grid label,
 #boc-reading-view .boc-reading-info-label {
-  font-size: 14px;
+  font-size: 16px;
   color: var(--boc-reader-muted);
 }
 
@@ -470,7 +470,7 @@
   border-color: var(--boc-reader-border);
   background: var(--boc-reader-card);
   color: var(--boc-reader-muted);
-  font-size: 12px;
+  font-size: 14px;
   max-width: 130px;
 }
 
@@ -492,7 +492,7 @@
 #boc-reading-view .boc-reading-info-group {
   display: grid;
   gap: 6px;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 #boc-reading-view .boc-reading-info-panel,
@@ -510,7 +510,7 @@
 
 #boc-reading-view .boc-reading-info-value,
 #boc-reading-view .boc-reading-info-copy {
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.45;
   color: var(--boc-reader-text);
   word-break: break-word;
@@ -523,7 +523,7 @@
   padding: 0;
   cursor: pointer;
   width: fit-content;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 #boc-reading-view .boc-reading-main {
@@ -607,7 +607,7 @@
   background: none;
   padding: 0;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--boc-reader-text, #2b2620);
 }
 
@@ -617,7 +617,7 @@
 
 .boc-reading-search-count {
   flex: 0 0 auto;
-  font-size: 11.5px;
+  font-size: 13.5px;
   color: var(--boc-reader-faint, #a39a8d);
   white-space: nowrap;
 }
@@ -633,7 +633,7 @@
   background: var(--boc-reader-card, #ffffff);
   border-radius: 8px;
   padding: 0;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--boc-reader-muted, #6f675c);
   cursor: pointer;
 }
@@ -655,7 +655,7 @@
   border-radius: 10px;
   padding: 6px 12px;
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: 14.5px;
   color: var(--boc-reader-muted, #6f675c);
   cursor: pointer;
 }
@@ -693,14 +693,14 @@
 }
 
 .boc-reading-asr-title {
-  font-size: 13.5px;
+  font-size: 15.5px;
   font-weight: 700;
   color: var(--boc-reader-text, #2b2620);
   margin-bottom: 4px;
 }
 
 .boc-reading-asr-copy {
-  font-size: 12.5px;
+  font-size: 14.5px;
   line-height: 1.6;
   color: var(--boc-reader-muted, #6f675c);
   margin: 0 0 10px;
@@ -739,7 +739,7 @@
 .boc-reading-asr-foot {
   display: flex;
   justify-content: space-between;
-  font-size: 11.5px;
+  font-size: 13.5px;
   color: var(--boc-reader-faint, #a39a8d);
   margin-top: 6px;
 }
@@ -769,7 +769,7 @@
   background: var(--boc-reader-accent, #fb7299);
   color: var(--boc-reader-accent-ink, #ffffff);
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: 14.5px;
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
@@ -799,7 +799,7 @@
   padding: 5px 14px;
   border-radius: 999px;
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: 14.5px;
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.14);
@@ -855,7 +855,7 @@
 }
 
 .boc-reading-explain-card-title {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--boc-reader-accent, #fb7299);
 }
@@ -866,7 +866,7 @@
   border-radius: 8px;
   background: transparent;
   color: var(--boc-reader-faint, #a39a8d);
-  font-size: 18px;
+  font-size: 20px;
   line-height: 1.2;
   cursor: pointer;
 }
@@ -882,7 +882,7 @@
   padding: 10px 14px;
   background: var(--boc-reader-accent-soft, #fce0ea);
   color: var(--boc-reader-muted, #6f675c);
-  font-size: 13px;
+  font-size: 15px;
   font-style: italic;
   line-height: 1.6;
   word-break: break-word;
@@ -893,7 +893,7 @@
   min-height: 0;
   overflow-y: auto;
   padding: 0 14px 12px;
-  font-size: 13.5px;
+  font-size: 15.5px;
   line-height: 1.75;
   color: var(--boc-reader-text, #2b2620);
   word-break: break-word;
@@ -912,7 +912,7 @@
   align-items: center;
   gap: 8px;
   padding: 2px 0 10px;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--boc-reader-muted, #6f675c);
 }
 
@@ -970,7 +970,7 @@
 }
 
 .boc-reading-chat-intent-title {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--boc-reader-faint, #a39a8d);
 }
@@ -985,7 +985,7 @@
   background: transparent;
   color: var(--boc-reader-faint, #a39a8d);
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1;
   cursor: pointer;
 }
@@ -997,7 +997,7 @@
 
 .boc-reading-chat-intent-quote {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.6;
   color: var(--boc-reader-text, #2b2620);
   word-break: break-word;
@@ -1025,7 +1025,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--boc-reader-faint, #a39a8d);
@@ -1034,7 +1034,7 @@
 
 /* 「AI 生成 / AI 精选」小标注：accent 软底 pill，仅在 AI 分章/金句标头出现 */
 .boc-reading-ov-badge {
-  font-size: 10.5px;
+  font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0;
   color: var(--boc-reader-accent, #fb7299);
@@ -1044,7 +1044,7 @@
 }
 
 .boc-reading-ov-empty {
-  font-size: 12.5px;
+  font-size: 14.5px;
   line-height: 1.6;
   color: var(--boc-reader-faint, #a39a8d);
 }
@@ -1079,7 +1079,7 @@
 }
 
 .boc-reading-ov-chapter-title {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   line-height: 1.5;
   color: var(--boc-reader-text, #2b2620);
@@ -1087,7 +1087,7 @@
 }
 
 .boc-reading-ov-chapter-desc {
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.6;
   color: var(--boc-reader-muted, #6f675c);
   word-break: break-word;
@@ -1115,7 +1115,7 @@
 
 .boc-reading-ov-quote-text {
   display: block;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.7;
   color: var(--boc-reader-text, #2b2620);
   word-break: break-word;
@@ -1132,7 +1132,7 @@
 /* 金句卡右下角 Copy 按钮（小字文本钮）：span[role=button]——嵌在跳播 <button>
  * 卡内不能用 <button>，语义由 role + data-overview-action 委托分流补齐 */
 .boc-reading-ov-quote-copy {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--boc-reader-muted, #6f675c);
   cursor: pointer;
@@ -1166,14 +1166,14 @@
 }
 
 .boc-reading-ov-strip-text {
-  font-size: 12.5px;
+  font-size: 14.5px;
   line-height: 1.6;
   color: var(--boc-reader-text, #2b2620);
 }
 
 .boc-reading-ov-progress {
   flex: 0 0 auto;
-  font-size: 11.5px;
+  font-size: 13.5px;
   color: var(--boc-reader-muted, #6f675c);
   white-space: nowrap;
 }
@@ -1213,7 +1213,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.5;
   color: var(--boc-reader-text, #2b2620);
 }
@@ -1240,7 +1240,7 @@
   background: var(--boc-reader-surface-2, #f0e9df);
   color: var(--boc-reader-muted, #6f675c);
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 14px;
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
@@ -1264,17 +1264,20 @@
   opacity: 0.72;
 }
 
+/* 工具条剩余宽度全部让给模型下拉（flex-grow）：内联 width（model-select-width
+ * 度量结果）只作 flex-basis 下限，不再被 232px 硬上限截断。 */
 .boc-reading-chat .sp-model-select {
   width: auto;
   height: 28px;
+  flex: 1 1 auto;
   min-width: 92px;
-  max-width: min(232px, 100%);
+  max-width: 100%;
   padding: 0 28px 0 12px;
   border: 1px solid var(--boc-reader-border, #e7dfd4);
   border-radius: 999px;
   background: var(--boc-reader-card, #ffffff);
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--boc-reader-text, #2b2620);
   appearance: none;
   -webkit-appearance: none;
@@ -1308,7 +1311,7 @@
   background: transparent;
   color: var(--boc-reader-muted, #6f675c);
   font: inherit;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
@@ -1425,7 +1428,7 @@
   padding: 7px 11px;
   border-radius: 14px;
   line-height: 1.45;
-  font-size: 13.5px;
+  font-size: 15.5px;
 }
 
 .boc-reading-chat .sp-msg-user {
@@ -1456,7 +1459,7 @@
   background: var(--boc-reader-surface, #fdfbf7);
   border-radius: 8px;
   color: var(--boc-reader-muted, #6f675c);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
   word-break: break-word;
 }
@@ -1533,9 +1536,9 @@
   line-height: 1.4;
 }
 
-.boc-reading-chat .sp-msg-assistant h3 { font-size: 14.5px; }
-.boc-reading-chat .sp-msg-assistant h4 { font-size: 13.5px; }
-.boc-reading-chat .sp-msg-assistant h5 { font-size: 13.5px; }
+.boc-reading-chat .sp-msg-assistant h3 { font-size: 16.5px; }
+.boc-reading-chat .sp-msg-assistant h4 { font-size: 15.5px; }
+.boc-reading-chat .sp-msg-assistant h5 { font-size: 15.5px; }
 
 .boc-reading-chat .sp-msg-assistant ul,
 .boc-reading-chat .sp-msg-assistant ol {
@@ -1547,7 +1550,7 @@
   width: 100%;
   margin: 6px 0 8px;
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: 14.5px;
 }
 
 .boc-reading-chat .sp-msg-assistant th,
@@ -1582,7 +1585,7 @@
   border: 1px solid var(--boc-reader-border, #e7dfd4);
   border-radius: 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 /* 时间戳跳转按钮：时间戳 pill 母题贯穿 AI 引用（与章节/金句/意图卡同款） */
@@ -1618,7 +1621,7 @@
   padding: 0;
   background: transparent;
   border: 0;
-  font-size: 12px;
+  font-size: 14px;
   white-space: pre;
 }
 
@@ -1651,12 +1654,12 @@
   border: 1px solid var(--boc-reader-border, #e7dfd4);
   border-radius: 10px;
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .boc-reading-chat .sp-msg-stopped {
   color: var(--boc-reader-muted, #6f675c);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.4;
   padding-top: 2px;
 }
@@ -1665,7 +1668,7 @@
   margin: auto;
   text-align: center;
   color: var(--boc-reader-muted, #6f675c);
-  font-size: 13.5px;
+  font-size: 15.5px;
   padding: 18px 16px;
   line-height: 1.65;
 }
@@ -1690,7 +1693,7 @@
   border-radius: 10px;
   background: var(--boc-reader-surface-2, #f0e9df);
   color: var(--boc-reader-muted, #6f675c);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.35;
   text-align: center;
 }
@@ -1712,7 +1715,7 @@
   border-radius: 10px;
   background: var(--boc-reader-surface-2, #f0e9df);
   color: var(--boc-reader-muted, #6f675c);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.35;
   text-align: center;
 }
@@ -1752,7 +1755,7 @@
   background: transparent;
   color: var(--boc-reader-muted, #6f675c);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 14.5px;
   line-height: 1;
   cursor: pointer;
 }
@@ -1811,7 +1814,7 @@
 }
 
 .boc-reading-chat .sp-history-popover-title {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--boc-reader-muted, #6f675c);
 }
@@ -1831,7 +1834,7 @@
 .boc-reading-chat .sp-preset-empty,
 .boc-reading-chat .sp-history-empty {
   color: var(--boc-reader-faint, #a39a8d);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .boc-reading-chat .sp-history-clear-btn {
@@ -1839,7 +1842,7 @@
   background: transparent;
   color: var(--boc-reader-faint, #a39a8d);
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
   padding: 2px 4px;
   border-radius: 6px;
@@ -1890,7 +1893,7 @@
   align-items: baseline;
   gap: 4px;
   min-width: 0;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.35;
 }
 
@@ -1906,11 +1909,11 @@
   flex: 0 0 auto;
   white-space: nowrap;
   color: var(--boc-reader-muted, #6f675c);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .boc-reading-chat .sp-history-meta {
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.3;
   color: var(--boc-reader-muted, #6f675c);
   white-space: nowrap;
@@ -1926,7 +1929,7 @@
   background: transparent;
   color: var(--boc-reader-faint, #a39a8d);
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
   cursor: pointer;
 }
 
@@ -1952,7 +1955,7 @@
   background: transparent;
   color: var(--boc-reader-muted, #6f675c);
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -1971,7 +1974,7 @@
   background: transparent;
   color: var(--boc-reader-faint, #a39a8d);
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
   cursor: pointer;
 }
 
@@ -1995,7 +1998,7 @@
   background: var(--boc-reader-surface, #fdfbf7);
   color: var(--boc-reader-text, #2b2620);
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .boc-reading-chat .sp-preset-add-btn {
@@ -2006,7 +2009,7 @@
   background: var(--boc-reader-surface-2, #f0e9df);
   color: var(--boc-reader-text, #2b2620);
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -2024,7 +2027,7 @@
   background: var(--boc-reader-surface, #fdfbf7);
   color: var(--boc-reader-text, #2b2620);
   font: inherit;
-  font-size: 13.5px;
+  font-size: 15.5px;
   line-height: 1.45;
   resize: none;
   outline: none;
@@ -2052,7 +2055,7 @@
   background: var(--boc-reader-card, #ffffff);
   color: var(--boc-reader-muted, #6f675c);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 14.5px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
@@ -2110,7 +2113,7 @@
 }
 
 #boc-reading-view .boc-reading-settings-host .boc-set-h {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--boc-reader-text, #2b2620);
   margin: 0;
@@ -2118,7 +2121,7 @@
 
 #boc-reading-view .boc-reading-settings-host .boc-set-hint {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
   color: var(--boc-reader-faint, #a39a8d);
 }
@@ -2129,7 +2132,7 @@
 }
 
 #boc-reading-view .boc-reading-settings-host .boc-set-label {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--boc-reader-muted, #6f675c);
 }
@@ -2143,7 +2146,7 @@
   background: var(--boc-reader-card, #ffffff);
   color: var(--boc-reader-text, #2b2620);
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 #boc-reading-view .boc-reading-settings-host .boc-set-input:focus,
@@ -2155,6 +2158,15 @@
 }
 
 #boc-reading-view .boc-reading-settings-host .boc-set-select {
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 8px;
+  background: var(--boc-reader-card, #ffffff);
+  color: var(--boc-reader-text, #2b2620);
+  font: inherit;
+  font-size: 15px;
   appearance: none;
   -webkit-appearance: none;
   padding-right: 26px;
@@ -2177,7 +2189,7 @@
   background: var(--boc-reader-card, #ffffff);
   color: var(--boc-reader-text, #2b2620);
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.5;
   resize: vertical;
 }
@@ -2191,7 +2203,7 @@
   align-items: flex-start;
   gap: 7px;
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.45;
   color: var(--boc-reader-text, #2b2620);
 }
@@ -2213,7 +2225,7 @@
   align-items: center;
   gap: 6px;
   margin: 0;
-  font-size: 12.5px;
+  font-size: 14.5px;
   color: var(--boc-reader-text, #2b2620);
 }
 
@@ -2231,7 +2243,7 @@
   background: var(--boc-reader-card, #ffffff);
   color: var(--boc-reader-text, #2b2620);
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 #boc-reading-view .boc-reading-settings-host .boc-set-actions {
@@ -2247,7 +2259,7 @@
   background: var(--boc-reader-accent, #fb7299);
   color: var(--boc-reader-accent-ink, #ffffff);
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -2260,7 +2272,7 @@
 #boc-reading-view .boc-reading-settings-host .boc-set-status {
   margin: 0;
   min-height: 16px;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.4;
   color: var(--boc-reader-muted, #6f675c);
 }
@@ -2287,7 +2299,7 @@
 
 #boc-reading-view .boc-reading-settings-host .fixed-properties-empty {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--boc-reader-faint, #a39a8d);
 }
 
@@ -2349,7 +2361,7 @@
   background: var(--boc-reader-card, #ffffff);
   color: var(--boc-reader-text, #2b2620);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 14.5px;
   line-height: 1.2;
 }
 
@@ -2359,6 +2371,7 @@
   appearance: none;
   -webkit-appearance: none;
   padding-right: 26px;
+  border-radius: 8px;
   background-image:
     linear-gradient(45deg, transparent 50%, var(--boc-reader-faint, #a39a8d) 50%),
     linear-gradient(135deg, var(--boc-reader-faint, #a39a8d) 50%, transparent 50%);
@@ -2387,7 +2400,7 @@
   background: var(--boc-reader-card, #ffffff);
   color: var(--boc-reader-text, #2b2620);
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 400;
   cursor: pointer;
 }
@@ -2449,7 +2462,7 @@
   padding: 4px 10px;
   text-align: left;
   font: inherit;
-  font-size: 12.5px;
+  font-size: 14.5px;
   color: var(--boc-reader-text, #2b2620);
   white-space: nowrap;
   overflow: hidden;
@@ -2490,7 +2503,7 @@
 
 #boc-reading-view .boc-reading-settings-host .ai-provider-model-count {
   padding: 8px 10px 2px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--boc-reader-faint, #a39a8d);
   border-top: 1px dashed var(--boc-reader-border, #e7dfd4);
   margin-top: 4px;
@@ -2508,7 +2521,7 @@
 #boc-reading-view .boc-reading-settings-host .fixed-property-error,
 #boc-reading-view .boc-reading-settings-host .note-section-error {
   margin: 6px 0 0;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--boc-reader-accent, #fb7299);
 }
 
@@ -2528,7 +2541,7 @@
 
 #boc-reading-view .boc-reading-settings-host .ai-providers-empty {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--boc-reader-faint, #a39a8d);
 }
 
@@ -2559,7 +2572,7 @@
   border: 1px solid var(--boc-reader-border, #e7dfd4);
   border-radius: 8px;
   font: inherit;
-  font-size: 12.5px;
+  font-size: 14.5px;
   background: var(--boc-reader-card, #ffffff);
   color: var(--boc-reader-text, #2b2620);
   min-width: 0;
@@ -2628,7 +2641,7 @@
   width: 72px;
   justify-self: start;
   padding: 0;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1;
   border: 0;
   border-radius: 999px;
@@ -2686,7 +2699,7 @@
 #boc-reading-view .boc-reading-settings-host .ai-provider-status,
 #boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-status {
   margin: 2px 0 0;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.4;
   color: var(--boc-reader-muted, #6f675c);
 }
@@ -2701,7 +2714,7 @@
   align-items: center;
   gap: 6px;
   margin: 0;
-  font-size: 12.5px;
+  font-size: 14.5px;
   font-weight: 500;
   color: var(--boc-reader-text, #2b2620);
   white-space: nowrap;
@@ -2724,7 +2737,7 @@
   background: var(--boc-reader-card, #ffffff);
   color: var(--boc-reader-text, #2b2620);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 14.5px;
   width: 100%;
   min-width: 0;
   margin: 0;
@@ -2741,7 +2754,7 @@
   border-radius: 999px;
   background: transparent;
   color: var(--boc-reader-muted, #6f675c);
-  font-size: 12.5px;
+  font-size: 14.5px;
   font-weight: 400;
   cursor: pointer;
 }
