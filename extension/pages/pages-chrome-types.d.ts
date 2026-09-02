@@ -26,6 +26,12 @@ declare namespace chrome {
       addListener(
         listener: (changes: Record<string, StorageChange>, areaName: string) => void
       ): void;
+
+      // PR5：对话 tab 组合根的会话收尾要摘除 providers 刷新监听（bind/unbind
+      // 对称；sidepanel 过渡期监听常驻挂载用不到，声明合并对两侧同时生效）。
+      removeListener(
+        listener: (changes: Record<string, StorageChange>, areaName: string) => void
+      ): void;
     }
 
     const onChanged: OnChangedEvent;

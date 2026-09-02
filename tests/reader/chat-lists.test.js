@@ -1,5 +1,8 @@
-// tests/sidepanel/sidepanel-lists.test.js
-// createSidepanelLists（三列表渲染 + 预设提示词插入）行为契约（候选5 拆分直测）。
+// tests/reader/chat-lists.test.ts
+// createReaderChatLists（对话 tab 三列表渲染 + 预设提示词插入）行为契约。
+// PR5 自 tests/sidepanel/sidepanel-lists.test.js 随重建迁移（tests/sidepanel/
+// 对应文件已迁走）：逻辑断言保真，DOM 壳换新——元素为 reader 的 readingChat*
+// 节点，class 名沿用 .sp-*（样式段随对话区并入 reader.css）。
 //
 // 覆盖：
 // - renderSuggestions：有平台/无历史/视频上下文时渲染建议 chip，点击填入输入框
@@ -16,13 +19,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 
-let createSidepanelLists;
+let createReaderChatLists;
 let sidepanelState;
 
 async function importModule() {
-  const module = await import("../../extension/pages/sidepanel-lists.js");
+  const module = await import("../../extension/reader/chat-lists.js");
   const state = (await import("../../extension/chat/chat-state.js")).sidepanelState;
-  createSidepanelLists = module.createSidepanelLists;
+  createReaderChatLists = module.createReaderChatLists;
   sidepanelState = state;
 }
 
@@ -53,7 +56,7 @@ function makeDeps(overrides = {}) {
     hideHistoryPopover: vi.fn(),
     ...overrides
   };
-  const lists = createSidepanelLists(deps);
+  const lists = createReaderChatLists(deps);
   deps.insertPresetPrompt = (prompt) => lists.insertPresetPrompt(prompt);
   return { deps, lists, input, presetList, historyList, historyClearBtn, container, setSuggestionsNode: (node) => {
     suggestionsNode.remove();

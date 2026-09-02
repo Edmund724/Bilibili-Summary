@@ -22,6 +22,19 @@ vi.mock("../../extension/ai/analysis.js", async (importActual) => {
   return { ...actual, runOverviewAnalysis: vi.fn() };
 });
 
+// PR5：概览笔记引导改走对话 tab 组合根的快捷动作 seam——本套件只测概览自身
+// 的接线与反馈语义，对话域（壳 DOM + 组合根）以 mock 替身解耦（对话 seam 的
+// 行为回归在 tests/reader/chat-tab.test.ts）。
+const chatTabMock = vi.hoisted(() => ({
+  ensureChatTabActivated: vi.fn(async () => {}),
+  closeChatSession: vi.fn(),
+  runQuickActionPrompt: vi.fn(async (_prompt: string) => true)
+}));
+vi.mock("../../extension/core/lazy-chat-tab.js", () => ({
+  ensureReaderChatTab: vi.fn(async () => chatTabMock),
+  isReaderChatTabLoaded: vi.fn(() => true)
+}));
+
 let state: TestState;
 let reader: typeof import("../../extension/reader/index.js");
 let ids: typeof import("../../extension/reader/state.js").ids;
@@ -435,6 +448,13 @@ describe("closeReadingView 清理", () => {
 describe("笔记一节", () => {
   const NOTE_MARKDOWN = "# 笔记标题\n\n第一段内容。";
 
+  // vi.restoreAllMocks（afterEach）会抹掉 vi.fn 的缺省实现：每用例重新归位
+  beforeEach(() => {
+    chatTabMock.runQuickActionPrompt.mockReset();
+    chatTabMock.runQuickActionPrompt.mockImplementation(async () => true);
+    chatTabMock.ensureChatTabActivated.mockClear();
+  });
+
   // 成稿判定（hasFinalNote）需要笔记正文 + 分段小结：会话存储给一条匹配当前
   // 视频的会话，段缓存按任意 boc_lvs_summary_ 键回一條小结。
   function seedNoteStorage({ withConversation = true, segmentSummaries = true } = {}) {
@@ -500,7 +520,7 @@ describe("笔记一节", () => {
     expect(overviewText()).toContain("查看完整笔记");
   });
 
-  it("未成稿（无会话/无分段小结）：引导按钮走现有笔记生成链路（player-ai-quick-action）", async () => {
+  it("未成稿（无会话/无分段小结）：引导按钮走 reader 对话 tab 直发 seam（PR5 改道）", async () => {
     seedClip();
     seedNoteStorage({ withConversation: false });
 
@@ -512,12 +532,11 @@ describe("笔记一节", () => {
     expect(generateBtn).not.toBe(null);
     generateBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 
-    await vi.waitFor(() => {
-      const calls = chromeStub().runtime.sendMessage.mock.calls as Array<[Record<string, unknown>]>;
-      expect(calls.some(([message]) => message?.type === "player-ai-quick-action")).toBe(true);
-    });
+    // 走对话组合根的 runQuickActionPrompt seam（提示词取设置的 playerAiQuickPrompt）
+    await vi.waitFor(() => expect(chatTabMock.runQuickActionPrompt).toHaveBeenCalledTimes(1));
+    expect(String(chatTabMock.runQuickActionPrompt.mock.calls[0][0])).toContain("结构化总结");
     // 受理成功：如实提示生成去向，不伪造本地面板进度
-    await vi.waitFor(() => expect(overviewText()).toContain("已在 AI 侧边栏发起笔记生成"));
+    await vi.waitFor(() => expect(overviewText()).toContain("已在 AI 对话发起笔记生成"));
   });
 
   it("短视频（预算内单次路径）无分段小结：hasFinalNote 不成立，按未成稿引导（忠实管线判定）", async () => {
@@ -531,15 +550,10 @@ describe("笔记一节", () => {
     expect(overviewBody().querySelector("button[data-overview-action='generate-note']")).not.toBe(null);
   });
 
-  it("发起笔记生成失败（消息链报错）：在笔记一节如实反馈", async () => {
+  it("发起笔记生成失败（对话 seam 报错/未受理）：在笔记一节如实反馈", async () => {
     seedClip();
     seedNoteStorage({ withConversation: false });
-    stubRuntimeMessages((message) => {
-      if (message?.type === "player-ai-quick-action") {
-        return { ok: false, error: "AI 按钮未开启" };
-      }
-      return undefined;
-    });
+    chatTabMock.runQuickActionPrompt.mockRejectedValueOnce(new Error("AI 对话暂不可用"));
 
     reader.ensureReaderOverviewTab();
     await vi.waitFor(() => expect(overviewText()).toContain("完整笔记还没有生成。"));
@@ -549,6 +563,6 @@ describe("笔记一节", () => {
       .querySelector<HTMLButtonElement>("button[data-overview-action='generate-note']")!
       .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 
-    await vi.waitFor(() => expect(overviewText()).toContain("AI 按钮未开启"));
+    await vi.waitFor(() => expect(overviewText()).toContain("AI 对话暂不可用"));
   });
 });

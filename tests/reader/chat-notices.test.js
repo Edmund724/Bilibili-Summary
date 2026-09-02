@@ -1,28 +1,30 @@
-// tests/sidepanel/sidepanel-notices.test.js
-// createConversationFeedback（消息区通知/错误/建议区清理/近底判定）行为契约
-//（候选5 拆分直测）。
+// tests/reader/chat-notices.test.ts
+// createReaderChatFeedback（对话 tab 消息区通知/错误/建议区清理/近底判定）行为契约。
+// PR5 自 tests/sidepanel/sidepanel-notices.test.js 随重建迁移：逻辑断言保真；
+// 唯一语义改造——「前往设置」链接在 content script 语境走 open-options 消息
+//（原 chrome.runtime.openOptionsPage）。
 //
 // 覆盖：
 // - showConversationContextNotice：追加通知条（textContent，防注入）、重复显示
 //   去重（先移除旧条）、autoHideMs > 0 时经注入定时器自动消失、clearTimer 取消；
-// - openSettingsAction：附「前往设置」链接并打开选项页；
+// - openSettingsAction：附「前往设置」链接并经 open-options 消息打开选项页；
 // - removeConversationContextNotice：清通知 + 取消挂起定时器；
 // - showConversationContextError：空文案 no-op、居中错误块 + scrollToBottom；
 // - removeCenteredState / removeSuggestions（同步置空单例钩子）；
 // - isMessagesNearBottom：近底/远底判定。
 //
-// 定时器注入受控 fake（手动推进），无 chrome 依赖（openOptionsPage 走 stub）。
+// 定时器注入受控 fake（手动推进）。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 
-let createConversationFeedback;
+let createReaderChatFeedback;
 
 beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
-  const module = await import("../../extension/pages/sidepanel-notices.js");
-  createConversationFeedback = module.createConversationFeedback;
+  const module = await import("../../extension/reader/chat-notices.js");
+  createReaderChatFeedback = module.createReaderChatFeedback;
 });
 
 function makeHarness() {
@@ -51,7 +53,7 @@ function makeHarness() {
     }
   };
   let suggestionsNode = document.createElement("div");
-  const feedback = createConversationFeedback(deps);
+  const feedback = createReaderChatFeedback(deps);
   const fireTimers = () => {
     [...timers].forEach((timer) => timer.fn());
   };
@@ -108,11 +110,14 @@ describe("showConversationContextNotice / removeConversationContextNotice", () =
     expect(messages.querySelector(".sp-context-notice")).toBeNull();
   });
 
-  it("openSettingsAction：附「前往设置」链接，点击打开选项页", () => {
+  it("openSettingsAction：附「前往设置」链接，点击走 open-options 消息", () => {
     const { feedback, messages } = makeHarness();
-    const openOptionsPage = vi.fn();
+    const sendMessage = vi.fn((_message, callback) => {
+      callback?.({ ok: true });
+      return undefined;
+    });
     window.chrome = window.chrome || {};
-    window.chrome.runtime = { ...window.chrome.runtime, openOptionsPage };
+    window.chrome.runtime = { ...window.chrome.runtime, sendMessage };
 
     feedback.showConversationContextNotice("需要配置", 0, { openSettingsAction: true });
 
@@ -120,7 +125,8 @@ describe("showConversationContextNotice / removeConversationContextNotice", () =
     expect(link).not.toBeNull();
     expect(link.textContent).toBe("前往设置");
     link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    expect(openOptionsPage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0][0]).toEqual({ type: "open-options" });
   });
 });
 

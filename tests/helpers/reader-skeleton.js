@@ -228,7 +228,8 @@ export function mountReaderSkeleton(ids) {
   explainBtn.className = "boc-reading-explain-btn";
   explainPop.appendChild(explainBtn);
 
-  // PR3 AI 对话 tab 占位期的待解释意图卡（quote/time/note，真实模板同构）
+  // PR3 AI 对话 tab 的待解释意图引用卡（quote/time/cancel，真实模板同构；
+  // PR5 起整卡由对话组合根渲染/消费，骨架只保留节点存在性）
   const chatIntent = doc.createElement("div");
   chatIntent.id = ids.readingChatIntent;
   chatIntent.className = "boc-reading-chat-intent";
@@ -250,10 +251,6 @@ export function mountReaderSkeleton(ids) {
   const intentQuote = doc.createElement("blockquote");
   intentQuote.className = "boc-reading-chat-intent-quote";
   chatIntent.appendChild(intentQuote);
-
-  const intentNote = doc.createElement("p");
-  intentNote.className = "boc-reading-chat-intent-note";
-  chatIntent.appendChild(intentNote);
 
   const readingAutoScroll = doc.createElement("input");
   readingAutoScroll.type = "checkbox";

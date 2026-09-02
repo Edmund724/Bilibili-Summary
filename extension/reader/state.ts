@@ -76,7 +76,35 @@ export const ids = {
   readingTranscribeBanner: "boc-reading-transcribe-banner",
   readingTranscribeProgress: "boc-reading-transcribe-progress",
   readingExplainPop: "boc-reading-explain-pop",
-  readingChatIntent: "boc-reading-chat-intent"
+  // PR3 占位期的待解释意图卡（PR5 起由对话 tab 组合根渲染/消费）
+  readingChatIntent: "boc-reading-chat-intent",
+  // PR5 AI 对话 tab（readingChat* 前缀，不用 sp 前缀）：对话区全部元素 id。
+  // 结构与 sidepanel.html 的 sp* 树一一对应（context chip / 刷新 / 设置 / 新对话、
+  // 转写提示行、消息区、模型/思考档/预设/历史、输入框、停止按钮），逻辑内核
+  // 在 reader/chat-tab.ts（组合根）+ reader/chat-{lists,notices,popovers}.ts
+  //（重建壳）+ ../chat/*（内核）。
+  readingChatRoot: "boc-reading-chat",
+  readingChatContextChip: "boc-reading-chat-context-chip",
+  readingChatHistoryBtn: "boc-reading-chat-history-btn",
+  readingChatRefreshBtn: "boc-reading-chat-refresh-btn",
+  readingChatSettingsBtn: "boc-reading-chat-settings-btn",
+  readingChatNewBtn: "boc-reading-chat-new-btn",
+  readingChatOpenSettings: "boc-reading-chat-open-settings",
+  readingChatAsrNotice: "boc-reading-chat-asr-notice",
+  readingChatMessages: "boc-reading-chat-messages",
+  readingChatSuggestions: "boc-reading-chat-suggestions",
+  readingChatModelSelect: "boc-reading-chat-model-select",
+  readingChatThinkingToggle: "boc-reading-chat-thinking-toggle",
+  readingChatPresetBtn: "boc-reading-chat-preset-btn",
+  readingChatPresetPopover: "boc-reading-chat-preset-popover",
+  readingChatPresetList: "boc-reading-chat-preset-list",
+  readingChatPresetInput: "boc-reading-chat-preset-input",
+  readingChatPresetAddBtn: "boc-reading-chat-preset-add-btn",
+  readingChatHistoryPopover: "boc-reading-chat-history-popover",
+  readingChatHistoryList: "boc-reading-chat-history-list",
+  readingChatHistoryClearBtn: "boc-reading-chat-history-clear-btn",
+  readingChatInput: "boc-reading-chat-input",
+  readingChatStopBtn: "boc-reading-chat-stop-btn"
 };
 
 // ===== view-state.js：阅读视图开关状态访问器 =====

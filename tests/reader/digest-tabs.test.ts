@@ -4,8 +4,8 @@
 // 覆盖：
 //   A. 壳结构契约：面板壳/三 tab 按钮/三 tab body 存在，字幕列表挂在字幕
 //      tab body 内（分批渲染的目标容器随搬家保持可用）；
-//   B. 概览 tab（PR4 状态机宿主）初始为「未生成」诚实态、AI 对话 tab 保持
-//      「即将上线」占位：无假数据、无假输入框；
+//   B. 概览 tab（PR4 状态机宿主）初始为「未生成」诚实态；AI 对话 tab（PR5）
+//      为静默真壳（消息区/输入框等节点齐备，未激活前空态无假数据）；
 //   C. tab 切换：点击 tab 按钮 → is-active/aria-selected/hidden 三通道一致，
 //      字幕 tab 与概览/AI 对话互斥显示；
 //   D. 进入阅读模式重置到默认「字幕」tab（概览停留状态不跨会话保留）；
@@ -92,23 +92,31 @@ describe("统一 Digest 面板三标签", () => {
     expectTabActive("Chat", false);
   });
 
-  it("B. 概览 tab（PR4 状态机宿主）与 AI 对话 tab（PR5 占位）初始都是诚实空态", () => {
+  it("B. 概览 tab（PR4 状态机宿主）保持诚实空态；AI 对话 tab（PR5）为静默真壳", () => {
     // 概览（PR4 落地）：初始为「未生成」诚实态，无假数据；渲染宿主节点存在。
     const overviewBody = document.getElementById(ids.readingOverviewBody) as HTMLElement;
     expect(overviewBody).not.toBe(null);
     const overviewCopy = tabBody("Overview").textContent || "";
     expect(overviewCopy).toContain("概览还未生成");
     expect(overviewBody.querySelector(".boc-reading-ov-chapter, .boc-reading-ov-quote")).toBe(null);
+    expect(tabBody("Overview").querySelector("input, textarea, button, select")).toBe(null);
 
-    // AI 对话（PR5 占位）：保持「即将上线」空态文案。
-    const chatCopy = tabBody("Chat").textContent || "";
-    expect(chatCopy).toContain("AI 对话即将上线");
-
-    // 不假装可用：初始态 body 内没有输入框/按钮/假消息列表
-    for (const body of [tabBody("Overview"), tabBody("Chat")]) {
-      expect(body.querySelector("input, textarea, button, select")).toBe(null);
-      expect(body.querySelectorAll(".boc-reading-item, .boc-reading-chapter").length).toBe(0);
-    }
+    // AI 对话（PR5 落地）：真对话 UI 壳（消息区/输入框/模型与思考档/预设历史），
+    // 未激活前保持静默空态——空消息区、无假消息节点、无占位文案。
+    const chatRoot = document.getElementById(ids.readingChatRoot) as HTMLElement;
+    expect(chatRoot).not.toBe(null);
+    expect(document.getElementById(ids.readingChatMessages)).not.toBe(null);
+    expect(document.getElementById(ids.readingChatInput)).not.toBe(null);
+    expect(document.getElementById(ids.readingChatModelSelect)).not.toBe(null);
+    expect(document.getElementById(ids.readingChatPresetBtn)).not.toBe(null);
+    expect(document.getElementById(ids.readingChatHistoryBtn)).not.toBe(null);
+    expect(document.getElementById(ids.readingChatStopBtn)).not.toBe(null);
+    const chatMessages = document.getElementById(ids.readingChatMessages) as HTMLElement;
+    expect(chatMessages.querySelectorAll(".sp-msg, .sp-center-error").length).toBe(0);
+    expect((chatMessages.querySelector(".sp-suggestions") as HTMLElement).innerHTML).toBe("");
+    expect(((document.getElementById(ids.readingChatInput) as HTMLTextAreaElement).value) || "").toBe("");
+    // 待解释意图引用卡默认隐藏
+    expect((document.getElementById(ids.readingChatIntent) as HTMLElement).hidden).toBe(true);
   });
 
   it("C. 点击 tab 按钮：三通道（is-active/aria-selected/hidden）一致切换", async () => {

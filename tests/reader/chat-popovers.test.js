@@ -1,6 +1,9 @@
-// tests/sidepanel/sidepanel-popovers.test.js
-// createPopovers（预设/历史 popover 开合 + 文档级外点关闭）行为契约（候选5
-// 拆分直测）。
+// tests/reader/chat-popovers.test.ts
+// createReaderChatPopovers（对话 tab 预设/历史 popover 开合 + 文档级外点关闭）
+// 行为契约。PR5 自 tests/sidepanel/sidepanel-popovers.test.js 随重建迁移：
+// 判定断言保真；外点关闭的 id 选择器换 reader 的 readingChat* id，且
+// handleDocumentClick 不再自挂 document 监听——经 chat-tab-bridge 并入
+// ui-renderer 的单一文档级委托（见 chat-tab 组合根测试的外点单委托用例）。
 //
 // 覆盖：
 // - togglePresetPopover：开（刷新预设列表 + 清输入 + focus）且关历史 popover、
@@ -12,25 +15,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 
-let createPopovers;
+let createReaderChatPopovers;
+let ids;
 
 beforeEach(async () => {
   resetModuleState();
-  const module = await import("../../extension/pages/sidepanel-popovers.js");
-  createPopovers = module.createPopovers;
+  const module = await import("../../extension/reader/chat-popovers.js");
+  createReaderChatPopovers = module.createReaderChatPopovers;
+  ids = (await import("../../extension/reader/state.js")).ids;
 });
 
 function makeHarness() {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const presetPopover = document.createElement("div");
-  presetPopover.id = "spPresetPopover";
+  presetPopover.id = ids.readingChatPresetPopover;
   const historyPopover = document.createElement("div");
-  historyPopover.id = "spHistoryPopover";
+  historyPopover.id = ids.readingChatHistoryPopover;
   const presetBtn = document.createElement("button");
-  presetBtn.id = "spPresetBtn";
+  presetBtn.id = ids.readingChatPresetBtn;
   const historyBtn = document.createElement("button");
-  historyBtn.id = "spHistoryBtn";
+  historyBtn.id = ids.readingChatHistoryBtn;
   const presetInput = document.createElement("input");
   container.append(presetPopover, historyPopover, presetBtn, historyBtn, presetInput);
   const deps = {
@@ -42,7 +47,7 @@ function makeHarness() {
     renderPresetPrompts: vi.fn(),
     renderHistoryList: vi.fn()
   };
-  const popovers = createPopovers(deps);
+  const popovers = createReaderChatPopovers(deps);
   // 初始态：两个 popover 可见（hidden=false），toggle 后才隐藏（与迁移前判定一致：
   // willShow = popover.hidden）
   presetPopover.hidden = false;
@@ -107,7 +112,7 @@ describe("toggleHistoryPopover", () => {
   });
 });
 
-describe("handleDocumentClick（外点关闭）", () => {
+describe("handleDocumentClick（外点关闭，readingChat* id）", () => {
   it("两个 popover 都隐藏时 no-op", () => {
     const { popovers, presetPopover, historyPopover } = makeHarness();
     presetPopover.hidden = true;

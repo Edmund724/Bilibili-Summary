@@ -60,6 +60,11 @@ export type ContentScriptMessageType = ContentScriptMessage["type"];
 export type GetSettingsMessage = { type: "get-settings" };
 export type SaveSettingsMessage = { type: "save-settings"; settings?: unknown };
 export type OpenOptionsMessage = { type: "open-options" };
+// PR5：对话 tab（content script）发送前的 offscreen 文档自愈 ensure——
+// chrome.offscreen / getContexts 仅扩展上下文可用，content script 经此消息
+// 委托 background 幂等创建（sidepanel 在扩展页内直调 ensureChatOffscreenDocument
+// 的等价物，见 reader/chat-tab.ts 的 connectPort）。
+export type EnsureOffscreenChatMessage = { type: "ensure-offscreen-chat" };
 export type PlayerAiQuickActionMessage = {
   type: "player-ai-quick-action";
   tabId?: number;
@@ -121,6 +126,7 @@ export type BackgroundMessage =
   | GetSettingsMessage
   | SaveSettingsMessage
   | OpenOptionsMessage
+  | EnsureOffscreenChatMessage
   | PlayerAiQuickActionMessage
   | OpenReadingViewTabMessage
   | CloseReadingViewTabMessage

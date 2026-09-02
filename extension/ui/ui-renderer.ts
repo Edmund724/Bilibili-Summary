@@ -8,14 +8,18 @@ import {
   isReaderMode,
   stripReaderModeUrl
 } from "../bilibili/video-id-shared.js";
-import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
+import { escapeHtml } from "../shared/string-utils.js";
 import { READING_HEADER_ICONS } from "./reading-header-icons.js";
 // PR3 句上「解释」的待处理意图契约叶子（零依赖常驻叶，见 reader/explain-intent.ts）：
-// 浮层点击写入意图并切到 AI 对话 tab；对话 tab 占位卡经 peek 渲染引用。
-import {
-  peekPendingExplainIntent,
-  setPendingExplainIntent
-} from "../reader/explain-intent.js";
+// 浮层点击写入意图并切到 AI 对话 tab；PR5 起意图由对话 tab 组合根消费
+//（激活时 peek → 渲染引用卡 + 自动发送），占位期的意图卡渲染随之退役。
+import { setPendingExplainIntent } from "../reader/explain-intent.js";
+// PR5 AI 对话 tab 的二级惰性加载器（常驻轻叶子，动态边在 core/lazy-chat-tab 内）：
+// 首次切到对话 tab / 句上「解释」触达时才装载对话组合根（reader/chat-tab.ts）。
+import { ensureReaderChatTab } from "../core/lazy-chat-tab.js";
+// PR5 外点关闭单委托：对话 tab popovers 的文档级外点关闭经桥接叶子并入本模块
+// 的单一 document click 委托（原双监听互踩风险收口，见 chat-tab-bridge.ts）。
+import { dispatchChatTabOutsideClick } from "../reader/chat-tab-bridge.js";
 // 候选03 常驻瘦身：本模块（面板 + 阅读视图壳构建、事件绑定）已整体惰性化，
 // 经 core/lazy-ui.js 动态装载。静态 import 只允许常驻叶子——reader 状态微模块
 //（./reader/state.js，含 ids/view-state/scroll-state）、轻状态栏写入器
@@ -111,7 +115,7 @@ export function buildUiHtml(): string {
 
           <!-- 统一 Digest 面板（PR2）：右侧 430px 卡片壳，三标签 = 字幕 / 概览 / AI 对话。
                字幕列表整体挂进字幕 tab body（分批渲染/点句跳转/跟随播放等行为不变）；
-               概览与 AI 对话为本期诚实占位，功能分别在 PR4 / PR5 落地。 -->
+               概览（PR4）与 AI 对话（PR5）分别由各自的状态机/组合根接管。 -->
           <aside id="${ids.readingDigestPanel}" class="boc-reading-digest-panel" aria-label="Digest 面板">
             <header class="boc-reading-header">
               <div class="boc-reading-header-copy">
@@ -272,21 +276,89 @@ export function buildUiHtml(): string {
               </div>
             </div>
 
-            <!-- AI 对话 tab：诚实占位（PR5 移植对话功能，不放假输入框）。
-                 待解释意图卡（PR3）：句上「解释」的 pending 意图在此展示引用，
-                 对话功能上线后由 PR5 消费发送 -->
+            <!-- AI 对话 tab（PR5）：真对话 UI 壳（结构对应 sidepanel.html 的 sp* 树，
+                 id 换 readingChat* 前缀）。对话组合根（reader/chat-tab.ts）首次激活时
+                 接线；未激活前壳保持静默空态（空消息区 + 空输入框），不放假数据。
+                 待解释意图引用卡（PR3 契约）：由对话组合根按 pending 意图渲染，
+                 自动发送成功即消费隐藏；卡上的取消按钮清意图。 -->
             <div id="${ids.readingTabBodyChat}" class="boc-reading-tab-body" role="tabpanel" aria-label="AI 对话" hidden>
-              <div id="${ids.readingChatIntent}" class="boc-reading-chat-intent" hidden>
-                <div class="boc-reading-chat-intent-head">
-                  <span class="boc-reading-chat-intent-title">待解释的字幕句</span>
-                  <span class="boc-reading-chat-intent-time boc-reading-time">00:00</span>
+              <div id="${ids.readingChatRoot}" class="boc-reading-chat">
+                <header class="sp-header boc-reading-chat-header">
+                  <button type="button" class="sp-context-chip" id="${ids.readingChatContextChip}" title="">加载中...</button>
+                  <button id="${ids.readingChatHistoryBtn}" type="button" class="sp-toolbar-btn" title="历史对话">
+                    <span>历史对话</span>
+                  </button>
+                  <button id="${ids.readingChatRefreshBtn}" type="button" class="sp-icon-btn" title="刷新当前视频上下文" aria-label="刷新上下文">
+                    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+                      <path d="M21 3v5h-5"></path>
+                      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+                      <path d="M8 16H3v5"></path>
+                    </svg>
+                  </button>
+                  <button id="${ids.readingChatSettingsBtn}" type="button" class="sp-icon-btn" title="打开设置" aria-label="设置">
+                    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                      <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"></path>
+                      <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                  </button>
+                  <button id="${ids.readingChatNewBtn}" type="button" class="sp-icon-btn" title="开启新会话" aria-label="开启新会话">
+                    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                      <path d="M12 5v14"></path>
+                      <path d="M5 12h14"></path>
+                    </svg>
+                  </button>
+                </header>
+
+                <div id="${ids.readingChatIntent}" class="boc-reading-chat-intent" hidden>
+                  <div class="boc-reading-chat-intent-head">
+                    <span class="boc-reading-chat-intent-title">待解释的字幕句</span>
+                    <span class="boc-reading-chat-intent-time boc-reading-time">00:00</span>
+                    <button type="button" class="boc-reading-chat-intent-cancel" data-chat-intent-action="cancel" title="取消解释" aria-label="取消解释">×</button>
+                  </div>
+                  <blockquote class="boc-reading-chat-intent-quote"></blockquote>
                 </div>
-                <blockquote class="boc-reading-chat-intent-quote"></blockquote>
-                <p class="boc-reading-chat-intent-note">AI 对话功能上线后，将自动把这句话的解释请求发送到对话。</p>
-              </div>
-              <div class="boc-reading-placeholder">
-                <div class="boc-reading-placeholder-title">AI 对话即将上线</div>
-                <p class="boc-reading-placeholder-copy">针对本视频的提问与解读将在这里进行。</p>
+
+                <div id="${ids.readingChatAsrNotice}" class="sp-asr-notice" hidden>该视频无字幕，正在音频转写…</div>
+                <main class="sp-messages" id="${ids.readingChatMessages}">
+                  <div class="sp-suggestions" id="${ids.readingChatSuggestions}"></div>
+                </main>
+                <footer class="sp-footer">
+                  <div class="sp-toolbar">
+                    <select id="${ids.readingChatModelSelect}" class="sp-model-select" aria-label="选择模型平台"></select>
+                    <div id="${ids.readingChatThinkingToggle}" class="sp-thinking-toggle" role="group" aria-label="思考档位">
+                      <button type="button" class="sp-thinking-btn" data-level="off">Off</button>
+                      <button type="button" class="sp-thinking-btn" data-level="low">Low</button>
+                      <button type="button" class="sp-thinking-btn" data-level="high">High</button>
+                    </div>
+                    <button id="${ids.readingChatPresetBtn}" type="button" class="sp-toolbar-btn" title="预设提示词">
+                      <span>预设提示词</span>
+                    </button>
+                  </div>
+                  <div id="${ids.readingChatPresetPopover}" class="sp-preset-popover" hidden>
+                    <div id="${ids.readingChatPresetList}" class="sp-preset-list"></div>
+                    <div class="sp-preset-editor">
+                      <input id="${ids.readingChatPresetInput}" class="sp-preset-input" type="text" placeholder="添加预设提示词" />
+                      <button id="${ids.readingChatPresetAddBtn}" type="button" class="sp-preset-add-btn">添加</button>
+                    </div>
+                  </div>
+                  <div id="${ids.readingChatHistoryPopover}" class="sp-history-popover" hidden>
+                    <div class="sp-history-popover-head">
+                      <span class="sp-history-popover-title">历史对话</span>
+                      <button id="${ids.readingChatHistoryClearBtn}" type="button" class="sp-history-clear-btn">清空全部</button>
+                    </div>
+                    <div id="${ids.readingChatHistoryList}" class="sp-history-list"></div>
+                  </div>
+                  <div class="sp-input-row">
+                    <textarea
+                      id="${ids.readingChatInput}"
+                      rows="2"
+                      placeholder="回车发送，Shift+Enter 换行"
+                      autocomplete="off"
+                    ></textarea>
+                    <button id="${ids.readingChatStopBtn}" type="button" class="sp-stop-btn" hidden>停止</button>
+                  </div>
+                </footer>
               </div>
             </div>
           </aside>
@@ -335,28 +407,14 @@ export function resetReaderDigestTabs(): void {
   setReaderDigestTab("subtitle");
 }
 
-// AI 对话 tab 占位期的待解释意图卡（PR3）：句上「解释」的 pending 意图在此
-// 展示引用（时间戳 pill 母题 + 句子原文 + 上线后自动发送的说明）。意图契约见
-// reader/explain-intent.ts；PR5 对话 tab 落地后由对话功能消费意图并接管此卡。
-export function renderReadingChatIntent(): void {
-  const node = document.getElementById(ids.readingChatIntent);
-  if (!node) {
-    return;
-  }
-  const intent = peekPendingExplainIntent();
-  if (!intent || !intent.content) {
-    node.hidden = true;
-    return;
-  }
-  const quote = node.querySelector<HTMLElement>(".boc-reading-chat-intent-quote");
-  if (quote) {
-    quote.textContent = `「${intent.content}」`;
-  }
-  const stamp = node.querySelector<HTMLElement>(".boc-reading-chat-intent-time");
-  if (stamp) {
-    stamp.textContent = formatCompactTimestamp(intent.from, intent.from >= 3600);
-  }
-  node.hidden = false;
+// PR5：AI 对话 tab 的二级惰性激活入口。首次切到对话 tab 时经
+// ensureReaderChatTab 装载组合根（reader/chat-tab.ts）并 init；已装载时为
+// 幂等的重开恢复 + 待解释意图消费。装载/激活失败只记日志（对话不可用不拖垮
+// 阅读视图其余两 tab）。
+export function activateReaderChatTab(): void {
+  ensureReaderChatTab()
+    .then((chat) => chat.ensureChatTabActivated())
+    .catch((error) => logWarn("[BOC] chat tab activate failed", error));
 }
 
 export function bindUiEvents(): void {
@@ -382,8 +440,8 @@ export function bindUiEvents(): void {
   const subtitleList = byId(ids.readingSubtitleList);
 
   // Digest 面板三标签切换（纯壳交互，见上方 setReaderDigestTab 注释）。
-  // 切到 AI 对话 tab 时按当前 pending 意图刷新待解释意图卡（句上「解释」写入
-  // 意图后也会主动切过来，两条路径都保证卡片与意图一致）。
+  // 切到 AI 对话 tab（PR5）：二级惰性激活对话组合根（首次装载 + 恢复路径 +
+  // 消费待解释意图，见 activateReaderChatTab）。
   // 切到概览 tab（PR4）：未生成则自动触发生成并刷新笔记一节快照（idle 才触发，
   // 生成中复用进行中 promise，已生成不重跑）；reader 域交互按惯例经
   // loadReaderDomain 装载后转发。
@@ -391,7 +449,7 @@ export function bindUiEvents(): void {
     byId(def.buttonId).addEventListener("click", () => {
       setReaderDigestTab(def.name);
       if (def.name === "chat") {
-        renderReadingChatIntent();
+        activateReaderChatTab();
       }
       if (def.name === "overview") {
         loadReaderDomain()
@@ -645,19 +703,24 @@ export function bindUiEvents(): void {
       return;
     }
     // 待解释意图契约（reader/explain-intent.ts）：单槽 pending，PR5 对话 tab 消费
+    //——切到 AI 对话 tab 并激活组合根（首次装载 / 已装载都经激活路径 peek 意图
+    // → 渲染引用卡 + 自动发送，发送成功即 consume）。
     setPendingExplainIntent({
       from: Number(itemNode?.dataset.seconds || 0) || 0,
       content,
       createdAt: Date.now()
     });
-    renderReadingChatIntent();
     setReaderDigestTab("chat");
+    activateReaderChatTab();
     hideExplainPop();
   });
 
-  // Click outside settings panel to close
+  // Click outside settings panel to close（单一文档级 click 委托：PR5 起同时
+  // 承接对话 tab popovers 的外点关闭——chat-tab-bridge 注册槽转发，不另挂第二
+  // 个 document 监听，避免双委托互踩。转发必须放在 settingsExpanded 早退之前）。
   if (!state.reader.readingDocumentClickBound) {
     document.addEventListener("click", (e) => {
+      dispatchChatTabOutsideClick(e);
       if (!state.reader.readingSettingsExpanded) return;
       const settingsPanel = document.getElementById(ids.readingSettingsPanel);
       const settingsBtnEl = document.getElementById(ids.readingSettingsBtn);

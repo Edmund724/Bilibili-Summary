@@ -20,9 +20,10 @@
 //          assistant 消息；segmentSummaries = 按预算计划重建段键位读段缓存）；
 //        - 成稿 → 预览卡（标题 + 首行摘要）+「查看完整笔记」面板内展开/收起，
 //          Markdown 渲染复用 ui/markdown 的 renderMarkdown；
-//        - 未成稿 → 引导按钮走现有笔记生成链路（player-ai-quick-action 消息，
-//          与播放器 AI 按钮同一入口：打开 AI 侧边栏并自动发送总结提示词），
-//          流式进度与失败反馈沿用侧边栏现有状态，本模块只反馈发起层面的失败。
+//        - 未成稿 → 引导按钮走对话 tab 直发链路（PR5 起：reader/chat-tab.ts 的
+//          runQuickActionPrompt seam——定位 AI 对话 tab + 自动发送
+//          playerAiQuickPrompt，不再绕侧边栏），流式进度与失败反馈沿用对话
+//          tab 现有状态，本模块只反馈发起层面的失败。
 //   5. 点击跳播：章节/金句复用 seekReadingTarget 通道（jumpReadingTarget，
 //      阅读视图内点击语义 resumePlayback:true）；金句卡选中文本时不跳转。
 //   6. 清理：closeReadingView 调 resetReaderOverviewState 归位状态；不取消进行中
@@ -37,6 +38,9 @@ import { state } from "../core/state.js";
 import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
+import { DEFAULT_PLAYER_AI_QUICK_PROMPT } from "../core/defaults.js";
+// PR5：概览笔记引导改走 reader 内对话 tab 的快捷动作消费 seam（二级惰性叶子）。
+import { ensureReaderChatTab } from "../core/lazy-chat-tab.js";
 import {
   runOverviewAnalysis,
   buildSubtitleSignature,
@@ -546,10 +550,11 @@ function buildNoteSectionHtml(): string {
     </section>
     `;
   }
-  // 未成稿：引导走现有笔记生成链路（player-ai-quick-action）。流式进度与
-  // 生成失败在 AI 侧边栏沿用其现有状态反馈，这里只反馈发起层面的失败。
+  // 未成稿：引导走 reader 内对话 tab 的笔记生成链路（playerAiQuickPrompt 直发，
+  // PR5 起不再绕侧边栏）。流式进度与生成失败在对话 tab 沿用其现有状态反馈，
+  // 这里只反馈发起层面的失败。
   const requestHint = overview.noteRequested
-    ? '<p class="boc-reading-ov-note-hint">已在 AI 侧边栏发起笔记生成，完成后回到概览即可查看。</p>'
+    ? '<p class="boc-reading-ov-note-hint">已在 AI 对话发起笔记生成，完成后回到概览即可查看。</p>'
     : "";
   const errorHint = overview.noteError
     ? `<p class="boc-reading-ov-note-hint is-error">${escapeHtml(overview.noteError)}</p>`
@@ -691,19 +696,20 @@ async function loadReaderNoteSnapshot(): Promise<{ title: string; excerpt: strin
   };
 }
 
-// 引导按钮 → 现有笔记生成链路：player-ai-quick-action 消息（背景页打开 AI
-// 侧边栏并自动发送配置的总结提示词，与播放器 AI 悬浮按钮完全同一入口）。
-// 生成中的流式进度与失败反馈沿用侧边栏现有状态；受理失败在此如实反馈。
+// 引导按钮 → reader 内对话 tab 直发（PR5 改道：原 player-ai-quick-action 消息
+// 打开 AI 侧边栏，现走对话组合根的快捷动作消费 seam——定位对话 tab +
+// startNewConversation + 填 playerAiQuickPrompt + 自动发送，同一 seam、不再绕
+// 侧边栏）。流式进度与失败反馈在对话 tab 沿用其现有状态；受理失败在此如实反馈。
 async function generateReaderNoteFromOverview(): Promise<void> {
   try {
-    const resp = (await sendRuntimeMessage({ type: "player-ai-quick-action" }).catch(() => null)) as
-      | { ok?: boolean; error?: string }
-      | null;
-    if (resp?.ok) {
+    const chat = await ensureReaderChatTab();
+    const prompt = String(state.settings?.playerAiQuickPrompt || DEFAULT_PLAYER_AI_QUICK_PROMPT).trim();
+    const accepted = await chat.runQuickActionPrompt(prompt);
+    if (accepted) {
       overview.noteRequested = true;
       overview.noteError = "";
     } else {
-      overview.noteError = String(resp?.error || "发起笔记生成失败，请重试。");
+      overview.noteError = "对话暂未就绪（未配置平台或上下文未就绪），请稍后重试。";
     }
   } catch (error) {
     overview.noteError = `发起笔记生成失败：${getErrorMessage(error)}`;

@@ -24,6 +24,8 @@ import {
   createAsrRuntimeConfigHandler
 } from "../core/provider-handlers.js";
 import { bgFetchJson } from "../bilibili/gateway.js";
+// PR5：对话 tab 的 offscreen 文档 ensure 通道（background 侧唯一合法创建点）
+import { ensureChatOffscreenDocument } from "../chat/offscreen-ensure.js";
 import { handleAsrDecodePrepare, handleAsrDecodeCleanup } from "../asr/offscreen-bridge.bg.js";
 import { ASR_TASK_PREPARE, ASR_TASK_CLEANUP } from "../asr/protocol.js";
 import type {
@@ -57,6 +59,18 @@ function handleOpenOptions(_message: Msg<"open-options">, _sender: MessageSender
   chrome.tabs
     .create({ url: chrome.runtime.getURL("pages/options.html") })
     .then(() => sendResponse({ ok: true }))
+    .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
+  return true;
+}
+
+// PR5：对话 tab（content script）发送前的 offscreen 文档自愈 ensure。chrome.offscreen
+// / chrome.runtime.getContexts 仅扩展上下文可用，content script 经此消息委托
+// background 幂等创建（sidepanel 扩展页内直调 ensureChatOffscreenDocument 的
+// 等价通道）。ensure 失败不阻断发送——connect 由连接结果兜底（与 sidepanel 的
+// connectPort 自愈设计一致）。
+function handleEnsureOffscreenChat(_message: Msg<"ensure-offscreen-chat">, _sender: MessageSender, sendResponse: SendResponse): boolean {
+  ensureChatOffscreenDocument()
+    .then((ensured) => sendResponse({ ok: true, ensured }))
     .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
   return true;
 }
@@ -240,6 +254,7 @@ const messageHandlers = new Map<BackgroundMessageType, BackgroundHandler>([
   ["get-settings", handleGetSettings as BackgroundHandler],
   ["save-settings", handleSaveSettings as BackgroundHandler],
   ["open-options", handleOpenOptions as BackgroundHandler],
+  ["ensure-offscreen-chat", handleEnsureOffscreenChat as BackgroundHandler],
   ["player-ai-quick-action", handlePlayerAiQuickAction as BackgroundHandler],
   ["open-reading-view-tab", handleOpenReadingViewTab as BackgroundHandler],
   ["close-reading-view-tab", handleCloseReadingViewTab as BackgroundHandler],

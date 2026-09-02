@@ -19,6 +19,9 @@ let reader: typeof import("../../extension/reader/index.js");
 let ids: typeof import("../../extension/reader/state.js").ids;
 let uiRenderer: typeof import("../../extension/ui/ui-renderer.js");
 let explainIntent: typeof import("../../extension/reader/explain-intent.js");
+// PR5：对话 tab 二级惰性叶子（点击「解释」后经激活路径消费意图，测试显式
+// await 激活落定再断言引用卡）。
+let ensureReaderChatTab: typeof import("../../extension/core/lazy-chat-tab.js").ensureReaderChatTab;
 let video: HTMLVideoElement;
 
 async function loadModules() {
@@ -28,6 +31,7 @@ async function loadModules() {
   reader = await import("../../extension/reader/index.js");
   ids = (await import("../../extension/reader/state.js")).ids;
   uiRenderer = await import("../../extension/ui/ui-renderer.js");
+  ensureReaderChatTab = (await import("../../extension/core/lazy-chat-tab.js")).ensureReaderChatTab;
 }
 
 function tabButton(name: "Subtitle" | "Overview" | "Chat") {
@@ -131,7 +135,7 @@ describe("句上「解释」浮层（真实绑定）", () => {
     expect(explainPop().hidden).toBe(true);
   });
 
-  it("点击「解释」：写入意图 {from, content, createdAt} + 三通道切到 AI 对话 tab + 意图卡引用", () => {
+  it("点击「解释」：写入意图 {from, content, createdAt} + 三通道切到 AI 对话 tab + 引用卡", async () => {
     renderList();
     subtitleItem(1).dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     explainBtn().click();
@@ -147,11 +151,16 @@ describe("句上「解释」浮层（真实绑定）", () => {
     expect(tabButton("Chat").getAttribute("aria-selected")).toBe("true");
     expect(tabBody("Subtitle").classList.contains("is-active")).toBe(false);
 
-    // 意图卡：显示引用与时间戳 pill
+    // 引用卡：对话 tab 激活（PR5 组合根接管 PR3 占位卡）后按 pending 意图渲染，
+    // 时间戳 pill + 引用句（时间戳 pill 母题）
+    const chatTab = await ensureReaderChatTab();
+    await chatTab.ensureChatTabActivated();
     const intentCard = document.getElementById(ids.readingChatIntent) as HTMLElement;
     expect(intentCard.hidden).toBe(false);
     expect(intentCard.querySelector(".boc-reading-chat-intent-quote")?.textContent).toContain("第二句话待解释");
     expect(intentCard.querySelector(".boc-reading-chat-intent-time")?.textContent).toBe("00:10");
+    // 自动发送被 provider 闸拦下（测试环境未配置平台）：意图保持 pending，可重试
+    expect(explainIntent.peekPendingExplainIntent()).not.toBe(null);
   });
 
   it("连点两句「解释」：意图以最后一句为准", () => {
@@ -196,8 +205,9 @@ describe("句上「解释」浮层（真实绑定）", () => {
 
     expect(explainIntent.peekPendingExplainIntent()).toBe(null);
     expect(searchInput.value).toBe("");
-    // 意图已清：下次打开（enterReaderMode → renderReadingChatIntent）按空态渲染
-    uiRenderer.renderReadingChatIntent();
+    // 意图已清：对话 tab 会话收尾隐藏引用卡，下次激活按空态渲染（无意图不弹卡）
+    const chatTab = await ensureReaderChatTab();
+    await chatTab.ensureChatTabActivated();
     expect((document.getElementById(ids.readingChatIntent) as HTMLElement).hidden).toBe(true);
   });
 });
