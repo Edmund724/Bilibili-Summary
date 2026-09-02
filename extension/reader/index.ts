@@ -72,6 +72,17 @@ export { refreshReadingSubtitleSearch, moveReadingSubtitleSearch, clearReadingSu
 // 转写中间态横幅：渲染尾部/tick 收敛（update）与转写中判定
 export { updateReadingTranscribeBanner, isReaderTranscribing } from "./transcribe-banner.js";
 
+// ===== 字幕 tab：选区「解释」卡片（reader/explain-card.js） =====
+
+// 打开卡片并发起解释（ui-renderer 选区浮层点击经 ensure 触达）、卡片内点击委托
+//（关闭 / 重试 / 去对话追问）、关闭（closeReadingView 会话收尾）、开着判定。
+export {
+  openReaderExplainCard,
+  onReaderExplainCardClick,
+  closeReaderExplainCard,
+  isReaderExplainCardOpen
+} from "./explain-card.js";
+
 // ===== PR4 概览 tab：状态机触达入口（ui-renderer 调用面） =====
 
 // 概览 tab 切换入口（未生成自动触发 + 笔记快照刷新）、章节/金句点击与重试/

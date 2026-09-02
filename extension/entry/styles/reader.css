@@ -238,7 +238,7 @@
   display: flex;
   flex-direction: column;
   padding: 14px 16px 16px;
-  /* Follow 悬浮按钮与句上「解释」浮层的定位上下文 */
+  /* Follow 悬浮按钮、选区「解释」浮层与解释卡片的定位上下文 */
   position: relative;
 }
 
@@ -291,6 +291,33 @@
   overflow-x: hidden;
   overflow-y: auto;
   pointer-events: auto;
+}
+
+/* 字幕列表内置滚动条：常驻可见。B 站页面样式会把默认滚动条压成 overlay 态
+ *（只在滚动瞬间闪现），显式定义 ::-webkit-scrollbar 让 Chrome 对该容器回落成
+ * 经典滚动条并常驻；scrollbar-gutter 预留槽位，滚动条出现/消失不抖布局。
+ * 配色走 --boc-reader-* token，三主题自动跟随。 */
+.boc-reading-subtitle {
+  scrollbar-gutter: stable;
+}
+
+.boc-reading-subtitle::-webkit-scrollbar {
+  width: 10px;
+}
+
+.boc-reading-subtitle::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.boc-reading-subtitle::-webkit-scrollbar-thumb {
+  background: var(--boc-reader-surface-3, #e7dfd4);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+.boc-reading-subtitle::-webkit-scrollbar-thumb:hover {
+  background-color: var(--boc-reader-faint, #a39a8d);
 }
 
 .boc-reading-chapter,
@@ -839,8 +866,8 @@
   display: none !important;
 }
 
-/* 句上「解释」浮层：绝对定位在 tab body（不进列表滚动容器，避免随滚动裁剪）；
- * hover 显示、列表滚动/pointerdown 隐藏，不挡条目文本选择 */
+/* 选区「解释」浮层：绝对定位在 tab body（不进列表滚动容器，避免随滚动裁剪）；
+ * 在字幕句内选中词/句后定位到选区下方，选区清空/列表滚动/重新按下时隐藏 */
 .boc-reading-explain-pop {
   position: absolute;
   z-index: 7;
@@ -863,6 +890,141 @@
   border-color: var(--boc-reader-accent, #fb7299);
   background: var(--boc-reader-accent-soft, #fce0ea);
   color: var(--boc-reader-accent, #fb7299);
+}
+
+/* 选区「解释」卡片：面板内弹层（遮罩 + 居中对话框），整块内容由
+ * reader/explain-card.js 按 loading/ready/error 三态重建。视觉基准
+ * prototype/final-字幕-解释.jpg：accent 标题 + 选中原文软底条 + 正文解释。 */
+.boc-reading-explain-card {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+}
+
+.boc-reading-explain-card[hidden] {
+  display: none;
+}
+
+.boc-reading-explain-card-mask {
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  background: rgba(20, 16, 12, 0.28);
+}
+
+.boc-reading-explain-card-dialog {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 16%;
+  max-height: 76%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 14px;
+  background: var(--boc-reader-card, #ffffff);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.24);
+}
+
+.boc-reading-explain-card-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 8px;
+}
+
+.boc-reading-explain-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+.boc-reading-explain-card-close {
+  border: 0;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--boc-reader-faint, #a39a8d);
+  font-size: 18px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.boc-reading-explain-card-close:hover {
+  background: var(--boc-reader-pill-bg, #f0e9df);
+  color: var(--boc-reader-text, #2b2620);
+}
+
+.boc-reading-explain-card-quote {
+  flex: 0 0 auto;
+  margin: 0 0 10px;
+  padding: 10px 14px;
+  background: var(--boc-reader-accent-soft, #fce0ea);
+  color: var(--boc-reader-muted, #6f675c);
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.boc-reading-explain-card-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 14px 12px;
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--boc-reader-text, #2b2620);
+  word-break: break-word;
+}
+
+.boc-reading-explain-card-answer p {
+  margin: 0 0 8px;
+}
+
+.boc-reading-explain-card-answer p:last-child {
+  margin-bottom: 0;
+}
+
+.boc-reading-explain-card-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 10px;
+  font-size: 13px;
+  color: var(--boc-reader-muted, #6f675c);
+}
+
+.boc-reading-explain-card-state.is-error {
+  display: block;
+  padding-bottom: 10px;
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+/* loading 转圈：与概览/转写横幅同族的细环动画 */
+.boc-reading-explain-card-dot {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--boc-reader-accent, #fb7299);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: boc-explain-spin 0.8s linear infinite;
+}
+
+@keyframes boc-explain-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.boc-reading-explain-card-foot {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 14px 14px;
 }
 
 /* AI 对话 tab 的待解释意图引用卡（PR3 引入，PR5 起由对话组合根渲染/消费）：

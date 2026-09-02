@@ -10,12 +10,12 @@ import {
 } from "../bilibili/video-id-shared.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { READING_HEADER_ICONS } from "./reading-header-icons.js";
-// PR3 句上「解释」的待处理意图契约叶子（零依赖常驻叶，见 reader/explain-intent.ts）：
-// 浮层点击写入意图并切到 AI 对话 tab；PR5 起意图由对话 tab 组合根消费
-//（激活时 peek → 渲染引用卡 + 自动发送），占位期的意图卡渲染随之退役。
-import { setPendingExplainIntent } from "../reader/explain-intent.js";
+// 选区「解释」的两处接线都在本模块：选区监听 + 浮层定位（bindUiEvents 内），
+// 以及点浮层后触达 reader 动态域的解释卡片（reader/explain-card.js，经
+// ensureReaderDomain 装载）。卡片底部「去对话追问」才写待解释意图
+// （reader/explain-intent.js 契约），由对话 tab 消费——常驻侧不再直连该契约。
 // PR5 AI 对话 tab 的二级惰性加载器（常驻轻叶子，动态边在 core/lazy-chat-tab 内）：
-// 首次切到对话 tab / 句上「解释」触达时才装载对话组合根（reader/chat-tab.ts）。
+// 首次切到对话 tab / 解释卡片「去对话追问」触达时才装载对话组合根（reader/chat-tab.ts）。
 import { ensureReaderChatTab } from "../core/lazy-chat-tab.js";
 // PR5 外点关闭单委托：对话 tab popovers 的文档级外点关闭经桥接叶子并入本模块
 // 的单一 document click 委托（原双监听互踩风险收口，见 chat-tab-bridge.ts）。
@@ -199,7 +199,7 @@ export function buildUiHtml(): string {
 
             <!-- 字幕 tab：工具条（句内搜索 + 复制/导出，PR3）+ 转写中间态横幅 +
                  字幕列表整体搬家（分批渲染/尾 spacer/事件委托不变） +
-                 Follow playback 悬浮按钮与句上「解释」浮层 -->
+                 Follow playback 悬浮按钮、选区「解释」浮层与解释卡片 -->
             <div id="${ids.readingTabBodySubtitle}" class="boc-reading-tab-body is-active" role="tabpanel" aria-label="字幕">
               <div class="boc-reading-sub-toolbar">
                 <div class="boc-reading-search">
@@ -250,11 +250,15 @@ export function buildUiHtml(): string {
                    （off/manual/auto）的 CSS 驱动，点击恢复跟随并跳回当前句 -->
               <button id="${ids.readingFollowBtn}" type="button" class="boc-reading-follow-btn">↓ 跟随播放</button>
 
-              <!-- 句上「解释」浮层：单实例、绝对定位在 tab body（不进列表滚动
-                   容器，避免随滚动裁剪/漂移），hover 字幕句时定位显示 -->
+              <!-- 选区「解释」浮层：单实例、绝对定位在 tab body（不进列表滚动
+                   容器，避免随滚动裁剪/漂移），在字幕句内选中词/句后定位到选区下方 -->
               <div id="${ids.readingExplainPop}" class="boc-reading-explain-pop" hidden>
                 <button type="button" class="boc-reading-explain-btn">解释</button>
               </div>
+
+              <!-- 选区「解释」卡片宿主：覆盖整个 tab body 的面板内弹层（遮罩 +
+                   对话框），内容由 reader/explain-card.js 按状态机整块重建 -->
+              <div id="${ids.readingExplainCard}" class="boc-reading-explain-card" hidden></div>
             </div>
 
             <!-- 概览 tab（PR4）：状态机渲染宿主（reader/overview.ts），内容由
@@ -640,71 +644,113 @@ export function bindUiEvents(): void {
       .catch((error) => logWarn("[BOC] resume reader follow failed", error));
   });
 
-  // ===== PR3 字幕 tab：句上「解释」浮层 =====
-  // 单实例浮层，hover 字幕句（mouseover 委托）时定位到条目右上；挂在本 tab
-  // body（非列表滚动容器）内——mouseover 目标含浮层自身（浮层是 tab body 子
-  // 节点），从条目移入浮层不会误隐藏。列表滚动 / pointerdown（开始选择文本）
-  // 时隐藏，浮层不挡文本选择。
+  // ===== 字幕 tab：选区「解释」浮层 =====
+  // 触发条件是「在字幕句里选中了词/句」，不再是 hover。选区变化经 document
+  // selectionchange 单点委托（拖选/双击/键盘选区都覆盖），只在选区落在字幕列表
+  // 内时显示浮层，并定位到选区下方；选区清空/移出列表/列表滚动时隐藏。
+  // 浮层挂在本 tab body（非列表滚动容器）内，不进 .boc-reading-item 的点击委托
+  // 链——点「解释」不会触发点句跳转。
   const readingExplainPop = byId(ids.readingExplainPop);
   const readingExplainBtn = readingExplainPop.querySelector("button") as HTMLButtonElement;
   const readingTabBodySubtitle = byId(ids.readingTabBodySubtitle);
+  // 浮层显示时快照选区（条目索引 + 选中原文）：点「解释」时不再回读
+  // window.getSelection()——彼时选区可能已被浏览器折叠，且快照语义更明确。
+  let pendingExplainSelection: { itemIndex: string; selection: string } | null = null;
   const hideExplainPop = () => {
-    readingExplainPop.hidden = true;
-    delete readingExplainPop.dataset.itemIndex;
-  };
-  const showExplainPopForItem = (item: HTMLElement) => {
-    const bodyRect = readingTabBodySubtitle.getBoundingClientRect();
-    const rect = item.getBoundingClientRect();
-    readingExplainPop.dataset.itemIndex = item.dataset.index || "";
-    // 视觉定稿（prototype/final-字幕-解释.jpg）：浮层贴条目右上角
-    readingExplainPop.style.left = `${Math.max(8, Math.round(rect.right - bodyRect.left - 96))}px`;
-    readingExplainPop.style.top = `${Math.max(0, Math.round(rect.top - bodyRect.top + 2))}px`;
-    readingExplainPop.hidden = false;
-  };
-  readingTabBodySubtitle.addEventListener("mouseover", (event) => {
-    const target = event.target as HTMLElement | null;
-    if (!target?.closest) {
+    // 热路径守卫：selectionchange 对页面任何输入框的选区变化都会触发，已隐藏时
+    // 直接返回，避免每次敲键盘都写一遍 DOM。
+    if (readingExplainPop.hidden && !pendingExplainSelection) {
       return;
     }
-    if (target.closest(".boc-reading-explain-pop")) {
-      return; // 移入浮层自身：保持显示，让用户能点到「解释」
+    readingExplainPop.hidden = true;
+    delete readingExplainPop.dataset.itemIndex;
+    pendingExplainSelection = null;
+  };
+  // 选区矩形：jsdom 无 Range.getBoundingClientRect，取不到时退回条目矩形
+  //（测试环境两者都是零矩形，定位数值不参与断言）。
+  const explainAnchorRect = (range: Range, item: HTMLElement) => {
+    const rect = typeof range.getBoundingClientRect === "function" ? range.getBoundingClientRect() : null;
+    if (rect && (rect.width || rect.height || rect.top || rect.left)) {
+      return rect;
     }
-    const item = target.closest<HTMLElement>(".boc-reading-item");
-    if (item) {
-      showExplainPopForItem(item);
-    } else {
+    return item.getBoundingClientRect();
+  };
+  const showExplainPopForSelection = (item: HTMLElement, range: Range, selection: string) => {
+    const bodyRect = readingTabBodySubtitle.getBoundingClientRect();
+    const rect = explainAnchorRect(range, item);
+    pendingExplainSelection = { itemIndex: item.dataset.index || "", selection };
+    readingExplainPop.dataset.itemIndex = pendingExplainSelection.itemIndex;
+    // 先显形再量宽：浮层宽度随文案变化，右缘对齐选区末端（贴右边界时收敛到视口内）
+    readingExplainPop.hidden = false;
+    const popWidth = readingExplainPop.offsetWidth || 96;
+    const left = Math.round(rect.right - bodyRect.left) - popWidth;
+    readingExplainPop.style.left = `${Math.min(Math.max(8, left), Math.max(8, Math.round(bodyRect.width) - popWidth - 8))}px`;
+    readingExplainPop.style.top = `${Math.max(0, Math.round(rect.bottom - bodyRect.top) + 4)}px`;
+  };
+  const syncExplainPopWithSelection = () => {
+    const selection = window.getSelection?.();
+    const text = selection?.toString().trim() || "";
+    if (!selection || !text || selection.rangeCount === 0) {
       hideExplainPop();
+      return;
     }
+    const range = selection.getRangeAt(0);
+    const anchorNode = range.startContainer.nodeType === Node.TEXT_NODE
+      ? range.startContainer.parentElement
+      : (range.startContainer as HTMLElement | null);
+    const item = anchorNode?.closest?.<HTMLElement>(".boc-reading-item");
+    if (!item || !subtitleList.contains(item)) {
+      hideExplainPop();
+      return;
+    }
+    showExplainPopForSelection(item, range, text);
+  };
+  document.addEventListener("selectionchange", syncExplainPopWithSelection);
+  // 按住「解释」按钮的 mousedown 必须吃掉默认动作：否则 Chrome 会先折叠页面
+  // 选区 → selectionchange 把浮层连同快照一起清掉 → click 落点时已无选区可用。
+  readingExplainPop.addEventListener("mousedown", (event) => {
+    event.preventDefault();
   });
-  readingTabBodySubtitle.addEventListener("mouseleave", hideExplainPop);
   subtitleList.addEventListener("scroll", hideExplainPop, { passive: true });
   subtitleList.addEventListener("pointerdown", hideExplainPop);
   readingExplainBtn.addEventListener("click", () => {
-    // 从渲染条目取选中句（textContent + data-seconds），不回读 state 结构——
+    // 从渲染条目取选中所在整句（textContent + data-seconds），不回读 state 结构——
     // 语义就是「用户看到的这句」，也避免常驻侧依赖字幕数据链。
     // 索引缺失（浮层已隐藏/重复 click）按无效处理：不回退到第 0 条。
-    const rawIndex = readingExplainPop.dataset.itemIndex || "";
-    const itemIndex = Number(rawIndex);
+    const snapshot = pendingExplainSelection;
+    const itemIndex = Number(snapshot?.itemIndex);
     const itemNode =
-      rawIndex !== "" && Number.isFinite(itemIndex) && itemIndex >= 0
+      snapshot && snapshot.itemIndex !== "" && Number.isFinite(itemIndex) && itemIndex >= 0
         ? subtitleList.querySelector<HTMLElement>(`[data-index="${itemIndex}"]`)
         : null;
-    const content = itemNode?.querySelector(".boc-reading-text")?.textContent?.trim() || "";
-    if (!itemNode || !content) {
+    const line = itemNode?.querySelector(".boc-reading-text")?.textContent?.trim() || "";
+    if (!itemNode || !line || !snapshot) {
       hideExplainPop();
       return;
     }
-    // 待解释意图契约（reader/explain-intent.ts）：单槽 pending，PR5 对话 tab 消费
-    //——切到 AI 对话 tab 并激活组合根（首次装载 / 已装载都经激活路径 peek 意图
-    // → 渲染引用卡 + 自动发送，发送成功即 consume）。
-    setPendingExplainIntent({
-      from: Number(itemNode?.dataset.seconds || 0) || 0,
-      content,
-      createdAt: Date.now()
-    });
-    setReaderDigestTab("chat");
-    activateReaderChatTab();
+    const payload = {
+      selection: snapshot.selection,
+      line,
+      from: Number(itemNode.dataset.seconds || 0) || 0,
+      index: itemIndex
+    };
+    // 收起选区高亮与浮层：解释内容已取走，页面上残留的蓝色选区只剩干扰
+    window.getSelection?.()?.removeAllRanges();
     hideExplainPop();
+    // 解释卡片属 reader 动态域（要发 AI 请求），经 ensure 装载后调用；
+    // 装载失败只记日志（解释不可用不拖垮字幕 tab 其余交互）。
+    loadReaderDomain()
+      .then((reader) => reader.openReaderExplainCard(payload))
+      .catch((error) => logWarn("[BOC] open explain card failed", error));
+  });
+
+  // 解释卡片内点击委托（关闭 / 重试 / 去对话追问）：宿主容器不换、内容整块
+  // 重建，与概览 tab 同款容器级委托；实现在 reader/explain-card.js。
+  const readingExplainCard = byId(ids.readingExplainCard);
+  readingExplainCard.addEventListener("click", (event) => {
+    loadReaderDomain()
+      .then((reader) => reader.onReaderExplainCardClick(event as MouseEvent))
+      .catch((error) => logWarn("[BOC] explain card click failed", error));
   });
 
   // Click outside settings panel to close（单一文档级 click 委托：PR5 起同时

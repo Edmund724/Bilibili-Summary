@@ -1,8 +1,8 @@
 // reader 对话 tab（reader/chat-tab.ts）的按需加载器（PR5 二级惰性）。
 //
 // 为什么惰性：对话 tab 的组合根 + 三个重建壳（lists/notices/popovers）连着
-// chat/* 内核（~2000 行），只在用户首次切到「AI 对话」tab（或句上「解释」/
-// 概览笔记按钮触达对话 seam）时才有职责。作为 reader 域内的二级惰性，经
+// chat/* 内核（~2000 行），只在用户首次切到「AI 对话」tab（或解释卡片的
+// 「去对话追问」/概览笔记按钮触达对话 seam）时才有职责。作为 reader 域内的二级惰性，经
 // createLazyLoader（promise 缓存 + 失败清缓存可重试）动态 import
 // reader/chat-tab.js——esbuild 把它切进独立动态 chunk，不拖进 reader/index
 // 主 chunk。

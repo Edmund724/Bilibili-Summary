@@ -63,7 +63,7 @@ export const ids = {
   //（idle/generating/ready/partial/error/empty，全诚实态）。
   readingOverviewBody: "boc-reading-overview-body",
   // PR3 字幕 tab 五件事：句内搜索、Copy/Export、Follow 悬浮按钮、转写中间态
-  // 横幅、句上「解释」浮层与 AI 对话 tab 占位期的待解释意图卡。
+  // 横幅、选区「解释」浮层与卡片、AI 对话 tab 的待解释意图卡。
   readingSearchInput: "boc-reading-search-input",
   readingSearchCount: "boc-reading-search-count",
   readingSearchPrevBtn: "boc-reading-search-prev",
@@ -74,6 +74,8 @@ export const ids = {
   readingTranscribeBanner: "boc-reading-transcribe-banner",
   readingTranscribeProgress: "boc-reading-transcribe-progress",
   readingExplainPop: "boc-reading-explain-pop",
+  // 选区「解释」卡片宿主（面板内弹层；状态机与渲染在 reader/explain-card.ts）
+  readingExplainCard: "boc-reading-explain-card",
   // PR3 占位期的待解释意图卡（PR5 起由对话 tab 组合根渲染/消费）
   readingChatIntent: "boc-reading-chat-intent",
   // PR5 AI 对话 tab（readingChat* 前缀，不用 sp 前缀）：对话区全部元素 id。

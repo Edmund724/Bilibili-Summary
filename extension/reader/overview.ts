@@ -37,10 +37,11 @@
 import { state } from "../core/state.js";
 import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
-import { sendRuntimeMessage } from "../shared/messaging.js";
 import { DEFAULT_PLAYER_AI_QUICK_PROMPT } from "../core/defaults.js";
 // PR5：概览笔记引导改走 reader 内对话 tab 的快捷动作消费 seam（二级惰性叶子）。
 import { ensureReaderChatTab } from "../core/lazy-chat-tab.js";
+// 「选中平台 + 其 API Key」解析（与选区解释共用）。
+import { resolveActiveProvider } from "../ai/active-provider.js";
 import {
   runOverviewAnalysis,
   buildSubtitleSignature,
@@ -157,46 +158,8 @@ function buildOverviewContext(): Record<string, unknown> {
 // 生成编排（provider 解析 + 管线调用 + 状态机迁移）
 // ============================================================
 
-interface OverviewProvider {
-  baseUrl?: string;
-  apiKey?: string;
-  model?: string;
-}
-
-// 「选中平台 + 其 API Key」解析：与 offscreen 的 resolveProviderWithKey 同款
-// 消息链（get-settings 选默认平台 → ai-providers-list 取列表 → get-ai-provider-
-// key 取密钥），任一步失败以异常上翻进 error 态。
-async function resolveOverviewProvider(): Promise<OverviewProvider> {
-  const settingsResp = (await sendRuntimeMessage({ type: "get-settings" }).catch(() => null)) as
-    | { ok?: boolean; settings?: { defaultModel?: unknown } }
-    | null;
-  const preferredId = String(settingsResp?.settings?.defaultModel || "").trim();
-
-  const listResp = (await sendRuntimeMessage({ type: "ai-providers-list" }).catch(() => null)) as
-    | { providers?: Array<{ id?: unknown; enabled?: unknown; baseUrl?: unknown; model?: unknown }> }
-    | null;
-  const enabled = (listResp?.providers || []).filter(
-    (item) => item && item.enabled !== false && String(item?.id || "").trim()
-  );
-  const provider = enabled.find((item) => String(item.id) === preferredId) || enabled[0] || null;
-  if (!provider) {
-    throw new Error("还没有配置 AI 平台，请先在插件设置中添加并启用。");
-  }
-
-  const keyResp = (await sendRuntimeMessage({
-    type: "get-ai-provider-key",
-    providerId: String(provider.id)
-  }).catch(() => null)) as { ok?: boolean; apiKey?: string; error?: string } | null;
-  if (!keyResp?.ok) {
-    throw new Error(String(keyResp?.error || "读取 API Key 失败"));
-  }
-  const apiKey = String(keyResp.apiKey || "").trim();
-  return {
-    baseUrl: String(provider.baseUrl || "").trim(),
-    apiKey,
-    model: String(provider.model || "").trim()
-  };
-}
+// 「选中平台 + 其 API Key」解析在 ai/active-provider.js（与选区解释共用同一份
+// 消息链实现）；失败以异常上翻进 error 态。
 
 function renderIfOpen(): void {
   if (state.reader.readingViewOpen) {
@@ -274,7 +237,7 @@ export function triggerReaderOverviewGeneration(
 
 async function startOverviewRun(clipKey: string, forceRefresh: boolean): Promise<void> {
   try {
-    const provider = await resolveOverviewProvider();
+    const provider = await resolveActiveProvider();
     const analysis = await runOverviewAnalysis(
       { provider, context: buildOverviewContext(), forceRefresh },
       {

@@ -26,7 +26,7 @@
 //
 // 生命周期（懒加载 + 会话收尾，工单 08 决议）：
 //   - 二级惰性：本模块经 core/lazy-chat-tab.ts 动态装载，首次切到对话 tab（或
-//     句上「解释」/概览笔记按钮触达 seam）才 init；
+//     解释卡片「去对话追问」/概览笔记按钮触达 seam）才 init；
 //   - 关闭阅读模式即断流（closeReadingView → closeChatSession：resetStreamState
 //     断 port、pending 的 subtitle-wait 立即失效、摘全局触发源）；重开从会话
 //     历史恢复（激活路径 loadContextState → restoreLatest → renderInitialState）；
@@ -485,8 +485,8 @@ export async function ensureChatTabActivated({ consumeIntent = true }: { consume
     bindGlobalTriggers();
     await restoreChatSession();
   }
-  // 已初始化的普通激活（tab 切回）：消费可能新写入的待解释意图（句上「解释」
-  // 在对话 tab 已装载时点击 / 上次挂起的意图重试）。无意图时为无害 no-op。
+  // 已初始化的普通激活（tab 切回）：消费可能新写入的待解释意图（解释卡片
+  // 「去对话追问」在对话 tab 已装载时点击 / 上次挂起的意图重试）。无意图时为无害 no-op。
   if (consumeIntent) {
     await consumeExplainIntentIfPending();
   }
@@ -545,18 +545,23 @@ export async function runQuickActionPrompt(prompt: string): Promise<boolean> {
 // ============================================================
 
 // 解释提示词模板：引用句 + 时间戳 pill 文案，发送出去的消息自带引用上下文。
-function buildExplainPrompt(intent: { from: number; content: string }): string {
+// 两种口径：卡片「去对话追问」带选中片段 → 解释这个词句；整句意图（无
+// selection）→ 解释这句字幕。
+function buildExplainPrompt(intent: { from: number; content: string; selection?: string }): string {
   const stamp = formatCompactTimestamp(intent.from, intent.from >= 3600);
+  if (intent.selection) {
+    return `请结合视频上下文解释我选中的词句：「${intent.selection}」。它出自字幕句「${intent.content}」（${stamp}）。说明它的含义、背景，以及在这句话里指什么。`;
+  }
   return `请结合视频上下文解释这句字幕：「${intent.content}」（${stamp}）。说明它的含义、背景，以及与前后文的关系。`;
 }
 
-function renderExplainIntentCard(intent: { from: number; content: string }): void {
+function renderExplainIntentCard(intent: { from: number; content: string; selection?: string }): void {
   if (!els.intentCard) {
     return;
   }
   const quote = els.intentCard.querySelector<HTMLElement>(".boc-reading-chat-intent-quote");
   if (quote) {
-    quote.textContent = `「${intent.content}」`;
+    quote.textContent = intent.selection ? `「${intent.selection}」｜${intent.content}` : `「${intent.content}」`;
   }
   const stamp = els.intentCard.querySelector<HTMLElement>(".boc-reading-chat-intent-time");
   if (stamp) {

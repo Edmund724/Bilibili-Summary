@@ -222,6 +222,13 @@ export function mountReaderSkeleton(ids) {
   explainBtn.className = "boc-reading-explain-btn";
   explainPop.appendChild(explainBtn);
 
+  // 选区「解释」卡片宿主（真实模板同构：空壳，内容整块由 explain-card 状态机重建）
+  const explainCard = doc.createElement("div");
+  explainCard.id = ids.readingExplainCard;
+  explainCard.className = "boc-reading-explain-card";
+  explainCard.setAttribute("hidden", "");
+  tabBodySubtitle.appendChild(explainCard);
+
   // PR3 AI 对话 tab 的待解释意图引用卡（quote/time/cancel，真实模板同构；
   // PR5 起整卡由对话组合根渲染/消费，骨架只保留节点存在性）
   const chatIntent = doc.createElement("div");

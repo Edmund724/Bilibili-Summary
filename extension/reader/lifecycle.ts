@@ -89,7 +89,8 @@ import {
   startReadingSubtitleAppendTask
 } from "./batched-render.js";
 // PR3 字幕 tab：句内搜索（批次回执 hook + 重渲重放 + 关闭清理）、转写中间态
-// 横幅（相位订阅 + 渲染尾部收敛）、句上「解释」的待处理意图（会话收尾清除）。
+// 横幅（相位订阅 + 渲染尾部收敛）、待解释意图契约（选区解释卡片「去对话追问」
+// 写入、对话 tab 消费；会话收尾清除）。
 import {
   clearReadingSubtitleSearch,
   handleReadingSubtitleRangeAppended,
@@ -97,6 +98,8 @@ import {
 } from "./subtitle-search.js";
 import { bindReadingTranscribeBanner, updateReadingTranscribeBanner } from "./transcribe-banner.js";
 import { clearPendingExplainIntent } from "./explain-intent.js";
+// 选区「解释」卡片（面板内弹层）：会话收尾时关卡片并中止在飞解释请求。
+import { closeReaderExplainCard } from "./explain-card.js";
 // PR4 概览 tab：状态机触达——打开即自动生成（enter/subtitle-ready）、渲染尾部
 // 收敛（renderReadingView 尾调用）、关闭清理（不取消进行中生成）。
 import {
@@ -301,9 +304,11 @@ export function closeReadingView() {
   // 避免关闭后还往已脱离上下文的列表追加节点。
   cancelReadingSubtitleAppend();
   // PR3：字幕 tab 的会话态随视图关闭一并清掉——搜索（输入框值 + 高亮 + 计数）
-  // 与句上「解释」的待处理意图（不跨会话残留；下次打开按空态渲染）。
+  // 与待解释意图（不跨会话残留；下次打开按空态渲染）。
   clearReadingSubtitleSearch();
   clearPendingExplainIntent();
+  // 选区「解释」卡片：关卡片（内部会 abort 在飞解释请求，避免关闭后回执落 DOM）。
+  closeReaderExplainCard();
   // PR5：对话 tab 的断流收口（工单 08 决议：关闭即断流——resetStreamState 断
   // port、挂起的 subtitle-wait 失效、摘全局触发源；重开从会话历史恢复，由对话
   // tab 的激活路径负责）。未装载 = 对话功能从未启用，no-op（不触发懒加载）。
