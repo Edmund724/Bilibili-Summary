@@ -5,13 +5,14 @@
 // class 名沿用 .sp-context-notice / .sp-center-error / .sp-suggestions）。
 //
 // 唯一语义改造（盘点报告 §1.1 notices 判定行）：「前往设置」链接在 reader
-//（content script）语境下没有 chrome.runtime.openOptionsPage，改走
-// open-options 消息（background 打开选项页，ui-renderer requestOpenOptions 同款）。
+//（content script）语境下没有 chrome.runtime.openOptionsPage；digest-only-ui
+// 起 open-options 消息与独立设置页已删除，链接点击经 deps.onOpenSettings
+// 回调打开侧边栏设置抽屉（生产组装点在 reader/chat-tab.ts 注入，转发到
+// ui-renderer 的 openReaderSettingsPanel）。
 //
 // 依赖方向（无环）：DOM 容器与 suggestionsNode 单例的读写钩子经工厂 deps 注入；
 // 定时器可注入（生产组装点用 window.setTimeout/clearTimeout，测试手动推进）。
 // 通知条自动消失定时器是本模块闭包私有状态。本模块不 import 组合根。
-import { sendRuntimeMessage } from "../shared/messaging.js";
 
 export interface CreateReaderChatFeedbackDeps {
   messages: HTMLElement;
@@ -22,6 +23,8 @@ export interface CreateReaderChatFeedbackDeps {
   scrollToBottom: () => void;
   getSuggestionsNode: () => HTMLElement | null;
   setSuggestionsNode: (node: HTMLElement | null) => void;
+  // 通知条「前往设置」链接的点击回调（打开侧边栏设置抽屉）
+  onOpenSettings: () => void;
 }
 
 export interface ReaderChatFeedback {
@@ -33,7 +36,7 @@ export interface ReaderChatFeedback {
   isMessagesNearBottom: (threshold?: number) => boolean;
 }
 
-export function createReaderChatFeedback({ messages, setTimer, clearTimer, scrollToBottom, getSuggestionsNode, setSuggestionsNode }: CreateReaderChatFeedbackDeps): ReaderChatFeedback {
+export function createReaderChatFeedback({ messages, setTimer, clearTimer, scrollToBottom, getSuggestionsNode, setSuggestionsNode, onOpenSettings }: CreateReaderChatFeedbackDeps): ReaderChatFeedback {
   // 通知条自动消失定时器（闭包私有单例；0 = 无挂起定时器）
   let contextNoticeTimer = 0;
 
@@ -48,8 +51,7 @@ export function createReaderChatFeedback({ messages, setTimer, clearTimer, scrol
       link.textContent = "前往设置";
       link.addEventListener("click", (e) => {
         e.preventDefault();
-        // reader（content script）语境：openOptionsPage 不可用，走 open-options 消息
-        void sendRuntimeMessage({ type: "open-options" }).catch(() => {});
+        onOpenSettings();
       });
       notice.appendChild(document.createTextNode(" "));
       notice.appendChild(link);

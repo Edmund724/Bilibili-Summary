@@ -16,14 +16,10 @@
 import { state } from "../core/state.js";
 import { getReaderElement } from "../shared/dom-utils.js";
 import { sleep } from "../shared/utils.js";
-// 候选02：updateReaderPreferences/renderReaderPanels 自 presentation.js 移回，
-// 步进器取值归一化（validators）随之回到本文件的 import 列表。
+// 候选02：updateReaderPreferences/renderReaderPanels 自 presentation.js 移回
+//（digest-only-ui：排版档位机制退役，validators 只剩主题与字幕可见性）。
 import {
   normalizeReaderTheme,
-  normalizeReaderFontScale,
-  normalizeReaderLetterSpacing,
-  normalizeReaderLineHeight,
-  normalizeReaderContentWidth,
   normalizeReaderSubtitleVisible
 } from "../core/validators.js";
 import { getRuntimeVideoElement } from "../bilibili/video-probe.js";
@@ -42,19 +38,18 @@ import { shouldShowHoursInNote } from "../notes/render.js";
 import { requestSubtitleRefresh, persistReaderSettingsThroughSeam } from "./presenter.js";
 
 // 候选02 分层惰性：启动接线（bindReaderPresenter / installReaderDebugHelpers /
-// bindSettingsWatcher）与启动期呈现（hydrate/apply/renderReadingStatus/stepper
-// 模板）在常驻微模块 ./init-essentials.js、./presentation.js；阅读视图打开后
-// 的交互呈现（updateReaderPreferences/renderReaderPanels/renderReadingInfoPanel
-// /renderReaderStepperState/applyReaderStepperPreference）属本域重活，自
-// presentation.js 移回此处（原 lifecycle.js 分节回归）。本文件只保留 reader 域
+// bindSettingsWatcher）与启动期呈现（hydrate/apply/renderReadingStatus）在常驻
+// 微模块 ./init-essentials.js、./presentation.js；阅读视图打开后的交互呈现
+//（updateReaderPreferences/renderReaderPanels）属本域重活，
+// 自 presentation.js 移回此处（原 lifecycle.js 分节回归；renderReadingInfoPanel
+// 已随「视频摘要/简介」区块删除）。本文件只保留 reader 域
 // 的重活：进入/退出生命周期、阅读视图渲染、偏好/面板呈现与 presenter 通知
 // 处理体（候选09 迁出：字幕分批渲染状态机 → ./batched-render.js，调试快照 →
 // ./debug-snapshot.js）。
 import {
   renderReadingStatus,
   hydrateReaderStateFromSettings,
-  applyReadingViewPresentation,
-  getReaderStepperConfig
+  applyReadingViewPresentation
 } from "./presentation.js";
 import { READER_CLOSE_ATTRS } from "./presentation-fields.js";
 
@@ -67,7 +62,7 @@ import {
 } from "./state.js";
 // B 形态右栏 Digest 面板定位器：进入时开始贴栏定位，关闭时拆除。LAYOUT 层
 // 只剩 video-bind + digest-host。
-import { openDigestHost, closeDigestHost, refreshDigestHostRect } from "./digest-host.js";
+import { openDigestHost, closeDigestHost } from "./digest-host.js";
 import { resetManualScrollPause, setProgrammaticScrollUntil } from "./state.js";
 // PR2 统一 Digest 面板：进入阅读模式时把右侧面板重置回默认「字幕」标签。
 // tab 切换是纯壳交互，实现在 ui/ui-renderer（bindUiEvents 的标签绑定同文件），
@@ -376,7 +371,6 @@ export function renderReadingView() {
   }
 
   updateReaderChapterPresence(hasChapters);
-  renderReadingInfoPanel();
   renderReadingSubtitleSelect();
   renderReaderPanels();
   applyReadingViewPresentation();
@@ -410,14 +404,7 @@ export function updateReaderChapterPresence(hasChapters: boolean) {
 // 仅在阅读视图交互时执行，常驻侧经 ensureReaderDomain 转发到这些导出） =====
 
 export function updateReaderPreferences(next: Partial<Record<string, unknown>>, { persist = true } = {}) {
-  const prevContentWidth = state.reader.readingContentWidth;
   state.reader.setTheme(normalizeReaderTheme(next.readerTheme ?? state.reader.readingTheme));
-  state.reader.setFontScale(normalizeReaderFontScale(next.readerFontScale ?? state.reader.readingFontScale));
-  state.reader.setLetterSpacing(
-    normalizeReaderLetterSpacing(next.readerLetterSpacing ?? state.reader.readingLetterSpacing)
-  );
-  state.reader.setLineHeight(normalizeReaderLineHeight(next.readerLineHeight ?? state.reader.readingLineHeight));
-  state.reader.setContentWidth(normalizeReaderContentWidth(next.readerContentWidth ?? state.reader.readingContentWidth));
   state.reader.setChapterVisible(next.readerChapterVisible !== undefined ? Boolean(next.readerChapterVisible) : state.reader.readingChapterVisible);
   state.reader.setSubtitleVisible(
     normalizeReaderSubtitleVisible(next.readerTranscriptVisible ?? state.reader.readingSubtitleVisible)
@@ -425,20 +412,11 @@ export function updateReaderPreferences(next: Partial<Record<string, unknown>>, 
   state.setSettings({
     ...state.settings,
     readerTheme: state.reader.readingTheme,
-    readerFontScale: state.reader.readingFontScale,
-    readerLetterSpacing: state.reader.readingLetterSpacing,
-    readerLineHeight: state.reader.readingLineHeight,
-    readerContentWidth: state.reader.readingContentWidth,
     readerChapterVisible: state.reader.readingChapterVisible,
     readerTranscriptVisible: state.reader.readingSubtitleVisible
   });
   applyReadingViewPresentation();
   renderReaderPanels();
-  // readerContentWidth 是面板宽度档，档位变化立即重算面板 rect
-  //（digest-host 读档位映射目标宽度；float 档直接切浮层形态）。
-  if (state.reader.readingContentWidth !== prevContentWidth && state.reader.readingViewOpen) {
-    refreshDigestHostRect();
-  }
   if (persist) {
     persistReaderSettings();
   }
@@ -448,36 +426,6 @@ function persistReaderSettings() {
   persistReaderSettingsThroughSeam();
 }
 
-// 步进器点击的偏好应用（原 presentation.js 私有 setReaderPreference，候选02
-// 更名导出：常驻侧 bindReaderStepperControl 的监听回调经 ensureReaderDomain
-// 转发到这里）。值校验/去重语义与搬迁前逐字一致。
-export function applyReaderStepperPreference(settingKey: string, nextValue: string) {
-  const config = getReaderStepperConfig(settingKey as import("./presentation.js").StepperSettingKey);
-  if (!config) {
-    return;
-  }
-
-  const current = config.getCurrent();
-  if (!config.options.includes(nextValue) || nextValue === current) {
-    return;
-  }
-  updateReaderPreferences(config.buildPayload(nextValue), { persist: true });
-}
-
-function renderReaderStepperState(node: HTMLElement, settingKey: string) {
-  const config = getReaderStepperConfig(settingKey as import("./presentation.js").StepperSettingKey);
-  if (!node || !config) {
-    return;
-  }
-
-  const current = config.getCurrent();
-  node.querySelectorAll<HTMLElement>("[data-value]").forEach((button) => {
-    const isActive = button.dataset.value === current;
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-pressed", isActive ? "true" : "false");
-  });
-}
-
 export function renderReaderPanels() {
   const settingsPanel = getReaderElement(ids.readingSettingsPanel);
   const settingsBtn = getReaderElement(ids.readingSettingsBtn);
@@ -485,74 +433,18 @@ export function renderReaderPanels() {
   settingsBtn.classList.toggle("is-active", state.reader.readingSettingsExpanded);
   (getReaderElement(ids.readingAutoScroll) as HTMLInputElement).checked = state.reader.readingAutoScroll;
   (getReaderElement(ids.readingSubtitleVisible) as HTMLInputElement).checked = state.reader.readingSubtitleVisible;
-  renderReaderStepperState(getReaderElement(ids.readingFontScaleSelect), "readerFontScale");
-  renderReaderStepperState(getReaderElement(ids.readingLetterSpacingSelect), "readerLetterSpacing");
-  renderReaderStepperState(getReaderElement(ids.readingLineHeightSelect), "readerLineHeight");
-  renderReaderStepperState(getReaderElement(ids.readingContentWidthSelect), "readerContentWidth");
-}
-
-export function renderReadingInfoPanel() {
-  const summaryNode = getReaderElement(ids.readingInfoSummary);
-  const descriptionNode = getReaderElement(ids.readingInfoDescription);
-  const descriptionBtn = getReaderElement(ids.readingDescriptionBtn);
-  const summaryItems = buildReadingSummaryItems();
-  const description = String(state.clip.description || "").trim();
-
-  summaryNode.innerHTML =
-    summaryItems.length === 0
-      ? '<div class="boc-reading-empty">当前视频信息还未就绪。</div>'
-      : summaryItems
-          .map(
-            (item) => `
-              <div class="boc-reading-info-item">
-                <span class="boc-reading-info-label">${escapeHtml(item.label)}</span>
-                <span class="boc-reading-info-value">${escapeHtml(item.value)}</span>
-              </div>
-            `
-          )
-          .join("");
-
-  if (!description) {
-    descriptionNode.innerHTML = '<div class="boc-reading-empty">当前视频没有简介。</div>';
-    descriptionNode.classList.remove("is-collapsed");
-    descriptionBtn.hidden = true;
-  } else {
-    descriptionNode.textContent = description;
-    const fullScrollHeight = descriptionNode.scrollHeight;
-    descriptionNode.classList.add("is-collapsed");
-    const clampedClientHeight = descriptionNode.clientHeight;
-    descriptionNode.classList.toggle("is-collapsed", !state.reader.readingDescriptionExpanded);
-    const hasOverflow = fullScrollHeight > clampedClientHeight + 2;
-    if (!hasOverflow) {
-      descriptionNode.classList.remove("is-collapsed");
-      descriptionBtn.hidden = true;
-      return;
-    }
-    descriptionBtn.hidden = false;
-    descriptionBtn.textContent = state.reader.readingDescriptionExpanded ? "收起简介" : "查看更多";
+  // digest-only-ui：设置抽屉展开时装载原 options 页的全部设置项（宿主容器在
+  // ui-renderer 模板内；模板与数据装载在 settings-panel 内，展开即刷新）。
+  if (!settingsPanel.hidden) {
+    void import("../ui/settings-panel.js").then(
+      (mod) => mod.renderReaderSettingsPanel(),
+      () => {}
+    );
   }
 }
 
-function buildReadingSummaryItems() {
-  const items = [];
-  if (state.clip.title) {
-    items.push({ label: "标题", value: state.clip.title });
-  }
-  if (state.clip.author) {
-    items.push({ label: "作者", value: state.clip.author });
-  }
-  if (state.clip.uploadDate) {
-    items.push({ label: "日期", value: state.clip.uploadDate });
-  }
-  if (Number(state.clip.pageCount) > 1) {
-    const pageParts = [`P${Number(state.clip.pageIndex) > 0 ? Number(state.clip.pageIndex) : 1}`];
-    if (state.clip.pageTitle) {
-      pageParts.push(state.clip.pageTitle);
-    }
-    items.push({ label: "分P", value: pageParts.join(" ") });
-  }
-  return items;
-}
+// renderReadingInfoPanel / buildReadingSummaryItems 已随「视频摘要」「视频简介」
+// 区块删除（digest-only-ui：面板 header 下的 meta 行保留标题/作者/日期信息）。
 
 function buildReadingMetaLine() {
   const parts = [];

@@ -7,7 +7,6 @@ import type { SubtitleOption } from "../core/state.js";
 import { extractBvid, computeCurrentClipSignature } from "../bilibili/video-id-shared.js";
 import { getSettings } from "../core/runtime.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
-import { byId } from "../shared/dom-utils.js";
 import {
   ensureRunActive,
   isStaleRunError,
@@ -44,12 +43,9 @@ import {
 import { resolvePageContext } from "../reader/page-context.js";
 import { notifyReaderPresenter, subscribeSubtitleRefresh } from "../reader/presenter.js";
 import {
-  // 候选02 分层惰性：renderMeta/renderSubtitleSelect/setBusyState 已自
-  // ui-renderer 移入链层（./ui.js，见该文件头注）。setStatus/setMessage 仍在
-  // ui-renderer——URL 变化编排等常驻侧路径也在用，不能随链下放。
-  renderMeta,
-  renderSubtitleSelect,
-  setBusyState,
+  // 候选02 分层惰性：链层交互（复制/下载/弹出快照等）自 ui-renderer 移入
+  // ./ui.js（见该文件头注）。setStatus/setMessage 仍在 shared/ui-status——
+  // URL 变化编排等常驻侧路径也在用，不能随链下放。
   readVideoDescription
 } from "./ui.js";
 // 字幕接受事务（CONTEXT.md 域词条）：接受/无字幕出口的唯一入口。渲染与状态栏
@@ -95,8 +91,6 @@ export function initSummarizeChain(): void {
 // 保持静态图无环）。放在模块求值期执行：本模块任何导出可被调用前必然完成，
 // loadAsrFallback 注入的 commitNoSubtitle 也因此保证先接线后可用。
 configureCommitUi({
-  renderMeta,
-  renderSubtitleSelect,
   setStatus
 });
 
@@ -213,9 +207,6 @@ export function resetClipState({ keepFetchState = false }: { keepFetchState?: bo
   state.reader.setActiveChapterIndex(-1);
   state.reader.readingVideoEl = null;
 
-  renderMeta();
-  renderSubtitleSelect();
-  (byId("boc-preview") as HTMLTextAreaElement).value = "";
   setMessage("");
   if (isReaderViewOpen()) {
     notifyReaderPresenter("rerender");
@@ -227,7 +218,6 @@ export async function refreshClip(): Promise<void> {
   const runId = state.clip.fetchRunId + 1;
   clipState.setFetchRunId(runId);
   try {
-    setBusyState(true);
     setMessage("");
     setStatus("正在抓取视频信息...");
     clipState.setSubtitleFetchState("loading");
@@ -355,8 +345,6 @@ export async function refreshClip(): Promise<void> {
     // fetchState/reason 已由 tryLoadSubtitleCandidates → loadSubtitle 内的
     // 字幕接受事务（commit.acceptSubtitle）落位（ready + 清原因），这里不再
     // 重写；以下只做选中轨渲染与完成提示。
-    renderMeta();
-    renderSubtitleSelect();
     if (isReaderViewOpen()) {
       notifyReaderPresenter("subtitle-ready");
     }
@@ -398,10 +386,6 @@ export async function refreshClip(): Promise<void> {
       return;
     }
     setStatus(`抓取失败：${getErrorMessage(error)}`);
-  } finally {
-    if (runId === state.clip.fetchRunId) {
-      setBusyState(false);
-    }
   }
 }
 

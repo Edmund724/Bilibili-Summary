@@ -2,9 +2,9 @@
 // 章节金句概览的纯数据层——提示词装配、模型输出校验/修复/合并、双路径编排
 // （预算内单次 / 超预算分段）、整份与分段两级缓存、生成中 promise 复用。
 // 提示词整搬参考仓库 .scratch/bilibili-digest/prompts/analysis.md（系统提示词
-// 全静态、逐字节一致，仅按概览票决议在 JSON 输出 schema 中加顶层 "summary"
-// 字段：2-4 句全片概述）；适配纯函数整搬自 .scratch/bilibili-digest/lib/ai.js，
-// 产出归一化为本仓库字段名：{ summary, chapters: {from,to,title,summary}[],
+// 全静态、逐字节一致；digest-only-ui 起顶层 "summary" 概述字段已随概览 UI 的
+// 总结区块一并移除）；适配纯函数整搬自 .scratch/bilibili-digest/lib/ai.js，
+// 产出归一化为本仓库字段名：{ chapters: {from,to,title,summary}[],
 // quotes: {from,content}[], failedRanges?: {from,to}[] }。
 //
 // 与笔记管线的关系（07 票决议）：产物不共享、只共享机制——分段边界沿用
@@ -52,7 +52,6 @@ export interface AnalysisFailureRange {
 
 /** 概览产物（含短路径与分段合并后的整份形态）；failedRanges 仅在分段路径有失败段时存在。 */
 export interface OverviewAnalysis {
-  summary: string;
   chapters: AnalysisChapter[];
   quotes: AnalysisQuote[];
   failedRanges?: AnalysisFailureRange[];
@@ -66,17 +65,16 @@ export const ANALYSIS_SEGMENT_PREFIX = "boc_lvs_analysis_";
 export const ANALYSIS_CONTEXT_CHARS = 400;
 // 「最后一章必须晚于 75%」硬门槛比例（对齐参考仓库 ai.js:193-194，逼模型覆盖全片）。
 export const ANALYSIS_LATE_THRESHOLD_RATIO = 0.75;
-// 校验上限：章节数 / 金句数 / 顶层概述字数（对齐参考仓库 validateAnalysis 的裁剪量级）。
+// 校验上限：章节数 / 金句数（对齐参考仓库 validateAnalysis 的裁剪量级）。
 export const MAX_ANALYSIS_CHAPTERS = 100;
 export const MAX_ANALYSIS_QUOTES = 50;
-const SUMMARY_MAX_CHARS = 600;
 
 // ============================================================
 // 系统提示词（全静态，逐字节可前缀缓存；变量全部在用户提示词侧）
 // ============================================================
 
 // 整搬自 .scratch/bilibili-digest/prompts/analysis.md「系统提示词」代码块；
-// 唯一差异：JSON 输出 schema 顶层加了 "summary" 字段（概览票 07 决议）。
+// digest-only-ui 起 JSON 输出 schema 顶层的 "summary" 概述字段已移除。
 const ANALYSIS_SYSTEM_PROMPT = `你是我的内容助理。我在看一个 B 站视频，请阅读下面的字幕，产出一份结构化概览：章节 + 金句。
 
 你需要给出：
@@ -137,7 +135,6 @@ B 站的 AI 字幕有两个特点，会直接影响你的工作：
 
 输出 JSON（不要加 markdown 代码围栏）：
 {
-  "summary": "全片概述（2-4 句）",
   "chapters": [
     {"title": "章节标题", "timestamp": "0:00", "timestampSeconds": 0, "summary": "这一段讲了什么"}
   ],
@@ -153,13 +150,12 @@ B 站的 AI 字幕有两个特点，会直接影响你的工作：
 - 每一个时间戳都必须在字幕里真实存在——去查！
 - 所有文字用简体中文输出`;
 
-// 自带章节短路径的「只挑金句」短提示词：金句规则 + ASR 纠错段 + summary；
+// 自带章节短路径的「只挑金句」短提示词：金句规则 + ASR 纠错段；
 // 章节由稿件自带，不再让模型分章（概览票 07 决议）。
-const QUOTES_SYSTEM_PROMPT = `你是我的内容助理。我在看一个 B 站视频，请阅读下面的字幕，为它挑选金句并写一段全片概述。
+const QUOTES_SYSTEM_PROMPT = `你是我的内容助理。我在看一个 B 站视频，请阅读下面的字幕，为它挑选金句。
 
 你需要给出：
 - 3-5 条金句，附上它们在字幕中的时间戳。
-- 一段 2-4 句的全片概述。
 
 金句要挑这几类：
 - 反直觉的观点，或者跟常识拧着来的判断
@@ -213,7 +209,6 @@ B 站的 AI 字幕有两个特点，会直接影响你的工作：
 
 输出 JSON（不要加 markdown 代码围栏）：
 {
-  "summary": "全片概述（2-4 句）",
   "keyQuotes": [
     {"quote": "整理后的原话", "timestamp": "2:30", "timestampSeconds": 150}
   ]
@@ -531,7 +526,6 @@ export function validateAnalysis(analysis: unknown, maxSeconds: unknown, minSeco
     .sort((a, b) => a.from - b.from);
 
   return {
-    summary: safeString(source.summary, SUMMARY_MAX_CHARS),
     chapters,
     quotes
   };
@@ -539,24 +533,18 @@ export function validateAnalysis(analysis: unknown, maxSeconds: unknown, minSeco
 
 /**
  * 合并各段概览：章节按秒级去重（相邻段边界容易产出同秒重复章），金句按文本
- * 去重；排序与数量裁剪收口在此。顶层概述取各段非空 summary 拼接（每段概述
- * 覆盖自己的区段，拼接后近似全片概述；段落很多时会偏长，第一版接受）。
+ * 去重；排序与数量裁剪收口在此。
  * 入参各 part 均已经 validateAnalysis 校验，这里不再重跑全量校验——分段产物
  * 的章界（to = 段内下一章 from / 段尾）在合并排序后依然成立。
  */
 export function mergeAnalyses(parts: unknown): OverviewAnalysis {
   const chapters: AnalysisChapter[] = [];
   const quotes: AnalysisQuote[] = [];
-  const summaries: string[] = [];
   const seenChapterFrom = new Set<number>();
   const seenQuoteText = new Set<string>();
 
   for (const rawPart of Array.isArray(parts) ? parts : []) {
     const part = (rawPart && typeof rawPart === "object" ? rawPart : {}) as Partial<OverviewAnalysis>;
-    const summary = String(part.summary ?? "").trim();
-    if (summary) {
-      summaries.push(summary);
-    }
     for (const rawChapter of Array.isArray(part.chapters) ? part.chapters : []) {
       const from = Number(rawChapter?.from);
       if (!Number.isFinite(from) || seenChapterFrom.has(from)) continue;
@@ -581,7 +569,6 @@ export function mergeAnalyses(parts: unknown): OverviewAnalysis {
   quotes.sort((a, b) => a.from - b.from);
 
   return {
-    summary: summaries.join(" "),
     chapters: chapters.slice(0, MAX_ANALYSIS_CHAPTERS),
     quotes: quotes.slice(0, MAX_ANALYSIS_QUOTES)
   };

@@ -239,7 +239,11 @@ async function startOverviewRun(clipKey: string, forceRefresh: boolean): Promise
   try {
     const provider = await resolveActiveProvider();
     const analysis = await runOverviewAnalysis(
-      { provider, context: buildOverviewContext(), forceRefresh },
+      // digest-only-ui：思考档位显式钉死 off（对齐 ai/explain.ts 的钉法）——
+      // 章节/金句生成不开放思考档位，省略档位虽会在协议层归一化落到 off，
+      // 显式传参让请求体带 THINKING_DISABLE_FIELDS 的行为成为契约而非默认值
+      // 巧合（协议层改动时不会被静默带走）。
+      { provider, context: buildOverviewContext(), forceRefresh, thinkingLevel: "off" },
       {
         // 分段进度文案（buildProgressNotice：「正在整理第 x/y 段（n%）」）注入：
         // 生成中状态条实时跟随（管线 onProgress 为可选注入，分段路径才回调）。
@@ -344,7 +348,7 @@ function buildOverviewBodyHtml(): string {
       return `
         <div class="boc-reading-placeholder">
           <div class="boc-reading-placeholder-title">概览还未生成</div>
-          <p class="boc-reading-placeholder-copy">切到概览标签页会自动开始生成全片总结、章节与金句。</p>
+          <p class="boc-reading-placeholder-copy">切到概览标签页会自动开始生成章节与金句。</p>
         </div>
       `;
   }
@@ -357,14 +361,14 @@ function buildEmptyStateHtml(): string {
     return `
       <div class="boc-reading-placeholder">
         <div class="boc-reading-placeholder-title">概览等字幕就绪后自动生成</div>
-        <p class="boc-reading-placeholder-copy">音频转写完成后会自动生成全片总结、章节与金句，期间可先在「字幕」页看视频。</p>
+        <p class="boc-reading-placeholder-copy">音频转写完成后会自动生成章节与金句，期间可先在「字幕」页看视频。</p>
       </div>
     `;
   }
   return `
     <div class="boc-reading-placeholder">
       <div class="boc-reading-placeholder-title">该视频没有可用字幕</div>
-      <p class="boc-reading-placeholder-copy">概览（全片总结、章节与金句）需要字幕才能生成。</p>
+      <p class="boc-reading-placeholder-copy">概览（章节与金句）需要字幕才能生成。</p>
     </div>
   `;
 }
@@ -402,8 +406,8 @@ function buildErrorStrip(): string {
   `;
 }
 
-// 结果区：总结段 → 章节列表 → 金句卡（视觉基准 prototype/final-概览.jpg）。
-// 生成中已有旧产物（重试场景）时同样渲染，新结果落定后整体重建。
+// 结果区：章节列表 → 金句卡。生成中已有旧产物（重试场景）时同样渲染，
+// 新结果落定后整体重建。
 function buildResultSectionsHtml(): string {
   const analysis = overview.analysis;
   if (!analysis) {
@@ -411,7 +415,7 @@ function buildResultSectionsHtml(): string {
       return `
         <div class="boc-reading-placeholder">
           <div class="boc-reading-placeholder-title">正在生成概览</div>
-          <p class="boc-reading-placeholder-copy">全片总结、章节与金句会出现在这里；期间可先在「字幕」页阅读。</p>
+          <p class="boc-reading-placeholder-copy">章节与金句会出现在这里；期间可先在「字幕」页阅读。</p>
         </div>
       `;
     }
@@ -420,15 +424,6 @@ function buildResultSectionsHtml(): string {
 
   const withHours = shouldShowHoursInNote(state, getClipBody());
   const sections: string[] = [];
-
-  // —— 总结 ——
-  const summary = String(analysis.summary || "").trim();
-  sections.push(`
-    <section class="boc-reading-ov-section">
-      <div class="boc-reading-ov-h">总结</div>
-      ${summary ? `<p class="boc-reading-ov-summary">${escapeHtml(summary)}</p>` : '<div class="boc-reading-ov-empty">模型没有给出全片总结。</div>'}
-    </section>
-  `);
 
   // —— 章节（「AI 生成」小标注仅 AI 分章显示；自带章节不标）——
   const chapters = (Array.isArray(analysis.chapters) ? analysis.chapters : []).filter(

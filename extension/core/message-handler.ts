@@ -116,6 +116,8 @@ export function dispatchContentScriptMessage(
     if (message.type === "popup-get-state") {
       // 候选02：getPopupPayload 属总结链层，经 ensure 装载后组装（热路径本地
       // 动态 import ~10ms）。装载失败回错误（popup 对缺 payload 有兜底渲染）。
+      // digest-only-ui：popup 页面已删除，popup-* 消息仅剩 background 的阅读
+      // 上下文链（context-resolver/chat 内核）在用，处理器保留以维持该链路。
       ensureSummarizeChain()
         .then((chain) => sendResponse({ ok: true, payload: chain.getPopupPayload() }))
         .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
@@ -125,6 +127,8 @@ export function dispatchContentScriptMessage(
     if (message.type === "popup-refresh") {
       // 候选03：刷新抓取会写面板 DOM（resetClipState / renderMeta 等），先确保
       // UI 壳存在。首开面板/首次刷新的惰性装载开销被用户动作掩盖。
+      // digest-only-ui：popup 已删除，本消息由背景上下文链（context-resolver
+      // 的 needsRefresh 分支）触发，ensureUiReady 保证阅读视图壳可写。
       ensureUiReady()
         .then(() => ensureSummarizeChain())
         .then((chain) =>
@@ -164,9 +168,9 @@ export function dispatchContentScriptMessage(
             .loadSubtitle(url, lang, state.clip.fetchRunId, subtitleId)
             .then(() => {
               setStatus("字幕切换完成。");
-              // renderSubtitleSelect 已随总结链下放（候选02）：渲染「抓取结果」
-              // 的函数在链层，经同一 chain 门面调用。
-              chain.renderSubtitleSelect();
+              // digest-only-ui：popup 已删除；字幕切换后的阅读视图渲染由
+              // presenter seam 的 subtitle-ready 通知驱动（renderReadingView），
+              // 不再回写 popup 的下拉。
               sendResponse({ ok: true, payload: chain.getPopupPayload() });
             })
             .catch((error) =>

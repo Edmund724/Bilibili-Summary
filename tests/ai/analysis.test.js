@@ -120,7 +120,6 @@ function buildCompletionFake({ failedSegments = new Set(), parts = null } = {}) 
 describe("validateAnalysis 越界丢弃与秒反推", () => {
   it("越上界/越下界（分段 minSeconds）的章节与金句直接丢弃，显示时间戳从秒反推不采信模型字符串", () => {
     const parsed = {
-      summary: "全片概述。",
       chapters: [
         { title: "早于下界", timestampSeconds: 5, summary: "前情回顾里开出来的章" },
         { title: "合法章", timestampSeconds: 100, timestamp: "完全瞎写的字符串", summary: "内容" },
@@ -135,7 +134,6 @@ describe("validateAnalysis 越界丢弃与秒反推", () => {
     };
     const result = mod.validateAnalysis(parsed, 200, 10);
 
-    expect(result.summary).toBe("全片概述。");
     expect(result.chapters.map((c) => c.title)).toEqual(["合法章"]);
     expect(result.chapters[0]).toEqual({ from: 100, to: 200, title: "合法章", summary: "内容" });
     expect(result.quotes).toEqual([{ from: 150, content: "合法金句" }]);
@@ -164,16 +162,15 @@ describe("validateAnalysis 越界丢弃与秒反推", () => {
   it("秒数取整、字符串秒数与上限裁剪；空/畸形输入返回空产物", () => {
     const chapters = Array.from({ length: 120 }, (_, i) => ({ title: `章${i}`, timestampSeconds: i + 1 }));
     const quotes = Array.from({ length: 60 }, (_, i) => ({ quote: `句${i}`, timestampSeconds: i + 1 }));
-    const result = mod.validateAnalysis({ chapters, keyQuotes: quotes, summary: "x".repeat(1000) }, 1000);
+    const result = mod.validateAnalysis({ chapters, keyQuotes: quotes }, 1000);
     expect(result.chapters).toHaveLength(mod.MAX_ANALYSIS_CHAPTERS);
     expect(result.quotes).toHaveLength(mod.MAX_ANALYSIS_QUOTES);
-    expect(result.summary.length).toBe(600);
 
     const chapters2 = [{ title: "小数秒", timestampSeconds: 10.9 }];
     expect(mod.validateAnalysis({ chapters: chapters2 }, 100).chapters[0].from).toBe(10);
     expect(mod.validateAnalysis({ chapters: [{ title: "字符串秒", timestampSeconds: "42" }] }, 100).chapters[0].from).toBe(42);
-    expect(mod.validateAnalysis(null, 100)).toEqual({ summary: "", chapters: [], quotes: [] });
-    expect(mod.validateAnalysis({ chapters: "not-array", keyQuotes: 42 }, 100)).toEqual({ summary: "", chapters: [], quotes: [] });
+    expect(mod.validateAnalysis(null, 100)).toEqual({ chapters: [], quotes: [] });
+    expect(mod.validateAnalysis({ chapters: "not-array", keyQuotes: 42 }, 100)).toEqual({ chapters: [], quotes: [] });
     expect(mod.validateAnalysis({ chapters: [{ title: "NaN", timestampSeconds: "abc" }] }, 100).chapters).toEqual([]);
   });
 });
@@ -220,20 +217,24 @@ describe("repairTruncatedJson 截断修复与 parseLooseJson 宽容解析", () =
 // ============================================================
 
 describe("双路径分派", () => {
-  it("≤100k 单次路径：1 次调用、显式 retries:2、无 rangeNote，产物含 summary/章节/金句", async () => {
+  it("≤100k 单次路径：1 次调用、显式 retries:2、无 rangeNote，产物含章节/金句", async () => {
     const { chatCompletion, calls } = buildCompletionFake();
     const body = makeSubtitleBody(50000);
     const result = await mod.runOverviewAnalysis(
-      { provider: makeProvider(), context: makeContext({ subtitleBody: body }) },
+      // digest-only-ui：调用方（reader/overview）显式传 thinkingLevel:"off"，
+      // 此处断言它逐级透传到 chatCompletion（协议层据此注入关闭字段）。
+      { provider: makeProvider(), context: makeContext({ subtitleBody: body }), thinkingLevel: "off" },
       { chatCompletion }
     );
 
     expect(chatCompletion).toHaveBeenCalledTimes(1);
     expect(calls[0].retries).toBe(2);
     expect(calls[0].stream).toBeUndefined();
+    expect(calls[0].thinkingLevel).toBe("off");
     // 系统提示词 = 整份分章提示词；用户提示词无 rangeNote（分段标记不出现）
     expect(calls[0].messages[0].content).toContain("产出一份结构化概览：章节 + 金句");
-    expect(calls[0].messages[0].content).toContain('"summary": "全片概述（2-4 句）"');
+    // digest-only-ui：顶层概述字段已移除（章节条目内的 summary 不受影响）
+    expect(calls[0].messages[0].content).not.toContain('"summary": "全片概述');
     const user = calls[0].messages.at(-1).content;
     expect(user).toContain("视频标题：测试视频");
     expect(user).toContain("UP 主：UP 主甲");
@@ -243,7 +244,6 @@ describe("双路径分派", () => {
     // maxTokens 按正文 0.5 比例估算（floor 2048）
     expect(calls[0].maxTokens).toBeGreaterThanOrEqual(2048);
 
-    expect(result.summary).toBe("第 1 段概述。");
     expect(result.chapters.map((c) => c.title)).toEqual(["章1a", "章1b"]);
     expect(result.quotes).toEqual([{ from: 30, content: "金句1" }]);
     expect(result.failedRanges).toBeUndefined();
@@ -253,13 +253,16 @@ describe("双路径分派", () => {
     const { chatCompletion, calls } = buildCompletionFake();
     const body = makeSubtitleBody(110000); // 3 段：50k / 50k / 10k
     const result = await mod.runOverviewAnalysis(
-      { provider: makeProvider(), context: makeContext({ subtitleBody: body }) },
+      // digest-only-ui：显式 off 透传（reader/overview 调用方钉死），每段调用都带
+      { provider: makeProvider(), context: makeContext({ subtitleBody: body }), thinkingLevel: "off" },
       { chatCompletion }
     );
 
     expect(chatCompletion).toHaveBeenCalledTimes(3);
     // 每段一次调用：无显式 retries（重试由池层负责）
     expect(calls.every((c) => c.retries === undefined)).toBe(true);
+    // 每段请求都携带 off 档位（协议层据此注入 THINKING_DISABLE_FIELDS）
+    expect(calls.every((c) => c.thinkingLevel === "off")).toBe(true);
 
     const firstUser = calls.find((c) => c.messages.at(-1).content.includes("第 1 / 3 段")).messages.at(-1).content;
     expect(firstUser).toContain("注意：这是长视频切分后的第 1 / 3 段，覆盖 0:00 到 4:10");
@@ -271,8 +274,7 @@ describe("双路径分派", () => {
     // 前情回顾只进输入不进输出：maxTokens 估算基于本段正文
     expect(secondUser).toContain("字幕：");
 
-    // 合并：各段章节按 from 排序，概述取各段 summary 拼接
-    expect(result.summary).toBe("第 1 段概述。 第 2 段概述。 第 3 段概述。");
+    // 合并：各段章节按 from 排序，金句按文本去重
     expect(result.chapters.map((c) => c.title)).toEqual(["章1a", "章1b", "章2a", "章2b", "章3a", "章3b"]);
     expect(result.chapters[0].from).toBe(5);
     expect(result.quotes.map((q) => q.content)).toEqual(["金句1", "金句2", "金句3"]);
@@ -311,7 +313,6 @@ describe("部分失败降级", () => {
       { chatCompletion }
     );
 
-    expect(result.summary).toBe("第 1 段概述。 第 3 段概述。");
     expect(result.chapters.map((c) => c.title)).toEqual(["章1a", "章1b", "章3a", "章3b"]);
     expect(result.failedRanges).toEqual([{ from: 250, to: 500 }]);
     // 部分结果照常落整份缓存（含 failedRanges），重试走 forceRefresh
@@ -348,7 +349,7 @@ describe("部分失败降级", () => {
   });
 
   it("模型产出全被校验丢弃（空产物）：抛空产物错误", async () => {
-    const chatCompletion = vi.fn(async () => JSON.stringify({ summary: "", chapters: [], keyQuotes: [] }));
+    const chatCompletion = vi.fn(async () => JSON.stringify({ chapters: [], keyQuotes: [] }));
     await expect(
       mod.runOverviewAnalysis(
         { provider: makeProvider(), context: makeContext({ subtitleBody: makeSubtitleBody(50000) }) },
@@ -385,22 +386,21 @@ describe("自带章节短路径", () => {
 
     expect(chatCompletion).toHaveBeenCalledTimes(1);
     const system = calls[0].messages[0].content;
-    // 短提示词：金句规则 + ASR 纠错段 + summary，无分章要求
-    expect(system).toContain("为它挑选金句并写一段全片概述");
+    // 短提示词：金句规则 + ASR 纠错段，无分章要求、无概述产出
+    expect(system).toContain("为它挑选金句");
     expect(system).toContain("自动语音识别（ASR）生成的字幕");
     expect(system).not.toContain("产出一份结构化概览：章节 + 金句");
     expect(system).not.toContain('"chapters"');
     // 用户提示词无「后段门槛」（章节不由模型产出）
     expect(calls[0].messages.at(-1).content).not.toContain("后段门槛");
 
-    // 产物同构：章节取稿件标题 + 金句归位 + summary
+    // 产物同构：章节取稿件标题 + 金句归位
     expect(result.chapters).toEqual([
       { from: 0, to: 100, title: "开场", summary: "" },
       { from: 100, to: 300, title: "正题", summary: "" }
     ]);
     expect(result.quotes).toEqual([{ from: 10, content: "金句1" }]);
-    expect(result.summary).toBe("第 1 段概述。");
-    expect(Object.keys(result).sort()).toEqual(["chapters", "quotes", "summary"]);
+    expect(Object.keys(result).sort()).toEqual(["chapters", "quotes"]);
   });
 
   it("短路径分段（>100k + 自带章节）：每段只挑金句，章节仍取稿件，合并后同构", async () => {
@@ -424,7 +424,6 @@ describe("自带章节短路径", () => {
       { from: 250, to: 550, title: "下半", summary: "" }
     ]);
     expect(result.quotes.map((q) => q.content)).toEqual(["金句1", "金句2", "金句3"]);
-    expect(result.summary).toContain("第 1 段概述。");
   });
 });
 
@@ -610,10 +609,9 @@ describe("成本护栏与进度", () => {
 // ============================================================
 
 describe("mergeAnalyses 秒级去重与拼接", () => {
-  it("相邻段边界同秒章节去重（保留先到段）、金句按文本去重、概述拼接", () => {
+  it("相邻段边界同秒章节去重（保留先到段）、金句按文本去重", () => {
     const merged = mod.mergeAnalyses([
       {
-        summary: "第一段概述。",
         chapters: [
           { from: 10, to: 100, title: "章A", summary: "a" },
           { from: 100, to: 200, title: "章B", summary: "b" }
@@ -621,7 +619,6 @@ describe("mergeAnalyses 秒级去重与拼接", () => {
         quotes: [{ from: 30, content: "金句X" }]
       },
       {
-        summary: "第二段概述。",
         chapters: [
           { from: 100, to: 250, title: "章B重复", summary: "b2" },
           { from: 200, to: 300, title: "章C", summary: "c" }
@@ -634,13 +631,12 @@ describe("mergeAnalyses 秒级去重与拼接", () => {
     ]);
     expect(merged.chapters.map((c) => c.title)).toEqual(["章A", "章B", "章C"]);
     expect(merged.quotes.map((q) => q.content)).toEqual(["金句X", "金句Y"]);
-    expect(merged.summary).toBe("第一段概述。 第二段概述。");
     expect(merged.chapters.map((c) => c.from)).toEqual([10, 100, 200]);
   });
 
   it("空入参 / null part 容错", () => {
-    expect(mod.mergeAnalyses([])).toEqual({ summary: "", chapters: [], quotes: [] });
-    expect(mod.mergeAnalyses([null, undefined, {}])).toEqual({ summary: "", chapters: [], quotes: [] });
+    expect(mod.mergeAnalyses([])).toEqual({ chapters: [], quotes: [] });
+    expect(mod.mergeAnalyses([null, undefined, {}])).toEqual({ chapters: [], quotes: [] });
   });
 });
 

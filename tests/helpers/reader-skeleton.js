@@ -275,41 +275,13 @@ export function mountReaderSkeleton(ids) {
   readingSettingsBtn.id = ids.readingSettingsBtn;
   digestPanel.appendChild(readingSettingsBtn);
 
-  const readingFontScaleSelect = doc.createElement("div");
-  readingFontScaleSelect.id = ids.readingFontScaleSelect;
-  digestPanel.appendChild(readingFontScaleSelect);
-
-  const readingLetterSpacingSelect = doc.createElement("div");
-  readingLetterSpacingSelect.id = ids.readingLetterSpacingSelect;
-  digestPanel.appendChild(readingLetterSpacingSelect);
-
-  const readingLineHeightSelect = doc.createElement("div");
-  readingLineHeightSelect.id = ids.readingLineHeightSelect;
-  digestPanel.appendChild(readingLineHeightSelect);
-
-  const readingContentWidthSelect = doc.createElement("div");
-  readingContentWidthSelect.id = ids.readingContentWidthSelect;
-  digestPanel.appendChild(readingContentWidthSelect);
-
-  const readingInfoSummary = doc.createElement("div");
-  readingInfoSummary.id = ids.readingInfoSummary;
-  digestPanel.appendChild(readingInfoSummary);
-
-  const readingInfoDescription = doc.createElement("div");
-  readingInfoDescription.id = ids.readingInfoDescription;
-  digestPanel.appendChild(readingInfoDescription);
-
-  const readingDescriptionBtn = doc.createElement("button");
-  readingDescriptionBtn.id = ids.readingDescriptionBtn;
-  digestPanel.appendChild(readingDescriptionBtn);
+  const readingInfoHost = doc.createElement("div");
+  readingInfoHost.id = ids.readingSettingsHost;
+  digestPanel.appendChild(readingInfoHost);
 
   const readingSubtitleSelect = doc.createElement("select");
   readingSubtitleSelect.id = ids.readingSubtitleSelect;
   digestPanel.appendChild(readingSubtitleSelect);
-
-  const readingChapterVisibilitySelect = doc.createElement("select");
-  readingChapterVisibilitySelect.id = ids.readingChapterVisibilitySelect;
-  digestPanel.appendChild(readingChapterVisibilitySelect);
 
   return { readingView, readingMain, digestPanel };
 }

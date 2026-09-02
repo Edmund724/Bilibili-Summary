@@ -28,31 +28,6 @@ export function normalizeReaderTheme(value: unknown): string {
   return value === "dark" || value === "paper" ? value : "light";
 }
 
-export function normalizeReaderFontScale(value: unknown): string {
-  return ["xs", "s", "m", "l", "xl"].includes(value as string) ? (value as string) : "m";
-}
-
-export function normalizeReaderLetterSpacing(value: unknown): string {
-  return ["tighter", "tight", "normal", "relaxed", "loose"].includes(value as string)
-    ? (value as string)
-    : "normal";
-}
-
-export function normalizeReaderLineHeight(value: unknown): string {
-  return ["compact", "tight", "normal", "relaxed", "loose"].includes(value as string)
-    ? (value as string)
-    : "tight";
-}
-
-export function normalizeReaderContentWidth(value: unknown): string {
-  // readerContentWidth 是 Digest 面板宽度档（narrow 340 /
-  // standard 380 / wide 440 / float 浮层全宽），不是整页主体宽度档。
-  // 旧档位（compact/narrow/wide/full/fit/medium 等）一律归一到默认 standard。
-  return ["narrow", "standard", "wide", "float"].includes(value as string)
-    ? (value as string)
-    : "standard";
-}
-
 export function normalizeReaderChapterVisibility(value: unknown): string {
   return value === "hide" || value === "auto" ? value : "show";
 }

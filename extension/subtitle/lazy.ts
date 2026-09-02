@@ -44,8 +44,7 @@ export interface SummarizeChain {
   copySubtitleTranscript(): Promise<void>;
   downloadSubtitle(): Promise<void>;
   getPopupPayload(): Record<string, unknown>;
-  renderMeta(): void;
-  renderSubtitleSelect(): void;
+  readVideoDescription(): string;
 }
 
 async function loadSummarizeChain(): Promise<SummarizeChain> {

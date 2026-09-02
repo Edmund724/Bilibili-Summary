@@ -33,9 +33,7 @@ export { waitForVideoMetadata } from "./lifecycle.js";
 // 阅读视图打开后的交互呈现
 export {
   updateReaderPreferences,
-  renderReaderPanels,
-  renderReadingInfoPanel,
-  applyReaderStepperPreference
+  renderReaderPanels
 } from "./lifecycle.js";
 // presenter seam 通知的 reader 侧处理体
 export { handleReaderPresenterNotification } from "./lifecycle.js";

@@ -85,7 +85,7 @@ export interface ReaderPresentationField {
 //                   writtenByApply 字段上存在，属「值怎么算」的呈现逻辑，
 //                   随字段声明进表以免写入方再抄一份取值清单。
 export const READER_PRESENTATION_FIELDS: ReaderPresentationField[] = [
-  // —— 排版设置五标量（顺序即 apply 的写入顺序，迁移前逐字一致）——
+  // —— 排版设置标量（顺序即 apply 的写入顺序，迁移前逐字一致）——
   {
     id: "theme",
     kind: "presentation",
@@ -99,64 +99,6 @@ export const READER_PRESENTATION_FIELDS: ReaderPresentationField[] = [
     clearViewOnClose: false,
     writtenByApply: true,
     readValue: (reader) => reader.readingTheme
-  },
-  {
-    id: "fontScale",
-    kind: "presentation",
-    targets: { html: "data-boc-reader-font-scale", body: "data-boc-reader-font-scale", readingView: "data-font-scale" },
-    datasetKeys: { html: "bocReaderFontScale", body: "bocReaderFontScale", readingView: "fontScale" },
-    storageKey: "readerFontScale",
-    legacyStorageKey: null,
-    watchedByGuard: true,
-    clearOnGuard: true,
-    clearOnClose: true,
-    clearViewOnClose: false,
-    writtenByApply: true,
-    readValue: (reader) => reader.readingFontScale
-  },
-  {
-    id: "letterSpacing",
-    kind: "presentation",
-    targets: { html: "data-boc-reader-letter-spacing", body: "data-boc-reader-letter-spacing", readingView: "data-letter-spacing" },
-    datasetKeys: { html: "bocReaderLetterSpacing", body: "bocReaderLetterSpacing", readingView: "letterSpacing" },
-    storageKey: "readerLetterSpacing",
-    legacyStorageKey: null,
-    watchedByGuard: true,
-    clearOnGuard: true,
-    clearOnClose: true,
-    clearViewOnClose: false,
-    writtenByApply: true,
-    readValue: (reader) => reader.readingLetterSpacing
-  },
-  {
-    id: "lineHeight",
-    kind: "presentation",
-    targets: { html: "data-boc-reader-line-height", body: "data-boc-reader-line-height", readingView: "data-line-height" },
-    datasetKeys: { html: "bocReaderLineHeight", body: "bocReaderLineHeight", readingView: "lineHeight" },
-    storageKey: "readerLineHeight",
-    legacyStorageKey: null,
-    watchedByGuard: true,
-    clearOnGuard: true,
-    clearOnClose: true,
-    clearViewOnClose: false,
-    writtenByApply: true,
-    readValue: (reader) => reader.readingLineHeight
-  },
-  {
-    // readerContentWidth 语义 = Digest 面板宽度档（narrow/standard/
-    // wide/float，接线在 digest-host），属性链照旧写值供 CSS/测试观察。
-    id: "contentWidth",
-    kind: "presentation",
-    targets: { html: "data-boc-reader-content-width", body: "data-boc-reader-content-width", readingView: "data-content-width" },
-    datasetKeys: { html: "bocReaderContentWidth", body: "bocReaderContentWidth", readingView: "contentWidth" },
-    storageKey: "readerContentWidth",
-    legacyStorageKey: null,
-    watchedByGuard: true,
-    clearOnGuard: true,
-    clearOnClose: true,
-    clearViewOnClose: false,
-    writtenByApply: true,
-    readValue: (reader) => reader.readingContentWidth
   },
   {
     id: "chapterVisibility",

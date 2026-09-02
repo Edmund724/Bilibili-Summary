@@ -1,13 +1,13 @@
 // tests/reader/chat-notices.test.ts
 // createReaderChatFeedback（对话 tab 消息区通知/错误/建议区清理/近底判定）行为契约。
 // PR5 自 tests/sidepanel/sidepanel-notices.test.js 随重建迁移：逻辑断言保真；
-// 唯一语义改造——「前往设置」链接在 content script 语境走 open-options 消息
-//（原 chrome.runtime.openOptionsPage）。
+// 语义改造——「前往设置」链接在 reader 语境经 deps.onOpenSettings 回调打开
+// 侧边栏设置抽屉（digest-only-ui：open-options 消息与独立设置页已删除）。
 //
 // 覆盖：
 // - showConversationContextNotice：追加通知条（textContent，防注入）、重复显示
 //   去重（先移除旧条）、autoHideMs > 0 时经注入定时器自动消失、clearTimer 取消；
-// - openSettingsAction：附「前往设置」链接并经 open-options 消息打开选项页；
+// - openSettingsAction：附「前往设置」链接，点击触发 onOpenSettings 回调；
 // - removeConversationContextNotice：清通知 + 取消挂起定时器；
 // - showConversationContextError：空文案 no-op、居中错误块 + scrollToBottom；
 // - removeCenteredState / removeSuggestions（同步置空单例钩子）；
@@ -50,7 +50,8 @@ function makeHarness() {
     getSuggestionsNode: () => suggestionsNode,
     setSuggestionsNode: (node) => {
       suggestionsNode = node;
-    }
+    },
+    onOpenSettings: vi.fn()
   };
   let suggestionsNode = document.createElement("div");
   const feedback = createReaderChatFeedback(deps);
@@ -110,14 +111,8 @@ describe("showConversationContextNotice / removeConversationContextNotice", () =
     expect(messages.querySelector(".sp-context-notice")).toBeNull();
   });
 
-  it("openSettingsAction：附「前往设置」链接，点击走 open-options 消息", () => {
-    const { feedback, messages } = makeHarness();
-    const sendMessage = vi.fn((_message, callback) => {
-      callback?.({ ok: true });
-      return undefined;
-    });
-    window.chrome = window.chrome || {};
-    window.chrome.runtime = { ...window.chrome.runtime, sendMessage };
+  it("openSettingsAction：附「前往设置」链接，点击触发 onOpenSettings 回调", () => {
+    const { feedback, messages, deps } = makeHarness();
 
     feedback.showConversationContextNotice("需要配置", 0, { openSettingsAction: true });
 
@@ -125,8 +120,7 @@ describe("showConversationContextNotice / removeConversationContextNotice", () =
     expect(link).not.toBeNull();
     expect(link.textContent).toBe("前往设置");
     link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(sendMessage.mock.calls[0][0]).toEqual({ type: "open-options" });
+    expect(deps.onOpenSettings).toHaveBeenCalledTimes(1);
   });
 });
 

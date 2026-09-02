@@ -281,10 +281,6 @@ describe("D. 源码扫描：data-boc-* 属性字面量必须登记在案", () =>
 describe("E. 行为：表声明的职责与 DOM 真实读写一致", () => {
   it("E1. apply 写全 writtenByApply 字段的三处目标，且不触碰其他字段", () => {
     state.reader.setTheme("dark");
-    state.reader.setFontScale("xl");
-    state.reader.setLetterSpacing("loose");
-    state.reader.setLineHeight("loose");
-    state.reader.setContentWidth("full");
     state.reader.setChapterVisible(false);
     state.reader.setSubtitleVisible(false);
 

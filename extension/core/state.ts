@@ -44,14 +44,9 @@ type ReaderBusinessState = {
   readingViewOpen: boolean;
   readingAutoScroll: boolean;
   readingTheme: string;
-  readingFontScale: string;
-  readingLetterSpacing: string;
-  readingLineHeight: string;
-  readingContentWidth: string;
   readingChapterVisible: boolean;
   readingSubtitleVisible: boolean;
   readingSettingsExpanded: boolean;
-  readingDescriptionExpanded: boolean;
   readingActiveSubtitleIndex: number;
   readingActiveChapterIndex: number;
   readingNextScrollBehavior: string;
@@ -67,14 +62,9 @@ type ReaderSetters = {
   setViewOpen(value: boolean): void;
   setAutoScroll(value: boolean): void;
   setTheme(value: string): void;
-  setFontScale(value: string): void;
-  setLetterSpacing(value: string): void;
-  setLineHeight(value: string): void;
-  setContentWidth(value: string): void;
   setChapterVisible(value: boolean): void;
   setSubtitleVisible(value: boolean): void;
   setSettingsExpanded(value: boolean): void;
-  setDescriptionExpanded(value: boolean): void;
   setActiveSubtitleIndex(value: number): void;
   setActiveChapterIndex(value: number): void;
   setNextScrollBehavior(value: string): void;
@@ -88,14 +78,9 @@ const readerState: ReaderStateWritable = {
   readingViewOpen: false,
   readingAutoScroll: true,
   readingTheme: "light",
-  readingFontScale: "m",
-  readingLetterSpacing: "normal",
-  readingLineHeight: "tight",
-  readingContentWidth: "standard",
   readingChapterVisible: true,
   readingSubtitleVisible: true,
   readingSettingsExpanded: false,
-  readingDescriptionExpanded: false,
   readingActiveSubtitleIndex: -1,
   readingActiveChapterIndex: -1,
   readingNextScrollBehavior: "smooth",
@@ -105,14 +90,9 @@ const readerState: ReaderStateWritable = {
   setViewOpen(value) { this.readingViewOpen = value; },
   setAutoScroll(value) { this.readingAutoScroll = value; },
   setTheme(value) { this.readingTheme = value; },
-  setFontScale(value) { this.readingFontScale = value; },
-  setLetterSpacing(value) { this.readingLetterSpacing = value; },
-  setLineHeight(value) { this.readingLineHeight = value; },
-  setContentWidth(value) { this.readingContentWidth = value; },
   setChapterVisible(value) { this.readingChapterVisible = value; },
   setSubtitleVisible(value) { this.readingSubtitleVisible = value; },
   setSettingsExpanded(value) { this.readingSettingsExpanded = value; },
-  setDescriptionExpanded(value) { this.readingDescriptionExpanded = value; },
   setActiveSubtitleIndex(value) { this.readingActiveSubtitleIndex = value; },
   setActiveChapterIndex(value) { this.readingActiveChapterIndex = value; },
   setNextScrollBehavior(value) { this.readingNextScrollBehavior = value; },

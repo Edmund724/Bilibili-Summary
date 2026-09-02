@@ -15,10 +15,6 @@ import {
   normalizeEnablePlayerAiQuickAction,
   normalizePlayerAiQuickPrompt,
   normalizeReaderTheme,
-  normalizeReaderFontScale,
-  normalizeReaderLetterSpacing,
-  normalizeReaderLineHeight,
-  normalizeReaderContentWidth,
   normalizeReaderChapterVisibility,
   normalizeReaderSubtitleVisible,
   normalizeFixedFrontmatterProperties,
@@ -40,18 +36,13 @@ function normalizeAsrAutoFallback(value: unknown): boolean {
 type NormalizerStep = [string, (m: Record<string, unknown>) => unknown];
 
 // 归一化步骤表：[key, normalizeField]，normalizeField 接收完整对象、返回该 key
-// 的归一化值。readerLetterSpacing 依赖同一对象里尚未归一化的 readerLineHeight
-// （缺失时派生兜底），因此步骤顺序即历史内联顺序，不可调整。
+// 的归一化值。步骤顺序即历史内联顺序，不可调整。
 const SETTINGS_NORMALIZER_STEPS: NormalizerStep[] = [
   ["downloadFormat", (m) => normalizeDownloadFormat(m.downloadFormat)],
   ["includeHotCommentsInNote", (m) => normalizeIncludeHotCommentsInNote(m.includeHotCommentsInNote)],
   ["enablePlayerAiQuickAction", (m) => normalizeEnablePlayerAiQuickAction(m.enablePlayerAiQuickAction)],
   ["playerAiQuickPrompt", (m) => normalizePlayerAiQuickPrompt(m.playerAiQuickPrompt)],
   ["readerTheme", (m) => normalizeReaderTheme(m.readerTheme)],
-  ["readerFontScale", (m) => normalizeReaderFontScale(m.readerFontScale)],
-  ["readerLetterSpacing", (m) => normalizeReaderLetterSpacing(m.readerLetterSpacing ?? m.readerLineHeight)],
-  ["readerLineHeight", (m) => normalizeReaderLineHeight(m.readerLineHeight)],
-  ["readerContentWidth", (m) => normalizeReaderContentWidth(m.readerContentWidth)],
   ["readerChapterVisibility", (m) => normalizeReaderChapterVisibility(m.readerChapterVisibility)],
   ["readerTranscriptVisible", (m) => normalizeReaderSubtitleVisible(m.readerTranscriptVisible)],
   ["fixedFrontmatterProperties", (m) => normalizeFixedFrontmatterProperties(m.fixedFrontmatterProperties)],

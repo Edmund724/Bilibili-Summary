@@ -82,7 +82,14 @@ export type ContentScriptMessageType = ContentScriptMessage["type"];
 
 export type GetSettingsMessage = { type: "get-settings" };
 export type SaveSettingsMessage = { type: "save-settings"; settings?: unknown };
-export type OpenOptionsMessage = { type: "open-options" };
+// digest-only-ui：content script 语境没有 chrome.permissions API（仅扩展自有
+// 页面/SW 可用），侧边栏设置面板保存时的 host 权限申请改走此消息由 SW 代为
+// 申请。用户手势经一次 runtime 消息传导；SW 处理器必须在调用
+// chrome.permissions.request 前零 await（见 entry/background.ts）。
+export type RequestProviderOriginsMessage = {
+  type: "request-provider-origins";
+  baseUrls?: unknown;
+};
 // PR5：对话 tab（content script）发送前的 offscreen 文档自愈 ensure——
 // chrome.offscreen / getContexts 仅扩展上下文可用，content script 经此消息
 // 委托 background 幂等创建（扩展页内直调 ensureChatOffscreenDocument 的
@@ -156,7 +163,7 @@ export type OffloadTaskMessage = {
 export type BackgroundMessage =
   | GetSettingsMessage
   | SaveSettingsMessage
-  | OpenOptionsMessage
+  | RequestProviderOriginsMessage
   | EnsureOffscreenChatMessage
   | PlayerAiQuickActionMessage
   | PopupTriggerReadingChatMessage

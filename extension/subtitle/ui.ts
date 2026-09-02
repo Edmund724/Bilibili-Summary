@@ -5,7 +5,6 @@ import { isAiSubtitle } from "./selection.js";
 import { sanitizeFileName, escapeHtml } from "../shared/string-utils.js";
 import { cleanVideoUrl } from "../bilibili/video-id-shared.js";
 import { getSettings } from "../core/runtime.js";
-import { byId } from "../shared/dom-utils.js";
 import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import { normalizeDownloadFormat } from "../core/validators.js";
@@ -14,70 +13,18 @@ import { state } from "../core/state.js";
 import { setMessage, setStatus } from "../shared/ui-status.js";
 // ids 为 reader 状态微模块（候选04 结构归并）：纯常量表，不经 reader/index.js
 // facade 转发（否则总结链会静态拖起整个 reader 域）。
-import { ids } from "../reader/state.js";
 import { refreshDerivedContent, rebuildDerivedContent } from "./core.js";
 
-// ===== 抓取结果渲染（候选02 分层惰性：自 ui/ui-renderer.js 移入） =====
+// ===== 链层交互（候选02 分层惰性：自 ui/ui-renderer.js 移入） =====
 //
-// renderMeta / renderSubtitleSelect / setBusyState 只渲染「抓取结果」（视频属性、
-// 字幕轨列表、忙碌态），唯一调用方是总结链（fetcher 的抓取收尾/重置）与本模块
-// 的交互回调——留在 ui-renderer（常驻）会把它对 selection.js（isAiSubtitle）及
-// cache/cache-lru 的依赖一并拖回常驻。setStatus/setMessage 仍在 ui-renderer：
-// URL 变化编排与本模块错误提示在启动期使用。
-export function setBusyState(disabled: boolean): void {
-  (byId(ids.copyBtn) as HTMLButtonElement).disabled = disabled;
-  (byId(ids.downloadBtn) as HTMLButtonElement).disabled = disabled;
-  (byId(ids.refreshBtn) as HTMLButtonElement).disabled = disabled;
-  (byId(ids.settingsBtn) as HTMLButtonElement).disabled = disabled;
-  (byId(ids.subtitleSelect) as HTMLSelectElement).disabled = disabled || state.clip.subtitles.length === 0;
-}
-
-export function renderMeta(): void {
-  const meta = byId(ids.meta);
-  if (!state.clip.bvid) {
-    meta.innerHTML = '<div class="boc-meta-item">尚未抓取视频信息</div>';
-    return;
-  }
-
-  const subtitleCount = state.clip.subtitles.length;
-  meta.innerHTML = `
-    <div class="boc-meta-item"><strong>标题：</strong>${escapeHtml(state.clip.title)}</div>
-    <div class="boc-meta-item"><strong>URL：</strong>${escapeHtml(cleanVideoUrl())}</div>
-    <div class="boc-meta-item"><strong>作者：</strong>${escapeHtml(state.clip.author || "未知")}</div>
-    <div class="boc-meta-item"><strong>日期：</strong>${escapeHtml(state.clip.uploadDate || "未知")}</div>
-    <div class="boc-meta-item"><strong>字幕轨：</strong>${subtitleCount}</div>
-  `;
-}
-
-export function renderSubtitleSelect(): void {
-  const select = byId(ids.subtitleSelect) as HTMLSelectElement;
-  const subtitles = state.clip.subtitles || [];
-
-  if (subtitles.length === 0) {
-    select.innerHTML = '<option value="">暂无字幕</option>';
-    select.disabled = true;
-    return;
-  }
-
-  select.innerHTML = subtitles
-    .map((item) => {
-      const selectedById =
-        state.clip.selectedSubtitleId && String(item.id || "") === String(state.clip.selectedSubtitleId);
-      const selectedByUrl = item.subtitleUrl === state.clip.selectedSubtitleUrl;
-      const selected = selectedById || selectedByUrl ? "selected" : "";
-      const label = item.lanDoc || item.lan || "unknown";
-      const isAi = isAiSubtitle(item);
-      const aiTag = isAi ? " [AI自动]" : "";
-      const optionLabel = `${label}${aiTag}`;
-      return `<option value="${escapeHtml(item.subtitleUrl)}" data-lang="${escapeHtml(
-        label
-      )}" data-id="${escapeHtml(String(item.id || ""))}" data-isai="${isAi}" ${selected}>${escapeHtml(
-        optionLabel
-      )}</option>`;
-    })
-    .join("");
-  select.disabled = false;
-}
+// copyMarkdown / copySubtitleTranscript / downloadSubtitle / onSubtitleChange /
+// getPopupPayload 只服务总结链与面板交互，留在 ui-renderer（常驻）会把它对
+// selection.js（isAiSubtitle）及 cache/cache-lru 的依赖一并拖回常驻。
+// setStatus/setMessage 仍在 shared/ui-status：URL 变化编排与本模块错误提示在
+// 启动期使用。
+//（digest-only-ui：经典侧栏面板删除后，renderMeta / renderSubtitleSelect /
+// setBusyState 三件「抓取结果渲染」已无目标节点——阅读视图的元信息/字幕轨由
+// reader 域的 renderReadingView/renderReadingSubtitleSelect 渲染，本节移除。）
 
 export async function onSubtitleChange(event: Event): Promise<void> {
   const target = event.target as HTMLSelectElement;
@@ -90,7 +37,6 @@ export async function onSubtitleChange(event: Event): Promise<void> {
   }
 
   try {
-    setBusyState(true);
     setStatus(`正在切换字幕：${lang}`);
     setMessage("");
     await loadSubtitle(value, lang, state.clip.fetchRunId, subtitleId);
@@ -100,8 +46,6 @@ export async function onSubtitleChange(event: Event): Promise<void> {
       return;
     }
     setStatus(`切换字幕失败：${getErrorMessage(error)}`);
-  } finally {
-    setBusyState(false);
   }
 }
 

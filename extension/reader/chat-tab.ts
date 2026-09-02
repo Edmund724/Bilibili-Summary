@@ -80,7 +80,7 @@ import { createReaderChatLists } from "./chat-lists.js";
 import { createReaderChatFeedback } from "./chat-notices.js";
 import { createReaderChatPopovers } from "./chat-popovers.js";
 import { setChatTabOutsideClickHandler } from "./chat-tab-bridge.js";
-import { setReaderDigestTab } from "../ui/ui-renderer.js";
+import { setReaderDigestTab, openReaderSettingsPanel } from "../ui/ui-renderer.js";
 import { ids } from "./state.js";
 // 时间戳跳转的进程内 seek（reader 域唯一定位入口，见 getTimestampNavDeps）。
 import { seekReadingTarget } from "./sync.js";
@@ -229,7 +229,9 @@ const feedback = createReaderChatFeedback({
   getSuggestionsNode: () => suggestionsNode,
   setSuggestionsNode: (node) => {
     suggestionsNode = node;
-  }
+  },
+  // digest-only-ui：提示条「前往设置」打开侧边栏设置抽屉（open-options 已删）
+  onOpenSettings: () => openReaderSettingsPanel()
 });
 const {
   showConversationContextNotice,
@@ -626,10 +628,8 @@ function bindEvents(): void {
   els.messages.addEventListener("scroll", () => {
     chatRuntime.setAutoScroll(isMessagesNearBottom());
   });
-  els.settingsBtn.addEventListener("click", () => {
-    // content script 无 chrome.runtime.openOptionsPage：走 open-options 消息。
-    void sendRuntimeMessage({ type: "open-options" }).catch(() => {});
-  });
+  // digest-only-ui：设置入口（els.settingsBtn = readingChatSettingsBtn）的
+  // 绑定已上收到 ui-renderer（打开侧边栏设置抽屉，open-options 消息已删除）。
   els.contextChip.addEventListener("click", () => {
     void openCurrentContextInReader();
   });
@@ -760,8 +760,8 @@ async function syncLiveContextState(forceRefresh = false): Promise<void> {
 }
 
 // 【整段迁移自 sidepanel.ts】初始态渲染：无上下文 / 无平台 / 会话回放 / 非视频
-// 四态分支逐字保持；无平台分支的「前往设置」换 readingChatOpenSettings id +
-// open-options 消息（content script 无 openOptionsPage）。
+// 四态分支逐字保持；无平台分支的「前往设置」换 readingChatOpenSettings id——
+// 点击绑定上收在 ui-renderer（打开侧边栏设置抽屉；open-options 消息已删除）。
 function renderInitialState(): void {
   updateChatLayoutState();
   if (!sidepanelState.contextData) {
@@ -770,10 +770,6 @@ function renderInitialState(): void {
   }
   if (!sidepanelState.providers.length) {
     resetConversationView(`还没有配置 AI 平台，<a href="#" id="${ids.readingChatOpenSettings}">前往设置</a>`);
-    document.getElementById(ids.readingChatOpenSettings)?.addEventListener("click", (e) => {
-      e.preventDefault();
-      void sendRuntimeMessage({ type: "open-options" }).catch(() => {});
-    });
     return;
   }
   if (sidepanelState.chatHistory.length) {

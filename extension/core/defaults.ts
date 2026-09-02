@@ -72,11 +72,6 @@ export interface Settings {
   includeTimestampInBody: boolean;
   enableDebugLogs: boolean;
   readerTheme: string;
-  readerFontScale: string;
-  readerLetterSpacing: string;
-  readerLineHeight: string;
-  // 面板宽度档（narrow/standard/wide/float），接线在 reader/digest-host.ts
-  readerContentWidth: string;
   readerChapterVisibility: string;
   readerChapterVisible: boolean;
   readerTranscriptVisible: boolean;
@@ -104,10 +99,6 @@ export const DEFAULT_SETTINGS: Settings = {
   includeTimestampInBody: true,
   enableDebugLogs: false,
   readerTheme: "light",
-  readerFontScale: "m",
-  readerLetterSpacing: "normal",
-  readerLineHeight: "tight",
-  readerContentWidth: "standard",
   readerChapterVisibility: "show",
   readerChapterVisible: true,
   readerTranscriptVisible: true,

@@ -1,6 +1,8 @@
-// 设置变更测试：主题 / 字体 / 内容宽度 / 行距 / 字距等
+// 设置变更测试：主题 / 章节与字幕可见性
 // 通过 hydrateReaderStateFromSettings 与 updateReaderPreferences 驱动，
 // 校验 data-attribute 在阅读视图、documentElement、body 三处的应用。
+//（digest-only-ui：排版档位机制退役，字号/字距/行距/面板宽度不再可调，
+// 相关字段与 data-attribute 一并移除。）
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NORMAL_PAGE_URL, READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
@@ -41,37 +43,11 @@ async function loadReaderModules() {
   );
 }
 
-function makeStepper(node: HTMLElement) {
-  // 与 buildReaderStepperControl 生成的按钮结构一致
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "boc-reading-stepper-btn";
-  btn.dataset.value = "l";
-  node.appendChild(btn);
-}
-
-// 给 4 个 stepper 控件各补一个按钮，让 renderReaderPanels 的
-// renderReaderStepperState 有可操作节点。
-function seedStepperButtons() {
-  [
-    ids.readingFontScaleSelect,
-    ids.readingLetterSpacingSelect,
-    ids.readingLineHeightSelect,
-    ids.readingContentWidthSelect
-  ].forEach((id) => {
-    const node = document.getElementById(id);
-    if (node) {
-      makeStepper(node);
-    }
-  });
-}
-
 beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
   await loadReaderModules();
   mountReaderSkeleton(ids);
-  seedStepperButtons();
 });
 
 afterEach(() => {
@@ -80,22 +56,14 @@ afterEach(() => {
 });
 
 describe("设置变更与 data-attribute", () => {
-  it("hydrateReaderStateFromSettings：应用主题/字体/面板宽度等设置", () => {
+  it("hydrateReaderStateFromSettings：应用主题/章节与字幕可见性设置", () => {
     presentation.hydrateReaderStateFromSettings({
       readerTheme: "dark",
-      readerFontScale: "xl",
-      readerLetterSpacing: "loose",
-      readerLineHeight: "relaxed",
-      readerContentWidth: "wide",
       readerChapterVisible: false,
       readerTranscriptVisible: true
     });
 
     expect(state.reader.readingTheme).toBe("dark");
-    expect(state.reader.readingFontScale).toBe("xl");
-    expect(state.reader.readingLetterSpacing).toBe("loose");
-    expect(state.reader.readingLineHeight).toBe("relaxed");
-    expect(state.reader.readingContentWidth).toBe("wide");
     expect(state.reader.readingChapterVisible).toBe(false);
     expect(state.reader.readingSubtitleVisible).toBe(true);
   });
@@ -103,10 +71,6 @@ describe("设置变更与 data-attribute", () => {
   it("applyReadingViewPresentation：在视图/html/body 三处写 data-attribute", () => {
     presentation.hydrateReaderStateFromSettings({
       readerTheme: "paper",
-      readerFontScale: "l",
-      readerLetterSpacing: "tight",
-      readerLineHeight: "normal",
-      readerContentWidth: "narrow",
       readerChapterVisible: true,
       readerTranscriptVisible: true
     });
@@ -118,43 +82,29 @@ describe("设置变更与 data-attribute", () => {
 
     const expected = {
       theme: "paper",
-      fontScale: "l",
-      letterSpacing: "tight",
-      lineHeight: "normal",
-      contentWidth: "narrow",
       chapterVisibility: "auto",
       subtitleVisible: "1"
     };
 
     expect(readingView.dataset.theme).toBe(expected.theme);
-    expect(readingView.dataset.fontScale).toBe(expected.fontScale);
-    expect(readingView.dataset.letterSpacing).toBe(expected.letterSpacing);
-    expect(readingView.dataset.lineHeight).toBe(expected.lineHeight);
-    expect(readingView.dataset.contentWidth).toBe(expected.contentWidth);
     expect(readingView.dataset.chapterVisibility).toBe(expected.chapterVisibility);
     expect(readingView.dataset.subtitleVisible).toBe(expected.subtitleVisible);
 
     expect(htmlEl.dataset.bocReaderTheme).toBe(expected.theme);
-    expect(htmlEl.dataset.bocReaderFontScale).toBe(expected.fontScale);
-    expect(htmlEl.dataset.bocReaderContentWidth).toBe(expected.contentWidth);
     expect(htmlEl.dataset.bocReaderChapterVisibility).toBe(expected.chapterVisibility);
 
     expect(bodyEl.dataset.bocReaderTheme).toBe(expected.theme);
-    expect(bodyEl.dataset.bocReaderFontScale).toBe(expected.fontScale);
-    expect(bodyEl.dataset.bocReaderContentWidth).toBe(expected.contentWidth);
   });
 
-  it("updateReaderPreferences：变更宽度/字体并持久化到 chrome.runtime", () => {
-    lifecycle.updateReaderPreferences({ readerFontScale: "xs", readerContentWidth: "float" }, { persist: true });
+  it("updateReaderPreferences：变更主题/可见性并持久化到 chrome.runtime", () => {
+    lifecycle.updateReaderPreferences({ readerTheme: "dark", readerChapterVisible: false }, { persist: true });
 
-    expect(state.reader.readingFontScale).toBe("xs");
-    expect(state.reader.readingContentWidth).toBe("float");
+    expect(state.reader.readingTheme).toBe("dark");
+    expect(state.reader.readingChapterVisible).toBe(false);
 
     const readingView = document.getElementById(ids.readingView) as HTMLElement;
-    expect(readingView.dataset.fontScale).toBe("xs");
-    expect(readingView.dataset.contentWidth).toBe("float");
-    expect(document.documentElement.dataset.bocReaderFontScale).toBe("xs");
-    expect(document.body.dataset.bocReaderContentWidth).toBe("float");
+    expect(readingView.dataset.theme).toBe("dark");
+    expect(readingView.dataset.chapterVisibility).toBe("hide");
 
     expect(chromeStub.runtime.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: "save-settings" }),
@@ -162,15 +112,12 @@ describe("设置变更与 data-attribute", () => {
     );
   });
 
-  it("updateReaderPreferences：非法值被归一化", () => {
+  it("updateReaderPreferences：非法主题被归一化", () => {
     lifecycle.updateReaderPreferences(
-      { readerFontScale: "huge", readerContentWidth: "ultra", readerTheme: "neon" },
+      { readerTheme: "neon" },
       { persist: false }
     );
 
-    expect(state.reader.readingFontScale).toBe("m");
-    // 阶段 4b：旧档位（ultra 等）统一归一到新默认 standard。
-    expect(state.reader.readingContentWidth).toBe("standard");
     expect(state.reader.readingTheme).toBe("light");
   });
 
@@ -192,10 +139,6 @@ describe("设置变更与 data-attribute", () => {
           ok: true,
           settings: {
             readerTheme: "dark",
-            readerFontScale: "m",
-            readerLetterSpacing: "normal",
-            readerLineHeight: "tight",
-            readerContentWidth: "fit", // 旧档位，应归一到 standard
             readerChapterVisible: true,
             readerTranscriptVisible: true
           }

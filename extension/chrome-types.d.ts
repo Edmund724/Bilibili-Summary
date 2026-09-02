@@ -27,6 +27,13 @@ declare namespace chrome {
     function getURL(path: string): string;
     function sendMessage(message: unknown): Promise<unknown>;
     function sendMessage(message: unknown, responseCallback?: SendMessageCallback): void;
+    // Chrome 116+：查询 offscreen 文档是否存在（chat/offscreen-ensure 的
+    // 存在性判定；Chrome <116 或查询失败时调用方降级为直接 createDocument）。
+    //（声明自删掉的 pages/pages-chrome-types.d.ts 归并于此。）
+    function getContexts(query: {
+      contextTypes?: string[];
+      documentUrls?: string[];
+    }): Promise<unknown[]>;
 
     interface Port {
       name: string;
@@ -102,8 +109,25 @@ declare namespace chrome {
       remove(keys: string | string[]): Promise<void>;
     }
 
+    interface StorageChange {
+      oldValue?: unknown;
+      newValue?: unknown;
+    }
+
+    interface OnChangedEvent {
+      addListener(
+        listener: (changes: Record<string, StorageChange>, areaName: string) => void
+      ): void;
+      // 对话组合根的会话收尾摘除 providers 刷新监听（bind/unbind 对称；
+      // 声明自删掉的 pages/pages-chrome-types.d.ts 归并于此）。
+      removeListener(
+        listener: (changes: Record<string, StorageChange>, areaName: string) => void
+      ): void;
+    }
+
     const sync: StorageArea;
     const local: StorageArea;
+    const onChanged: OnChangedEvent;
   }
 
   namespace permissions {

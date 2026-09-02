@@ -24,6 +24,8 @@ import {
   createAsrRuntimeConfigHandler
 } from "../core/provider-handlers.js";
 import { bgFetchJson } from "../bilibili/gateway.js";
+// digest-only-ui：侧边栏设置面板的 host 权限代申请（collectOrigins 纯函数）
+import { collectOrigins } from "../core/host-permissions.js";
 // PR5：对话 tab 的 offscreen 文档 ensure 通道（background 侧唯一合法创建点）
 import { ensureChatOffscreenDocument } from "../chat/offscreen-ensure.js";
 import { handleAsrDecodePrepare, handleAsrDecodeCleanup } from "../asr/offscreen-bridge.bg.js";
@@ -55,11 +57,34 @@ function handleSaveSettings(message: Msg<"save-settings">, _sender: MessageSende
   return true;
 }
 
-function handleOpenOptions(_message: Msg<"open-options">, _sender: MessageSender, sendResponse: SendResponse): boolean {
-  chrome.tabs
-    .create({ url: chrome.runtime.getURL("pages/options.html") })
-    .then(() => sendResponse({ ok: true }))
-    .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
+// digest-only-ui：侧边栏设置面板（content script）保存时的 host 权限代申请。
+// content script 无 chrome.permissions API，用户手势经本次 runtime 消息传导到
+// 本处理器——chrome.permissions.request 必须是处理器内的第一个动作（任何先行
+// await 都会耗尽手势，被 Chrome 以「缺少用户手势」拒绝，见
+// ui/settings-panel.ts 的 requestProviderOriginsViaBackground）。
+function handleRequestProviderOrigins(message: Msg<"request-provider-origins">, _sender: MessageSender, sendResponse: SendResponse): boolean {
+  const origins = collectOrigins(message.baseUrls);
+  if (origins.length === 0) {
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (typeof chrome.permissions?.request !== "function") {
+    sendResponse({ ok: false, error: "当前环境不支持申请权限" });
+    return false;
+  }
+  chrome.permissions
+    .request({ origins })
+    .then((granted) => {
+      if (!granted) {
+        sendResponse({
+          ok: false,
+          error: `未授权 ${origins.join("、")}，保存已中止：请重新点击「保存设置」并在弹窗中选择允许`
+        });
+        return;
+      }
+      sendResponse({ ok: true });
+    })
+    .catch((error: Error) => sendResponse({ ok: false, error: `申请域名权限失败：${error.message}` }));
   return true;
 }
 
@@ -299,7 +324,9 @@ function handleOffloadTask(message: Msg<"offload-task">, _sender: MessageSender,
 const messageHandlers = new Map<BackgroundMessageType, BackgroundHandler>([
   ["get-settings", handleGetSettings as BackgroundHandler],
   ["save-settings", handleSaveSettings as BackgroundHandler],
-  ["open-options", handleOpenOptions as BackgroundHandler],
+  // digest-only-ui：open-options 处理器已随 options 页删除（设置已全部并入
+  // 侧边栏面板，无独立设置页可开）。
+  ["request-provider-origins", handleRequestProviderOrigins as BackgroundHandler],
   ["ensure-offscreen-chat", handleEnsureOffscreenChat as BackgroundHandler],
   ["player-ai-quick-action", handlePlayerAiQuickAction as BackgroundHandler],
   ["popup-trigger-reading-chat", handlePopupTriggerReadingChat as BackgroundHandler],

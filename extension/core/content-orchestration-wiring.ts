@@ -19,11 +19,13 @@ function probeContentScriptVersionOnce(tabId: number) {
 
 async function injectReaderAssets(tabId: number) {
   // S3 分层：修复注入语义是「补齐整页样式」（页面可能被 manifest 注入路径
-  // 遗漏，阅读模式可能正处于开启状态），因此常驻表 + 阅读表全量注入；播放器
-  // AI 表不需要——它只随 ai/player-ai.js 模块装载挂载，与内容脚本注入无关。
+  // 遗漏，阅读模式可能正处于开启状态），因此阅读表全量注入；播放器 AI 表
+  // 不需要——它只随 ai/player-ai.js 模块装载挂载，与内容脚本注入无关。
+  //（digest-only-ui：常驻表 panel.css 已随经典侧栏面板删除，内容脚本不再
+  // 经 manifest 注入任何样式——阅读表全部由 ensureReaderStyles 挂载。）
   await chrome.scripting.insertCSS({
     target: { tabId },
-    files: ["entry/styles/panel.css", "entry/styles/reader.css", "entry/styles/reader-gate.css"]
+    files: ["entry/styles/reader.css", "entry/styles/reader-gate.css"]
   });
 
   await chrome.scripting.executeScript({

@@ -9,9 +9,8 @@
 // 贴栏形态的几何：面板吃掉「锚点左缘 → 视口右缘」整条右侧（B 站容器有最大
 // 宽度，宽屏下锚点右缘与窗口右缘之间是大片死区），纵向钳进一屏（top 跟锚点
 // 但不出视口，底缘贴视口底），内容超高由面板内部滚动消化。
-// state.reader.readingContentWidth 档位（narrow 340 / standard 380 / wide 440）
-// 作贴栏宽度下限：可填宽度不足档位宽时左缘向左延伸补足；float 档强制浮层。
-// 步进器「面板宽度」档即本模块的消费方。
+// 贴栏宽度下限（digest-only-ui 排版定稿）：面板宽度档已定死 380px，可填宽度
+// 不足时左缘向左延伸补足。
 //
 // player-host 整页接管退役后，本模块是 LAYOUT 层唯一的布局调度器
 //（rAF 合帧 + 脏检查，思路源自旧 player-host 调度器）——digest-host
@@ -22,7 +21,6 @@
 // 覆盖，口径对齐 digest-button 的 REINJECT_INTERVAL_MS。
 
 import { findReaderPlayerHost } from "../bilibili/video-probe.js";
-import { state } from "../core/state.js";
 
 // 右栏锚点候选（按优先级）。判定规则与覆盖页面见 closeDigestHost 上方注释；
 // 全部只读 getBoundingClientRect，绝不往锚点里插节点。
@@ -37,16 +35,10 @@ const ANCHOR_SELECTORS = [
 
 // 锚点有效硬下限：宽度过小视为隐藏副本/折叠态，跳过落到次优先候选。
 const ANCHOR_MIN_WIDTH = 280;
-// 贴栏宽度下限（readerContentWidth 语义 = 面板宽度档）：贴栏面板正常吃掉
-// 锚点左缘到视口右缘的整条右侧，仅当可填宽度不足档位宽时左缘左移补足。
+// 贴栏宽度下限（定死值 = 380px，digest-only-ui 排版定稿）：贴栏面板正常吃掉
+// 锚点左缘到视口右缘的整条右侧，仅当可填宽度不足时左缘左移补足。
 const PANEL_MIN_WIDTH = 300;
-// narrow/standard/wide 三档的下限宽度；float 档不走贴栏，强制浮层形态。
-export const PANEL_WIDTH_BY_MODE: Record<string, number> = {
-  narrow: 340,
-  standard: 380,
-  wide: 440
-};
-const DEFAULT_PANEL_WIDTH = PANEL_WIDTH_BY_MODE.standard;
+const PANEL_TARGET_WIDTH = 380;
 
 // 贴播放器右缘时的间距。贴栏纵向钳进一屏的最低高度保底（视口过矮时
 // top 不再上移，宁可口子贴底）。
@@ -59,15 +51,7 @@ const FLOAT_VIEWPORT_MIN_WIDTH = 1000;
 // 理由见文件头注）。
 const REANCHOR_INTERVAL_MS = 800;
 
-// 当前档位的贴栏宽度下限：未知值（含 float）回落 standard。
-function getPanelTargetWidth(): number {
-  return PANEL_WIDTH_BY_MODE[state.reader.readingContentWidth] || DEFAULT_PANEL_WIDTH;
-}
-
-// float 档：无论锚点/视口是否合格，面板一律走浮层形态。
-function isFloatMode(): boolean {
-  return state.reader.readingContentWidth === "float";
-}
+// 贴栏宽度下限：定死 380px。
 
 const DIGEST_VAR_PREFIX = "--boc-digest-";
 const DIGEST_VARS = ["left", "top", "width", "height"] as const;
@@ -208,18 +192,12 @@ function applyDigestRect(): void {
     return;
   }
 
-  // float 档强制浮层（不做贴栏判定）。
-  if (isFloatMode()) {
-    applyFloating();
-    return;
-  }
-
   const anchor = findDigestAnchor();
   if (anchor !== observedAnchor) {
     observeDigestAnchor(anchor);
   }
 
-  // 锚点命中且视口够宽：贴栏形态，宽度取档位目标宽。
+  // 锚点命中且视口够宽：贴栏形态，宽度下限定死 380px。
   const anchorRect = anchor?.getBoundingClientRect();
   if (anchorRect && window.innerWidth >= FLOAT_VIEWPORT_MIN_WIDTH) {
     const rect = clampAnchorRect(anchorRect);
@@ -270,10 +248,10 @@ function clampTopIntoViewport(rawTop: number): number {
 }
 
 // 命中锚点后取面板 rect：占「锚点左缘 → 视口右界」整条右侧；可填宽度不足
-// 档位下限宽时左缘向左延伸补足（窄窗/窄栏兜底）。
+// 下限宽时左缘向左延伸补足（窄窗/窄栏兜底）。
 function clampAnchorRect(rect: DOMRect): { left: number; top: number; width: number; height: number } {
   const right = getViewportRightBound();
-  const left = Math.min(rect.left, right - getPanelTargetWidth());
+  const left = Math.min(rect.left, right - PANEL_TARGET_WIDTH);
   const top = clampTopIntoViewport(rect.top);
   return { left, top, width: right - left, height: window.innerHeight - top };
 }

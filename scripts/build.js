@@ -4,12 +4,13 @@
 //   1. content 部分沿用 build-content.js（bootstrap IIFE + ESM 主包 + 动态
 //      chunk），产物先落在 extension/entry/（dev load unpacked 直接用），
 //      本脚本再把它们按源相对路径拷进 dist/。
-//   2. 其余入口（SW / 三个扩展页面）bundle 成单文件 + minify，无 code
-//      splitting：SW 不做运行时惰性（ADR-0003），全静态图。offscreen 例外
-//      （见 buildOffscreenEntry）：AI / ASR 两族任务链动态 import 后开
+//   2. 其余入口（SW）bundle 成单文件 + minify，无 code splitting：SW 不做
+//      运行时惰性（ADR-0003），全静态图。offscreen 例外（见
+//      buildOffscreenEntry）：AI / ASR 两族任务链动态 import 后开
 //      splitting，常驻接线与动态 chunk 分文件落盘。
-//   3. CSS 三件套 minify 到 dist 同相对路径；popup.css 不在 minify 清单，
-//      作为静态资源原样拷入。
+//      （digest-only-ui：options/popup 页面已随「侧边栏成为唯一界面」删除，
+//      不再有扩展页面入口。）
+//   3. CSS minify 到 dist 同相对路径。
 //   4. 静态资源（manifest.json / html / icons）原样拷入；产物路径与源路径
 //      完全一致，因此 html 与 manifest 零改写。
 //   5. 校验：dist/manifest.json 合法 JSON 且引用路径全部存在；html 本地
@@ -22,7 +23,6 @@
 //   entry/background.js              SW 单文件 bundle
 //   entry/offscreen.js               offscreen 常驻接线（splitting 主入口）
 //   entry/offscreen-chunks/*.js      offscreen 动态 chunk（AI / ASR 两族按需）
-//   entry/styles/panel.css            常驻表（manifest content_scripts 注入）
 //   entry/styles/reader.css           阅读表（运行时挂载，随阅读模式）
 //   entry/styles/reader-gate.css      阅读表门控段（同上）
 //   entry/styles/player-ai.css        播放器 AI 表（随 ai/player-ai.js chunk）
@@ -30,10 +30,6 @@
 //   entry/content-main.mjs           拷贝自 build-content.js 产物
 //   entry/chunks/*.mjs               拷贝自 build-content.js 产物
 //   entry/offscreen.html             原样拷贝
-//   pages/{popup,options}.js         单文件 bundle
-//   pages/options.css                minified
-//   pages/popup.css                  原样拷贝（不在 minify 清单）
-//   pages/*.html                     原样拷贝
 //   icons/*.png                      原样拷贝
 //   manifest.json                    原样拷贝（零改写）
 //   各 JS/CSS 产物伴随同名 .map        linked sourcemap（devtools 调试用；
@@ -47,8 +43,8 @@ const { build, context } = require("esbuild");
 // --watch（npm run dev）：首轮走与发布完全一致的全量构建 + 自检 + 报表，之后
 // esbuild context 监听三个构建任务原地重建 dist/，content 部分拉起
 // build-content.js --watch 子进程（产物落 extension/entry/，由下方 fs.watch
-// 侦测后重拷进 dist/），静态资源（manifest/html/popup.css/icons）变化同样
-// 重拷。watch 只做重建与拷贝，manifest/html 校验留给首轮全量构建。
+// 侦测后重拷进 dist/），静态资源（manifest/html/icons）变化同样重拷。watch
+// 只做重建与拷贝，manifest/html 校验留给首轮全量构建。
 const watchMode = process.argv.includes("--watch");
 
 const root = path.join(__dirname, "..");
@@ -63,28 +59,21 @@ const distDir = path.join(root, "dist");
 // offscreen 入口不在此列——它开 splitting 拆动态 chunk（见 buildOffscreenEntry）。
 const jsEntries = [
   "entry/background.ts",
-  "pages/options.ts",
-  "pages/popup.ts",
 ];
 
-// CSS minify 入口（popup.css 是纯静态拷贝，见下）。S3 分层：content 样式拆为
-// 常驻表（entry/styles/panel.css，manifest 注入）与按需表（reader/player-ai，
-// 运行时 link 挂载），按需表也走 minify 保证 dist 无未压缩 CSS。
+// CSS minify 入口。S3 分层：content 样式全部按需挂载（reader/player-ai 各自
+// 运行时 link 挂载，见 shared/style-injector），仍走 minify 保证 dist 无未压缩
+// CSS。（digest-only-ui：常驻表 panel.css 已随经典侧栏面板删除。）
 const cssEntries = [
-  "entry/styles/panel.css",
   "entry/styles/reader.css",
   "entry/styles/reader-gate.css",
   "entry/styles/player-ai.css",
-  "pages/options.css",
 ];
 
 // 原样拷贝的文件（产物路径与源路径一致 → html/manifest 零改写）。
 const copyFiles = [
   "manifest.json",
   "entry/offscreen.html",
-  "pages/popup.html",
-  "pages/options.html",
-  "pages/popup.css",
   // content 构建产物（build-content.js 跑完后的最新产物；.map 为 linked
   // sourcemap，devtools 调试用，release zip 由 build_release.py 剔除）。
   "entry/content-bootstrap.iife.js",

@@ -91,7 +91,6 @@ function stubRuntimeMessages(extra?: (message: Record<string, unknown>) => unkno
 }
 
 const SAMPLE_ANALYSIS: OverviewAnalysis = {
-  summary: "全片讲了测试驱动开发的三个误区。",
   chapters: [
     { from: 0, to: 120, title: "开场", summary: "为什么测试难写" },
     { from: 120, to: 300, title: "误区一", summary: " mocking 一切" }
@@ -167,7 +166,7 @@ describe("概览状态机与触发", () => {
     expect(overviewText()).toContain("概览等字幕就绪后自动生成");
   });
 
-  it("idle 触发 → 生成 → ready 渲染：总结/章节/金句 + 上下文与 provider 入参正确", async () => {
+  it("idle 触发 → 生成 → ready 渲染：章节/金句 + 上下文与 provider 入参正确", async () => {
     seedClip();
     runOverviewMock.mockResolvedValue(SAMPLE_ANALYSIS);
 
@@ -178,16 +177,18 @@ describe("概览状态机与触发", () => {
       provider: { apiKey?: string; baseUrl?: string; model?: string };
       context: Record<string, unknown>;
       forceRefresh?: boolean;
+      thinkingLevel?: string;
     };
     expect(args.provider).toEqual({ baseUrl: "https://api.test/v1", apiKey: "sk-test", model: "test-model" });
     expect(args.forceRefresh).toBe(false);
+    // digest-only-ui：章节/金句生成思考档位显式钉死 off（请求体由协议层
+    // buildChatRequestBody 注入 THINKING_DISABLE_FIELDS，见 ai/completion.test）
+    expect(args.thinkingLevel).toBe("off");
     expect(args.context.bvid).toBe("BV1test000000");
     expect(args.context.selectedSubtitleId).toBe("sub-1");
     expect(Array.isArray(args.context.subtitleBody)).toBe(true);
 
     const text = overviewText();
-    expect(text).toContain("总结");
-    expect(text).toContain("全片讲了测试驱动开发的三个误区。");
     expect(text).toContain("开场");
     expect(text).toContain("为什么测试难写");
     expect(text).toContain("金句");
@@ -218,7 +219,7 @@ describe("概览状态机与触发", () => {
 
     resolveRun({ ...SAMPLE_ANALYSIS });
     await first;
-    expect(overviewText()).toContain("全片讲了测试驱动开发的三个误区。");
+    expect(overviewText()).toContain("开场");
 
     // 已 ready 再触发：不重跑（缓存语义由管线负责，状态机直接短路）
     await reader.triggerReaderOverviewGeneration();
@@ -242,7 +243,7 @@ describe("概览状态机与触发", () => {
 
     resolveRun({ ...SAMPLE_ANALYSIS });
     await run;
-    expect(overviewText()).toContain("全片讲了测试驱动开发的三个误区。");
+    expect(overviewText()).toContain("开场");
   });
 
   it("AI 分章（稿件章节为空）章节标头带「AI 生成」标注；自带章节不标", async () => {
@@ -276,7 +277,7 @@ describe("概览状态机与触发", () => {
     await reader.triggerReaderOverviewGeneration();
     expect(overviewText()).toContain("1 个分段生成失败");
     // 部分结果照常展示
-    expect(overviewText()).toContain("全片讲了测试驱动开发的三个误区。");
+    expect(overviewText()).toContain("开场");
 
     runOverviewMock.mockClear();
     runOverviewMock.mockResolvedValue({ ...SAMPLE_ANALYSIS });
@@ -312,7 +313,7 @@ describe("概览状态机与触发", () => {
 
     await vi.waitFor(() => expect(runOverviewMock).toHaveBeenCalledTimes(1));
     expect((runOverviewMock.mock.calls[0][0] as { forceRefresh?: boolean }).forceRefresh).toBe(true);
-    await vi.waitFor(() => expect(overviewText()).toContain("全片讲了测试驱动开发的三个误区。"));
+    await vi.waitFor(() => expect(overviewText()).toContain("开场"));
   });
 
   it("provider 解析失败（未配置 AI 平台）落入 error 态并如实展示", async () => {
@@ -385,14 +386,14 @@ describe("概览 tab 切换接线（ui-renderer → ensureReaderOverviewTab）",
     tabButton.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 
     await vi.waitFor(() => expect(runOverviewMock).toHaveBeenCalledTimes(1));
-    await vi.waitFor(() => expect(overviewText()).toContain("全片讲了测试驱动开发的三个误区。"));
+    await vi.waitFor(() => expect(overviewText()).toContain("开场"));
   });
 
   it("换轨后旧产物退场：渲染收敛回未生成态，切 tab 按新签名重新生成", async () => {
     seedClip();
     runOverviewMock.mockResolvedValue(SAMPLE_ANALYSIS);
     await reader.triggerReaderOverviewGeneration();
-    expect(overviewText()).toContain("全片讲了测试驱动开发的三个误区。");
+    expect(overviewText()).toContain("开场");
 
     // 换轨（签名变化）：渲染层自愈，旧概览不串轨展示
     state.clip.selectedSubtitleId = "sub-2";
@@ -401,10 +402,10 @@ describe("概览 tab 切换接线（ui-renderer → ensureReaderOverviewTab）",
     expect(overviewText()).toContain("概览还未生成");
 
     runOverviewMock.mockClear();
-    runOverviewMock.mockResolvedValue({ ...SAMPLE_ANALYSIS, summary: "新字幕轨的总结。" });
+    runOverviewMock.mockResolvedValue(SAMPLE_ANALYSIS);
     reader.ensureReaderOverviewTab();
     await vi.waitFor(() => expect(runOverviewMock).toHaveBeenCalledTimes(1));
-    await vi.waitFor(() => expect(overviewText()).toContain("新字幕轨的总结。"));
+    await vi.waitFor(() => expect(overviewText()).toContain("开场"));
   });
 });
 
@@ -441,7 +442,7 @@ describe("closeReadingView 清理", () => {
     runOverviewMock.mockResolvedValue({ ...SAMPLE_ANALYSIS });
     await reader.triggerReaderOverviewGeneration();
     expect(runOverviewMock).toHaveBeenCalledTimes(1);
-    expect(overviewText()).toContain("全片讲了测试驱动开发的三个误区。");
+    expect(overviewText()).toContain("开场");
   });
 });
 

@@ -17,34 +17,33 @@
 // renderSubtitleSelect / setStatus 由 fetcher 在模块求值期经 configureCommitUi
 // 注入一次。其余依赖全部是叶子或常驻轻模块：core/state、subtitle/selection、
 // subtitle/core、reader/presenter（常驻轻 seam）、reader/view-state（常驻微
-// 模块，纯 state 读取）、shared/dom-utils、reader/state（状态微模块，含 ids
-// 常量表）、shared/logging。
+// 模块，纯 state 读取）、shared/logging。
+//（digest-only-ui：经典侧栏面板的预览 textarea 已删除，commit 不再清空它。）
 
 import { clipState } from "../core/state.js";
 import type { NoSubtitleReason, SubtitleBodyItem } from "../core/state.js";
 import { sortSubtitleBodyByFrom } from "./selection.js";
 import { refreshDerivedContent } from "./core.js";
 import { notifyReaderPresenter } from "../reader/presenter.js";
-import { isReaderViewOpen, ids } from "../reader/state.js";
-import { byId } from "../shared/dom-utils.js";
+import { isReaderViewOpen } from "../reader/state.js";
 
 export interface CommitUiCallbacks {
-  renderMeta(): void;
-  renderSubtitleSelect(): void;
   setStatus(message: string): void;
 }
 
 // 渲染/状态栏回调（fetcher 注入，见模块头注）。接受事务本身不渲染（历史行为：
 // loadSubtitle / fallback 的四个接受点均不调 renderMeta，渲染由调用方编排负责）；
-// 无字幕出口需要 renderMeta / renderSubtitleSelect（轨道/元信息落空态）与
+// 无字幕出口只回 reader 的 subtitle-ready 通知（renderReadingView 落空态）与
 // setStatus（skip 分支的引导文案）。
+//（digest-only-ui：经典侧栏面板的 renderMeta/renderSubtitleSelect 已随旧壳
+// 删除——无字幕出口对面板的元信息/下拉渲染改由 presenter 通知驱动。）
 let commitUi: CommitUiCallbacks | null = null;
 
-// 由 fetcher 在模块求值期注入一次（取自 subtitle/ui.js 的 renderMeta /
-// renderSubtitleSelect 与 ui-renderer 的 setStatus）。重复调用以最后一次为准
+// 由 fetcher 在模块求值期注入一次（取自 subtitle/ui.js 的 setStatus 与
+// ui-renderer 的 setStatus）。重复调用以最后一次为准
 //（测试换纪元时随 fetcher 重新求值，天然幂等）。
-export function configureCommitUi({ renderMeta, renderSubtitleSelect, setStatus }: CommitUiCallbacks) {
-  commitUi = { renderMeta, renderSubtitleSelect, setStatus };
+export function configureCommitUi({ setStatus }: CommitUiCallbacks) {
+  commitUi = { setStatus };
 }
 
 export interface AcceptSubtitleArgs {
@@ -86,8 +85,10 @@ export interface CommitNoSubtitleArgs {
 }
 
 // 无字幕出口（逆事务，applyNoSubtitleState + 两处收尾段的唯一实现）：清空选中
-// 三项 + body + 派生内容 + 预览 DOM，fetchState 落 "empty"，写 noSubtitleReason，
-// 渲染轨道/元信息，reader 开启则通知，skip 时状态栏落引导文案。与接受互为逆：
+// 三项 + body + 派生内容，fetchState 落 "empty"，写 noSubtitleReason，
+// reader 开启则通知（renderReadingView 落空态），skip 时状态栏落引导文案。
+//（digest-only-ui：经典侧栏面板的 preview DOM 与 renderMeta/renderSubtitleSelect
+// 回调已删除——无字幕出口对阅读视图的呈现收敛到 subtitle-ready 通知。）与接受互为逆：
 // 两者写齐同一组字段，任何时刻 state 不落在半事务态。
 //
 // noSubtitleReason 缺省（undefined）时保留现有值——fetcher 出口的原因已由
@@ -109,12 +110,9 @@ export async function commitNoSubtitle({ noSubtitleReason, asrResult }: CommitNo
   clipState.setMarkdown("");
   clipState.setSrt("");
   clipState.setTxt("");
-  (byId(ids.preview) as HTMLTextAreaElement).value = "";
   if (noSubtitleReason !== undefined) {
     clipState.setNoSubtitleReason(noSubtitleReason);
   }
-  commitUi.renderMeta();
-  commitUi.renderSubtitleSelect();
   if (isReaderViewOpen()) {
     notifyReaderPresenter("subtitle-ready", "当前视频无字幕。");
   }

@@ -1,10 +1,9 @@
 // digest-host 右栏定位器测试。
 //
 // 覆盖：锚点优先级命中与变量写入（贴栏占「锚点左缘 → 视口右界」整条右侧，
-// 档位宽作下限；纵向钳进一屏）、隐藏副本跳过、播放器贴右缘降级、浮层降级
-// （属性而非变量）、窄窗浮层、800ms 自查重锚、close 拆除与变量清除；
-// 面板宽度档（narrow/standard/wide → 下限 340/380/440，float 档强制浮层）
-// 映射用例。
+// 下限 380px；纵向钳进一屏）、隐藏副本跳过、播放器贴右缘降级、浮层降级
+// （属性而非变量）、窄窗浮层、800ms 自查重锚、close 拆除与变量清除。
+//（digest-only-ui：面板宽度档机制退役，贴栏宽度下限定死 380px。）
 //
 // 注意：setup.js 给 Element.prototype.getBoundingClientRect 打了「恒返回
 // 800x450」的默认补丁——不覆盖它会让锚点判定/降级分支全部走不到，测试假绿。
@@ -19,9 +18,6 @@ import { READER_MODE_URL } from "../setup.js";
 type DigestHost = typeof import("../../extension/reader/digest-host.js");
 
 let digestHost: DigestHost;
-// 档位读写走 digest-host 同一批模块实例：beforeEach 的 resetModuleState 会
-// vi.resetModules()，静态 import 的 state 是被重置前的旧实例，不能用来改档位。
-let state: typeof import("../../extension/core/state.js").state;
 
 // 右栏锚点六个选择器对应的可命中节点，按需在用例里往 body 挂。
 const ANCHOR_SELECTORS = [
@@ -90,7 +86,6 @@ function vars(el: HTMLElement): Record<string, string> {
 async function loadModules() {
   setLocationUrl(READER_MODE_URL);
   digestHost = await import("../../extension/reader/digest-host.js");
-  state = (await import("../../extension/core/state.js")).state;
 }
 
 beforeEach(() => {
@@ -159,37 +154,17 @@ describe("digest-host 锚点命中", () => {
     expect(vars(readingView()).width).toBe("400px");
   });
 
-  it.each([
-    ["narrow", 340],
-    ["standard", 380],
-    ["wide", 440]
-  ])("宽度档 %s：可填宽度不足时左缘左移补足下限 %ipx", async (mode, width) => {
+  it("可填宽度不足下限 380：左缘左移补足", async () => {
     await loadModules();
-    state.reader.setContentWidth(mode as string);
-    // 锚点左缘 1640：可填宽 1920-1640=280 < 任何档位 → 左缘左移到
-    // 1920-档位宽，宽度恒为档位下限。
+    // 锚点左缘 1640：可填宽 1920-1640=280 < 380 → 左缘左移到 1920-380=1540，
+    // 宽度恒为 380。
     mountAnchor(".right-container-inner", makeRect(1640, 80, 280, 2000));
 
     digestHost.openDigestHost();
     expect(vars(readingView())).toEqual({
-      left: `${1920 - width}px`,
+      left: "1540px",
       top: "80px",
-      width: `${width}px`,
-      height: "688px"
-    });
-  });
-
-  it("可填宽度大于档位下限：填满整条右侧，档位不影响宽度", async () => {
-    await loadModules();
-    state.reader.setContentWidth("narrow");
-    // 锚点左缘 1420：可填宽 500 > 所有档位下限 → 宽度 = 500。
-    mountAnchor(".right-container-inner", makeRect(1420, 80, 480, 2000));
-
-    digestHost.openDigestHost();
-    expect(vars(readingView())).toEqual({
-      left: "1420px",
-      top: "80px",
-      width: "500px",
+      width: "380px",
       height: "688px"
     });
   });
@@ -470,10 +445,10 @@ describe("digest-host close", () => {
     });
   });
 
-  it("float 档：锚点有效且视口够宽也强制浮层（不写变量）", async () => {
+  it("窄窗浮层 → 贴栏切换：重算后清浮层属性并写变量", async () => {
     await loadModules();
-    state.reader.setContentWidth("float");
-    mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
+    window.innerWidth = 900;
+    mountAnchor(".right-container-inner", makeRect(1640, 80, 280, 2000));
 
     digestHost.openDigestHost();
 
@@ -481,15 +456,15 @@ describe("digest-host close", () => {
     expect(el.getAttribute("data-boc-digest-float")).toBe("1");
     expect(vars(el)).toEqual({ left: "", top: "", width: "", height: "" });
 
-    // 档位切回贴栏档：重算后恢复写变量。wide 档下限 440：可填宽
-    // 1920-1520=400 < 440 → 左缘左移到 1920-440=1480，宽 440。
-    state.reader.setContentWidth("wide");
+    // 视口变宽后重算：恢复贴栏。锚点 rect 不随 innerWidth 变（左缘 1640），
+    // 可填宽 1920-1640=280 < 下限 380 → 左缘左移到 1540，宽 380。
+    window.innerWidth = 1920;
     digestHost.refreshDigestHostRect();
     expect(el.getAttribute("data-boc-digest-float")).toBe(null);
     expect(vars(el)).toEqual({
-      left: "1480px",
+      left: "1540px",
       top: "80px",
-      width: "440px",
+      width: "380px",
       height: "688px"
     });
   });

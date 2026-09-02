@@ -198,6 +198,15 @@
   gap: 10px;
 }
 
+/* 状态行（「当前进度」等）与 header 内容左右对齐（digest-only-ui）：
+ * header/tab-body 各自带 16px 水平内边距，而状态行原是撑满面板宽度的裸
+ * block（文本左缘贴面板边缘），与 header 内容不在同一垂直线上——补同款
+ * 水平边距 + 与下方 tab 控件的小间距。 */
+.boc-reading-digest-panel .boc-reading-status {
+  margin: 0 16px 8px;
+  line-height: 1.4;
+}
+
 .boc-reading-tabs {
   flex: 0 0 auto;
   display: flex;
@@ -296,28 +305,41 @@
 /* 字幕列表内置滚动条：常驻可见。B 站页面样式会把默认滚动条压成 overlay 态
  *（只在滚动瞬间闪现），显式定义 ::-webkit-scrollbar 让 Chrome 对该容器回落成
  * 经典滚动条并常驻；scrollbar-gutter 预留槽位，滚动条出现/消失不抖布局。
- * 配色走 --boc-reader-* token，三主题自动跟随。 */
+ * 配色走 --boc-reader-* token，三主题自动跟随。
+ *
+ * digest-only-ui 修复（不可见双根因）：
+ * 1. 页面侧存在作用于任意元素的 ::-webkit-scrollbar 规则（B 站全局压窄/压成
+ *    overlay），注入样式与页面同文档、同特异性时谁后声明谁生效——滚动条规则
+ *    所在 reader.css 是运行时 link 挂载，多数情况下晚于页面样式，但页面样式
+ *    若带更高优先级（如 html 上 !important 或更晚的 CSSOM 插入）仍会覆盖。
+ *    width/track/thumb 全部加 !important，让扩展容器滚动条不被页面规则改写。
+ * 2. 原 thumb 色（--boc-reader-surface-3，light 主题 #e7dfd4）与面板底色
+ *    （surface #fdfbf7）对比度过低，10px 槽里实际 6px 的可视条近乎隐形——
+ *    加深为 faint（#a39a8d），hover 再加深为 muted，三主题下都可见。 */
 .boc-reading-subtitle {
   scrollbar-gutter: stable;
+  scrollbar-width: auto;
 }
 
 .boc-reading-subtitle::-webkit-scrollbar {
-  width: 10px;
+  width: 10px !important;
 }
 
 .boc-reading-subtitle::-webkit-scrollbar-track {
-  background: transparent;
+  background: transparent !important;
 }
 
 .boc-reading-subtitle::-webkit-scrollbar-thumb {
-  background: var(--boc-reader-surface-3, #e7dfd4);
+  background: var(--boc-reader-faint, #a39a8d) !important;
   border: 2px solid transparent;
   border-radius: 999px;
   background-clip: content-box;
 }
 
 .boc-reading-subtitle::-webkit-scrollbar-thumb:hover {
-  background-color: var(--boc-reader-faint, #a39a8d);
+  background: var(--boc-reader-muted, #6f675c) !important;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 .boc-reading-chapter,
@@ -574,11 +596,6 @@
   color: var(--boc-reader-text);
 }
 
-.boc-reading-stepper-list {
-  display: grid;
-  gap: 7px;
-}
-
 /* 设置面板分组与三态开关行（窄容器适配） */
 #boc-reading-view .boc-reading-settings-group {
   display: grid;
@@ -596,58 +613,6 @@
   align-items: center;
   gap: 5px;
   min-height: 28px;
-}
-
-/* 窄容器（面板 300–460px）：标签占满一行，按钮排换行成第二行 */
-.boc-reading-stepper {
-  align-items: center;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 5px;
-}
-
-.boc-reading-stepper-title {
-  min-width: 0;
-  color: var(--boc-reader-text);
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.boc-reading-stepper-buttons {
-  display: flex;
-  border: 1px solid var(--boc-reader-border);
-  border-radius: 12px;
-  overflow: hidden;
-  background: var(--boc-reader-surface);
-}
-
-.boc-reading-stepper-btn {
-  flex: 1 1 0;
-  min-width: 0;
-  min-height: 28px;
-  border: 0;
-  border-right: 1px solid var(--boc-reader-border);
-  background: transparent;
-  color: var(--boc-reader-muted);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.18s ease, color 0.18s ease;
-}
-
-.boc-reading-stepper-btn:last-child {
-  border-right: 0;
-}
-
-.boc-reading-stepper-btn:hover {
-  background: var(--boc-reader-accent-soft);
-  color: var(--boc-reader-accent);
-}
-
-.boc-reading-stepper-btn.is-active {
-  background: var(--boc-reader-accent-soft);
-  color: var(--boc-reader-accent);
 }
 
 /* ===== PR3 字幕 tab：搜索工具条 / 转写横幅 / 跟随按钮 / 句上解释浮层 / 意图卡
@@ -1084,11 +1049,12 @@
   word-break: break-word;
 }
 
-/* ===== PR4 概览 tab：总结 / 章节 / 金句 / 笔记一节 =====
- * 视觉基准：prototype/final-概览.jpg——总结段 → 章节列表（时间戳 pill + 标题 +
+/* ===== PR4 概览 tab：章节 / 金句 / 笔记一节 =====
+ * 视觉基准：prototype/final-概览.jpg——章节列表（时间戳 pill + 标题 +
  * 小结）→ 金句卡（白底 + 左 3px accent 边 + 右下角时间戳）→ 笔记一节（预览卡 +
  * 查看完整笔记）。色值全部走 --boc-reader-* token（gate 段三主题定义），
- * 暗色主题自动跟随；时间戳 pill 复用 .boc-reading-time 母题。 */
+ * 暗色主题自动跟随；时间戳 pill 复用 .boc-reading-time 母题。
+ *（digest-only-ui：概览顶部「总结」区块已删除，直接以章节开头。） */
 .boc-reading-overview {
   flex: 1;
   min-height: 0;
@@ -1105,7 +1071,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--boc-reader-faint, #a39a8d);
@@ -1123,21 +1089,14 @@
   padding: 1px 8px;
 }
 
-.boc-reading-ov-summary {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.75;
-  color: var(--boc-reader-text, #2b2620);
-  word-break: break-word;
-}
-
 .boc-reading-ov-empty {
   font-size: 12.5px;
   line-height: 1.6;
   color: var(--boc-reader-faint, #a39a8d);
 }
 
-/* 章节列表：时间戳 pill + 标题 + 小结（点击跳播） */
+/* 章节列表：时间戳 pill + 标题 + 小结（点击跳播）。卡片底色用 surface-2 与
+ * 周边区分（digest-only-ui 决策：参考 YouTube Digest Overview 卡片式）。 */
 .boc-reading-ov-chapter {
   width: 100%;
   display: grid;
@@ -1145,9 +1104,10 @@
   gap: 10px;
   align-items: start;
   border: 0;
-  background: transparent;
+  background: var(--boc-reader-surface-2, #f0e9df);
   border-radius: 12px;
-  padding: 7px 8px;
+  padding: 9px 10px;
+  margin-bottom: 8px;
   text-align: left;
   font-family: inherit;
   color: inherit;
@@ -1155,7 +1115,7 @@
 }
 
 .boc-reading-ov-chapter:hover {
-  background: var(--boc-reader-surface-2, #f5efe6);
+  background: var(--boc-reader-surface-3, #e7dfd4);
 }
 
 .boc-reading-ov-chapter-copy {
@@ -1165,7 +1125,7 @@
 }
 
 .boc-reading-ov-chapter-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.5;
   color: var(--boc-reader-text, #2b2620);
@@ -1173,7 +1133,7 @@
 }
 
 .boc-reading-ov-chapter-desc {
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
   color: var(--boc-reader-muted, #6f675c);
   word-break: break-word;
@@ -1201,7 +1161,7 @@
 
 .boc-reading-ov-quote-text {
   display: block;
-  font-size: 12.5px;
+  font-size: 14px;
   line-height: 1.7;
   color: var(--boc-reader-text, #2b2620);
   word-break: break-word;
@@ -1279,7 +1239,7 @@
 }
 
 .boc-reading-ov-note-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--boc-reader-text, #2b2620);
   margin-bottom: 6px;
@@ -1288,7 +1248,7 @@
 
 .boc-reading-ov-note-excerpt {
   margin: 0 0 8px;
-  font-size: 12.5px;
+  font-size: 14px;
   line-height: 1.7;
   color: var(--boc-reader-muted, #6f675c);
   word-break: break-word;
@@ -1296,7 +1256,7 @@
 
 .boc-reading-ov-note-hint {
   margin: 0 0 8px;
-  font-size: 12.5px;
+  font-size: 14px;
   line-height: 1.6;
   color: var(--boc-reader-muted, #6f675c);
 }
@@ -1312,7 +1272,7 @@
   border-radius: 999px;
   padding: 6px 16px;
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -1328,7 +1288,7 @@
   border-top: 1px solid var(--boc-reader-border, #e7dfd4);
   margin-top: 10px;
   padding-top: 10px;
-  font-size: 12.5px;
+  font-size: 14px;
   line-height: 1.75;
   color: var(--boc-reader-text, #2b2620);
   word-break: break-word;
@@ -1344,7 +1304,7 @@
 .boc-reading-ov-note-full h4,
 .boc-reading-ov-note-full h5 {
   margin: 12px 0 6px;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
   color: var(--boc-reader-text, #2b2620);
 }
@@ -2242,4 +2202,674 @@
 .boc-reading-chat .sp-stop-btn:disabled {
   cursor: default;
   opacity: 0.7;
+}
+
+/* ===== 侧边栏设置面板（digest-only-ui）：原独立 options 页的设置项 =====
+ * 原 pages/options.css 随 options 页删除，其全部设置项样式按「宿主容器 +
+ * 行级构建器类」迁入本表。所有颜色/边框改走 --boc-reader-* token（gate 段
+ * 三主题定义），深色/纸色自动跟随；数字/字符统一改用当前排版基准 14px 或
+ * 控件内 13px。容器：#boc-reading-settings-panel 内嵌
+ * #boc-reading-settings-host（ui/ui-renderer 模板），其滚动链与右侧概览 tab
+ * 相同（max-height: calc(100vh - 150px) + overflow-y:auto），规则全部以
+ * #boc-reading-settings-panel 为前置，避免与宿主页面类名冲突。 */
+#boc-reading-view .boc-reading-settings-panel {
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 14px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  background: var(--boc-reader-surface, #fdfbf7);
+  padding: 12px 14px;
+}
+
+#boc-reading-view .boc-reading-settings-panel[hidden] {
+  display: none;
+}
+
+#boc-reading-view .boc-reading-settings-extension {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--boc-reader-border, #e7dfd4);
+}
+
+#boc-reading-view .boc-reading-settings-host {
+  display: grid;
+  gap: 14px;
+}
+
+#boc-reading-view .boc-reading-settings-host * {
+  box-sizing: border-box;
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-group {
+  display: grid;
+  gap: 8px;
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-h {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--boc-reader-text, #2b2620);
+  margin: 0;
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--boc-reader-faint, #a39a8d);
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-row {
+  display: grid;
+  gap: 5px;
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--boc-reader-muted, #6f675c);
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-select {
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 8px;
+  background: var(--boc-reader-card, #ffffff);
+  color: var(--boc-reader-text, #2b2620);
+  font: inherit;
+  font-size: 13px;
+  appearance: auto;
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-textarea {
+  width: 100%;
+  min-height: 66px;
+  padding: 8px 10px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 8px;
+  background: var(--boc-reader-card, #ffffff);
+  color: var(--boc-reader-text, #2b2620);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-textarea::placeholder {
+  color: var(--boc-reader-faint, #a39a8d);
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--boc-reader-text, #2b2620);
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-check input[type="checkbox"] {
+  margin: 2px 0 0;
+  accent-color: var(--boc-reader-accent, #fb7299);
+  flex: 0 0 auto;
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 6px 10px;
+}
+
+#boc-reading-view .boc-reading-settings-host .mini-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--boc-reader-text, #2b2620);
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-quick-prompts {
+  display: grid;
+  gap: 7px;
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-quick-prompts input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 8px;
+  background: var(--boc-reader-card, #ffffff);
+  color: var(--boc-reader-text, #2b2620);
+  font: inherit;
+  font-size: 13px;
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-save-btn {
+  height: 32px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--boc-reader-accent, #fb7299);
+  color: var(--boc-reader-accent-ink, #ffffff);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-save-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-status {
+  margin: 0;
+  min-height: 16px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--boc-reader-muted, #6f675c);
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-status[data-error="true"] {
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+#boc-reading-view .boc-reading-settings-host input.input-error,
+#boc-reading-view .boc-reading-settings-host select.input-error,
+#boc-reading-view .boc-reading-settings-host textarea.input-error {
+  border-color: var(--boc-reader-accent, #fb7299);
+}
+
+/* 固定属性 / 正文附加段落 / 平台 provider 行（原 options.css 行级规则，
+ * 类名未动——行构建器（options-rows / options-asr-rows / provider-row）
+ * 照旧生成；栅格缩到面板宽度能用的 4 列形态） */
+#boc-reading-view .boc-reading-settings-host .fixed-properties-list,
+#boc-reading-view .boc-reading-settings-host .note-sections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-properties-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--boc-reader-faint, #a39a8d);
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-fields,
+#boc-reading-view .boc-reading-settings-host .note-section-fields {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) 32px;
+  gap: 6px;
+  align-items: center;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-field-remove,
+#boc-reading-view .boc-reading-settings-host .note-section-field-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-remove,
+#boc-reading-view .boc-reading-settings-host .note-section-remove {
+  width: 100%;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--boc-reader-faint, #a39a8d);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-remove:hover,
+#boc-reading-view .boc-reading-settings-host .note-section-remove:hover {
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-remove svg,
+#boc-reading-view .boc-reading-settings-host .note-section-remove svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-fields input,
+#boc-reading-view .boc-reading-settings-host .fixed-property-fields select,
+#boc-reading-view .boc-reading-settings-host .note-section-fields input,
+#boc-reading-view .boc-reading-settings-host .note-section-fields select {
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 8px;
+  background: var(--boc-reader-card, #ffffff);
+  color: var(--boc-reader-text, #2b2620);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.2;
+}
+
+#boc-reading-view .boc-reading-settings-host .note-section-fields select.note-section-position,
+#boc-reading-view .boc-reading-settings-host .ai-provider-row select.ai-provider-preset,
+#boc-reading-view .boc-reading-settings-host .asr-provider-row select.asr-provider-preset {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 26px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--boc-reader-faint, #a39a8d) 50%),
+    linear-gradient(135deg, var(--boc-reader-faint, #a39a8d) 50%, transparent 50%);
+  background-position:
+    calc(100% - 12px) calc(50% - 1px),
+    calc(100% - 9px) calc(50% - 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-type-picker {
+  position: relative;
+  height: 32px;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-type-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 8px;
+  background: var(--boc-reader-card, #ffffff);
+  color: var(--boc-reader-text, #2b2620);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-type-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-type-button svg {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  stroke: var(--boc-reader-faint, #a39a8d);
+  stroke-width: 1.5;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-type-button:focus,
+#boc-reading-view .boc-reading-settings-host .fixed-property-fields input:focus,
+#boc-reading-view .boc-reading-settings-host .note-section-fields input:focus,
+#boc-reading-view .boc-reading-settings-host .note-section-fields select:focus {
+  outline: none;
+  border-color: var(--boc-reader-accent, #fb7299);
+  box-shadow: 0 0 0 2px var(--boc-reader-accent-soft, #fce0ea);
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-type-menu,
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: 260px;
+  z-index: 30;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 12px;
+  background: var(--boc-reader-card, #ffffff);
+  box-shadow: 0 10px 24px rgba(28, 25, 23, 0.12);
+  list-style: none;
+  margin: 0;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-type-option,
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-option,
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-message {
+  width: 100%;
+  min-height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  padding: 4px 10px;
+  text-align: left;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--boc-reader-text, #2b2620);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-type-option {
+  cursor: pointer;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-type-option:hover,
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-option:hover {
+  background: var(--boc-reader-surface-2, #f0e9df);
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-option[data-selected="true"] {
+  background: var(--boc-reader-accent-soft, #fce0ea);
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-loading {
+  color: var(--boc-reader-faint, #a39a8d);
+  cursor: default;
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-loading:hover {
+  background: transparent;
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-message {
+  white-space: normal;
+  cursor: default;
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-error {
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-count {
+  padding: 8px 10px 2px;
+  font-size: 11px;
+  color: var(--boc-reader-faint, #a39a8d);
+  border-top: 1px dashed var(--boc-reader-border, #e7dfd4);
+  margin-top: 4px;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-fields input::placeholder,
+#boc-reading-view .boc-reading-settings-host .note-section-fields input::placeholder {
+  color: var(--boc-reader-faint, #a39a8d);
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-value-slot {
+  width: 100%;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-error,
+#boc-reading-view .boc-reading-settings-host .note-section-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-error[hidden],
+#boc-reading-view .boc-reading-settings-host .note-section-error[hidden] {
+  display: none;
+}
+
+/* AI / ASR 平台行（原 options.css 行级栅格；侧边栏 340px 级宽度下所有字段
+ * 折成单列行，preset 下拉 + 连接测试 + 删除按钮仍在一行） */
+#boc-reading-view .boc-reading-settings-host .ai-providers-list,
+#boc-reading-view .boc-reading-settings-host .asr-providers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-providers-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--boc-reader-faint, #a39a8d);
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-row,
+#boc-reading-view .boc-reading-settings-host .asr-provider-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 10px;
+  background: var(--boc-reader-card, #ffffff);
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-row select,
+#boc-reading-view .boc-reading-settings-host .ai-provider-row input[type="text"],
+#boc-reading-view .boc-reading-settings-host .ai-provider-row input[type="password"],
+#boc-reading-view .boc-reading-settings-host .ai-provider-row input[type="number"],
+#boc-reading-view .boc-reading-settings-host .asr-provider-row select,
+#boc-reading-view .boc-reading-settings-host .asr-provider-row input[type="text"],
+#boc-reading-view .boc-reading-settings-host .asr-provider-row input[type="password"],
+#boc-reading-view .boc-reading-settings-host .asr-provider-row input[type="number"] {
+  width: 100%;
+  height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12.5px;
+  background: var(--boc-reader-card, #ffffff);
+  color: var(--boc-reader-text, #2b2620);
+  min-width: 0;
+  margin: 0;
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-row > *,
+#boc-reading-view .boc-reading-settings-host .asr-provider-row > * {
+  min-width: 0;
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-wrapper .ai-provider-model {
+  flex: 1;
+  min-width: 0;
+  padding-right: 30px !important;
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-toggle {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 24px;
+  width: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--boc-reader-faint, #a39a8d);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-toggle:hover {
+  background: var(--boc-reader-surface-2, #f0e9df);
+  color: var(--boc-reader-text, #2b2620);
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-toggle svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-row .ai-provider-test,
+#boc-reading-view .boc-reading-settings-host .asr-provider-row .asr-provider-test {
+  height: 30px;
+  width: 72px;
+  justify-self: start;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  border: 0;
+  border-radius: 999px;
+  background: var(--boc-reader-accent-soft, #fce0ea);
+  color: var(--boc-reader-accent, #fb7299);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* 测试按钮在 provider-row 模板里带 .secondary-btn 类（原 options 页样式），
+ * 面板内按行内按钮统一处理。 */
+#boc-reading-view .boc-reading-settings-host .secondary-btn {
+  background: transparent;
+  border: 0;
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-row .ai-provider-test:hover,
+#boc-reading-view .boc-reading-settings-host .asr-provider-row .asr-provider-test:hover {
+  background: var(--boc-reader-surface-3, #e7dfd4);
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-row .ai-provider-remove,
+#boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-remove {
+  width: 24px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--boc-reader-faint, #a39a8d);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-row .ai-provider-remove:hover,
+#boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-remove:hover {
+  color: var(--boc-reader-accent, #fb7299);
+  background: var(--boc-reader-accent-soft, #fce0ea);
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-row .ai-provider-remove svg,
+#boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-remove svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-status,
+#boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-status {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--boc-reader-muted, #6f675c);
+}
+
+#boc-reading-view .boc-reading-settings-host .ai-provider-status[data-error="true"],
+#boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-status[data-error="true"] {
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+#boc-reading-view .boc-reading-settings-host .asr-provider-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--boc-reader-text, #2b2620);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+#boc-reading-view .boc-reading-settings-host .asr-provider-active input[type="radio"] {
+  margin: 0;
+  accent-color: var(--boc-reader-accent, #fb7299);
+}
+
+/* ASR 平台行把「模型/平台名称」做成内联下拉/输入（asr-provider-model 复用
+ * select/input 行样式；预设切换重建时类名不变） */
+#boc-reading-view .boc-reading-settings-host .asr-provider-row .asr-provider-model,
+#boc-reading-view .boc-reading-settings-host .asr-provider-row .asr-provider-name {
+  height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 8px;
+  background: var(--boc-reader-card, #ffffff);
+  color: var(--boc-reader-text, #2b2620);
+  font: inherit;
+  font-size: 12.5px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+#boc-reading-view .boc-reading-settings-host .asr-fallback-checkbox {
+  margin-top: 4px;
+}
+
+#boc-reading-view .boc-reading-settings-host .add-property-btn {
+  justify-self: start;
+  padding: 6px 10px;
+  border: 1px dashed var(--boc-reader-border, #e7dfd4);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--boc-reader-muted, #6f675c);
+  font-size: 12.5px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+#boc-reading-view .boc-reading-settings-host .add-property-btn:hover {
+  color: var(--boc-reader-accent, #fb7299);
+  border-color: var(--boc-reader-accent, #fb7299);
+}
+
+/* 面板外部的 global document click 委托会关闭 type picker 菜单/模型下拉；
+ * 弹出层需要盖过相邻卡片，堆叠上下文内 z-index 已够，此处补一个兜底。 */
+#boc-reading-view .boc-reading-settings-host .fixed-property-type-menu[hidden],
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-dropdown[hidden] {
+  display: none;
 }

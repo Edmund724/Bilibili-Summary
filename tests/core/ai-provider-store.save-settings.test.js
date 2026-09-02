@@ -43,10 +43,10 @@ describe("saveSettings 部分保存", () => {
     expect(payload).not.toHaveProperty("enablePlayerAiQuickAction");
   });
 
-  it("readerLineHeight 存在而 readerLetterSpacing 缺失时，不写入派生的 readerLetterSpacing", async () => {
+  it("readerTheme 存在而 readerChapterVisible 缺失时，不写入缺失的 key", async () => {
     const { saveSettings } = await loadModule();
-    await saveSettings({ readerLineHeight: "relaxed" });
-    expect(extractSetPayload()).toEqual({ readerLineHeight: "relaxed" });
+    await saveSettings({ readerTheme: "dark" });
+    expect(extractSetPayload()).toEqual({ readerTheme: "dark" });
   });
 
   it("payload 含 aiSystemPrompt: undefined 时，set 收到的 payload 不含该 key", async () => {
@@ -69,14 +69,12 @@ describe("saveSettings 全量保存", () => {
     const { saveSettings } = await loadModule();
     await saveSettings({
       enablePlayerAiQuickAction: true,
-      readerLetterSpacing: "loose",
-      readerLineHeight: "wide", // 非法行高，应回落 "tight"
+      readerTheme: "neon", // 非法主题，应回落 "light"
       aiThinkingLevel: "medium" // 非法档位，应回落 "off"
     });
     const payload = extractSetPayload();
     expect(payload.enablePlayerAiQuickAction).toBe(true);
-    expect(payload.readerLetterSpacing).toBe("loose");
-    expect(payload.readerLineHeight).toBe("tight");
+    expect(payload.readerTheme).toBe("light");
     expect(payload.aiThinkingLevel).toBe("off");
   });
 });

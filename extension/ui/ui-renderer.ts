@@ -1,8 +1,5 @@
 import { state, uiState } from "../core/state.js";
 import { byId } from "../shared/dom-utils.js";
-import { setStatus, setMessage } from "../shared/ui-status.js";
-import { sendRuntimeMessage } from "../shared/messaging.js";
-import { getErrorMessage, toReadableText, isExtensionContextInvalidated } from "../shared/error-helpers.js";
 import { replaceReaderModeUrl } from "../bilibili/reader-url.js";
 import {
   isReaderMode,
@@ -31,10 +28,6 @@ import {
   resetManualScrollPause,
   isProgrammaticScrolling
 } from "../reader/state.js";
-import {
-  buildReaderStepperControl,
-  bindReaderStepperControl
-} from "../reader/presentation.js";
 // 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
 import { logWarn } from "../shared/logging.js";
 // 总结链与 reader 域的按需加载器（常驻轻文件，动态边在其内部）。
@@ -50,55 +43,8 @@ type ReaderDomain = typeof import("../reader/index.js");
 type UiReaderDomain = Awaited<ReturnType<typeof ensureReaderDomain>> & ReaderDomain;
 const loadReaderDomain = ensureReaderDomain as () => Promise<UiReaderDomain>;
 
-// 打开设置页（原 core/runtime.js 提供；因 runtime 不得依赖 ui 域，且本模块是
-// 唯一使用方，搬到此处）。成功无提示；失败按扩展上下文是否失效给出对应文案。
-function requestOpenOptions(): void {
-  sendRuntimeMessage({ type: "open-options" })
-    .then((resp) => {
-      if (!(resp as { ok?: boolean } | null)?.ok) {
-        setMessage(`打开设置失败：${toReadableText((resp as { error?: unknown } | null)?.error, "未知错误")}`);
-      }
-    })
-    .catch((error) => {
-      if (isExtensionContextInvalidated(error)) {
-        setMessage("扩展刚刚更新，请刷新当前页面后重试。");
-        return;
-      }
-      setMessage(`打开设置失败：${getErrorMessage(error)}`);
-    });
-}
-
 export function buildUiHtml(): string {
   return `
-    <aside id="${ids.panel}" aria-hidden="true">
-      <header class="boc-header">
-        <strong>Default</strong>
-        <div class="boc-header-actions">
-          <button id="${ids.settingsBtn}" type="button" title="插件设置">设置</button>
-          <button id="${ids.closeBtn}" type="button" title="关闭">关闭</button>
-        </div>
-      </header>
-
-      <p id="${ids.status}" class="boc-status">准备就绪，点击“刷新抓取”开始。</p>
-      <div class="boc-props-head">属性</div>
-      <div id="${ids.meta}" class="boc-meta"></div>
-
-      <label class="boc-label" for="${ids.subtitleSelect}">字幕语言</label>
-      <select id="${ids.subtitleSelect}" disabled>
-        <option value="">暂无字幕</option>
-      </select>
-
-      <label class="boc-label" for="${ids.preview}">字幕预览</label>
-      <textarea id="${ids.preview}" readonly></textarea>
-
-      <div class="boc-actions">
-        <button id="${ids.refreshBtn}" type="button">刷新抓取</button>
-        <button id="${ids.copyBtn}" type="button">复制完整 Markdown</button>
-        <button id="${ids.downloadBtn}" type="button">下载字幕</button>
-      </div>
-      <p id="${ids.message}" class="boc-message"></p>
-    </aside>
-
     <section id="${ids.readingView}" aria-hidden="true" data-boc-reader-ready="0" aria-busy="true">
       <!-- 统一 Digest 面板（B 形态）：右栏面板壳，三标签 = 字幕 / 概览 /
            AI 对话。rail（章节栏）与 stage（状态栏/播放器槽）已随整页接管退役
@@ -130,32 +76,6 @@ export function buildUiHtml(): string {
 
             <section id="${ids.readingSettingsPanel}" class="boc-reading-panel boc-reading-settings-panel" hidden>
               <section class="boc-reading-settings-group">
-                <div class="boc-reading-eyebrow">排版</div>
-                <div class="boc-reading-stepper-list">
-                  ${buildReaderStepperControl({
-                    id: ids.readingFontScaleSelect,
-                    title: "字号",
-                    settingKey: "readerFontScale"
-                  })}
-                  ${buildReaderStepperControl({
-                    id: ids.readingLetterSpacingSelect,
-                    title: "字间距",
-                    settingKey: "readerLetterSpacing"
-                  })}
-                  ${buildReaderStepperControl({
-                    id: ids.readingLineHeightSelect,
-                    title: "行间距",
-                    settingKey: "readerLineHeight"
-                  })}
-                  ${buildReaderStepperControl({
-                    id: ids.readingContentWidthSelect,
-                    title: "面板宽度",
-                    settingKey: "readerContentWidth"
-                  })}
-                </div>
-              </section>
-
-              <section class="boc-reading-settings-group">
                 <div class="boc-reading-controls">
                   <label class="boc-reading-toggle boc-reading-toggle-inline">
                     <input id="${ids.readingAutoScroll}" type="checkbox" checked />
@@ -179,14 +99,11 @@ export function buildUiHtml(): string {
                 </div>
               </section>
 
-              <section class="boc-reading-settings-group boc-reading-info-group">
-                <div class="boc-reading-eyebrow">视频摘要</div>
-                <div id="${ids.readingInfoSummary}" class="boc-reading-info-list"></div>
-              </section>
-              <section class="boc-reading-settings-group boc-reading-info-group">
-                <div class="boc-reading-eyebrow">视频简介</div>
-                <div id="${ids.readingInfoDescription}" class="boc-reading-info-copy"></div>
-                <button id="${ids.readingDescriptionBtn}" type="button" class="boc-reading-text-btn">展开简介</button>
+              <!-- 扩展设置宿主（digest-only-ui）：原独立 options 页的全部设置项
+                   由 ui/settings-panel.js 渲染进此容器（分节、可滚动），options
+                   页面本体已删除。 -->
+              <section class="boc-reading-settings-group boc-reading-settings-extension">
+                <div id="${ids.readingSettingsHost}" class="boc-reading-settings-host"></div>
               </section>
             </section>
 
@@ -268,7 +185,7 @@ export function buildUiHtml(): string {
               <div id="${ids.readingOverviewBody}" class="boc-reading-overview">
                 <div class="boc-reading-placeholder">
                   <div class="boc-reading-placeholder-title">概览还未生成</div>
-                  <p class="boc-reading-placeholder-copy">切到概览标签页会自动开始生成全片总结、章节与金句。</p>
+                  <p class="boc-reading-placeholder-copy">切到概览标签页会自动开始生成章节与金句。</p>
                 </div>
               </div>
             </div>
@@ -412,25 +329,26 @@ export function activateReaderChatTab(): void {
     .catch((error) => logWarn("[BOC] chat tab activate failed", error));
 }
 
+// digest-only-ui：打开侧边栏设置抽屉（展开 + 渲染）。原「打开设置页」入口
+//（open-options 消息/options 页）已删除，header 齿轮、对话 tab 设置按钮与
+// 提示条「前往设置」都收敛到本函数；reader 域（lifecycle.renderReaderPanels）
+// 在抽屉打开时装载设置面板。
+export function openReaderSettingsPanel(): void {
+  state.reader.setSettingsExpanded(true);
+  loadReaderDomain()
+    .then((reader) => reader.renderReaderPanels())
+    .catch((error) => logWarn("[BOC] reader panels render failed", error));
+}
+
 export function bindUiEvents(): void {
-  const panel = byId(ids.panel);
-  const closeBtn = byId(ids.closeBtn);
-  const refreshBtn = byId(ids.refreshBtn);
-  const select = byId(ids.subtitleSelect);
-  const copyBtn = byId(ids.copyBtn);
-  const downloadBtn = byId(ids.downloadBtn);
-  const settingsBtn = byId(ids.settingsBtn);
+  // digest-only-ui：A 形态经典侧栏面板已删除，模板不再包含旧壳节点
+  //（boc-panel/boc-status/boc-preview 等）；面板交互只有阅读视图（Digest）。
   const readingView = byId(ids.readingView);
   const readingCloseBtn = byId(ids.readingCloseBtn);
   const readingAutoScroll = byId(ids.readingAutoScroll);
   const readingSubtitleVisible = byId(ids.readingSubtitleVisible);
   const readingThemeSelect = byId(ids.readingThemeSelect);
   const readingSettingsToggleBtn = byId(ids.readingSettingsBtn);
-  const readingFontScaleSelect = byId(ids.readingFontScaleSelect);
-  const readingLetterSpacingSelect = byId(ids.readingLetterSpacingSelect);
-  const readingLineHeightSelect = byId(ids.readingLineHeightSelect);
-  const readingContentWidthSelect = byId(ids.readingContentWidthSelect);
-  const readingDescriptionBtn = byId(ids.readingDescriptionBtn);
   // rail 章节列表 DOM 已随整页接管退役（章节跳转/手动滚动接管由概览
   // tab 的列表承接，见 readingOverviewBody 的委托）。
   const subtitleList = byId(ids.readingSubtitleList);
@@ -455,31 +373,10 @@ export function bindUiEvents(): void {
     });
   }
 
-  closeBtn.addEventListener("click", () => panel.classList.remove("open"));
-  // ===== 总结链按钮回调（候选02）：refreshClip/onSubtitleChange/copyMarkdown/
-  // downloadSubtitle 属链层，点击时经 ensureSummarizeChain 装载后调用（首次
-  // 点击多一次本地动态 import ~10ms；promise 缓存后为直取）。
-  refreshBtn.addEventListener("click", () => {
-    ensureSummarizeChain()
-      .then((chain) => chain.refreshClip())
-      .catch((error) => logWarn("[BOC] refresh clip failed", error));
-  });
-  select.addEventListener("change", (event) => {
-    ensureSummarizeChain()
-      .then((chain) => chain.onSubtitleChange(event))
-      .catch((error) => logWarn("[BOC] subtitle change failed", error));
-  });
-  copyBtn.addEventListener("click", () => {
-    ensureSummarizeChain()
-      .then((chain) => chain.copyMarkdown())
-      .catch((error) => logWarn("[BOC] copy markdown failed", error));
-  });
-  downloadBtn.addEventListener("click", () => {
-    ensureSummarizeChain()
-      .then((chain) => chain.downloadSubtitle())
-      .catch((error) => logWarn("[BOC] download subtitle failed", error));
-  });
-  settingsBtn.addEventListener("click", requestOpenOptions);
+  // digest-only-ui：经典侧栏面板的按钮绑定（close/refresh/select/copy/
+  // download/settings）已随 A 形态模板删除；刷新/复制/导出等动作由字幕 tab
+  // 工具条与面板 header 的动作按钮承接，绑定见各自 id（readingRefreshBtn 等
+  // 历史 id 已从模板移除，阅读视图的刷新链路改经字幕工具条/转写横幅触发）。
   // ===== 阅读视图交互回调（候选02）：closeReadingView/sync/click 等属 reader
   // 重域，交互时经 ensureReaderDomain 装载后调用（视图开着 ⇒ 域几乎必然已装载
   // ，ensure 命中缓存 promise）。
@@ -547,16 +444,23 @@ export function bindUiEvents(): void {
       .then((reader) => reader.renderReaderPanels())
       .catch((error) => logWarn("[BOC] reader panels render failed", error));
   });
-  readingDescriptionBtn.addEventListener("click", () => {
-    state.reader.setDescriptionExpanded(!state.reader.readingDescriptionExpanded);
-    loadReaderDomain()
-      .then((reader) => reader.renderReadingInfoPanel())
-      .catch((error) => logWarn("[BOC] reader info panel render failed", error));
-  });
-  bindReaderStepperControl(readingFontScaleSelect, "readerFontScale");
-  bindReaderStepperControl(readingLetterSpacingSelect, "readerLetterSpacing");
-  bindReaderStepperControl(readingLineHeightSelect, "readerLineHeight");
-  bindReaderStepperControl(readingContentWidthSelect, "readerContentWidth");
+
+  // digest-only-ui：对话 tab 设置入口与无平台提示的「前往设置」都打开侧边栏
+  // 设置抽屉（原 open-options 消息/独立设置页已删除）——展开面板并渲染。
+  // 两处节点都非必存在：readingChatSettingsBtn 在 buildUiHtml 模板内，但测试
+  // 骨架常只挂字幕 tab 节点；readingChatOpenSettings 更是对话 tab 按态重建的
+  // 链接（缺失时跳过，由 chat-tab 的 onOpenSettings 回调兜底）。
+  const chatSettingsBtn = document.getElementById(ids.readingChatSettingsBtn);
+  if (chatSettingsBtn) {
+    chatSettingsBtn.addEventListener("click", openReaderSettingsPanel);
+  }
+  const chatOpenSettingsLink = document.getElementById(ids.readingChatOpenSettings);
+  if (chatOpenSettingsLink) {
+    chatOpenSettingsLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      openReaderSettingsPanel();
+    });
+  }
 
   const readingSubtitleSelect = byId(ids.readingSubtitleSelect);
   readingSubtitleSelect.addEventListener("change", (event) => {
@@ -622,8 +526,7 @@ export function bindUiEvents(): void {
 
   // ===== PR3 字幕 tab：复制 / 导出（纯接线，逻辑在总结链） =====
   // 复制 = 字幕纯文本（copySubtitleTranscript，buildTxt 管线，transcript 语义）；
-  // 导出 = SRT/TXT（downloadSubtitle，按 downloadFormat 设置）。接线方式与
-  // 面板 copyBtn/downloadBtn 同款（ensureSummarizeChain 装载后调用）。
+  // 导出 = SRT/TXT（downloadSubtitle，按 downloadFormat 设置）。
   byId(ids.readingCopySubtitleBtn).addEventListener("click", () => {
     ensureSummarizeChain()
       .then((chain) => chain.copySubtitleTranscript())
@@ -839,26 +742,14 @@ export function ensureUiReady({ forceRecreate = false }: { forceRecreate?: boole
     bindUiEvents();
     uiState.setEventsBound(true);
   }
-  // 壳构建前可能已通过 shared/ui-status.js 写入状态，把当前 state 同步到新创建的
-  // 状态栏/消息节点，避免首开面板时文案丢失。
-  const statusNode = document.getElementById(ids.status);
-  if (statusNode) {
-    statusNode.textContent = state.ui.statusText;
-  }
-  const messageNode = document.getElementById(ids.message);
-  if (messageNode) {
-    messageNode.textContent = state.ui.messageText;
-  }
 }
 
-export function setBusyState(disabled: boolean): void {
-  (byId(ids.copyBtn) as HTMLButtonElement).disabled = disabled;
-  (byId(ids.downloadBtn) as HTMLButtonElement).disabled = disabled;
-  (byId(ids.refreshBtn) as HTMLButtonElement).disabled = disabled;
-  (byId(ids.settingsBtn) as HTMLButtonElement).disabled = disabled;
-  (byId(ids.subtitleSelect) as HTMLSelectElement).disabled = disabled || state.clip.subtitles.length === 0;
+export function setBusyState(): void {
+  // digest-only-ui：经典侧栏面板按钮已删除（见 buildUiHtml），字幕 tab 的
+  // 复制/导出按钮忙态由字幕工具条自己的渲染逻辑驱动，不再有全局忙态开关。
 }
 
-// renderMeta / renderSubtitleSelect 已移往 subtitle/ui.js（候选02 分层惰性）。
-// setStatus / setMessage 已迁往 ../shared/ui-status.js（候选03 常驻瘦身），本模块
-// 只消费它们，不再自行实现。
+// renderMeta / renderSubtitleSelect / setBusyState 已随经典侧栏面板删除
+//（digest-only-ui：阅读视图的元信息/字幕轨由 reader 域渲染，复制/导出由字幕
+// tab 工具条接线）；setStatus / setMessage 已迁往 ../shared/ui-status.js，宿主
+// 收敛到 #boc-reading-status。

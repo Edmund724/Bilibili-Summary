@@ -52,15 +52,9 @@ let commitUiMocks;
 beforeEach(() => {
   resetModuleState();
   document.body.innerHTML = "";
-  // commitNoSubtitle（真实代码）通过 byId("boc-preview") 清预览 DOM，需该节点
-  const preview = document.createElement("textarea");
-  preview.id = "boc-preview";
-  document.body.appendChild(preview);
 
-  // 与生产一致：fetcher 在模块求值期注入的渲染/状态栏回调，这里注入 vi.fn
+  // 与生产一致：fetcher 在模块求值期注入的状态栏回调，这里注入 vi.fn
   commitUiMocks = {
-    renderMeta: vi.fn(),
-    renderSubtitleSelect: vi.fn(),
     setStatus: vi.fn()
   };
   configureCommitUi(commitUiMocks);
@@ -180,7 +174,7 @@ describe("acceptSubtitle：字幕接受事务", () => {
 });
 
 describe("commitNoSubtitle：无字幕出口（逆事务）", () => {
-  it("清空完整性：selected 三项/body/派生内容/preview DOM 全清，fetchState=empty，渲染回调触发", async () => {
+  it("清空完整性：selected 三项/body/派生内容全清，fetchState=empty，subtitle-ready 通知触发", async () => {
     // 预放脏状态：与接受后的 state 互为镜像
     clipState.setSelectedSubtitleId("track-1");
     clipState.setSelectedSubtitleUrl("https://example.com/sub.json");
@@ -191,9 +185,9 @@ describe("commitNoSubtitle：无字幕出口（逆事务）", () => {
     clipState.setMarkdown("# 笔记");
     clipState.setSrt("1\n00:00:00,000 --> 00:00:01,000 你好");
     clipState.setTxt("你好");
-    document.getElementById("boc-preview").value = "预览文本";
     clipState.setNoSubtitleReason("asr-empty");
 
+    state.reader.setViewOpen(true);
     await commitNoSubtitle({ asrResult: "empty" });
 
     expect(state.clip.selectedSubtitleId).toBe("");
@@ -205,12 +199,10 @@ describe("commitNoSubtitle：无字幕出口（逆事务）", () => {
     expect(state.clip.markdown).toBe("");
     expect(state.clip.srt).toBe("");
     expect(state.clip.txt).toBe("");
-    expect(document.getElementById("boc-preview").value).toBe("");
     // 原因未显式传参：保留 maybeRunAsrFallback 终态分支写入的值，不覆盖
     expect(clipState.noSubtitleReason).toBe("asr-empty");
-    // 轨道/元信息落空态的渲染由注入回调完成
-    expect(commitUiMocks.renderMeta).toHaveBeenCalledTimes(1);
-    expect(commitUiMocks.renderSubtitleSelect).toHaveBeenCalledTimes(1);
+    // 阅读视图的落空态渲染由 subtitle-ready 通知驱动（renderReadingView）
+    expect(notifyReaderPresenter).toHaveBeenCalledWith("subtitle-ready", "当前视频无字幕。");
   });
 
   it("noSubtitleReason：显式传参写入（含 null 清空），undefined 保留现有值", async () => {

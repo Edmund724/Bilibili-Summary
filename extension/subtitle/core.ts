@@ -4,7 +4,6 @@ import { logWarn } from "../shared/logging.js";
 import { fetchHotComments } from "../bilibili/gateway.js";
 import { normalizeChapters } from "./selection.js";
 import {
-  buildSubtitlePreview,
   buildMarkdown,
   buildSrt,
   buildTxt
@@ -154,11 +153,6 @@ export function rebuildDerivedContent(): void {
   clipState.setMarkdown(body.length ? buildMarkdown(state as State, body, state.settings) : "");
   clipState.setSrt(body.length ? buildSrt(body) : "");
   clipState.setTxt(body.length ? buildTxt(body, state.settings) : "");
-  const previewNode = document.getElementById("boc-preview") as HTMLTextAreaElement | null;
-  if (!previewNode) {
-    throw new Error(`Missing node: boc-preview`);
-  }
-  previewNode.value = body.length ? buildSubtitlePreview(body, state.settings) : "";
 }
 
 // 原 extension/notes/build.js 的 refreshDerivedContent，浅模块合并后内联于此。

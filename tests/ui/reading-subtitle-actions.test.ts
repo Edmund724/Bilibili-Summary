@@ -2,8 +2,8 @@
 //
 // 语义：复制 = 字幕纯文本（transcript，buildTxt 管线，copySubtitleTranscript）；
 // 导出 = SRT/TXT（downloadSubtitle，按 downloadFormat 设置，默认 srt）。
-// 逻辑全部在总结链（subtitle/ui.js），按钮经 ensureSummarizeChain 装载后调用
-// （与面板 copyBtn/downloadBtn 同款接线），反馈走 setMessage（ids.message 节点）。
+// 逻辑全部在总结链（subtitle/ui.js），按钮经 ensureSummarizeChain 装载后调用，
+// 反馈走 setMessage（digest-only-ui：宿主收敛到 #boc-reading-status）。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
@@ -34,8 +34,9 @@ function dispatchClick(elementId: string) {
   );
 }
 
+// digest-only-ui：A 形态 message 节点已删除，反馈收敛到 #boc-reading-status
 function messageText(): string {
-  return (document.getElementById(ids.message) as HTMLElement).textContent || "";
+  return (document.getElementById(ids.readingStatus) as HTMLElement).textContent || "";
 }
 
 function seedSubtitleBody() {
