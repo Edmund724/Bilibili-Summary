@@ -1,4 +1,6 @@
-# Bilibili-Summary｜一键总结B站视频
+# Bilibili-Summary｜一键总结 B 站视频
+
+> UI 设计参考了 [YouTube Digest](https://github.com/zarazhangrui/youtube-digest)。
 
 > **本仓库说明**：本仓库（Bilibili-Summary）是在上游源仓库 [haixiong1997/Bilibili-Obsidian-Clipper](https://github.com/haixiong1997/Bilibili-Obsidian-Clipper) 的基础上由本人进行二次修改（fork）的版本，保留了上游的 MIT License 与版权归属。
 
@@ -38,6 +40,108 @@
 
 ![Bilibili-Summary AI 侧边栏演示](docs/images/ai-sidebar-demo.png)
 
+## 让你的编程 Agent 帮你安装
+
+你不需要看懂代码，也不需要会使用命令行。把下面这段话发送给你的编程 Agent：
+
+> 请把这个项目下载或克隆到我选择的长期保留文件夹，告诉我准确的完整路径，并让 Chrome"加载已解压的扩展程序"使用同一个文件夹。如果我在第一次安装时需要位置建议，可以推荐 macOS 或 Linux 上的 `~/Documents/bilibili-summary`，或 Windows 上的 `%USERPROFILE%\Documents\bilibili-summary`，但不要假设我一定使用这些路径。请用简单易懂的语言一步一步指导我完成安装和配置。https://github.com/Edmund724/Bilibili-Summary
+
+你的 Agent 应该帮你：
+
+1. 先询问你想把项目长期保存在哪里，再下载或克隆到那里，并告诉你准确的完整路径。如果你需要建议，可以推荐 macOS 或 Linux 上的 `~/Documents/bilibili-summary`，或 Windows 上的 `%USERPROFILE%\Documents\bilibili-summary`。
+2. 打开下方硅基流动和 ModelScope 官方页面，指导你创建自己的账号。
+3. 指导你在 Chrome 中通过"加载已解压的扩展程序"选择你刚才确定的那个准确项目文件夹。
+4. 告诉你应该在扩展的"设置"页面哪个位置填写 API Key。
+5. 打开一个有字幕的 B 站视频，确认字幕、阅读视图和 AI 对话功能可以使用。
+
+安装后请让这个文件夹留在原位。如果移动或删除它，Chrome 中加载的本地扩展会失效，需要从新的长期存放位置重新加载。
+
+不要把 API Key 发送到 AI 对话、源代码、截图或公开消息中。请你自己在 Bilibili Summary 的设置页面直接填写。编程 Agent 可以告诉你填写位置，但不需要看到 Key。
+
+## 手动安装
+
+如果你想自己操作：
+
+1. 打开 [github.com/Edmund724/Bilibili-Summary](https://github.com/Edmund724/Bilibili-Summary)。
+2. 点击 **Code**，再选择 **Download ZIP**。
+3. 选择一个长期保留的文件夹，并把项目解压到这里。可选建议是 macOS 或 Linux 上的 `~/Documents/bilibili-summary`，或 Windows 上的 `%USERPROFILE%\Documents\bilibili-summary`。你也可以使用其他文件夹。
+4. 在 Chrome 地址栏打开 `chrome://extensions`。
+5. 打开右上角的"开发者模式"。
+6. 点击"加载已解压的扩展程序"。
+7. 选择你刚才确定的那个准确项目文件夹，其中必须包含 `manifest.json`。
+8. 如果需要，可以在 Chrome 扩展菜单中固定 Bilibili Summary。
+
+这是一个本地加载的扩展，不会自动更新。下载新版或让 Agent 修改代码后，请在 `chrome://extensions` 中找到 Bilibili Summary 并点击"重新加载"，然后刷新已经打开的 B 站页面。如果移动或删除源代码文件夹，Chrome 中加载的扩展会失效，需要从新的位置重新加载。
+
+## 设置 API Key
+
+Bilibili-Summary 需要你在自己的服务账号中准备两个 Key：
+
+1. **硅基流动 API Key**，用于无字幕视频的语音转写。
+2. **ModelScope API Key**，用于 AI 总结和对话。
+
+### 获取硅基流动 API Key
+
+1. 打开硅基流动官方[注册页面](https://siliconflow.cn/)。
+2. 创建账号并登录。
+3. 在控制台中找到 API Key 管理页，创建一个新的 API Key。
+4. 复制 Key，并粘贴到 Bilibili Summary 设置中的 **硅基流动 API Key**。
+
+如果页面流程发生变化，请查看 [硅基流动官方文档](https://docs.siliconflow.cn/)。
+
+### 获取 ModelScope API Key
+
+1. 打开 ModelScope 官方[注册/登录页面](https://modelscope.cn/)。
+2. 创建账号或登录。ModelScope 提供每日签到机制，每日访问官网并登录即可完成签到，获取免费积分；积分可直接用于 AI 总结和对话，无需额外付费。
+3. 在用户页或 API 管理页中创建 SDK Token（格式通常为 `ms-` 开头）。
+4. 复制 Token，并粘贴到 Bilibili Summary 设置中的 **ModelScope API Key**。
+5. 如果 ModelScope 提示积分不足，请在 ModelScope 官网完成当日签到，或检查账号额度与限速。
+
+当前账号和接口说明请查看 [ModelScope 官方 API 文档](https://modelscope.cn/docs/intro/model-service)。
+
+在侧边栏中打开 **Settings**。你也可以在 `chrome://extensions` 的 Bilibili Summary 卡片中打开扩展选项。Key 只能粘贴到这些设置输入框中。不要把 Key 发送到 AI 对话、项目文件、截图或公开消息中。
+
+发布版本推荐使用 ModelScope：
+
+```text
+Base URL: https://api-inference.modelscope.cn/v1
+Model: deepseek-ai/DeepSeek-V3.1 或其他 ModelScope 可用模型
+```
+
+Bilibili Summary 不会锁定模型，你可以在设置中自由切换。如果 ModelScope 积分不足或希望使用其他服务，也可以在「AI 模型平台」中添加其他平台。关于 ModelScope 每日签到免费积分和语音转写额度，请查看下方「免费额度与成本」章节。
+
+API Key 和设置保存在你设备上的 Chrome 扩展本地存储中。发布包不会包含或使用 `config.js`。
+
+## 使用方式
+
+1. 打开一个带有字幕的 B 站视频页面。
+2. 点击 Bilibili Summary 扩展图标，打开侧边栏。
+3. 阅读带时间戳的字幕。
+4. 打开 **AI 模式**，查看 AI 生成的视频摘要，或围绕字幕内容进行多轮对话。
+5. 选中字幕，获取 AI 内容讲解或保存带时间戳的笔记。
+6. 从播放器或重点引用中保存笔记，之后可以在侧边栏中查看。
+
+## 当前支持范围
+
+- Chrome 116 或更高版本。
+- 标准的 `bilibili.com/video` 视频页面。
+- B 站原生字幕。Bilibili Summary 会优先请求中文字幕，也可能显示其他可用的原生语言。
+- AI 总结、选中文本讲解、翻译和自动润色笔记。
+- 本地笔记，以及最近字幕、概览和翻译的本地缓存。
+- 无字幕视频的语音识别回退（硅基流动 / 本地 Whisper）。
+
+稍后再看页面的阅读视图体验尚不完善，但 AI 侧边栏和播放器快捷按钮已经支持。Shorts、直播、私密视频、受访问限制的视频，以及没有原生字幕的视频可能无法使用。目前没有测试 Firefox、Safari、移动浏览器或其他 Chromium 浏览器。
+
+## 免费额度与成本
+
+### 硅基流动
+
+硅基流动提供免费语音转写额度，无字幕视频的音频转写通常不收费或仅收取极低费用。使用前请查看 [硅基流动定价页面](https://siliconflow.cn/pricing) 确认最新规则。
+
+### ModelScope
+
+截至文档更新时间，ModelScope 提供每日签到免费积分，注册账号并每日访问官网登录即可完成签到。积分可用于调用模型进行 AI 总结和对话。如果积分不足，请在 ModelScope 官网完成当日签到。ModelScope 与硅基流动的额度分开计算。Bilibili Summary 不收款，也不转售 API 服务。建议为账号设置消费上限并定期查看用量。
+
 ## AI 配置与平台支持
 
 首次使用 AI 功能前，需要在扩展设置页中配置 AI 模型平台：
@@ -75,6 +179,27 @@
 
 如果没有您使用的平台，可选择「自定义」预设，手动填写该平台的 API Base URL（需兼容 OpenAI 协议）即可。
 
+## 项目结构
+
+```
+extension/
+├── manifest.json          # 扩展清单
+├── entry/                 # 入口（background、content、offscreen）
+├── ai/                    # AI 客户端、SSE 流式解析、播放器 AI 按钮
+├── asr/                   # 语音识别（音频分片、转写、WAV 编码）
+├── bilibili/              # B 站 API 网关与视频 ID 解析
+├── core/                  # 核心状态、运行时、消息处理
+├── notes/                 # 笔记/导出渲染（Markdown、SRT、TXT）
+├── subtitle/              # 字幕抓取、缓存与处理
+├── reader/                # 阅读视图（生命周期/同步/布局）
+├── ui/                    # UI 渲染（面板、Markdown、时间戳导航）
+├── shared/                # 跨模块工具（DOM、日志、字符串处理等）
+├── pages/                 # popup / sidepanel / options 页面
+└── icons/                 # 扩展图标
+```
+
+> `extension/entry/content-bootstrap.iife.js`、`entry/content-main.mjs` 与 `entry/chunks/` 是构建产物，由 `npm run build` 生成（content 部分由 scripts/build-content.js 产出），已加入 `.gitignore`，请勿手动编辑。
+
 ## 安装方式
 
 > 仅支持 Chrome / Edge 等 Chromium 浏览器（依赖 sidePanel、offscreen 等 Chrome 专属 API），不支持 Firefox。
@@ -106,39 +231,9 @@ npm run build:release  # 生成 Chrome 打包到 release/（zip 不含 sourcemap
 3. 开启"开发者模式"
 4. 点击"加载已解压的扩展程序"，选择解压后的文件夹
 
-## 项目结构
+## 用编程 Agent 改造成自己的版本
 
-```
-extension/
-├── manifest.json          # 扩展清单
-├── entry/                 # 入口（background、content、offscreen）
-├── ai/                    # AI 客户端、SSE 流式解析、播放器 AI 按钮
-├── asr/                   # 语音识别（音频分片、转写、WAV 编码）
-├── bilibili/              # B 站 API 网关与视频 ID 解析
-├── core/                  # 核心状态、运行时、消息处理
-├── notes/                 # 笔记/导出渲染（Markdown、SRT、TXT）
-├── subtitle/              # 字幕抓取、缓存与处理
-├── reader/                # 阅读视图（生命周期/同步/布局）
-├── ui/                    # UI 渲染（面板、Markdown、时间戳导航）
-├── shared/                # 跨模块工具（DOM、日志、字符串处理等）
-├── pages/                 # popup / sidepanel / options 页面
-└── icons/                 # 扩展图标
-```
-
-> `extension/entry/content-bootstrap.iife.js`、`entry/content-main.mjs` 与 `entry/chunks/` 是构建产物，由 `npm run build` 生成（content 部分由 scripts/build-content.js 产出），已加入 `.gitignore`，请勿手动编辑。
-
-## 使用方式
-
-1. 打开任意 B 站视频页并点击扩展图标
-2. 面板会自动抓取并展示字幕
-3. 按需使用：
-   - **字幕模式**：复制 Markdown / 下载字幕文件
-   - **AI 模式**：在侧边栏中针对字幕内容进行多轮对话，或通过播放器内的 AI 按钮一键生成视频摘要
-   - **阅读视图**：在沉浸式布局中浏览字幕，支持排版调整与主题切换
-
-## 用自己的 Agent 二次修改
-
-这个项目是开源浏览器扩展，您可以下载源码，让自己的 AI 编程 Agent 按个人工作流修改功能。
+这是一个开源浏览器扩展，您可以下载源码，让自己的 AI 编程 Agent 按个人工作流修改功能。
 
 推荐步骤：
 
@@ -153,9 +248,33 @@ extension/
 
 建议先在本地测试确认无误，再替换日常使用的扩展版本。修改源码前也建议保留一份原始版本，方便出现问题时回退。
 
-## 隐私说明
+您可以尝试：
 
-字幕抓取与 AI 对话均通过你自己的浏览器请求对应接口，不经过任何第三方中转服务器。开启「无字幕视频语音识别回退」后，无字幕视频的音频会发送到你自行配置并选用的语音识别平台进行转写，具体发送哪些数据以该平台的服务条款为准。内置的「本地 Whisper」预设连接的是本机自部署的转写服务，音频数据不出本机；不开启语音识别回退时，本工具不会抓取或上传任何音频。
+- 调整 AI 总结视频的提示词和预期输出格式
+- 新增一个自定义的总结命令或快捷方式
+- 修改视频总结的触发方式（例如自动总结、播放器内快捷按钮或侧边栏手动触发）
+- 增加更多翻译语言或自定义总结模板
+- 增加生词本，保存单词、原句、解释和视频时间戳
+- 把笔记和生词导出到 Markdown、CSV、Anki 或其他学习工具
+- 增加个人主题筛选，只突出与你目标相关的章节
+- 增加本地模型选项，获得不同的隐私和成本方案
+- 改善键盘操作、字体大小和高对比度等无障碍体验
+
+请让 Agent 保留用户自带 API Key 的模式，不要把秘密写入源代码，并运行下方检查。分享自己的版本前，也要在真实视频上测试。
+
+如果想使用其他 AI 服务或模型，请先在编程 Agent 中打开 Chrome 通过"加载已解压的扩展程序"使用的那个准确的 Bilibili Summary 项目文件夹。然后打开 Bilibili Summary 设置并点击 **Copy customization prompt**。发送前替换 `[PROVIDER]` 和 `[MODEL]`，但不要加入任何 API Key。Agent 完成本地代码修改后，请你自己在它指出的设置位置填写 Key。
+
+## 隐私和数据流向
+
+Bilibili Summary 会直接从扩展向服务商发送请求：
+
+1. 从 B 站获取原生字幕数据。
+2. 当你使用 AI 功能时，把字幕和相关视频信息发送给 ModelScope 或其他自行配置的 AI 平台。
+3. 翻译或讲解等功能只发送当前需要的内容，例如选中的文本和上下文，或少量字幕分段。
+4. 开启「无字幕视频语音识别回退」后，无字幕视频的音频会发送到你自行配置并选用的语音识别平台（如硅基流动）进行转写，具体发送哪些数据以该平台的服务条款为准。内置的「本地 Whisper」预设连接的是本机自部署的转写服务，音频数据不出本机；不开启语音识别回退时，本工具不会抓取或上传任何音频。
+5. API Key、设置、笔记和最近缓存保存在 Chrome 本地。
+
+Bilibili Summary 没有账号系统、广告、分析统计或行为追踪。硅基流动和 ModelScope 仍会按照各自的条款和隐私政策处理数据。详情请查看 [PRIVACY.md](PRIVACY.md)。
 
 ## 常见问题
 
@@ -183,6 +302,30 @@ extension/
 ### 稍后再看页面和普通视频页有什么区别？
 
 普通视频页的字幕抓取、阅读视图、AI 侧边栏和播放器 AI 按钮均已适配；稍后再看页面的阅读视图体验尚不完善，但 AI 侧边栏和播放器快捷按钮已经支持。
+
+### ModelScope 提示积分不足怎么办？
+
+请在 ModelScope 官网完成当日签到以获取免费积分。如果已签到但仍提示不足，请检查 ModelScope 账号的额度与限速状态，或稍后再试。
+
+### 硅基流动转写失败怎么办？
+
+请检查硅基流动 API Key 是否有效，以及网络环境是否能访问 `api.siliconflow.cn`。如果仍失败，可以尝试切换为其他可用的语音识别平台，或在设置中关闭「无字幕自动语音识别」。
+
+## 给编程 Agent 的检查命令
+
+修改项目后，让你的编程 Agent 运行：
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+Agent 还应该在 Chrome 中重新加载扩展，并测试多个真实 B 站视频。自动检查通过，不代表真实服务请求和 B 站交互一定正常。
+
+## 开源许可
+
+MIT，详见 [LICENSE](LICENSE)。
 
 ## 视频教程
 
