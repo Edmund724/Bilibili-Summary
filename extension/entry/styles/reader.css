@@ -2802,6 +2802,12 @@
   padding: 4px 8px;
 }
 
+/* ASR 模型名下拉（内联字段，占满所在栅格） */
+.asr-provider-row .asr-model-wrapper {
+  width: 100%;
+  min-width: 0;
+}
+
 .custom-select-dropdown {
   position: absolute;
   top: calc(100% + 6px);

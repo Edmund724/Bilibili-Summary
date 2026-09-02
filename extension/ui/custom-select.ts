@@ -42,7 +42,7 @@ export function initCustomSelect(select: HTMLSelectElement, wrapperClass = "cust
     dropdown.appendChild(li);
   });
 
-  select.parentNode.insertBefore(wrapper, select);
+  select.parentElement!.insertBefore(wrapper, select);
   wrapper.appendChild(select);
   select.classList.add("custom-select-hidden");
   wrapper.appendChild(trigger);
@@ -57,14 +57,14 @@ export function initCustomSelect(select: HTMLSelectElement, wrapperClass = "cust
   });
 
   dropdown.addEventListener("click", (e) => {
-    const option = (e.target as HTMLElement).closest(".custom-select-option");
+    const option = (e.target as HTMLElement).closest<HTMLElement>(".custom-select-option");
     if (!option) return;
     e.stopPropagation();
     const value = option.dataset.value;
     if (value === undefined) return;
     select.value = value;
     valueSpan.textContent = option.textContent || "";
-    dropdown.querySelectorAll(".custom-select-option").forEach((o) => o.dataset.selected = "false");
+    dropdown.querySelectorAll<HTMLElement>(".custom-select-option").forEach((o) => o.dataset.selected = "false");
     option.dataset.selected = "true";
     dropdown.hidden = true;
     select.dispatchEvent(new Event("change", { bubbles: true }));

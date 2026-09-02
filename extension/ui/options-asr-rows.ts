@@ -36,6 +36,12 @@ function buildAsrModelField(preset: ProviderRowPreset | null, model: string): st
   return `<select class="asr-provider-model" title="模型名">${optionsHtml}</select>`;
 }
 
+// 带 modelOptions 的预设渲染出原生 select，转成自定义下拉（与平台预设下拉一致）
+function initAsrModelCustomSelect(row: HTMLElement): void {
+  const select = row.querySelector("select.asr-provider-model");
+  if (select) initCustomSelect(select as HTMLSelectElement, "custom-select-wrapper asr-model-wrapper");
+}
+
 const asrProviderRow = createProviderRow({
   rowClass: "asr-provider-row",
   presetClass: "asr-provider-preset",
@@ -68,6 +74,7 @@ const asrProviderRow = createProviderRow({
     // 模型名与名称无条件跟随——上一平台的模型对新平台无意义；
     // API Key 输入框清空，避免旧平台的 Key 在测试/保存时误发给新平台。
     row.querySelector(".asr-provider-model")!.outerHTML = buildAsrModelField(next, next.model || "");
+    initAsrModelCustomSelect(row);
     (row.querySelector(".asr-provider-name") as HTMLInputElement).value = next.name || "";
     (row.querySelector(".asr-provider-apikey") as HTMLInputElement).value = "";
   },
@@ -124,14 +131,20 @@ export function renderAsrProviders(
   { presets = ASR_PROVIDER_PRESETS, activeId = "" }: { presets?: readonly AsrProviderPreset[]; activeId?: string } = {}
 ): void {
   asrProviderRow.render(listNode, emptyNode, items, { presets, activeId });
-  listNode.querySelectorAll<HTMLElement>(".asr-provider-row").forEach(convertRowPresetToCustom);
+  listNode.querySelectorAll<HTMLElement>(".asr-provider-row").forEach((row) => {
+    convertRowPresetToCustom(row);
+    initAsrModelCustomSelect(row);
+  });
 }
 
 export function addAsrProviderRow(listNode: HTMLElement, emptyNode: HTMLElement, item: ProviderRowItem = {}, { presets = ASR_PROVIDER_PRESETS, activeId = "" }: { presets?: readonly AsrProviderPreset[]; activeId?: string } = {}): void {
   asrProviderRow.add(listNode, emptyNode, item, { presets, activeId });
   const rows = listNode.querySelectorAll<HTMLElement>(".asr-provider-row");
   const lastRow = rows[rows.length - 1];
-  if (lastRow) convertRowPresetToCustom(lastRow);
+  if (lastRow) {
+    convertRowPresetToCustom(lastRow);
+    initAsrModelCustomSelect(lastRow);
+  }
 }
 
 export function collectAsrProviders(listNode: HTMLElement, { presets = ASR_PROVIDER_PRESETS, generateId = asrProviderRow.generateId }: { presets?: readonly AsrProviderPreset[]; generateId?: () => string } = {}) {
