@@ -1,7 +1,7 @@
 // ===== Player-AI state =====
 //
 // playerAi 状态微模块（随 ai 域内聚，自 core/state.ts 平移）：player-ai.js
-// 动态 chunk 独占读写；core/message-handler.ts 在 reader-enter 触发阅读模式时经
+// 动态 chunk 独占读写；reader/shell.ts 的 enterReaderShell 在进入阅读模式时经
 // suppressUntil 抑制快捷按钮弹出，无需加载整个 player-ai chunk。
 
 type PlayerAiBusinessState = {

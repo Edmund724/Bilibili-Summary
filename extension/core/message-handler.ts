@@ -1,5 +1,4 @@
 import { state, uiState, clipState } from "./state.js";
-import { suppressUntil } from "../ai/player-ai-state.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
 
 // reader-get-context 的 payload 形状 + 签名投影单源（纯模块）：字段清单、
@@ -11,7 +10,6 @@ import {
 } from "./context-payload.js";
 
 import { startUrlWatcher, BOC_URL_CHANGE_EVENT } from "./url-watcher.js";
-import { replaceReaderModeUrl } from "../bilibili/reader-url.js";
 import { ensureReaderChatTab } from "./lazy-chat-tab.js";
 import { DEFAULT_PLAYER_AI_QUICK_PROMPT } from "./defaults.js";
 import {
@@ -38,26 +36,30 @@ import { ensureUiReady } from "./lazy-ui.js";
 // lazy-player-ai.js 头注）。
 import { loadPlayerAi, isPlayerAiLoaded } from "./lazy-player-ai.js";
 
-// reader 域经加载器按需引入（候选02 分层惰性）：重符号（enterReaderMode 等）
-// 在处理器内 ensureReaderDomain() 后经命名空间取用；启动必需的轻符号直接从
-// reader 状态微模块 import（isReaderViewOpen=纯 state 读、enforceNormalPageState-
-// IfNeeded=DOM 守卫、renderReadingStatus=状态栏文案写入），不拖入 reader 重文件。
+// reader 域经加载器按需引入（候选02 分层惰性）：重符号在处理器内 ensureReaderDomain()
+// 后经命名空间取用；启动必需的轻符号直接从 reader 状态微模块 import
+//（isReaderViewOpen=纯 state 读、enforceNormalPageStateIfNeeded=DOM 守卫、
+// renderReadingStatus=状态栏文案写入），不拖入 reader 重文件。
+// 阅读壳（工单 arch-slim/02）：reading-view 四个消息分支与 URL 跳转编排的
+// 进入/退出事务统一委托 reader/shell.ts（enterReaderShell / exitReaderShell /
+// enterReaderShellOnUrlNavigation），八步无闪变时序不再有本文件的手抄。
 // （候选06：seek 的滚动暂停重置/跟随设置已收进 reader 域单入口
 // seekReadingTarget 的规范序，本文件不再触碰 scroll-state 与跟随状态。）
 import { ensureReaderDomain } from "./lazy-reader.js";
-import { ids, isReaderViewOpen, enforceNormalPageStateIfNeeded } from "../reader/state.js";
+import {
+  enterReaderShell,
+  enterReaderShellOnUrlNavigation,
+  exitReaderShell
+} from "../reader/shell.js";
+import { isReaderViewOpen, enforceNormalPageStateIfNeeded } from "../reader/state.js";
 // 候选03 常驻瘦身：renderReadingStatus 已惰性化。
 import { renderReadingStatus } from "./lazy-reader-presentation.js";
 // 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
 import { logWarn } from "../shared/logging.js";
-// S3 分层：阅读表随阅读模式挂载/移除（打开/关闭/URL 跳转编排三处共用）
-import { ensureReaderStyles, removeReaderStyles } from "../shared/style-injector.js";
 
 import {
   isReaderMode,
-  cleanVideoUrl,
-  computeCurrentClipSignature,
-  stripReaderModeUrl
+  computeCurrentClipSignature
 } from "../bilibili/video-id-shared.js";
 import type {
   ContentScriptMessage,
@@ -77,26 +79,6 @@ export function bindRuntimeEvents() {
   chrome.runtime.onMessage.addListener((rawMessage, _sender, sendResponse: SendResponse) => {
     return dispatchContentScriptMessage(rawMessage, sendResponse);
   });
-}
-
-// 空 readerUrl 的语义是「已在阅读模式内，只聚焦/激活」。但 background 的
-// player-ai / reading-chat 链在视图未开时也传空串（triggerReaderModeInTab 的
-// 空 readerUrl 参数）——此时必须用当前地址兜底构造阅读 URL，否则 URL 改写、
-// 阅读表与 data-boc-reader-mode 门控全被跳过，enterReaderMode 落在无样式的
-// 半进入态（页面布局微变但阅读模式不出现）。拼法与 ui/digest-button.ts
-// buildReaderUrl 一致（cleanVideoUrl 清成规范 URL 再加 boc_reader=1）。
-function resolveReaderEntryUrl(readerUrl: string): string {
-  if (readerUrl || isReaderViewOpen()) {
-    return readerUrl;
-  }
-  const base = cleanVideoUrl(location.href);
-  try {
-    const parsed = new URL(base);
-    parsed.searchParams.set("boc_reader", "1");
-    return parsed.toString();
-  } catch {
-    return base;
-  }
 }
 
 // onMessage 监听器的分发主体抽成可导出函数：除 runtime 消息外，页内触发源
@@ -136,131 +118,27 @@ export function dispatchContentScriptMessage(
       return true;
     }
 
+    // 进入阅读壳（工单 arch-slim/02）：三个 reading-view 分支只做意图路由，
+    // 八步无闪变时序与 restore 失同步自愈都在 reader/shell.ts 唯一实现。
     if (message.type === "reader-enter") {
-      suppressUntil(Date.now() + 2500);
-      // 原为同步 remove；懒加载后「未加载 ⇒ 无按钮」可直接跳过，已加载时经
-      // promise 移除（延后一个 tick，视觉无差异）。失败静默：移除按钮失败
-      // 不应阻断阅读模式打开，且 suppressedUntil 已保证按钮短期不再弹出。
-      if (isPlayerAiLoaded()) {
-        loadPlayerAi()
-          .then((playerAi) => playerAi.removePlayerAiQuickActionButton())
-          .catch(() => {});
-      }
-      const readerUrl = resolveReaderEntryUrl(String(message.readerUrl || "").trim());
-      // 候选03：先确保 UI 壳存在，再设置阅读模式属性并进入重域。ensureUiReady
-      // 与后续 reader 操作串成同一 promise 链，避免并发触发导致壳构建两次。
-      ensureUiReady().then(() => {
-        if (readerUrl) {
-          replaceReaderModeUrl(readerUrl);
-          // S3：先挂阅读表再翻属性（无闪变时序，见 content.js 同款注释）
-          ensureReaderStyles();
-          document.documentElement.setAttribute("data-boc-reader-mode", "1");
-          document.body.setAttribute("data-boc-reader-mode", "1");
-        }
-        if (!isReaderViewOpen()) {
-          // 候选02：enterReaderMode 属 reader 重域，经 ensureReaderDomain 装载后
-          // 进入（点击路径的本地动态装载对用户无感）。
-          ensureReaderDomain()
-            .then((reader) => reader.enterReaderMode())
-            .catch((error) => {
-              logWarn("[BOC] reading mode trigger failed", error);
-            });
-        }
-      });
+      enterReaderShell({ readerUrl: String(message.readerUrl || ""), intent: "open" });
       sendResponse({ ok: true });
       return true;
     }
 
     // 阅读视图自愈恢复（ui/digest-button.ts 的定时自查在失同步时派发，见该文件
-    // syncDigestButton）。两种失同步：
-    //   - URL 带 boc_reader=1 而视图没开：直达进入链在页面上半途失败（如 SW
-    //     报文丢失、动态装载异常），失败文案写进隐藏面板用户看不见；
-    //   - 状态开着而壳失整：面板壳被页面重渲染整树摘走，readingViewOpen 卡在
-    //     true，digest 按钮被自查守卫永久压住——表现为「侧边栏和按钮一起消失，
-    //     只能刷新」。closeReadingView 顶部才置状态、取壳节点失败会先抛错，所以
-    //     收敛前必须先 ensureUiReady 把壳补回来。
-    // 收敛后与 reader-enter 走同一条进入链（URL 改写 + 阅读表 +
-    // 门控属性 + enterReaderMode）；重开会话态由各 tab 的恢复路径接管（对话从
-    // 会话历史恢复、概览读缓存）。
+    // syncDigestButton）：壳完好性自查 + 先收敛再重进都在壳的 restore 档内。
     if (message.type === "reader-restore") {
-      suppressUntil(Date.now() + 2500);
-      ensureUiReady().then(async () => {
-        if (isReaderViewOpen()) {
-          const shell = document.getElementById(ids.readingView);
-          const shellIntact = Boolean(
-            shell?.isConnected &&
-              shell.classList.contains("open") &&
-              shell.getAttribute("data-boc-reader-ready") !== "0" &&
-              document.body.getAttribute("data-boc-reader-mode") === "1" &&
-              document.documentElement.getAttribute("data-boc-reader-mode") === "1"
-          );
-          if (!shellIntact) {
-            await ensureReaderDomain()
-              .then((reader) => reader.closeReadingView())
-              .catch((error) => {
-                logWarn("[BOC] reading view restore: close failed", error);
-              });
-          }
-        }
-        const readerUrl = resolveReaderEntryUrl(String(message.readerUrl || "").trim());
-        if (readerUrl) {
-          replaceReaderModeUrl(readerUrl);
-          // S3：先挂阅读表再翻属性（无闪变时序，见 reader-enter 同款注释）
-          ensureReaderStyles();
-          document.documentElement.setAttribute("data-boc-reader-mode", "1");
-          document.body.setAttribute("data-boc-reader-mode", "1");
-        }
-        if (!isReaderViewOpen()) {
-          await ensureReaderDomain()
-            .then((reader) => reader.enterReaderMode())
-            .catch((error) => {
-              logWarn("[BOC] reading view restore failed", error);
-            });
-        }
-      }).catch((error) => {
-        logWarn("[BOC] reading view restore failed", error);
-      });
+      enterReaderShell({ readerUrl: String(message.readerUrl || ""), intent: "restore" });
       sendResponse({ ok: true });
       return true;
     }
 
-    // PR5c：AI 对话入口 / player-ai 悬浮按钮的统一消费端（工单 08 决议 2）——
-    // 先确保 reader shell（reader-enter 同款：URL 改写 + 阅读表 +
-    // reader-mode 属性 + enterReaderMode），再激活对话 tab 并（带 prompt 时）
-    // 自动发送快捷提示词。快捷动作路径传 consumeIntent:false（与快捷发送互不
-    // 踩踏）；无 prompt 则只定位/聚焦对话 tab。发响应不等待 enterReaderMode
-    // 完成（与 reader-enter 的即答语义一致）。
+    // PR5c：AI 对话入口 / player-ai 悬浮按钮的统一消费端（工单 08 决议 2）：
+    // 进入壳后激活对话 tab 并（带 prompt 时）自动发送快捷提示词，全部在壳的
+    // focus-chat 档内。发响应不等待事务完成（即答语义与 reader-enter 一致）。
     if (message.type === "reader-enter-chat") {
-      suppressUntil(Date.now() + 2500);
-      if (isPlayerAiLoaded()) {
-        loadPlayerAi()
-          .then((playerAi) => playerAi.removePlayerAiQuickActionButton())
-          .catch(() => {});
-      }
-      const readerUrl = resolveReaderEntryUrl(String(message.readerUrl || "").trim());
-      const prompt = String(message.prompt || "").trim();
-      ensureUiReady().then(async () => {
-        if (readerUrl) {
-          replaceReaderModeUrl(readerUrl);
-          // S3：先挂阅读表再翻属性（无闪变时序，见 content.js 同款注释）
-          ensureReaderStyles();
-          document.documentElement.setAttribute("data-boc-reader-mode", "1");
-          document.body.setAttribute("data-boc-reader-mode", "1");
-        }
-        if (!isReaderViewOpen()) {
-          // 候选02：enterReaderMode 属 reader 重域，经 ensureReaderDomain 装载后
-          // 进入（点击路径的本地动态装载对用户无感）。
-          await ensureReaderDomain().then((reader) => reader.enterReaderMode());
-        }
-        const chat = await ensureReaderChatTab();
-        if (prompt) {
-          await chat.runQuickActionPrompt(prompt);
-        } else {
-          await chat.ensureChatTabActivated({ consumeIntent: false });
-        }
-      }).catch((error) => {
-        logWarn("[BOC] reading chat trigger failed", error);
-      });
+      enterReaderShell({ readerUrl: message.readerUrl ?? "", intent: "focus-chat", prompt: message.prompt ?? "" });
       sendResponse({ ok: true });
       return true;
     }
@@ -280,29 +158,12 @@ export function dispatchContentScriptMessage(
       return true;
     }
 
+    // 退出阅读壳（工单 arch-slim/02）：reader-close 处理器退化为退出事务委托
+    // （URL 收敛 → closeReadingView → 摘阅读表都在 exitReaderShell 内）。
     if (message.type === "reader-close") {
-      // URL 改写保持同步（与旧行为一致地先收敛地址栏）；closeReadingView 属
-      // reader 重域，经 ensure 装载后执行（视图开着 ⇒ 域几乎必然已装载，此处
-      // 只是兜底直开路径）。
-      try {
-        if (isReaderMode()) {
-          replaceReaderModeUrl(stripReaderModeUrl(location.href));
-        }
-      } catch (error) {
-        sendResponse({ ok: false, error: getErrorMessage(error) });
-        return false;
-      }
-      ensureReaderDomain()
-        .then((reader) => {
-          reader.closeReadingView();
-          // S3：关闭后移除阅读表——门控样式随属性清除已停止生效，摘表进一步
-          // 释放级联；下次进入重挂（link 数据在浏览器缓存，二进宫无闪变）。
-          removeReaderStyles();
-          sendResponse({ ok: true });
-        })
-        .catch((error) => {
-          sendResponse({ ok: false, error: getErrorMessage(error) });
-        });
+      exitReaderShell()
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
       return true;
     }
 
@@ -465,20 +326,17 @@ export function bindUrlChangeHandler() {
     }
     const shouldEnterReaderMode = isReaderMode(nextUrl);
     if (!isReaderViewOpen() && shouldEnterReaderMode) {
-      // S3：先挂阅读表再翻属性（无闪变时序，见 content.js 同款注释）
-      ensureReaderStyles();
-      document.documentElement.setAttribute("data-boc-reader-mode", "1");
-      document.body.setAttribute("data-boc-reader-mode", "1");
-      // 候选03：renderReadingStatus 已惰性化；壳构建与呈现层装载完成后写状态栏。
-      Promise.all([ensureUiReady(), renderReadingStatus("检测到阅读视图跳转，正在打开阅读模式...")])
-        .catch(() => {})
-        .then(() => {
-          ensureReaderDomain()
-            .then((reader) => reader.enterReaderMode())
-            .catch((error) => {
-              renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
-            });
-        });
+      // URL 跳转编排改走阅读壳（工单 arch-slim/02）：与消息意图三档共享同一条
+      // 进入链（挂表 → 翻门控属性 → enterReaderMode），但无 player-ai 前奏
+      //（URL 跳转没有用户点击在先，不抑制、不摘快捷按钮）；进入前播报等落地
+      //（防反向覆盖 enterReaderMode 的「已就绪」文案），失败口径写状态栏。
+      enterReaderShellOnUrlNavigation({
+        readerUrl: nextUrl,
+        announce: () => renderReadingStatus("检测到阅读视图跳转，正在打开阅读模式..."),
+        onEnterFailed: (error) => {
+          renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
+        }
+      });
       return;
     }
     if (isReaderViewOpen() || shouldEnterReaderMode) {

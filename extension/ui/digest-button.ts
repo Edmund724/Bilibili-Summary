@@ -20,12 +20,15 @@
 // triggerReaderModeInTab 的拼法一致。经 dispatchContentScriptMessage 分发而非
 // chrome.runtime.sendMessage：content script 的 sendMessage 不会回环到本文档
 // 自己的 onMessage 监听器，分发主体抽出后监听器与按钮共用同一条处理器路径。
-// 失同步自愈同理：自查派发 reader-restore（处理器先按 DOM 实况
+// 失同步自愈同理：自查派发 reader-restore（阅读壳 restore 档先按 DOM 实况
 // 收敛失同步状态，再走与点击完全相同的进入链）。
 
 import { cleanVideoUrl, isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
 import { dispatchContentScriptMessage } from "../core/message-handler.js";
 import { isReaderViewOpen } from "../reader/state.js";
+// 阅读壳（工单 arch-slim/02）：失同步判定收口为壳的唯一完好性自查
+//（restore 档自愈与本守卫共用同一 predicate，不再本地手抄）。
+import { isReaderShellIntact } from "../reader/shell.js";
 
 const DIGEST_BUTTON_ID = "boc-digest-button";
 const DIGEST_OVERLAY_ID = "boc-digest-overlay";
@@ -106,20 +109,6 @@ const RESTORE_RETRY_BACKOFF_MS = 4000;
 let brokenTicks = 0;
 let lastRestoreAt = 0;
 
-// 壳失整判定：状态说视图开着，但 DOM 侧任一必要呈现条件缺失——壳被整树摘走、
-// .open 掉了、ready 门控卡 0、html/body 门控属性被页面侧清掉。任一命中面板都
-// 不可见，而 readingViewOpen 仍为 true，digest 按钮被下方守卫永久压住。
-function isReadingViewShellIntact(): boolean {
-  const shell = document.getElementById("boc-reading-view");
-  return Boolean(
-    shell?.isConnected &&
-      shell.classList.contains("open") &&
-      shell.getAttribute("data-boc-reader-ready") !== "0" &&
-      document.body.getAttribute("data-boc-reader-mode") === "1" &&
-      document.documentElement.getAttribute("data-boc-reader-mode") === "1"
-  );
-}
-
 function syncDigestButton(): void {
   // SPA 换到非视频页：工具栏按钮无意义，主动摘除。口径与 content.ts
   // isSupportedUrl 一致——稍后再看等列表播放页（/list/watchlater?bvid=）
@@ -133,7 +122,8 @@ function syncDigestButton(): void {
   const viewOpen = isReaderViewOpen();
   const readerUrlMode = isReaderMode();
   // 阅读视图开着且壳完整：正常接管态，按钮保持摘除（视图关闭后自查会把按钮补回来）。
-  if (viewOpen && isReadingViewShellIntact()) {
+  // 壳完好性判定收口到阅读壳的唯一实现 isReaderShellIntact（reader/shell.ts）。
+  if (viewOpen && isReaderShellIntact()) {
     brokenTicks = 0;
     removeDigestButton();
     return;

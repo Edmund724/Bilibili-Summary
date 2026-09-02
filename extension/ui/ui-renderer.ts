@@ -1,10 +1,5 @@
 import { state, uiState } from "../core/state.js";
 import { byId } from "../shared/dom-utils.js";
-import { replaceReaderModeUrl } from "../bilibili/reader-url.js";
-import {
-  isReaderMode,
-  stripReaderModeUrl
-} from "../bilibili/video-id-shared.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { READING_HEADER_ICONS } from "./reading-header-icons.js";
 // 选区「解释」的两处接线都在本模块：选区监听 + 浮层定位（bindUiEvents 内），
@@ -32,6 +27,9 @@ import { logWarn } from "../shared/logging.js";
 // 总结链与 reader 域的按需加载器（常驻轻文件，动态边在其内部）。
 import { ensureSummarizeChain } from "../subtitle/lazy.js";
 import { ensureReaderDomain } from "../core/lazy-reader.js";
+// 阅读壳（工单 arch-slim/02）：关闭按钮的关闭链退化为退出事务委托
+//（URL 收敛 → closeReadingView → 摘阅读表，唯一实现在 reader/shell.ts）。
+import { exitReaderShell } from "../reader/shell.js";
 
 // ensureReaderDomain 的返回类型在 core/lazy-reader.ts 只声明了启动期窄接口
 //（enterReaderMode/closeReadingView/waitForVideoMetadata/seekReadingTarget）；
@@ -347,14 +345,10 @@ export function bindUiEvents(): void {
   // 历史 id 已从模板移除，阅读视图的刷新链路改经字幕工具条/转写横幅触发）。
   // ===== 阅读视图交互回调（候选02）：closeReadingView/sync/click 等属 reader
   // 重域，交互时经 ensureReaderDomain 装载后调用（视图开着 ⇒ 域几乎必然已装载
-  // ，ensure 命中缓存 promise）。
+  // ，ensure 命中缓存 promise）。关闭按钮：退出事务统一走阅读壳（工单
+  // arch-slim/02），与 reader-close 消息路径同一实现。
   readingCloseBtn.addEventListener("click", () => {
-    if (isReaderMode()) {
-      replaceReaderModeUrl(stripReaderModeUrl(location.href));
-    }
-    loadReaderDomain()
-      .then((reader) => reader.closeReadingView())
-      .catch((error) => logWarn("[BOC] close reading view failed", error));
+    exitReaderShell().catch((error) => logWarn("[BOC] close reading view failed", error));
   });
   readingThemeSelect.addEventListener("click", () => {
     const themes = ["light", "dark", "paper"];

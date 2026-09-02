@@ -43,8 +43,8 @@ import {
 } from "../reader/presenter.js";
 
 import { bindRuntimeEvents, bindUrlChangeHandler } from "../core/message-handler.js";
-// S3 分层：阅读表随阅读模式挂载（进入/URL 编排与 message-handler 共用同一
-// 挂载器；此处 handle 启动直开路径与页内跳转路径）
+// S3 分层：阅读表随阅读模式挂载（进入/退出事务的挂摘在 reader/shell.ts 阅读壳
+// 内；此处 handle 启动直开路径与非阅读页的预清理——先于设置水合同步翻好门控）
 import { ensureReaderStyles, removeReaderStyles } from "../shared/style-injector.js";
 
 // lazy-player-ai.ts 的接口未覆盖 content 侧实际调用的全部方法；用局部接口
