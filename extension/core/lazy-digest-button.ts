@@ -12,8 +12,11 @@
 // 失败语义：加载失败清空缓存 promise，允许下次触发重试（与 lazy-player-ai 一致）。
 //
 // 「未加载」的语义约定（消费方依赖它做等价性判断）：模块未加载 ⇒ 按钮从未
-// 挂上 ⇒ removeDigestButton 是 no-op；且阅读模式直达链接路径（isReaderMode）
-// 不会装载本模块，生命周期不启动，天然无残留。
+// 挂上 ⇒ removeDigestButton 是 no-op。装载面：content.ts 的 getSettings().then
+// 两个分支（非阅读模式 + 阅读模式直达）都装载本模块——直达分支装载不为按钮
+// （自查守卫在阅读模式下恒摘除），为的是视图失同步自愈与「关闭视图后补回
+// 按钮」（见 ui/digest-button.ts 头注）；按钮注入本身由 syncDigestButton 按
+// isReaderViewOpen/isReaderMode 守卫，两种路径下都不会在阅读模式开着时挂出。
 interface DigestButtonDomain {
   removeDigestButton(): void;
 }

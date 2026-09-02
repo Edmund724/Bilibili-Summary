@@ -2194,6 +2194,12 @@
   resize: vertical;
 }
 
+/* 系统提示词是长文案（多段结构化提示），默认 66px 两三行的高度不够用；
+ * 其余短提示 textarea（AI 按钮快捷提示词）维持通用档。 */
+#boc-reading-view .boc-reading-settings-host #aiSystemPrompt {
+  min-height: 200px;
+}
+
 #boc-reading-view .boc-reading-settings-host .boc-set-textarea::placeholder {
   color: var(--boc-reader-faint, #a39a8d);
 }
@@ -2635,11 +2641,21 @@
   cursor: not-allowed;
 }
 
+/* 操作行：测试按钮 + 行内状态 + 删除按钮同排（provider-row 模板的
+ * .provider-row-actions 容器）。状态默认 hidden 不占位，出现时吃掉按钮
+ * 之间的剩余宽度；删除按钮贴行尾。 */
+#boc-reading-view .boc-reading-settings-host .provider-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 #boc-reading-view .boc-reading-settings-host .ai-provider-row .ai-provider-test,
 #boc-reading-view .boc-reading-settings-host .asr-provider-row .asr-provider-test {
   height: 30px;
   width: 72px;
-  justify-self: start;
+  flex: 0 0 auto;
   padding: 0;
   font-size: 14px;
   line-height: 1;
@@ -2667,6 +2683,8 @@
 #boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-remove {
   width: 24px;
   height: 32px;
+  flex: 0 0 auto;
+  margin-left: auto;
   padding: 0;
   border: 0;
   border-radius: 8px;
@@ -2676,7 +2694,6 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  justify-self: end;
 }
 
 #boc-reading-view .boc-reading-settings-host .ai-provider-row .ai-provider-remove:hover,
@@ -2698,7 +2715,9 @@
 
 #boc-reading-view .boc-reading-settings-host .ai-provider-status,
 #boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-status {
-  margin: 2px 0 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
   font-size: 14px;
   line-height: 1.4;
   color: var(--boc-reader-muted, #6f675c);

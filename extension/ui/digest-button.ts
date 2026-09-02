@@ -2,9 +2,12 @@
 // 工单 .scratch/tickets/digest-reader/issues/04-digest-button-anchor.md）。
 //
 // 装载模式仿 ai/player-ai.ts 的惰性域模块：经 core/lazy-digest-button.ts 动态
-// import，content.ts 的 getSettings().then 非阅读模式分支触发装载；模块求值即
-// 自管「等 hydration 稳定 → 注入 → setInterval 定时自查」生命周期，无设置项、
-// 常驻（按钮是阅读模式的替代入口）。
+// import，content.ts 的 getSettings().then 两个分支（非阅读模式分支 + 阅读模式
+// 直达分支）都触发装载；模块求值即自管「等 hydration 稳定 → 自查注入/摘除 →
+// setInterval 定时自查 + visibilitychange 即时自查」生命周期，无设置项、常驻。
+// 阅读直达分支也装载的原因：直达路径上按钮模块同时承担视图失同步自愈（见
+// syncDigestButton）——视图关闭后把按钮补回来、视图壳被页面重渲染摘走或进入
+// 链半途失败时自动恢复，这些失同步在直达路径同样可能发生。
 //
 // 与 player-ai 的有意差异：工具栏按钮场景用定时自查而非 MutationObserver——
 // 观察 body 时弹幕每飘一条都是变更事件，白烧 CPU 且防抖等不到空档；定时器
@@ -17,6 +20,8 @@
 // handleOpenReadingViewTab 的拼法一致。经 dispatchContentScriptMessage 分发而非
 // chrome.runtime.sendMessage：content script 的 sendMessage 不会回环到本文档
 // 自己的 onMessage 监听器，分发主体抽出后监听器与按钮共用同一条处理器路径。
+// 失同步自愈同理：自查派发 popup-restore-reading-view（处理器先按 DOM 实况
+// 收敛失同步状态，再走与点击完全相同的进入链）。
 
 import { cleanVideoUrl, isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
 import { dispatchContentScriptMessage } from "../core/message-handler.js";
@@ -50,8 +55,17 @@ const BUTTON_BASE_STYLE =
 // ===== 模块求值即启动生命周期（content.ts 只在非阅读模式分支装载本模块） =====
 
 void waitForHydrationSettled().then(() => {
-  injectDigestButton();
+  syncDigestButton();
   window.setInterval(syncDigestButton, REINJECT_INTERVAL_MS);
+  // 切回标签页立即自查一轮：hidden 期间定时器被 Chrome 强力节流（5 分钟后
+  // 至多 1 次/分钟），靠它恢复会让「切走再切回」场景的白屏时间拉长到下一个
+  // 节流 tick；visibilitychange 回来的第一次自查与定时器共用 brokenTicks
+  // 连击确认，不会抢先误恢复。
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      syncDigestButton();
+    }
+  });
 });
 
 // 水合等待链：等不到 <video>（特殊页面形态）也别一直等，超时后照常尝试注入。
@@ -81,7 +95,30 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-// ===== 定时自查：补按钮 / 摘按钮 =====
+// ===== 定时自查：补按钮 / 摘按钮 / 视图失同步自愈 =====
+
+// 失同步恢复的节奏控制：连续 RESTORE_CONFIRM_TICKS 个自查周期都处于失同步态才
+// 派发恢复（点击路径上「URL 已改写、enterReaderMode 未完成」「状态已置开、
+// .open 未挂上」的亚秒瞬态不触发）；两次恢复派发之间至少隔 RESTORE_RETRY_BACKOFF_MS
+// （进入链自身失败时退避，不每 800ms 空转重试）。
+const RESTORE_CONFIRM_TICKS = 3;
+const RESTORE_RETRY_BACKOFF_MS = 4000;
+let brokenTicks = 0;
+let lastRestoreAt = 0;
+
+// 壳失整判定：状态说视图开着，但 DOM 侧任一必要呈现条件缺失——壳被整树摘走、
+// .open 掉了、ready 门控卡 0、html/body 门控属性被页面侧清掉。任一命中面板都
+// 不可见，而 readingViewOpen 仍为 true，digest 按钮被下方守卫永久压住。
+function isReadingViewShellIntact(): boolean {
+  const shell = document.getElementById("boc-reading-view");
+  return Boolean(
+    shell?.isConnected &&
+      shell.classList.contains("open") &&
+      shell.getAttribute("data-boc-reader-ready") !== "0" &&
+      document.body.getAttribute("data-boc-reader-mode") === "1" &&
+      document.documentElement.getAttribute("data-boc-reader-mode") === "1"
+  );
+}
 
 function syncDigestButton(): void {
   // SPA 换到非视频页：工具栏按钮无意义，主动摘除。口径与 content.ts
@@ -89,15 +126,39 @@ function syncDigestButton(): void {
   // 由 isWatchlaterPage 覆盖，不能只看 /video/ pathname（否则按钮在装载后
   // 一个自查周期就被摘掉）。
   if (!/\/video\//.test(location.pathname) && !isWatchlaterPage()) {
+    brokenTicks = 0;
     removeDigestButton();
     return;
   }
-  // 阅读模式接管整页后工具栏按钮无意义（player-ai 快捷按钮同款守卫）；
-  // 视图关闭后自查会把按钮补回来。
-  if (isReaderViewOpen() || isReaderMode()) {
+  const viewOpen = isReaderViewOpen();
+  const readerUrlMode = isReaderMode();
+  // 阅读视图开着且壳完整：正常接管态，按钮保持摘除（视图关闭后自查会把按钮补回来）。
+  if (viewOpen && isReadingViewShellIntact()) {
+    brokenTicks = 0;
     removeDigestButton();
     return;
   }
+  // 失同步两态，交由 popup-restore-reading-view 处理器自愈（连续确认 + 退避见
+  // 上方常量注）：
+  //   - 状态开着而壳失整：面板被页面重渲染摘走，按钮被守卫永久压住——用户看到
+  //     「侧边栏和按钮一起消失，只能刷新」的正是它；
+  //   - URL 带 boc_reader=1 而视图没开：进入链半途失败（直达启动失败 / 中途
+  //     状态被清），失败文案写进隐藏面板用户看不见。
+  if ((viewOpen || readerUrlMode) && ++brokenTicks >= RESTORE_CONFIRM_TICKS) {
+    const now = Date.now();
+    if (now - lastRestoreAt >= RESTORE_RETRY_BACKOFF_MS) {
+      brokenTicks = 0;
+      lastRestoreAt = now;
+      dispatchContentScriptMessage(
+        { type: "popup-restore-reading-view", readerUrl: buildReaderUrl() },
+        () => {}
+      );
+    }
+    return;
+  }
+  // 视图没开也不在阅读模式：健康态，补按钮（brokenTicks 一并归位，避免上一轮
+  // 失同步的残留计数让下一轮瞬态误触发恢复）。
+  brokenTicks = 0;
   injectDigestButton();
 }
 

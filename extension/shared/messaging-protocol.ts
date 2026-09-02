@@ -28,6 +28,15 @@ export type PopupCloseReadingViewMessage = {
   type: "popup-close-reading-view";
 };
 
+// 阅读视图自愈恢复（ui/digest-button.ts 的 800ms 自查在失同步时派发）：
+// URL 带 boc_reader=1 而视图没开（直达进入失败）、或状态开着而壳被页面重渲染
+// 摘掉（状态-DOM 失同步）时，按 DOM 实况收敛状态后重走进入链。readerUrl 语义
+// 同 popup-trigger-reading-view。仅 content 页内源使用（dispatchContentScriptMessage）。
+export type PopupRestoreReadingViewMessage = {
+  type: "popup-restore-reading-view";
+  readerUrl?: string;
+};
+
 // 打开/进入阅读模式并激活「AI 对话」tab：readerUrl 语义同
 // popup-trigger-reading-view（空串 = 已在阅读模式内，只定位/聚焦）；prompt
 // 语义同 player-ai-quick-action（空串 = 只激活对话 tab，不发送）。
@@ -68,6 +77,7 @@ export type ContentScriptMessage =
   | PopupSelectSubtitleMessage
   | PopupTriggerReadingViewMessage
   | PopupTriggerReadingChatMessage
+  | PopupRestoreReadingViewMessage
   | PopupCloseReadingViewMessage
   | ReaderGetContextMessage
   | ReaderGetHotCommentsMessage

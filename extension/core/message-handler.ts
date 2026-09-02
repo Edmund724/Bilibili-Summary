@@ -45,7 +45,7 @@ import { loadPlayerAi, isPlayerAiLoaded } from "./lazy-player-ai.js";
 // （候选06：seek 的滚动暂停重置/跟随设置已收进 reader 域单入口
 // seekReadingTarget 的规范序，本文件不再触碰 scroll-state 与跟随状态。）
 import { ensureReaderDomain } from "./lazy-reader.js";
-import { isReaderViewOpen, enforceNormalPageStateIfNeeded } from "../reader/state.js";
+import { ids, isReaderViewOpen, enforceNormalPageStateIfNeeded } from "../reader/state.js";
 // 候选03 常驻瘦身：renderReadingStatus 已惰性化。
 import { renderReadingStatus } from "./lazy-reader-presentation.js";
 // 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
@@ -211,6 +211,59 @@ export function dispatchContentScriptMessage(
               logWarn("[BOC] reading mode trigger failed", error);
             });
         }
+      });
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    // 阅读视图自愈恢复（ui/digest-button.ts 的定时自查在失同步时派发，见该文件
+    // syncDigestButton）。两种失同步：
+    //   - URL 带 boc_reader=1 而视图没开：直达进入链在页面上半途失败（如 SW
+    //     报文丢失、动态装载异常），失败文案写进隐藏面板用户看不见；
+    //   - 状态开着而壳失整：面板壳被页面重渲染整树摘走，readingViewOpen 卡在
+    //     true，digest 按钮被自查守卫永久压住——表现为「侧边栏和按钮一起消失，
+    //     只能刷新」。closeReadingView 顶部才置状态、取壳节点失败会先抛错，所以
+    //     收敛前必须先 ensureUiReady 把壳补回来。
+    // 收敛后与 popup-trigger-reading-view 走同一条进入链（URL 改写 + 阅读表 +
+    // 门控属性 + enterReaderMode）；重开会话态由各 tab 的恢复路径接管（对话从
+    // 会话历史恢复、概览读缓存）。
+    if (message.type === "popup-restore-reading-view") {
+      suppressUntil(Date.now() + 2500);
+      ensureUiReady().then(async () => {
+        if (isReaderViewOpen()) {
+          const shell = document.getElementById(ids.readingView);
+          const shellIntact = Boolean(
+            shell?.isConnected &&
+              shell.classList.contains("open") &&
+              shell.getAttribute("data-boc-reader-ready") !== "0" &&
+              document.body.getAttribute("data-boc-reader-mode") === "1" &&
+              document.documentElement.getAttribute("data-boc-reader-mode") === "1"
+          );
+          if (!shellIntact) {
+            await ensureReaderDomain()
+              .then((reader) => reader.closeReadingView())
+              .catch((error) => {
+                logWarn("[BOC] reading view restore: close failed", error);
+              });
+          }
+        }
+        const readerUrl = resolveReaderEntryUrl(String(message.readerUrl || "").trim());
+        if (readerUrl) {
+          replaceReaderModeUrl(readerUrl);
+          // S3：先挂阅读表再翻属性（无闪变时序，见 popup-trigger-reading-view 同款注释）
+          ensureReaderStyles();
+          document.documentElement.setAttribute("data-boc-reader-mode", "1");
+          document.body.setAttribute("data-boc-reader-mode", "1");
+        }
+        if (!isReaderViewOpen()) {
+          await ensureReaderDomain()
+            .then((reader) => reader.enterReaderMode())
+            .catch((error) => {
+              logWarn("[BOC] reading view restore failed", error);
+            });
+        }
+      }).catch((error) => {
+        logWarn("[BOC] reading view restore failed", error);
       });
       sendResponse({ ok: true });
       return true;

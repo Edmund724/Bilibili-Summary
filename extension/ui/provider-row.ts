@@ -2,7 +2,8 @@
 // AI 平台行与 ASR 平台行构建器的共享工厂 createProviderRow。
 // 两套行构建器此前互为平行克隆（options-rows.js 的 AI 平台部分 / options-asr-rows.js 全文），
 // 以下骨架完全一致，由工厂统一持有：
-// - 行骨架：预设下拉 / baseUrl / API Key / 测试 / 删除（确认 + 后台消息）/ 行内状态 <p>；
+// - 行骨架：预设下拉 / baseUrl / API Key / 操作行（测试 + 行内状态 <p> + 删除，
+//   三者同排一条 flex 行）/ 删除（确认 + 后台消息）；
 // - 预设切换的 baseUrl 跟随规则：未改过 baseUrl（空或仍是上一预设默认值）才跟随新预设；
 // - 测试连接流程：校验 → 探针（注入 runTestProbe 直调，或经运行时消息）→
 //   成功后回调保存 → 重查行显示"连接成功"；
@@ -220,11 +221,13 @@ export function createProviderRow({
     <input class="${apikeyClass}" type="password" placeholder="${apiKeyPlaceholder({ item, preset, hasSavedKey })}" autocomplete="off" />
     ${buildModelField(preset, model)}
     ${buildTailFields ? buildTailFields({ id, isActive }) : ""}
-    <button type="button" class="secondary-btn ${testClass}">测试</button>
-    <button type="button" class="${removeClass}" aria-label="删除" title="删除">
-      <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">${TRASH_ICON_PATHS}</svg>
-    </button>
-    <p class="${statusClass}" hidden></p>
+    <div class="provider-row-actions">
+      <button type="button" class="secondary-btn ${testClass}">测试</button>
+      <p class="${statusClass}" hidden></p>
+      <button type="button" class="${removeClass}" aria-label="删除" title="删除">
+        <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">${TRASH_ICON_PATHS}</svg>
+      </button>
+    </div>
   `;
 
     // 预设切换：baseUrl 未改过（空或仍是上一预设默认值）时跟随新预设；

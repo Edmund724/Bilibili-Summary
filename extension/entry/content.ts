@@ -11,8 +11,9 @@ import { logInfo, logWarn } from "../shared/logging.js";
 // 不再常驻，start/stop/sync 全部走 loadPlayerAi() 的动态 import。
 import { loadPlayerAi, isPlayerAiLoaded } from "../core/lazy-player-ai.js";
 
-// Digest 工具栏按钮经加载器按需引入（统一 Digest 阅读模式 PR1）：只在非阅读
-// 模式分支装载（阅读模式直达链接上按钮无意义，生命周期不启动）。
+// Digest 工具栏按钮经加载器按需引入（统一 Digest 阅读模式 PR1）：非阅读模式
+// 分支与阅读模式直达分支都装载——直达分支上按钮由自查守卫恒摘除（无意义），
+// 装载为的是视图失同步自愈与关闭视图后补回按钮（见 ui/digest-button.ts 头注）。
 import { loadDigestButton } from "../core/lazy-digest-button.js";
 
 // 候选03 常驻瘦身：UI 壳构建（ensureUiReady）与 reader 静态呈现层
@@ -181,10 +182,16 @@ function init(): void {
         .catch((error) => {
           renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
         });
+      // 阅读直达分支同样装载工具栏按钮模块（非阅读分支见下方 else）：装载不为
+      // 按钮本身（阅读模式下自查守卫恒摘除），为视图失同步自愈与「关闭视图后
+      // 补回按钮」——启动失败文案写进隐藏面板用户看不见，没有自查就真只剩刷新。
+      loadDigestButton().catch((error) => {
+        logWarn("[BOC] digest-button module load failed", error);
+      });
     } else {
       // 统一 Digest 阅读模式 PR1：非阅读模式分支装载工具栏按钮模块。模块
-      // 自管「等 hydration 稳定 → 注入 → setInterval 自查」生命周期；阅读
-      // 视图打开后由其自查守卫摘除按钮，无需在此 stop。
+      // 自管「等 hydration 稳定 → 自查注入/摘除 → 定时自查 + 失同步自愈」生命
+      // 周期；阅读视图打开后由其自查守卫摘除按钮，无需在此 stop。
       loadDigestButton().catch((error) => {
         logWarn("[BOC] digest-button module load failed", error);
       });
