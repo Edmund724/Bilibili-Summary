@@ -193,6 +193,38 @@ describe("createProviderRow：AI 平台行（options-rows.js 配置）", () => {
     expect(baseUrlInput.value).toBe("http://localhost:11434/v1");
   });
 
+  it("预设切换：代申请新 baseUrl 的 host 权限（request-provider-origins），失败静默", async () => {
+    const rows = await loadAiRows();
+    const { listNode, emptyNode } = makeContainer();
+    rows.renderAiProviders(listNode, emptyNode, [aiItem], { presets: AI_PRESETS });
+    const row = listNode.querySelector(".ai-provider-row");
+    const select = row.querySelector(".ai-provider-preset");
+
+    // 切到 ollama → baseUrl 跟随后代申请该 origin 的 host 权限
+    select.value = "ollama";
+    select.dispatchEvent(new Event("change"));
+    await flushMicrotasks();
+    expect(sendRuntimeMessageMock).toHaveBeenCalledWith({
+      type: "request-provider-origins",
+      baseUrls: ["http://localhost:11434/v1"]
+    });
+
+    // 自定义（baseUrl 为空）不申请
+    sendRuntimeMessageMock.mockClear();
+    select.value = "custom";
+    select.dispatchEvent(new Event("change"));
+    await flushMicrotasks();
+    expect(sendRuntimeMessageMock).not.toHaveBeenCalled();
+
+    // 代申请失败（用户拒绝/无手势）不影响预设切换本身
+    sendRuntimeMessageMock.mockImplementation(async () => ({ ok: false, error: "未授权" }));
+    row.querySelector(".ai-provider-baseurl").value = "https://api.openai.com/v1";
+    select.value = "openai_compat";
+    select.dispatchEvent(new Event("change"));
+    await flushMicrotasks();
+    expect(row.dataset.currentPresetId).toBe("openai_compat");
+  });
+
   it("测试连接：直调探针（平铺入参带 providerId）+ 成功回调重渲染后，新行禁用输入并在 2 秒后恢复", async () => {
     vi.useFakeTimers();
     const rows = await loadAiRows();

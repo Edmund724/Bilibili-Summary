@@ -11,6 +11,7 @@ import { escapeHtml } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { testAsrConnection } from "../asr/provider-test.js";
 import { createProviderRow, type ProviderRowElement, type ProviderRowItem, type ProviderRowPreset } from "./provider-row.js";
+import { initCustomSelect } from "./custom-select.js";
 
 const ASR_STATUS_SUCCESS_MIN_MS = 2000;
 
@@ -109,6 +110,13 @@ const asrProviderRow = createProviderRow({
   buildDeleteMessage: (providerId) => ({ type: "asr-providers-delete", providerId })
 });
 
+function convertRowPresetToCustom(row: HTMLElement): void {
+  const select = row.querySelector(".asr-provider-preset") as HTMLSelectElement | null;
+  if (select && select.dataset.customSelectInitialized !== "1") {
+    initCustomSelect(select, "custom-select-wrapper asr-preset-wrapper");
+  }
+}
+
 export function renderAsrProviders(
   listNode: HTMLElement,
   emptyNode: HTMLElement,
@@ -116,10 +124,14 @@ export function renderAsrProviders(
   { presets = ASR_PROVIDER_PRESETS, activeId = "" }: { presets?: readonly AsrProviderPreset[]; activeId?: string } = {}
 ): void {
   asrProviderRow.render(listNode, emptyNode, items, { presets, activeId });
+  listNode.querySelectorAll<HTMLElement>(".asr-provider-row").forEach(convertRowPresetToCustom);
 }
 
 export function addAsrProviderRow(listNode: HTMLElement, emptyNode: HTMLElement, item: ProviderRowItem = {}, { presets = ASR_PROVIDER_PRESETS, activeId = "" }: { presets?: readonly AsrProviderPreset[]; activeId?: string } = {}): void {
   asrProviderRow.add(listNode, emptyNode, item, { presets, activeId });
+  const rows = listNode.querySelectorAll<HTMLElement>(".asr-provider-row");
+  const lastRow = rows[rows.length - 1];
+  if (lastRow) convertRowPresetToCustom(lastRow);
 }
 
 export function collectAsrProviders(listNode: HTMLElement, { presets = ASR_PROVIDER_PRESETS, generateId = asrProviderRow.generateId }: { presets?: readonly AsrProviderPreset[]; generateId?: () => string } = {}) {

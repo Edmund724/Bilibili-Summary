@@ -2767,6 +2767,94 @@
 /* 面板外部的 global document click 委托会关闭 type picker 菜单/模型下拉；
  * 弹出层需要盖过相邻卡片，堆叠上下文内 z-index 已够，此处补一个兜底。 */
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-menu[hidden],
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-dropdown[hidden] {
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-dropdown[hidden],
+#boc-reading-view .boc-reading-settings-host .custom-select-dropdown[hidden] {
   display: none;
+}
+
+/* 自定义下拉通用样式（下载格式 / 语音转写平台预设） */
+.custom-select-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.custom-select-trigger {
+  width: 100%;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 8px;
+  background: var(--boc-reader-card, #ffffff);
+  color: var(--boc-reader-text, #2b2620);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.asr-provider-row .custom-select-wrapper .custom-select-trigger {
+  font-size: 14.5px;
+  padding: 4px 8px;
+}
+
+.custom-select-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: 260px;
+  z-index: 30;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--boc-reader-border, #e7dfd4);
+  border-radius: 12px;
+  background: var(--boc-reader-card, #ffffff);
+  box-shadow: 0 10px 24px rgba(28, 25, 23, 0.12);
+  list-style: none;
+  margin: 0;
+}
+
+.custom-select-option {
+  width: 100%;
+  min-height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  padding: 4px 10px;
+  text-align: left;
+  font: inherit;
+  font-size: 14.5px;
+  color: var(--boc-reader-text, #2b2620);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.custom-select-option:hover {
+  background: var(--boc-reader-surface-2, #f0e9df);
+}
+
+.custom-select-option[data-selected="true"] {
+  background: var(--boc-reader-accent-soft, #fce0ea);
+  color: var(--boc-reader-accent, #fb7299);
+}
+
+.custom-select-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

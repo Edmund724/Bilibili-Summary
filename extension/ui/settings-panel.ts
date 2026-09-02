@@ -27,6 +27,7 @@ import {
   validateAiProviders
 } from "../core/validators.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
+import { initCustomSelect } from "./custom-select.js";
 import {
   renderFixedPropertyRows,
   addFixedPropertyRow,
@@ -583,6 +584,10 @@ async function saveSettings(elements: SettingsElements, { requestPermissions = t
 function bindSettingsEvents(host: HTMLElement): void {
   const elements = collectElements(host);
 
+  if (elements.downloadFormat) {
+    initCustomSelect(elements.downloadFormat, "custom-select-wrapper boc-set-custom-select");
+  }
+
   setTestSuccessHandler(async () => {
     await saveSettings(elements, { requestPermissions: false });
   });
@@ -630,6 +635,11 @@ function bindSettingsEvents(host: HTMLElement): void {
     }
     if (!(event.target instanceof Element) || !event.target.closest(".ai-provider-model-wrapper")) {
       document.querySelectorAll<HTMLElement>(".ai-provider-model-dropdown").forEach((dropdown) => {
+        dropdown.hidden = true;
+      });
+    }
+    if (!(event.target instanceof Element) || !event.target.closest(".custom-select-wrapper")) {
+      document.querySelectorAll<HTMLElement>(".custom-select-dropdown").forEach((dropdown) => {
         dropdown.hidden = true;
       });
     }
