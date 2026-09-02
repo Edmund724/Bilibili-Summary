@@ -680,11 +680,13 @@ export function bindUiEvents(): void {
     const rect = explainAnchorRect(range, item);
     pendingExplainSelection = { itemIndex: item.dataset.index || "", selection };
     readingExplainPop.dataset.itemIndex = pendingExplainSelection.itemIndex;
-    // 先显形再量宽：浮层宽度随文案变化，右缘对齐选区末端（贴右边界时收敛到视口内）
+    // 先显形再量宽：浮层宽度随文案变化。水平位置 = 选区中点正下方居中
+    //（贴左右边界时收敛回 tab body 内），垂直位置 = 选区下缘留 4px。
     readingExplainPop.hidden = false;
     const popWidth = readingExplainPop.offsetWidth || 96;
-    const left = Math.round(rect.right - bodyRect.left) - popWidth;
-    readingExplainPop.style.left = `${Math.min(Math.max(8, left), Math.max(8, Math.round(bodyRect.width) - popWidth - 8))}px`;
+    const selectionCenter = Math.round(rect.left + rect.width / 2 - bodyRect.left);
+    const maxLeft = Math.max(8, Math.round(bodyRect.width) - popWidth - 8);
+    readingExplainPop.style.left = `${Math.min(Math.max(8, selectionCenter - Math.round(popWidth / 2)), maxLeft)}px`;
     readingExplainPop.style.top = `${Math.max(0, Math.round(rect.bottom - bodyRect.top) + 4)}px`;
   };
   const syncExplainPopWithSelection = () => {

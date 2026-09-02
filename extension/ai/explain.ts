@@ -36,13 +36,15 @@ export interface ExplainSelectionInput {
 
 // 上下文窗口半径（前后各取几句）。太小判不出指代，太大就只是在重复字幕。
 const CONTEXT_WINDOW_SENTENCES = 2;
-// 解释输出的 token 上限：口径是「最多三句话」，512 已留足余量。
-const EXPLAIN_MAX_TOKENS = 512;
+// 解释输出的 token 上限：口径是「最多三句话」，320 已够中文三句 + 少量英文术语，
+// 压低上限同时也是给模型的长度信号（越长出得越慢）。
+const EXPLAIN_MAX_TOKENS = 320;
 
 const EXPLAIN_SYSTEM_PROMPT = [
   "你在解释 B 站视频字幕里被观众选中的内容。",
   "规则：",
-  "- 最多 3 句话，直接给解释；不要复述问题、不要「这句话的意思是」这类开场白",
+  "- 不要思考过程、不要前言后语，直接给出解释本身",
+  "- 最多 3 句话，尽量短",
   "- 选中的是词或术语：给简明定义，并说明它在本视频里具体指什么",
   "- 选中的是短语或整句：解释它在当前上下文中的含义与说话人想表达什么",
   "- 人名 / 机构 / 产品名：说明它是谁 / 什么，以及与本片主题的关系",
@@ -104,8 +106,11 @@ export function buildExplainMessages({
 
 /**
  * 发一次解释请求，返回模型给出的解释文本（已 trim）。
- * 中止（signal）与网络/HTTP 失败按 ai/completion.js 的错误模型上抛，由调用方
- * 落 error 态展示；空回复按错误处理（模型没给东西不算成功）。
+ * 思考档位显式钉死 "off"：解释要的是即时性，不跟随用户在对话 tab 选的档位
+ *（ai/completion.js 的口径：off = 请求体不带 reasoning_effort，模型按默认
+ * 快路径回答；「不要思考过程」的措辞另写在系统提示词里，兜住服务端默认开
+ * 思考的平台）。中止（signal）与网络/HTTP 失败按 ai/completion.js 的错误模型
+ * 上抛，由调用方落 error 态展示；空回复按错误处理（模型没给东西不算成功）。
  */
 export async function explainSelection({
   provider,
@@ -122,6 +127,7 @@ export async function explainSelection({
     provider,
     messages,
     stream: false,
+    thinkingLevel: "off",
     signal,
     maxTokens: EXPLAIN_MAX_TOKENS,
     retries: 1
