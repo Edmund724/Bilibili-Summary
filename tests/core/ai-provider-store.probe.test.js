@@ -81,7 +81,11 @@ describe("probeAiChatCompletion { ok, error } 形状", () => {
       model: "gpt",
       messages: [{ role: "user", content: "ping" }],
       stream: false,
-      max_tokens: 1
+      max_tokens: 1,
+      // 探针省略思考档位 ⇒ 协议层按 off 发显式关思考字段：默认开思考的模型在
+      // 非流式 max_tokens:1 探针上会因思考模式报错，关掉才探得通。
+      thinking: { type: "disabled" },
+      enable_thinking: false
     });
     expect(init.headers).toEqual({
       Accept: "application/json",

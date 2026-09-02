@@ -1,5 +1,6 @@
 // ai/completion.ts — OpenAI 兼容 /chat/completions 的纯协议接缝（候选 03）。
-// 请求构造（baseUrl 归一 / Bearer 头 / reasoning_effort / max_tokens 探针）、
+// 请求构造（baseUrl 归一 / Bearer 头 / 思考档位：low·high 发 reasoning_effort、
+// off 发显式关思考字段族 / max_tokens 探针）、
 // SSE 解析、context-length 溢出判定、参数化重试策略，全部收口于此；
 // 三份历史实现（client 流式 port 回吐 / map-reduce 非流式 / provider 探针）
 // 统一经此调用，未来接入新 provider 家族（Gemini/Ollama）时在此加适配器插点。
@@ -22,18 +23,20 @@ import type { ChatMessage, StreamChatEvent } from "./types.js";
 // （原 client.js 的 OPENAI_COMPAT 常量收口于此；listModels 死字段不再保留。）
 export const OPENAI_CHAT_PATH = "/chat/completions";
 
-// 思考档位：off 不发任何参数；low / high 映射到 OpenAI 兼容的 reasoning_effort。
+// 思考档位：low / high 映射到 OpenAI 兼容的 reasoning_effort；off = 显式关思考
+// （见 THINKING_DISABLE_FIELDS，不再是「什么都不发」）。
 const AI_THINKING_LEVELS = ["off", "low", "high"];
 
-// OpenAI 兼容族的「显式关闭思考」字段集（档位为 off 且调用方要求显式关闭时发）。
-// 各家字段名不同且互不冲突，一次全发，认的一方生效、不认的一方按未知参数忽略：
-//   reasoning_effort: "none"      —— OpenAI GPT-5 系的官方关思考值
+// 「关闭思考」的显式字段（OpenAI 兼容族里两家各认一种，一次全发，不认的一方按
+// 未知参数忽略）：
 //   thinking: {type:"disabled"}   —— DeepSeek / GLM / Kimi / MiniMax / 豆包的混合思考开关
 //   enable_thinking: false        —— Qwen（DashScope 兼容模式）/ vLLM / SiliconFlow 系
-// 写点唯一：若某个平台对未知参数严格报错（表现为 HTTP 400），把对应那条从表里删掉
-// 即可，调用方（ai/explain.js 的选区解释）不需要改动。
+// 写点唯一：档位 off 时由 buildChatRequestBody 注入，覆盖对话 tab（含 offscreen
+// 流式链路）、概览生成、选区解释与连通性探针——用户在对话 tab 选 Off 或调用方
+// 省略档位，都落到这里。若某平台对未知参数严格报错（表现为 HTTP 400），删掉对应
+// 一条即可，各调用方无需改动。（不用 reasoning_effort:"none"：那是 GPT-5 专属，
+// 不接受该值的模型会直接 400。）
 const THINKING_DISABLE_FIELDS = {
-  reasoning_effort: "none",
   thinking: { type: "disabled" },
   enable_thinking: false
 };
@@ -48,8 +51,6 @@ interface BuildChatRequestBodyInput {
   stream?: boolean;
   thinkingLevel?: string;
   maxTokens?: number | null;
-  /** 显式关思考：仅档位为 off 时生效，见 THINKING_DISABLE_FIELDS */
-  disableThinking?: boolean;
 }
 
 interface ChatRequestBody {
@@ -65,16 +66,16 @@ interface ChatRequestBody {
 /**
  * 构造 chat/completions 请求体（纯函数，便于单测；请求构造单点）。
  * stream 显式传递（流式 true / 非流式 false）；maxTokens 供探针传 1。
- * disableThinking：调用方要的是「一定别想」（如选区解释要即时答案）。档位是
- * low/high 说明用户主动要思考，此时不注入关闭字段（不覆盖用户选择）。
+ * 档位 off（含省略/非法回落到 off）→ 注入 THINKING_DISABLE_FIELDS 显式关思考；
+ * 档位 low/high → 只发 reasoning_effort，不混入关闭字段。
  */
-export function buildChatRequestBody({ model, messages, stream = false, thinkingLevel, maxTokens, disableThinking = false }: BuildChatRequestBodyInput): ChatRequestBody {
+export function buildChatRequestBody({ model, messages, stream = false, thinkingLevel, maxTokens }: BuildChatRequestBodyInput): ChatRequestBody {
   const body: ChatRequestBody = { model, messages, stream };
   const level = normalizeThinkingLevel(thinkingLevel);
-  if (level !== "off") {
-    body.reasoning_effort = level;
-  } else if (disableThinking) {
+  if (level === "off") {
     Object.assign(body, THINKING_DISABLE_FIELDS);
+  } else {
+    body.reasoning_effort = level;
   }
   if (maxTokens != null) {
     body.max_tokens = maxTokens;
@@ -232,8 +233,6 @@ interface ChatCompletionInput {
   stream?: boolean;
   signal?: AbortSignal | null;
   thinkingLevel?: string;
-  /** 显式关思考（仅 thinkingLevel 为 off 时生效）；见 buildChatRequestBody */
-  disableThinking?: boolean;
   retries?: number;
   probe?: boolean;
   maxTokens?: number | null;
@@ -263,8 +262,8 @@ interface ChatCompletionInput {
  *   fetch/http 阶段的失败未吐过任何事件，不触发。
  * - headers: 额外请求头（探针的 Accept 等）；Content-Type 固定 JSON，
  *   Authorization 已存在时不重复注入。
- * - thinkingLevel / disableThinking（档位 off 时显式发关思考字段族）/
- *   maxTokens / signal / fetchImpl（默认 globalThis.fetch）。
+ * - thinkingLevel / maxTokens / signal / fetchImpl（默认 globalThis.fetch）；
+ *   档位 off（或省略）= 显式关思考，见 THINKING_DISABLE_FIELDS。
  * 错误模型见文件头注释。
  */
 export async function chatCompletion({
@@ -273,7 +272,6 @@ export async function chatCompletion({
   stream = false,
   signal,
   thinkingLevel,
-  disableThinking = false,
   retries,
   probe = false,
   maxTokens,
@@ -305,7 +303,6 @@ export async function chatCompletion({
     messages,
     stream,
     thinkingLevel,
-    disableThinking,
     maxTokens: probe ? (maxTokens ?? 1) : maxTokens
   });
 
