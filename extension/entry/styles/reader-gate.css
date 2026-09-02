@@ -2,8 +2,9 @@
  * data-boc-reader-mode="1" / data-boc-reading-active="1" 为前置，未开启时永不匹配。
  * 阶段 2（B 形态）：整页接管门控退役，本表只剩 Digest 面板的视口定位与
  * 显隐门控——面板贴右栏 fixed 定位（rect 由 reader/digest-host 写入四个
- * --boc-digest-* 变量），窄窗/无锚点降级为居中浮层；B 站页面自身的布局、
- * 播放器与推荐栏一律不动。 */
+ * --boc-digest-* 变量，宽度取 readerContentWidth 面板宽度档，阶段 4b），
+ * 窄窗/无锚点/float 档降级为居中浮层；B 站页面自身的布局、播放器与推荐栏
+ * 一律不动。 */
 
 /* ===== Digest 面板定位 =====
  * 贴栏态：digest-host 挂载时写 left/top/width/height 四变量，面板按变量定位
@@ -31,9 +32,9 @@ body[data-boc-reader-mode="1"] #boc-reading-view.open {
   display: block;
 }
 
-/* 浮层降级态：digest-host 未写变量（窄窗/无锚点），面板回到居中浮层基础
- * 样式（reader.css 的 fixed 16px 边距 + 76vh）——这里只复位贴栏变量定位并
- * 恢复可点，宽度/高度/圆角/阴影全部沿用基础段。 */
+/* 浮层形态：digest-host 未写变量（窄窗/无锚点/float 档），面板回到居中浮层
+ * 基础样式（reader.css 的 fixed 16px 边距 + 76vh）——这里只复位贴栏变量定位
+ * 并恢复可点，宽度/高度/圆角/阴影全部沿用基础段。 */
 body[data-boc-reader-mode="1"] #boc-reading-view[data-boc-digest-float="1"] {
   left: 16px;
   top: 16px;
@@ -225,9 +226,10 @@ body[data-boc-reader-mode="1"][data-boc-reader-line-height="loose"],
   --boc-reader-subtitle-line-height: 1.692;
 }
 
-/* 内容宽度档：阶段 2 起 --boc-reader-main-width 在 B 形态无消费方（主体宽度
- * 逻辑随整页接管门控退役）。presentation-fields 的属性链与步进器照旧写值，
- * 这里保留选择器空档位（阶段 4b 做窄容器与设置语义改写），视觉零效果。 */
+/* 面板宽度档：阶段 4b 起 readerContentWidth 语义 = Digest 面板宽度档
+ *（narrow 340 / standard 380 / wide 440 / float 浮层全宽），接线在
+ * digest-host（档位映射目标宽度写进 --boc-digest-width；float 档强制本段
+ * 浮层形态），CSS 无需档位分支。presentation-fields 的属性链照旧写值。 */
 html[data-boc-reader-mode="1"][data-boc-reader-subtitle-visible="0"] #boc-reading-view .boc-reading-main,
 body[data-boc-reader-mode="1"][data-boc-reader-subtitle-visible="0"] #boc-reading-view .boc-reading-main,
 #boc-reading-view[data-subtitle-visible="0"] .boc-reading-main {

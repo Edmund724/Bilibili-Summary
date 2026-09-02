@@ -8,7 +8,7 @@
 // 本文件只聚合 reader 动态域（LAYOUT/SYNC/LIFECYCLE）的导出，供 ensureReaderDomain()
 // 装载后使用。依赖图保持无环：
 //   ports.js        显式回调端口叶子
-//   LAYOUT          page-frame.js + video-bind.js + digest-host.js → ports
+//   LAYOUT          video-bind.js + digest-host.js → ports
 //   SYNC            sync.js                                        → LAYOUT + ports
 //   LIFECYCLE       lifecycle.js                                   → SYNC + LAYOUT + ports
 // （ports.js 为零依赖叶子，承载逆依赖回调；lifecycle.js 启动时单点注册。
@@ -42,7 +42,7 @@ export { handleReaderPresenterNotification } from "./lifecycle.js";
 // 阅读模式调试快照真身
 export { createReaderDebugSnapshot } from "./debug-snapshot.js";
 
-// ===== LAYOUT 层：page-frame.js + video-bind.js + digest-host.js =====
+// ===== LAYOUT 层：video-bind.js + digest-host.js =====
 
 // 阅读视图的播放器绑定（LAYOUT · video-bind 域，阶段 3 自 player-host 迁出）
 export { bindReadingViewVideo } from "./video-bind.js";
@@ -50,7 +50,7 @@ export { bindReadingViewVideo } from "./video-bind.js";
 // ===== sync.js (SYNC): playback↔subtitle sync =====
 
 // 播放↔字幕同步域：定时器、滚动暂停、章节/字幕点击跳转与跟随状态均来自 ./sync.js
-//（依赖 LAYOUT 层 page-frame.js + video-bind.js）。
+//（依赖 LAYOUT 层 video-bind.js）。
 export { startReadingViewSync } from "./sync.js";
 export { stopReadingViewSync } from "./sync.js";
 export { syncReadingViewPlayback } from "./sync.js";

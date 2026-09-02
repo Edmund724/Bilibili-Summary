@@ -8,7 +8,7 @@
 // Layer graph (acyclic; ports.js is the zero-dependency leaf):
 //
 //   ports.js  显式回调端口（本域逆依赖的唯一通道，lifecycle 单点注册）
-//   LAYOUT    page-frame.js + video-bind.js + digest-host.js → ports
+//   LAYOUT    video-bind.js + digest-host.js → ports
 //                               module-level closure: scroll-pause variables,
 //                               timer variables
 //   SYNC      sync.js（本文件）                     → LAYOUT + ports

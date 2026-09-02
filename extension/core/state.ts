@@ -94,7 +94,7 @@ const readerState: ReaderStateWritable = {
   readingFontScale: "m",
   readingLetterSpacing: "normal",
   readingLineHeight: "tight",
-  readingContentWidth: "fit",
+  readingContentWidth: "standard",
   readingChapterVisible: true,
   readingSubtitleVisible: true,
   readingSettingsExpanded: false,

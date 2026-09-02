@@ -80,13 +80,13 @@ afterEach(() => {
 });
 
 describe("设置变更与 data-attribute", () => {
-  it("hydrateReaderStateFromSettings：应用主题/字体/宽度等设置", () => {
+  it("hydrateReaderStateFromSettings：应用主题/字体/面板宽度等设置", () => {
     presentation.hydrateReaderStateFromSettings({
       readerTheme: "dark",
       readerFontScale: "xl",
       readerLetterSpacing: "loose",
       readerLineHeight: "relaxed",
-      readerContentWidth: "full",
+      readerContentWidth: "wide",
       readerChapterVisible: false,
       readerTranscriptVisible: true
     });
@@ -95,7 +95,7 @@ describe("设置变更与 data-attribute", () => {
     expect(state.reader.readingFontScale).toBe("xl");
     expect(state.reader.readingLetterSpacing).toBe("loose");
     expect(state.reader.readingLineHeight).toBe("relaxed");
-    expect(state.reader.readingContentWidth).toBe("full");
+    expect(state.reader.readingContentWidth).toBe("wide");
     expect(state.reader.readingChapterVisible).toBe(false);
     expect(state.reader.readingSubtitleVisible).toBe(true);
   });
@@ -106,7 +106,7 @@ describe("设置变更与 data-attribute", () => {
       readerFontScale: "l",
       readerLetterSpacing: "tight",
       readerLineHeight: "normal",
-      readerContentWidth: "wide",
+      readerContentWidth: "narrow",
       readerChapterVisible: true,
       readerTranscriptVisible: true
     });
@@ -121,7 +121,7 @@ describe("设置变更与 data-attribute", () => {
       fontScale: "l",
       letterSpacing: "tight",
       lineHeight: "normal",
-      contentWidth: "wide",
+      contentWidth: "narrow",
       chapterVisibility: "auto",
       subtitleVisible: "1"
     };
@@ -145,16 +145,16 @@ describe("设置变更与 data-attribute", () => {
   });
 
   it("updateReaderPreferences：变更宽度/字体并持久化到 chrome.runtime", () => {
-    lifecycle.updateReaderPreferences({ readerFontScale: "xs", readerContentWidth: "narrow" }, { persist: true });
+    lifecycle.updateReaderPreferences({ readerFontScale: "xs", readerContentWidth: "float" }, { persist: true });
 
     expect(state.reader.readingFontScale).toBe("xs");
-    expect(state.reader.readingContentWidth).toBe("narrow");
+    expect(state.reader.readingContentWidth).toBe("float");
 
     const readingView = document.getElementById(ids.readingView) as HTMLElement;
     expect(readingView.dataset.fontScale).toBe("xs");
-    expect(readingView.dataset.contentWidth).toBe("narrow");
+    expect(readingView.dataset.contentWidth).toBe("float");
     expect(document.documentElement.dataset.bocReaderFontScale).toBe("xs");
-    expect(document.body.dataset.bocReaderContentWidth).toBe("narrow");
+    expect(document.body.dataset.bocReaderContentWidth).toBe("float");
 
     expect(chromeStub.runtime.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: "save-settings" }),
@@ -169,7 +169,8 @@ describe("设置变更与 data-attribute", () => {
     );
 
     expect(state.reader.readingFontScale).toBe("m");
-    expect(state.reader.readingContentWidth).toBe("fit");
+    // 阶段 4b：旧档位（ultra 等）统一归一到新默认 standard。
+    expect(state.reader.readingContentWidth).toBe("standard");
     expect(state.reader.readingTheme).toBe("light");
   });
 
@@ -194,7 +195,7 @@ describe("设置变更与 data-attribute", () => {
             readerFontScale: "m",
             readerLetterSpacing: "normal",
             readerLineHeight: "tight",
-            readerContentWidth: "medium",
+            readerContentWidth: "fit", // 旧档位，应归一到 standard
             readerChapterVisible: true,
             readerTranscriptVisible: true
           }

@@ -7,6 +7,10 @@
 // data-boc-digest-float="1" 属性，让阶段 2 的 CSS 回落到 reader.css 既有的
 // 居中浮层基础样式。
 //
+// 阶段 4b：面板宽度不再跟随锚点夹取 [300, 420]，改为读
+// state.reader.readingContentWidth 档位（narrow 340 / standard 380 / wide 440 /
+// float 强制浮层）——步进器「面板宽度」档即本模块的消费方。
+//
 // 阶段 3：player-host 整页接管已退役，本模块是 LAYOUT 层唯一的布局调度器
 //（rAF 合帧 + 脏检查，思路源自候选10 批1 的旧 player-host 调度器）——digest-host
 // 的写组是四个 CSS 变量与一个浮层属性，快照结构独立。
@@ -16,6 +20,7 @@
 // 覆盖，口径对齐 digest-button 的 REINJECT_INTERVAL_MS。
 
 import { findReaderPlayerHost } from "../bilibili/video-probe.js";
+import { state } from "../core/state.js";
 
 // 右栏锚点候选（按优先级）。判定规则与覆盖页面见 closeDigestHost 上方注释；
 // 全部只读 getBoundingClientRect，绝不往锚点里插节点。
@@ -30,9 +35,19 @@ const ANCHOR_SELECTORS = [
 
 // 锚点有效硬下限：宽度过小视为隐藏副本/折叠态，跳过落到次优先候选。
 const ANCHOR_MIN_WIDTH = 280;
-// 命中锚点后面板宽度的夹取区间；超出则 clamp，left 相应右移保持右缘对齐。
+// 面板宽度档（阶段 4b：readerContentWidth 语义 = 面板宽度档）。贴栏形态的
+// 面板宽度由档位决定（不再跟随锚点宽度），右缘对齐锚点；夹取区间只作安全
+// 下限/上限，档位宽度始终落在区间内。
 const PANEL_MIN_WIDTH = 300;
-const PANEL_MAX_WIDTH = 420;
+const PANEL_MAX_WIDTH = 460;
+// narrow/standard/wide 三档的目标宽度；float 档不走贴栏，强制浮层形态。
+export const PANEL_WIDTH_BY_MODE: Record<string, number> = {
+  narrow: 340,
+  standard: 380,
+  wide: 440
+};
+const DEFAULT_PANEL_WIDTH = PANEL_WIDTH_BY_MODE.standard;
+
 // 贴播放器右缘时的间距与视口安全边距。
 const PLAYER_GAP = 12;
 const VIEWPORT_MARGIN = 16;
@@ -42,6 +57,16 @@ const FLOAT_VIEWPORT_MIN_WIDTH = 1000;
 // 定时自查间隔：SPA 换页把锚点节点换掉后靠它重锚（不用 MutationObserver，
 // 理由见文件头注）。
 const REANCHOR_INTERVAL_MS = 800;
+
+// 当前档位的目标面板宽度：未知值（含 float）回落 standard。
+function getPanelTargetWidth(): number {
+  return PANEL_WIDTH_BY_MODE[state.reader.readingContentWidth] || DEFAULT_PANEL_WIDTH;
+}
+
+// float 档：无论锚点/视口是否合格，面板一律走浮层形态。
+function isFloatMode(): boolean {
+  return state.reader.readingContentWidth === "float";
+}
 
 const DIGEST_VAR_PREFIX = "--boc-digest-";
 const DIGEST_VARS = ["left", "top", "width", "height"] as const;
@@ -182,12 +207,18 @@ function applyDigestRect(): void {
     return;
   }
 
+  // float 档强制浮层（不做贴栏判定）。
+  if (isFloatMode()) {
+    applyFloating();
+    return;
+  }
+
   const anchor = findDigestAnchor();
   if (anchor !== observedAnchor) {
     observeDigestAnchor(anchor);
   }
 
-  // 锚点命中且视口够宽：贴栏形态。
+  // 锚点命中且视口够宽：贴栏形态，宽度取档位目标宽。
   const anchorRect = anchor?.getBoundingClientRect();
   if (anchorRect && window.innerWidth >= FLOAT_VIEWPORT_MIN_WIDTH) {
     const rect = clampAnchorRect(anchorRect);
@@ -200,7 +231,7 @@ function applyDigestRect(): void {
     const playerRect = getPlayerRect();
     if (playerRect) {
       const left = playerRect.right + PLAYER_GAP;
-      const width = Math.min(PANEL_MAX_WIDTH, window.innerWidth - left - VIEWPORT_MARGIN);
+      const width = Math.min(getPanelTargetWidth(), window.innerWidth - left - VIEWPORT_MARGIN);
       if (width >= PANEL_MIN_WIDTH) {
         applyPinnedRect(readingView, {
           left,
@@ -218,9 +249,10 @@ function applyDigestRect(): void {
   applyFloating();
 }
 
-// 命中锚点后取面板 rect：宽度夹在 [300, 420]，left 相应右移保持右缘对齐。
+// 命中锚点后取面板 rect：宽度 = 当前档位目标宽（夹在安全区间内），left 相应
+// 左移保持右缘与锚点右缘对齐。
 function clampAnchorRect(rect: DOMRect): { left: number; top: number; width: number; height: number } {
-  const width = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, rect.width));
+  const width = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, getPanelTargetWidth()));
   const left = rect.right - width;
   return { left, top: rect.top, width, height: rect.height };
 }

@@ -143,6 +143,8 @@ export const READER_PRESENTATION_FIELDS: ReaderPresentationField[] = [
     readValue: (reader) => reader.readingLineHeight
   },
   {
+    // 阶段 4b：readerContentWidth 语义 = Digest 面板宽度档（narrow/standard/
+    // wide/float，接线在 digest-host），属性链照旧写值供 CSS/测试观察。
     id: "contentWidth",
     kind: "presentation",
     targets: { html: "data-boc-reader-content-width", body: "data-boc-reader-content-width", readingView: "data-content-width" },
@@ -338,8 +340,6 @@ export const READER_SETTINGS_WATCH_KEYS = [
 // （写入方与清除方在同一处），不存在跨文件清单漂移面，不参与呈现属性契约。
 // 源码扫描测试据此放行；新增 data-boc-* 属性字面量必须要么进主表、要么进本清单。
 export const LOCAL_FLAG_ATTRIBUTES = new Set([
-  "data-boc-reader-keep",             // page-frame 剪枝：保留节点标记
-  "data-boc-reader-hidden",           // page-frame 剪枝：隐藏节点标记
   "data-boc-reader-ready",            // 视图就绪态（ui-renderer 模板初值 / close 复位 "0"）
   "data-boc-reader-hide-sending-bar"  // close 时瞬时隐藏 B 站发送条
 ]);

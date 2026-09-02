@@ -14,14 +14,13 @@
 //   - 渲染期间再次 renderReadingView（切轨/重进阅读模式）先取消上一轮任务。
 // 章节列表量小（几十条），保持整段渲染不变。
 //
-// 依赖方向（无环叶子）：shared 字符串工具 + page-frame 的 ids/尾部留白。
+// 依赖方向（无环叶子）：shared 字符串工具 + state 的 ids/尾部留白。
 // 首屏批与任务启动入口（buildReadingSubtitleItemHtml /
 // startReadingSubtitleAppendTask / cancelReadingSubtitleAppend /
 // ensureReadingSubtitleRenderedUpTo / SUBTITLE_FIRST_BATCH）由 lifecycle.js
 // 的 renderReadingView/closeReadingView/端口注册调用；本模块不 import lifecycle。
 import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
-import { ids } from "./state.js";
-import { updateReadingSubtitleTailSpacer } from "./page-frame.js";
+import { ids, updateReadingSubtitleTailSpacer } from "./state.js";
 import type { ReadingSubtitleItem } from "../subtitle/core.js";
 
 const SUBTITLE_FIRST_BATCH = 120;

@@ -1,7 +1,7 @@
 // Multi-page (分P) page-context resolution seam (issue 02).
 //
 // Collects every page / cid / oid / duration resolution path formerly spread
-// across reader/page-frame.js into a single pure interface:
+// across the reader layout layer into a single pure interface:
 //
 //   resolvePageContext(url, meta, options) -> { pageIndex, cid, cidSource, duration, pageTitle }
 //
@@ -302,7 +302,7 @@ function pickDurationFromPages(pages: PageItem[], pageIndex: number, fallbackDur
 // Pure: returns a plain object and never writes `state`.
 
 // Issue 06: the reader implementation keeps the page state guard's
-// MutationObserver in module scope (now ./page-frame.js, formerly
+// MutationObserver in module scope (now reader state/lifecycle modules, formerly
 // reader-impl.js); the guard holds it here so the implementation can reuse it
 // across lifecycle phases.
 let normalPageStateObserver: MutationObserver | null = null;

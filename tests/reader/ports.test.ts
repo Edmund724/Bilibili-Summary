@@ -53,7 +53,7 @@ describe("reader 显式端口", () => {
 
   it("方法集覆盖旧 callSync 的全部真实调用名（无死槽位）", () => {
     // 旧 sync-adapter 时代实际经 callSync 路由的名字只有这两个
-    //（player-host: syncReadingViewPlayback；page-frame: noteManualReaderInteraction），
+    //（video-bind: syncReadingViewPlayback + noteManualReaderInteraction），
     // 它们必须都是端口方法；旧注册表里其余名字从无调用点，属死注册，不进端口。
     expect(ports.READER_PORT_METHODS).toContain("syncReadingViewPlayback");
     expect(ports.READER_PORT_METHODS).toContain("noteManualReaderInteraction");

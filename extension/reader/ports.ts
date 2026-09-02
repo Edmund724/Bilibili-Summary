@@ -1,7 +1,7 @@
 // Reader 域唯一显式端口（候选06「端口半边」）。
 //
 // 本模块是 reader 依赖图的最底层叶子：不 import reader 域内任何模块，只被
-// LAYOUT（page-frame.js / video-bind.js）与 SYNC（sync.js）引用，承载全部
+// LAYOUT（video-bind.js）与 SYNC（sync.js）引用，承载全部
 // 「逆依赖方向」的回调——即下层域需要上层域服务、而依赖图禁止静态 import
 // 边的场景。它替换了此前的两个隐式注册槽：
 //   1. sync-adapter.js 的 registerSyncAdapter/callSync（`?.[` 可选链解析，
@@ -11,13 +11,13 @@
 //
 // 层图（保持既有方向不变，ports.js 为叶子）：
 //   ports.js   显式方法集（本文件，零依赖叶子）
-//   LAYOUT     page-frame.js + video-bind.js        → ports
+//   LAYOUT     video-bind.js + digest-host.js        → ports
 //   SYNC       sync.js                               → LAYOUT + ports
 //   LIFECYCLE  lifecycle.js                          → SYNC + LAYOUT（并在
 //              模块求值时单点注册端口实现）
 //
 // 方法集只从真实调用点推导，禁止预留死槽位：
-//   - noteManualReaderInteraction     LAYOUT(page-frame) → SYNC      内联宿主手动滚动/滚轮暂停跟随
+//   - noteManualReaderInteraction     LAYOUT(video-bind) → SYNC      阅读视图手动滚动/滚轮暂停跟随
 //   - syncReadingViewPlayback         LAYOUT(video-bind) → SYNC     视频事件驱动的播放↔字幕同步
 //   - flushReadingSubtitleToIndex   SYNC → LIFECYCLE               字幕分批渲染的同步补渲染
 // （旧 callSync 注册表里其余名字——startReadingViewSync/stopReadingViewSync/
@@ -82,7 +82,7 @@ function requirePortMethod(name: keyof ReaderPortImpls) {
 // 显式方法集：逐个列出、不做动态名字分发。LAYOUT/SYNC 域只经本对象回调
 // reader 上层域，方法签名与被替换的旧 callSync/flush 槽逐一对应。
 export const readerPorts = {
-  // LAYOUT(page-frame) → SYNC：内联宿主 scroll/wheel 的手动交互通知。
+  // LAYOUT(video-bind) → SYNC：阅读视图 scroll/wheel 的手动交互通知。
   noteManualReaderInteraction(...args: unknown[]) {
     return requirePortMethod("noteManualReaderInteraction")(...args);
   },

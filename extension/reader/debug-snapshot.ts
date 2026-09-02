@@ -48,10 +48,6 @@ export function createReaderDebugSnapshot(label = "manual") {
         transform: style.transform,
         overflow: style.overflow,
         zIndex: style.zIndex
-      },
-      attrs: {
-        readerKeep: node.getAttribute("data-boc-reader-keep"),
-        readerHidden: node.getAttribute("data-boc-reader-hidden")
       }
     };
   };

@@ -3,11 +3,11 @@
 //
 // Deep module owning the reader view lifecycle (enter/close), the settings
 // rendering/steppers and the page-state guards. It depends
-// on the base LAYOUT layer (page-frame.js + video-bind.js + digest-host.js)
+// on the base LAYOUT layer (video-bind.js + digest-host.js)
 // and on ./sync.js; neither may import it, so the dependency graph stays acyclic:
 //
 //   ports.js        显式回调端口叶子（本模块在文件尾单点注册全部端口实现）
-//   LAYOUT          page-frame.js + video-bind.js + digest-host.js → ports
+//   LAYOUT          video-bind.js + digest-host.js → ports
 //   SYNC            sync.js（本文件）                      → SYNC + LAYOUT + ports
 //   LIFECYCLE       lifecycle.js（本文件）            → SYNC + LAYOUT + ports
 //
@@ -59,16 +59,17 @@ import {
 } from "./presentation.js";
 import { READER_CLOSE_ATTRS } from "./presentation-fields.js";
 
-// LAYOUT (page-frame) functions this module drives:
+// LAYOUT (state) functions this module drives:
 import {
   ids,
-  // 候选06：转写尾部留白自 player-host 迁入 page-frame（内联宿主的滚动留白）。
+  // 候选06：转写尾部留白（PR2 起高度基准为字幕列表容器自身；阶段 4a 自
+  // page-frame 并入 state）。
   updateReadingSubtitleTailSpacer
-} from "./page-frame.js";
-// B 形态右栏 Digest 面板定位器：进入时开始贴栏定位，关闭时拆除。阶段 3 起整页
-// 接管链（player-host/hover-chrome）已整体退役，LAYOUT 层只剩 page-frame +
-// video-bind + digest-host。
-import { openDigestHost, closeDigestHost } from "./digest-host.js";
+} from "./state.js";
+// B 形态右栏 Digest 面板定位器：进入时开始贴栏定位，关闭时拆除。阶段 3 起
+// 整页接管链（player-host/hover-chrome）已整体退役；阶段 4a 起 page-frame
+// 剪枝体系随之退役，LAYOUT 层只剩 video-bind + digest-host。
+import { openDigestHost, closeDigestHost, refreshDigestHostRect } from "./digest-host.js";
 import { resetManualScrollPause, setProgrammaticScrollUntil } from "./state.js";
 // PR2 统一 Digest 面板：进入阅读模式时把右侧面板重置回默认「字幕」标签。
 // tab 切换是纯壳交互，实现在 ui/ui-renderer（bindUiEvents 的标签绑定同文件），
@@ -424,6 +425,7 @@ export function updateReaderChapterPresence(hasChapters: boolean) {
 // 仅在阅读视图交互时执行，常驻侧经 ensureReaderDomain 转发到这些导出） =====
 
 export function updateReaderPreferences(next: Partial<Record<string, unknown>>, { persist = true } = {}) {
+  const prevContentWidth = state.reader.readingContentWidth;
   state.reader.setTheme(normalizeReaderTheme(next.readerTheme ?? state.reader.readingTheme));
   state.reader.setFontScale(normalizeReaderFontScale(next.readerFontScale ?? state.reader.readingFontScale));
   state.reader.setLetterSpacing(
@@ -447,6 +449,11 @@ export function updateReaderPreferences(next: Partial<Record<string, unknown>>, 
   });
   applyReadingViewPresentation();
   renderReaderPanels();
+  // 阶段 4b：readerContentWidth 是面板宽度档，档位变化立即重算面板 rect
+  //（digest-host 读档位映射目标宽度；float 档直接切浮层形态）。
+  if (state.reader.readingContentWidth !== prevContentWidth && state.reader.readingViewOpen) {
+    refreshDigestHostRect();
+  }
   if (persist) {
     persistReaderSettings();
   }

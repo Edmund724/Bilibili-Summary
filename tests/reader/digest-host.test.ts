@@ -1,8 +1,9 @@
-// digest-host 右栏定位器测试（纯增量模块，无消费方）。
+// digest-host 右栏定位器测试。
 //
-// 覆盖：锚点优先级命中与变量写入（含 300/420 clamp）、隐藏副本跳过、
+// 覆盖：锚点优先级命中与变量写入（宽度 = 面板宽度档）、隐藏副本跳过、
 // 播放器贴右缘降级、浮层降级（属性而非变量）、窄窗浮层、800ms 自查重锚、
-// close 拆除与变量清除。
+// close 拆除与变量清除；阶段 4b 补面板宽度档（narrow/standard/wide →
+// 340/380/440，float 档强制浮层）映射用例。
 //
 // 注意：setup.js 给 Element.prototype.getBoundingClientRect 打了「恒返回
 // 800x450」的默认补丁——不覆盖它会让锚点判定/降级分支全部走不到，测试假绿。
@@ -15,6 +16,9 @@ import { READER_MODE_URL } from "../setup.js";
 type DigestHost = typeof import("../../extension/reader/digest-host.js");
 
 let digestHost: DigestHost;
+// 档位读写走 digest-host 同一批模块实例：beforeEach 的 resetModuleState 会
+// vi.resetModules()，静态 import 的 state 是被重置前的旧实例，不能用来改档位。
+let state: typeof import("../../extension/core/state.js").state;
 
 // 右栏锚点六个选择器对应的可命中节点，按需在用例里往 body 挂。
 const ANCHOR_SELECTORS = [
@@ -83,6 +87,7 @@ function vars(el: HTMLElement): Record<string, string> {
 async function loadModules() {
   setLocationUrl(READER_MODE_URL);
   digestHost = await import("../../extension/reader/digest-host.js");
+  state = (await import("../../extension/core/state.js")).state;
 }
 
 beforeEach(() => {
@@ -130,10 +135,11 @@ describe("digest-host 锚点命中", () => {
 
     const el = readingView();
     expect(el.getAttribute("data-boc-digest-float")).toBe(null);
+    // 宽度恒为 standard 档 380（不随锚点 360 变），右缘对齐锚点右缘 1880。
     expect(vars(el)).toEqual({
-      left: "1520px",
+      left: "1500px",
       top: "80px",
-      width: "360px",
+      width: "380px",
       height: "2000px"
     });
   });
@@ -145,35 +151,36 @@ describe("digest-host 锚点命中", () => {
 
     digestHost.openDigestHost();
 
-    expect(vars(readingView()).left).toBe("1520px");
+    expect(vars(readingView()).width).toBe("380px");
   });
 
-  it("宽度 420 上限 clamp：锚点过宽时面板宽度收到 420，left 右移保持右缘对齐", async () => {
+  it.each([
+    ["narrow", 340],
+    ["standard", 380],
+    ["wide", 440]
+  ])("宽度档 %s：面板宽度取档位目标 %ipx，右缘对齐锚点（不随锚点宽度变）", async (mode, width) => {
     await loadModules();
-    // 480 宽锚点，右缘 1900：clamp 到 420 后 left = 1900 - 420 = 1480。
-    mountAnchor(".right-container-inner", makeRect(1420, 80, 480, 2000));
+    state.reader.setContentWidth(mode as string);
+    // 锚点 480 宽（比任何档位都宽）与 280 宽（比任何档位都窄）都只影响 left：
+    // 宽度恒为档位目标宽，右缘对齐锚点右缘 1900。
+    mountAnchor(".right-container-inner", makeRect(1900 - 480, 80, 480, 2000));
 
     digestHost.openDigestHost();
-
     expect(vars(readingView())).toEqual({
-      left: "1480px",
+      left: `${1900 - width}px`,
       top: "80px",
-      width: "420px",
+      width: `${width}px`,
       height: "2000px"
     });
-  });
 
-  it("宽度 300 下限 clamp：锚点过窄（但 >= 280）时面板宽度抬到 300，left 左移保持右缘对齐", async () => {
-    await loadModules();
-    // 280 宽锚点，右缘 1880：clamp 到 300 后 left = 1880 - 300 = 1580。
-    mountAnchor(".right-container-inner", makeRect(1600, 80, 280, 2000));
+    digestHost.closeDigestHost();
+    mountAnchor(".right-container", makeRect(1900 - 280, 80, 280, 2000));
 
     digestHost.openDigestHost();
-
     expect(vars(readingView())).toEqual({
-      left: "1580px",
+      left: `${1900 - width}px`,
       top: "80px",
-      width: "300px",
+      width: `${width}px`,
       height: "2000px"
     });
   });
@@ -187,7 +194,7 @@ describe("digest-host 锚点命中", () => {
 
     digestHost.openDigestHost();
 
-    expect(vars(readingView()).left).toBe("1520px");
+    expect(vars(readingView()).top).toBe("80px");
   });
 });
 
@@ -200,7 +207,7 @@ describe("digest-host 隐藏副本跳过", () => {
 
     digestHost.openDigestHost();
 
-    expect(vars(readingView()).left).toBe("1520px");
+    expect(vars(readingView()).top).toBe("80px");
   });
 
   it("全部锚点均为隐藏副本（width 0）→ 降级贴播放器右缘", async () => {
@@ -215,12 +222,12 @@ describe("digest-host 隐藏副本跳过", () => {
 
     digestHost.openDigestHost();
 
-    // left = 1000 + 12 = 1012，width = min(420, 1920 - 1012 - 16) = 420，
+    // left = 1000 + 12 = 1012，width = min(380(standard), 1920 - 1012 - 16)，
     // 顶/高对齐播放器。
     expect(vars(readingView())).toEqual({
       left: "1012px",
       top: "80px",
-      width: "420px",
+      width: "380px",
       height: "560px"
     });
   });
@@ -236,7 +243,7 @@ describe("digest-host 降级链", () => {
     expect(vars(readingView())).toEqual({
       left: "1012px",
       top: "80px",
-      width: "420px",
+      width: "380px",
       height: "560px"
     });
   });
@@ -292,7 +299,7 @@ describe("digest-host 降级链", () => {
 
     const el = readingView();
     expect(el.getAttribute("data-boc-digest-float")).toBe(null);
-    expect(vars(el).left).toBe("1520px");
+    expect(vars(el).width).toBe("380px");
   });
 });
 
@@ -323,7 +330,7 @@ describe("digest-host 重算时机", () => {
     await loadModules();
     const old = mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
     digestHost.openDigestHost();
-    expect(vars(readingView()).left).toBe("1520px");
+    expect(vars(readingView()).width).toBe("380px");
 
     // SPA 换页：旧节点 rect 塌掉（从文档里摘掉后 stub 仍在但新节点顶上）。
     old.getBoundingClientRect = () => makeRect(0, 0, 0, 0) as DOMRect;
@@ -333,7 +340,7 @@ describe("digest-host 重算时机", () => {
     runRafSynchronously();
     vi.advanceTimersByTime(801);
 
-    expect(vars(readingView()).left).toBe("1500px");
+    expect(vars(readingView()).top).toBe("100px");
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -349,7 +356,7 @@ describe("digest-host 重算时机", () => {
     digestHost.openDigestHost();
     expect(setIntervalSpy).not.toHaveBeenCalled();
 
-    expect(vars(readingView()).left).toBe("1520px");
+    expect(vars(readingView()).width).toBe("380px");
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -361,7 +368,7 @@ describe("digest-host close", () => {
     await loadModules();
     mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
     digestHost.openDigestHost();
-    expect(vars(readingView()).left).toBe("1520px");
+    expect(vars(readingView()).width).toBe("380px");
 
     digestHost.closeDigestHost();
 
@@ -373,7 +380,7 @@ describe("digest-host close", () => {
     mountAnchor(".right-container", makeRect(1500, 100, 360, 1800));
     runRafSynchronously();
     vi.advanceTimersByTime(2000);
-    expect(vars(el).left).toBe("");
+    expect(vars(el).width).toBe("");
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -385,7 +392,7 @@ describe("digest-host close", () => {
 
     mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
     digestHost.openDigestHost();
-    expect(vars(readingView()).left).toBe("1520px");
+    expect(vars(readingView()).width).toBe("380px");
   });
 
   it("未 open 时 close 是安全 no-op", async () => {
@@ -404,7 +411,7 @@ describe("digest-host close", () => {
     document.body.appendChild(view);
     mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
     digestHost.refreshDigestHostRect();
-    expect(vars(view).left).toBe("1520px");
+    expect(vars(view).width).toBe("380px");
   });
 
   it("refreshDigestHostRect：手动重算一次，同步写变量", async () => {
@@ -416,10 +423,33 @@ describe("digest-host close", () => {
     digestHost.refreshDigestHostRect();
 
     expect(vars(readingView())).toEqual({
-      left: "1500px",
+      left: "1480px",
       top: "40px",
-      width: "360px",
+      width: "380px",
       height: "1600px"
+    });
+  });
+
+  it("float 档：锚点有效且视口够宽也强制浮层（不写变量）", async () => {
+    await loadModules();
+    state.reader.setContentWidth("float");
+    mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
+
+    digestHost.openDigestHost();
+
+    const el = readingView();
+    expect(el.getAttribute("data-boc-digest-float")).toBe("1");
+    expect(vars(el)).toEqual({ left: "", top: "", width: "", height: "" });
+
+    // 档位切回贴栏档：重算后恢复写变量。
+    state.reader.setContentWidth("wide");
+    digestHost.refreshDigestHostRect();
+    expect(el.getAttribute("data-boc-digest-float")).toBe(null);
+    expect(vars(el)).toEqual({
+      left: "1440px",
+      top: "80px",
+      width: "440px",
+      height: "2000px"
     });
   });
 });

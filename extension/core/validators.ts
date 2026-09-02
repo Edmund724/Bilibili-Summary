@@ -45,11 +45,12 @@ export function normalizeReaderLineHeight(value: unknown): string {
 }
 
 export function normalizeReaderContentWidth(value: unknown): string {
-  // fit（填满）是默认档：字幕列表常驻右侧面板后主体只剩标题与视频，固定宽度
-  // 上限徒留空白。旧默认 medium（860px）不在允许列表内，按 fit 迁移。
-  return ["compact", "narrow", "wide", "full", "fit"].includes(value as string)
+  // 阶段 4b 语义改写：readerContentWidth 是 Digest 面板宽度档（narrow 340 /
+  // standard 380 / wide 440 / float 浮层全宽），不再是整页主体宽度档。
+  // 旧档位（compact/narrow/wide/full/fit/medium 等）一律归一到新默认 standard。
+  return ["narrow", "standard", "wide", "float"].includes(value as string)
     ? (value as string)
-    : "fit";
+    : "standard";
 }
 
 export function normalizeReaderChapterVisibility(value: unknown): string {

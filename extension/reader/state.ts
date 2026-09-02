@@ -10,10 +10,10 @@
 // ===== ids.js：reader 私有 DOM id 表 =====
 //
 // 为什么聚合前独立成叶子：id 表被 UI 模板（ui/ui-renderer.js buildUiHtml）、
-// 总结链（subtitle/ui.js）与 reader 域实现（page-frame/video-bind/sync/
-// lifecycle）三方共享。若继续由 page-frame.js 持有，常驻侧为取一份纯数据
-// 就得静态拖入整个 LAYOUT 域。聚合后本文件仍是 content 静态 chunk 的轻量
-// 部分，不 import reader 域任何重实现。
+// 总结链（subtitle/ui.js）与 reader 域实现（video-bind/sync/lifecycle）三方
+// 共享。若继续由旧 page-frame.js 持有，常驻侧为取一份纯数据就得静态拖入整个
+// LAYOUT 域。聚合后本文件仍是 content 静态 chunk 的轻量部分，不 import reader
+// 域任何重实现。
 
 export const ids = {
   root: "boc-root",
@@ -120,7 +120,7 @@ export function isReaderViewOpen() {
 
 // ===== scroll-state.js：阅读视图滚动状态共享叶子 =====
 //
-// 这是 SYNC（./sync.js）与 LAYOUT（./page-frame.js + ./video-bind.js）的共享
+// 这是 SYNC（./sync.js）与 LAYOUT（./video-bind.js + ./digest-host.js）的共享
 // 叶子：拥有手动滚动暂停与程序化滚动两个截止时间的唯一声明与读写函数。
 // 放在独立叶子里，让 SYNC 与 LAYOUT 共享同一份状态而不需要访问器穿越
 // reader-impl 的闭包 seam，也保持依赖图无环——本模块不 import reader 域内
@@ -147,6 +147,28 @@ export function setManualScrollPaused(until: number) {
 
 export function setProgrammaticScrollUntil(until: number) {
   programmaticScrollUntil = until;
+}
+
+// ===== 转写尾部留白（阶段 4a 自 page-frame.js 并入） =====
+//
+// 消费方：batched-render 分批追加、lifecycle 的整段渲染，均属 reader 动态
+// chunk，故随消费方落在本动态域聚合文件；此处不得 import 其他 reader 域模块
+//（保持本文件只依赖 core/state 的既有边界）。
+export function updateReadingSubtitleTailSpacer() {
+  const spacer = document.getElementById(ids.readingSubtitleTailSpacer);
+  if (!spacer) {
+    return;
+  }
+  const subtitleList = document.getElementById(ids.readingSubtitleList);
+  const hostHeight = subtitleList?.clientHeight || 0;
+  const spacerHeight = Math.max(hostHeight, Math.round(window.innerHeight * 0.92), 320);
+  // 候选10 批1 脏检查：现值与目标一致则跳写（250ms tick / 每帧追加都会调到）。
+  // 读现值而非缓存快照：换新 spacer 节点（重建后 style.height 为空）或外部
+  // 篡改时自动重写，无需额外的节点身份失效逻辑。
+  if (spacer.style.height === `${spacerHeight}px`) {
+    return;
+  }
+  spacer.style.height = `${spacerHeight}px`;
 }
 
 // ===== page-state.js：reader 页面状态守卫 =====

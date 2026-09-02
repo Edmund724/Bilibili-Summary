@@ -19,7 +19,6 @@ function isIgnoredReaderVideoCandidate(video: Element | null | undefined): boole
   }
   const host = findReaderPlayerHost(video);
   const blockedSelector = [
-    "[data-boc-reader-hidden='1']",
     ".bpx-player-mini-warp",
     ".bpx-player-mini-close",
     ".bpx-player-ending-panel",

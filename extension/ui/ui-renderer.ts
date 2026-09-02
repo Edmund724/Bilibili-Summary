@@ -149,7 +149,7 @@ export function buildUiHtml(): string {
                   })}
                   ${buildReaderStepperControl({
                     id: ids.readingContentWidthSelect,
-                    title: "正文宽度",
+                    title: "面板宽度",
                     settingKey: "readerContentWidth"
                   })}
                 </div>
