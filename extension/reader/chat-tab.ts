@@ -9,8 +9,10 @@
 // 谓词的疑义记录仍在），按新 UI 心态重写必引入行为漂移（盘点报告风险 4）。
 //
 // 组装面（与 sidepanel.ts 同构，内核全部来自 ../chat/*）：
-//   conversation-store（pinned 补水走 ai/context-resolver 的 bgFetchJson 通道，
-//     content script 可用）+ context-load（createInProcessContextFetch：进程内
+//   conversation-store（pinned 补水的 context 解析 dep 接复合适配器：会话
+//     contextRef 与当前 clip 身份一致 → 进程内快照装配（工单 04 短路，零网络
+//     解析）；未命中走 ai/context-resolver 的 bgFetchJson 通道，content script
+//     可用）+ context-load（createInProcessContextFetch：进程内
 //     直读 state.clip，工单 08 三事已配测试）+ context-sync（reader 触发源：
 //     boc:urlchange 强刷；reader 打开/关闭的恢复折叠进本组合根的激活路径）+
 //     providers + presets + subtitle-wait + no-subtitle + notices/lists/popovers
@@ -59,7 +61,7 @@ import { sidepanelState } from "../chat/chat-state.js";
 import { createPresetPrompts } from "../chat/presets.js";
 import { createProviderPrefs } from "../chat/providers.js";
 import { createLiveContextSync } from "../chat/context-sync.js";
-import { createContextLoad, createInProcessContextFetch } from "../chat/context-load.js";
+import { createContextLoad, createInProcessContextFetch, createInProcessPinnedContextResolver } from "../chat/context-load.js";
 // 上下文加载失败文案：ensureCurrentContextForSend 的失败闸共用策略模块常量。
 import { CONTEXT_READ_FAILED_MESSAGE, isPinnedContextTruthy } from "../chat/context-policy.js";
 import { updateModelSelectWidth } from "../ui/model-select-width.js";
@@ -252,7 +254,14 @@ const conversationStore = createConversationStore({
   removeConversationContextNotice,
   hideHistoryPopover: () => popovers.hideHistoryPopover(),
   loadContextState: (opts) => contextLoad.loadContextState(opts),
-  resolveAiConversationContext,
+  // pinned 补水的 context 解析（工单 04 身份短路）：会话 contextRef 与当前
+  // clip 一致 → 进程内快照装配（零网络解析、不重下字幕正文）；未命中（换
+  // 视频/换分P/换轨/无页面）→ ai/context-resolver 的网络路径原样兜底。
+  resolveAiConversationContext: createInProcessPinnedContextResolver({
+    clip: () => state.clip,
+    settings: () => state.settings,
+    resolveNetwork: resolveAiConversationContext
+  }),
   resolveAiConversationPageRef,
   // 流式中删除当前会话 / 清空全部 / restoreLatest 无匹配时由 store 同步调用：
   // 断 port、清在途一问一答、清消息区并退出流式 UI 态（对应 restartChat 的

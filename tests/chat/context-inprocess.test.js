@@ -53,7 +53,9 @@ vi.mock("../../extension/core/state.js", () => ({
 }));
 
 let createInProcessContextFetch;
+let createInProcessPinnedContextResolver;
 let createContextLoad;
+let createConversationStore;
 let createChatRuntime;
 let createSubtitleWaiter;
 let isContextPending;
@@ -67,7 +69,10 @@ const HOT_COMMENTS = [{ uname: "热评君", message: "前方高能" }];
 async function importModules() {
   const contextLoadModule = await import("../../extension/chat/context-load.js");
   createInProcessContextFetch = contextLoadModule.createInProcessContextFetch;
+  createInProcessPinnedContextResolver = contextLoadModule.createInProcessPinnedContextResolver;
   createContextLoad = contextLoadModule.createContextLoad;
+  const storeModule = await import("../../extension/chat/conversation-store.js");
+  createConversationStore = storeModule.createConversationStore;
   const runtimeModule = await import("../../extension/chat/chat-runtime.js");
   createChatRuntime = runtimeModule.createChatRuntime;
   const waitModule = await import("../../extension/chat/subtitle-wait.js");
@@ -436,5 +441,177 @@ describe("缺省热评实现（reader-get-hot-comments 处理器语义重演）"
     expect(clipStateMock.setHotComments).toHaveBeenCalledWith([]);
     expect(outcome.kind).toBe("payload");
     expect(outcome.payload.hotComments).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// pinned 补水身份短路（工单 04）
+//
+// 重开一条置顶对话时，若其 contextRef（bvid/cid/字幕轨身份三元组）与当前
+// state.clip 一致，补水走 createInProcessPinnedContextResolver 的进程内快照
+// 装配（createInProcessContextFetch 同 shape 同签名），不再经网络解析
+// （ai/context-resolver 的 bgFetchJson 三四趟 + 重新下载可达 MB 级字幕正文）。
+// 任何身份字段缺失/不一致（换视频/换分P/换轨/老数据缺轨身份）或无页面
+// （clip 为空）/转写中（字幕体为空）一律落回注入的网络解析器——宁可多一次
+// 网络，不可装配出错的上下文。
+// ===========================================================================
+describe("pinned 补水身份短路（工单 04）", () => {
+  // 持久化会话的 contextRef（buildAiContextRef 归一后的形状）。
+  function makePinnedRef(overrides = {}) {
+    return {
+      bvid: "BV1test000000",
+      cid: "101",
+      aid: "100",
+      url: VIDEO_URL,
+      title: "测试视频",
+      pageIndex: 1,
+      subtitleLang: "zh-CN",
+      selectedSubtitleId: "s1",
+      selectedSubtitleUrl: "https://example.com/s1",
+      isVideoContext: true,
+      ...overrides
+    };
+  }
+
+  // 短路解析器 + 网络路径 mock（resolveNetwork 即 conversation-store 的
+  // resolveAiConversationContext dep 的网络适配器替身）。
+  function makeResolver(clipRef, { resolveNetwork } = {}) {
+    const fetchHotComments = vi.fn(async () => HOT_COMMENTS);
+    const network = resolveNetwork
+      || vi.fn(async () => ({
+        title: "网络装配",
+        subtitleBody: [{ from: 9, to: 12, content: "网络字幕" }],
+        isVideoContext: true
+      }));
+    const resolve = createInProcessPinnedContextResolver({
+      clip: () => clipRef.current,
+      settings: () => ({ includeTimestampInBody: true }),
+      url: () => VIDEO_URL,
+      fetchHotComments,
+      resolveNetwork: network
+    });
+    return { resolve, network, fetchHotComments };
+  }
+
+  it("pinned contextRef 与当前 clip 身份一致 → 零网络往返，从同进程快照装配", async () => {
+    const clipRef = { current: makeClip() };
+    const { resolve, network, fetchHotComments } = makeResolver(clipRef);
+
+    const payload = await resolve(makePinnedRef());
+
+    // 网络解析（视频元信息/字幕列表/字幕正文的三四趟）零调用
+    expect(network).not.toHaveBeenCalled();
+    // 快照装配：字幕正文取自 state.clip（未重新下载），热评走全量路径同款时机
+    expect(payload.bvid).toBe("BV1test000000");
+    expect(payload.cid).toBe("101");
+    expect(payload.subtitleBody).toEqual([{ from: 0, to: 5, content: "第一句" }]);
+    expect(payload.hotComments).toEqual(HOT_COMMENTS);
+    expect(payload.isVideoContext).toBe(true);
+    expect(payload.signature).not.toBe("");
+    expect(fetchHotComments).toHaveBeenCalledTimes(1);
+  });
+
+  it("装配结果与 createInProcessContextFetch 的 live 全量快照同 shape 同签名", async () => {
+    const clipRef = { current: makeClip() };
+    const { resolve } = makeResolver(clipRef);
+    const pinnedPayload = await resolve(makePinnedRef());
+
+    const liveFetch = createInProcessContextFetch({
+      clip: () => clipRef.current,
+      settings: () => ({ includeTimestampInBody: true }),
+      url: () => VIDEO_URL,
+      fetchHotComments: async () => HOT_COMMENTS
+    });
+    const live = await liveFetch({ forceRefresh: true, ifSignature: "" });
+
+    expect(live.kind).toBe("payload");
+    expect(pinnedPayload).toEqual(live.payload);
+  });
+
+  it.each([
+    ["bvid 不同（别的视频）", { bvid: "BV1other00000" }],
+    ["cid 不同（换分P）", { cid: "999" }],
+    ["字幕轨 id 不同（换轨）", { selectedSubtitleId: "s2" }],
+    ["字幕 lang 不同", { subtitleLang: "en-US" }],
+    ["字幕轨 URL 缺失（老数据）", { selectedSubtitleUrl: "" }],
+    ["cid 缺失（aid 键老会话）", { cid: "" }]
+  ])("不匹配（%s）→ 原样落回网络路径", async (_name, overrides) => {
+    const clipRef = { current: makeClip() };
+    const { resolve, network } = makeResolver(clipRef);
+    const ref = makePinnedRef(overrides);
+
+    const payload = await resolve(ref);
+
+    // 网络适配器收到原始 ref（归一化留给网络路径自己），装配结果原样返回
+    expect(network).toHaveBeenCalledTimes(1);
+    expect(network).toHaveBeenCalledWith(ref);
+    expect(payload.title).toBe("网络装配");
+  });
+
+  it("无页面（clip 为空）→ 落回网络路径", async () => {
+    const clipRef = { current: {} };
+    const { resolve, network } = makeResolver(clipRef);
+
+    await resolve(makePinnedRef());
+
+    expect(network).toHaveBeenCalledTimes(1);
+  });
+
+  it("转写中（字幕体为空）→ 落回网络路径，不装配空字幕上下文", async () => {
+    const clipRef = { current: makeClip({ subtitleBody: [], subtitleFetchState: "loading" }) };
+    const { resolve, network } = makeResolver(clipRef);
+
+    await resolve(makePinnedRef());
+
+    expect(network).toHaveBeenCalledTimes(1);
+  });
+
+  // 组合根接线对账：conversation-store 的 resolveAiConversationContext dep 接
+  // 复合解析器后，hydratePinned 对「当前视频的置顶对话」零网络补水，且落进
+  // contextData / resolvedContext 的形态与网络路径消费口径一致。
+  it("hydratePinned 经身份短路补水当前视频的置顶对话（dep 接线对账）", async () => {
+    const clipRef = { current: makeClip() };
+    const { resolve, network } = makeResolver(clipRef);
+    const contextChip = document.createElement("button");
+    document.body.appendChild(contextChip);
+    const store = createConversationStore({
+      renderHistoryList: vi.fn(),
+      renderInitialState: vi.fn(),
+      updateContextChip: vi.fn(),
+      showConversationContextNotice: vi.fn(),
+      showConversationContextError: vi.fn(),
+      removeConversationContextNotice: vi.fn(),
+      hideHistoryPopover: vi.fn(),
+      loadContextState: vi.fn(async () => true),
+      resolveAiConversationContext: resolve,
+      resolveAiConversationPageRef: vi.fn(async () => ({})),
+      stopActiveChat: vi.fn(),
+      storage: { get: vi.fn(async () => ({})), set: vi.fn(async () => {}) }
+    });
+    // 重开后 live 键缺失（分支 2 的键比较不命中）→ 补水落到 context 解析 dep
+    sidepanelState.currentConversationMeta = {
+      id: "conv-1",
+      title: "测试视频",
+      createdAt: 1,
+      updatedAt: 1,
+      contextKey: CONTEXT_KEY,
+      contextTitle: "测试视频",
+      contextUrl: VIDEO_URL,
+      isVideoContext: true,
+      pinnedContext: true,
+      contextRef: makePinnedRef(),
+      resolvedContext: null
+    };
+    sidepanelState.liveContextKey = "";
+
+    const ok = await store.hydratePinned({ silent: true });
+
+    expect(ok).toBe(true);
+    // 零网络往返：补水上下文来自进程内快照
+    expect(network).not.toHaveBeenCalled();
+    expect(sidepanelState.contextData.subtitleBody).toEqual([{ from: 0, to: 5, content: "第一句" }]);
+    expect(sidepanelState.contextData.signature).not.toBe("");
+    expect(sidepanelState.currentContextKey).toBe(CONTEXT_KEY);
+    expect(sidepanelState.currentConversationMeta.resolvedContext).not.toBeNull();
   });
 });

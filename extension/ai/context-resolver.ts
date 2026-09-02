@@ -7,7 +7,6 @@ import {
   fetchVideoMeta,
   fetchSubtitleBundle,
   fetchSubtitleBody,
-  fetchHotComments,
   bgFetchJson,
   type VideoMeta,
   type VideoPage,
@@ -101,22 +100,22 @@ export async function resolveAiConversationContext(contextRef: unknown): Promise
     lang: selectedTrack.lanDoc || selectedTrack.lan
   });
   const cachedBody = await loadSubtitleFromCache(cacheKey);
-  // 旧 JS 调用点传了 transport + url 且期望返回字幕数组；gateway.ts 的导出签名
-  // 已变为只接受 url 并返回 { body }，但本模块仍按旧契约消费（测试 mock 与实际
-  // 历史行为均返回数组）。通过函数类型断言保留原调用以维持运行时行为不变。
-  const fetchSubtitleBodyLegacy = fetchSubtitleBody as unknown as (transport: unknown, url: string) => Promise<unknown[]>;
+  // 缓存命中免一次字幕正文下载；未命中按 gateway 现代签名只传 url、解构
+  // { body }（与 subtitle/fetcher 等其余调用点同一条 contentFetchJson 通道）。
   const body = Array.isArray(cachedBody) && cachedBody.length > 0
     ? cachedBody
-    : await fetchSubtitleBodyLegacy(bgFetchJson, selectedTrack.subtitleUrl);
+    : (await fetchSubtitleBody(selectedTrack.subtitleUrl)).body;
   if (!body.length) {
     throw new Error("原视频字幕为空");
   }
 
   const pageIndex = Number(page?.page || extractPageIndexFromUrl(ref.url || "") || 1) || 1;
-  // 旧 JS 调用点传了 transport + aid；gateway.ts 的导出签名已变为只接受 count，
-  // 多余参数被忽略。通过函数类型断言保留原调用以维持运行时行为不变。
-  const fetchHotCommentsLegacy = fetchHotComments as unknown as (transport: unknown, aid: string) => Promise<HotComment[]>;
-  const hotComments = await fetchHotCommentsLegacy(bgFetchJson, aid);
+  // 热评恒为空数组：gateway 现代签名 fetchHotComments(count) 按 getCurrentAid()
+  // 取「当前视频」的 aid，对任意 contextRef 的网络解析会把别的视频的热评装进
+  // 上下文；旧调用点（transport + aid 两参）自签名变更起实际恒返回空数组
+  //（count 位被 transport 占位污染为 0 → 早退）。按现状保留空数组，可感知
+  // 行为零变化；per-aid 拉取（gateway 内部的 fetchHotCommentsJson）待后续票接通。
+  const hotComments: HotComment[] = [];
   const title = String(videoMeta.title || ref.title || "").trim();
   const author = String(videoMeta.author || ref.author || "").trim();
   const uploadDate = String(videoMeta.uploadDate || ref.uploadDate || "").trim();
@@ -154,7 +153,7 @@ export async function resolveAiConversationContext(contextRef: unknown): Promise
       url: String(item.subtitleUrl || "").trim(),
       lang: String(item.lanDoc || item.lan || "").trim()
     })),
-    hotComments: hotComments as HotComment[],
+    hotComments,
     isVideoContext: true
   };
 }

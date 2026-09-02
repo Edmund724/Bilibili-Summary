@@ -14,7 +14,11 @@
 //     state.clip + core/context-payload 组装，不走消息往返），重演消息链的
 //     三件事（工单 08 短路验收）：签名短路（unchanged 不重发字幕体、不拉
 //     热评）、热评拉取时机（仅全量路径，与现状一致）、快照附 signature 供
-//     下一轮 ifSignature。
+//     下一轮 ifSignature；
+//   - createInProcessPinnedContextResolver：pinned 补水的 context 解析适配器
+//    （工单 04）：会话 contextRef 与当前 clip 身份一致 → 走上一条从同进程
+//     快照装配（零网络解析、不重下字幕正文），未命中原样落回注入的网络
+//     解析器（ai/context-resolver）。
 //
 // 依赖方向（无环）：共享可变状态（contextData / currentContextKey /
 // liveContextData / liveContextKey / liveTabUrl / currentConversationMeta）直接
@@ -24,7 +28,7 @@
 // renderSuggestions、restoreLatest、流式守卫判定 isStreaming /
 // hasPendingUserPrompt 惰性互引 chatRuntime 实例）经工厂 deps 注入。本模块
 // 不 import 组合根。
-import { buildContextKey, doesTabMatchContextUrl } from "../ai/conversation.js";
+import { buildAiContextRef, buildContextKey, doesTabMatchContextUrl } from "../ai/conversation.js";
 import { getAiContextState } from "../ai/context-resolver.js";
 import { waitForTabComplete } from "../shared/tab-utils.js";
 import {
@@ -216,6 +220,97 @@ export function createInProcessContextFetch(deps: InProcessContextFetchDeps = {}
       // 形状跨域传递，边界处经 unknown 断言对齐 AiContext。
       payload: { ...payload, hotComments, isVideoContext: true, signature } as unknown as ContextFetchPayload
     };
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 策略三：pinned 补水的进程内身份短路（工单 04）
+// ---------------------------------------------------------------------------
+
+// pinned 会话的 contextRef 与当前 clip 的身份一致性判定（纯函数）。从紧语义：
+// 任一身份字段缺失或不一致一律不命中（宁可多一次网络，不可装配出错的上下文）——
+//   - bvid 双方非空且相等：视频身份主键；
+//   - cid 双方非空且相等：分P 身份（ref.cid 缺失的老会话/aid 键会话不命中）；
+//   - 字幕轨身份三元组（selectedSubtitleId / selectedSubtitleUrl / subtitleLang）
+//     双方非空且逐项相等：轨不一致时网络路径会按 ref 偏好重选轨，而快照装配
+//     给出的是当前生效轨，两者不可互换；
+//   - clip.subtitleBody 非空：轨身份与字幕体同属「字幕接受」事务
+//    （subtitle/commit.ts 原子落账），此处防御抓取/转写中窗口把空字幕上下文
+//     装配给 pinned 补水（其发送路径不经 subtitle-wait 等待闸）。
+// ref 先经 buildAiContextRef 归一（单一构造器；bvid 允许从 url 回落，但 cid
+// 必须显式存在才可能命中）。
+export function doesContextRefMatchCurrentClip(
+  contextRef: unknown,
+  clip: Partial<ClipState> | null | undefined
+): boolean {
+  const ref = buildAiContextRef(contextRef);
+  const refBvid = String(ref.bvid || "").trim();
+  const refCid = String(ref.cid || "").trim();
+  const clipBvid = String(clip?.bvid || "").trim();
+  const clipCid = String(clip?.cid || "").trim();
+  if (!refBvid || !refCid || refBvid !== clipBvid || refCid !== clipCid) {
+    return false;
+  }
+  const trackFields = [ref.selectedSubtitleId, ref.selectedSubtitleUrl, ref.subtitleLang].map((item) =>
+    String(item || "").trim()
+  );
+  const clipTrackFields = [
+    clip?.selectedSubtitleId,
+    clip?.selectedSubtitleUrl,
+    clip?.selectedSubtitleLang
+  ].map((item) => String(item || "").trim());
+  if (trackFields.some((item, index) => !item || item !== clipTrackFields[index])) {
+    return false;
+  }
+  return Array.isArray(clip?.subtitleBody) && clip.subtitleBody.length > 0;
+}
+
+// pinned 补水的 context 解析器：conversation-store 的 resolveAiConversationContext
+// dep 在 reader 组合根的适配器。contextRef 与当前 clip 身份一致（上面的判定）→
+// 经 createInProcessContextFetch 从同进程快照装配（同 shape 同签名，不再经网络
+// 解析发三四趟请求、不重新下载可达 MB 级的字幕正文）；未命中（换视频/换分P/
+// 换轨/无页面/转写中）→ 原样落回注入的网络解析器。conversation-store 的
+// context 解析 dep 因此保持「进程内短路 + 网络」两个适配器的复合，接缝真实
+// （扩展页消息链世界仍直接接纯网络解析器）。
+export interface InProcessPinnedContextResolverDeps {
+  // 进程内快照输入（与 createInProcessContextFetch 同一套注入、同一缺省口径）。
+  clip?: () => Partial<ClipState>;
+  settings?: () => Partial<Settings>;
+  url?: () => string;
+  fetchHotComments?: () => Promise<unknown[]>;
+  // 未命中时的网络路径（生产传 ai/context-resolver 的 resolveAiConversationContext；
+  // 原始 contextRef 透传，归一化留给网络路径自己）。
+  resolveNetwork: (contextRef: unknown) => Promise<Record<string, unknown>>;
+}
+
+export function createInProcessPinnedContextResolver(
+  deps: InProcessPinnedContextResolverDeps
+): (contextRef: unknown) => Promise<Record<string, unknown>> {
+  const fetchContext = createInProcessContextFetch({
+    clip: deps.clip,
+    settings: deps.settings,
+    url: deps.url,
+    fetchHotComments: deps.fetchHotComments
+  });
+  const getClip = deps.clip || (() => ({}));
+  const resolveNetwork = deps.resolveNetwork;
+
+  return async function resolveAiConversationContext(contextRef: unknown): Promise<Record<string, unknown>> {
+    if (doesContextRefMatchCurrentClip(contextRef, getClip())) {
+      // 命中：forceRefresh + 空签名 ⇒ 必走全量（不吃 unchanged 短路），热评
+      // 时机与 live 全量路径一致。
+      const outcome = await fetchContext({ forceRefresh: true, ifSignature: "" });
+      // 进程内组装不产生 no-tab/error，空签名下 unchanged 也不可达；防御式
+      // 收窄，异常形态一律落回网络路径。
+      if (
+        outcome.kind === "payload" &&
+        outcome.payload &&
+        (outcome.payload as { unchanged?: unknown }).unchanged !== true
+      ) {
+        return outcome.payload as Record<string, unknown>;
+      }
+    }
+    return resolveNetwork(contextRef);
   };
 }
 

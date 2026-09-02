@@ -26,7 +26,9 @@ vi.mock("../../extension/bilibili/gateway.js", () => ({
       { title: "正文", from: 60, to: 600, source: "player-view-points" }
     ]
   })),
-  fetchSubtitleBody: vi.fn(async () => [{ from: 0, to: 5, content: "第一句" }]),
+  // 现代签名：fetchSubtitleBody(url) 返回 { body }（工单 04 起 context-resolver
+  // 按现代契约调用，legacy 形状垫片已删）。
+  fetchSubtitleBody: vi.fn(async () => ({ body: [{ from: 0, to: 5, content: "第一句" }] })),
   fetchHotComments: vi.fn(async () => []),
   bgFetchJson: vi.fn(),
   isBiliUrl: vi.fn(() => true)
