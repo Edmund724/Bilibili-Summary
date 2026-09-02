@@ -1,13 +1,16 @@
 // digest-host 右栏定位器测试。
 //
-// 覆盖：锚点优先级命中与变量写入（宽度 = 面板宽度档）、隐藏副本跳过、
-// 播放器贴右缘降级、浮层降级（属性而非变量）、窄窗浮层、800ms 自查重锚、
-// close 拆除与变量清除；阶段 4b 补面板宽度档（narrow/standard/wide →
-// 340/380/440，float 档强制浮层）映射用例。
+// 覆盖：锚点优先级命中与变量写入（贴栏占「锚点左缘 → 视口右界」整条右侧，
+// 档位宽作下限；纵向钳进一屏）、隐藏副本跳过、播放器贴右缘降级、浮层降级
+// （属性而非变量）、窄窗浮层、800ms 自查重锚、close 拆除与变量清除；
+// 面板宽度档（narrow/standard/wide → 下限 340/380/440，float 档强制浮层）
+// 映射用例。
 //
 // 注意：setup.js 给 Element.prototype.getBoundingClientRect 打了「恒返回
 // 800x450」的默认补丁——不覆盖它会让锚点判定/降级分支全部走不到，测试假绿。
-// 本文件所有涉及 rect 判定的元素都在用例内显式 stub。
+// 本文件所有涉及 rect 判定的元素都在用例内显式 stub。jsdom 下
+// documentElement.clientWidth 恒 0，视口右界回落 innerWidth（1920）；
+// innerHeight 用 jsdom 默认 768。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState, setLocationUrl } from "../setup.js";
@@ -135,12 +138,13 @@ describe("digest-host 锚点命中", () => {
 
     const el = readingView();
     expect(el.getAttribute("data-boc-digest-float")).toBe(null);
-    // 宽度恒为 standard 档 380（不随锚点 360 变），右缘对齐锚点右缘 1880。
+    // 贴栏占「锚点左缘 1520 → 视口右界 1920」：宽 400；纵向钳进一屏
+    //（top 80，height = 768 - 80，而非锚点的 2000）。
     expect(vars(el)).toEqual({
-      left: "1500px",
+      left: "1520px",
       top: "80px",
-      width: "380px",
-      height: "2000px"
+      width: "400px",
+      height: "688px"
     });
   });
 
@@ -151,38 +155,72 @@ describe("digest-host 锚点命中", () => {
 
     digestHost.openDigestHost();
 
-    expect(vars(readingView()).width).toBe("380px");
+    // 高优先锚点左缘 1520 → 视口右界 1920：宽 400（低优先的 1500 未生效）。
+    expect(vars(readingView()).width).toBe("400px");
   });
 
   it.each([
     ["narrow", 340],
     ["standard", 380],
     ["wide", 440]
-  ])("宽度档 %s：面板宽度取档位目标 %ipx，右缘对齐锚点（不随锚点宽度变）", async (mode, width) => {
+  ])("宽度档 %s：可填宽度不足时左缘左移补足下限 %ipx", async (mode, width) => {
     await loadModules();
     state.reader.setContentWidth(mode as string);
-    // 锚点 480 宽（比任何档位都宽）与 280 宽（比任何档位都窄）都只影响 left：
-    // 宽度恒为档位目标宽，右缘对齐锚点右缘 1900。
-    mountAnchor(".right-container-inner", makeRect(1900 - 480, 80, 480, 2000));
+    // 锚点左缘 1640：可填宽 1920-1640=280 < 任何档位 → 左缘左移到
+    // 1920-档位宽，宽度恒为档位下限。
+    mountAnchor(".right-container-inner", makeRect(1640, 80, 280, 2000));
 
     digestHost.openDigestHost();
     expect(vars(readingView())).toEqual({
-      left: `${1900 - width}px`,
+      left: `${1920 - width}px`,
       top: "80px",
       width: `${width}px`,
-      height: "2000px"
+      height: "688px"
     });
+  });
 
-    digestHost.closeDigestHost();
-    mountAnchor(".right-container", makeRect(1900 - 280, 80, 280, 2000));
+  it("可填宽度大于档位下限：填满整条右侧，档位不影响宽度", async () => {
+    await loadModules();
+    state.reader.setContentWidth("narrow");
+    // 锚点左缘 1420：可填宽 500 > 所有档位下限 → 宽度 = 500。
+    mountAnchor(".right-container-inner", makeRect(1420, 80, 480, 2000));
 
     digestHost.openDigestHost();
     expect(vars(readingView())).toEqual({
-      left: `${1900 - width}px`,
+      left: "1420px",
       top: "80px",
-      width: `${width}px`,
-      height: "2000px"
+      width: "500px",
+      height: "688px"
     });
+  });
+
+  it("视口右界用 clientWidth（不含经典滚动条）：页面滚动条带不被覆盖", async () => {
+    await loadModules();
+    // innerWidth 1920 含 20px 经典滚动条 → clientWidth 1900。
+    vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(1900);
+    mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
+
+    digestHost.openDigestHost();
+    expect(vars(readingView())).toEqual({
+      left: "1520px",
+      top: "80px",
+      width: "380px",
+      height: "688px"
+    });
+  });
+
+  it("锚点滚出视口顶（top 为负）：面板顶钳到 0、高度撑满一屏", async () => {
+    await loadModules();
+    const anchor = mountAnchor(".right-container-inner", makeRect(1520, -300, 360, 2000));
+
+    digestHost.openDigestHost();
+    expect(vars(readingView())).toEqual({
+      left: "1520px",
+      top: "0px",
+      width: "400px",
+      height: "768px"
+    });
+    expect(anchor).toBeTruthy();
   });
 
   it("锚点 rect.right 超出视口的候选被跳过，落到下一个有效候选", async () => {
@@ -222,19 +260,19 @@ describe("digest-host 隐藏副本跳过", () => {
 
     digestHost.openDigestHost();
 
-    // left = 1000 + 12 = 1012，width = min(380(standard), 1920 - 1012 - 16)，
-    // 顶/高对齐播放器。
+    // left = 1000 + 12 = 1012，宽 = 1920 - 1012 = 908（占满到视口右界），
+    // 纵向钳进一屏（top 80，height = 768 - 80）。
     expect(vars(readingView())).toEqual({
       left: "1012px",
       top: "80px",
-      width: "380px",
-      height: "560px"
+      width: "908px",
+      height: "688px"
     });
   });
 });
 
 describe("digest-host 降级链", () => {
-  it("锚点全落空但有播放器：面板贴播放器右缘 + 12，顶/高对齐播放器", async () => {
+  it("锚点全落空但有播放器：面板占「播放器右缘 + 12 → 视口右界」，纵向钳进一屏", async () => {
     await loadModules();
     mountPlayerChain(makeRect(0, 80, 1000, 560));
 
@@ -243,14 +281,14 @@ describe("digest-host 降级链", () => {
     expect(vars(readingView())).toEqual({
       left: "1012px",
       top: "80px",
-      width: "380px",
-      height: "560px"
+      width: "908px",
+      height: "688px"
     });
   });
 
   it("播放器右缘太靠右挤不出 300 宽 → 继续降级为浮层", async () => {
     await loadModules();
-    // 播放器右缘 1700：left 1712，可用 1920-1712-16=192 < 300 → 浮层。
+    // 播放器右缘 1700：left 1712，可用 1920-1712=208 < 300 → 浮层。
     mountPlayerChain(makeRect(0, 80, 1700, 560));
 
     digestHost.openDigestHost();
@@ -299,7 +337,8 @@ describe("digest-host 降级链", () => {
 
     const el = readingView();
     expect(el.getAttribute("data-boc-digest-float")).toBe(null);
-    expect(vars(el).width).toBe("380px");
+    // 贴栏恢复：占锚点左缘 1520 → 视口右界 1920，宽 400。
+    expect(vars(el).width).toBe("400px");
   });
 });
 
@@ -330,7 +369,7 @@ describe("digest-host 重算时机", () => {
     await loadModules();
     const old = mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
     digestHost.openDigestHost();
-    expect(vars(readingView()).width).toBe("380px");
+    expect(vars(readingView()).width).toBe("400px");
 
     // SPA 换页：旧节点 rect 塌掉（从文档里摘掉后 stub 仍在但新节点顶上）。
     old.getBoundingClientRect = () => makeRect(0, 0, 0, 0) as DOMRect;
@@ -356,7 +395,7 @@ describe("digest-host 重算时机", () => {
     digestHost.openDigestHost();
     expect(setIntervalSpy).not.toHaveBeenCalled();
 
-    expect(vars(readingView()).width).toBe("380px");
+    expect(vars(readingView()).width).toBe("400px");
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -368,7 +407,7 @@ describe("digest-host close", () => {
     await loadModules();
     mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
     digestHost.openDigestHost();
-    expect(vars(readingView()).width).toBe("380px");
+    expect(vars(readingView()).width).toBe("400px");
 
     digestHost.closeDigestHost();
 
@@ -392,7 +431,7 @@ describe("digest-host close", () => {
 
     mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
     digestHost.openDigestHost();
-    expect(vars(readingView()).width).toBe("380px");
+    expect(vars(readingView()).width).toBe("400px");
   });
 
   it("未 open 时 close 是安全 no-op", async () => {
@@ -411,7 +450,7 @@ describe("digest-host close", () => {
     document.body.appendChild(view);
     mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
     digestHost.refreshDigestHostRect();
-    expect(vars(view).width).toBe("380px");
+    expect(vars(view).width).toBe("400px");
   });
 
   it("refreshDigestHostRect：手动重算一次，同步写变量", async () => {
@@ -422,11 +461,12 @@ describe("digest-host close", () => {
 
     digestHost.refreshDigestHostRect();
 
+    // 锚点左缘 1500 → 视口右界 1920：宽 420；top 40，height = 768 - 40。
     expect(vars(readingView())).toEqual({
-      left: "1480px",
+      left: "1500px",
       top: "40px",
-      width: "380px",
-      height: "1600px"
+      width: "420px",
+      height: "728px"
     });
   });
 
@@ -441,15 +481,16 @@ describe("digest-host close", () => {
     expect(el.getAttribute("data-boc-digest-float")).toBe("1");
     expect(vars(el)).toEqual({ left: "", top: "", width: "", height: "" });
 
-    // 档位切回贴栏档：重算后恢复写变量。
+    // 档位切回贴栏档：重算后恢复写变量。wide 档下限 440：可填宽
+    // 1920-1520=400 < 440 → 左缘左移到 1920-440=1480，宽 440。
     state.reader.setContentWidth("wide");
     digestHost.refreshDigestHostRect();
     expect(el.getAttribute("data-boc-digest-float")).toBe(null);
     expect(vars(el)).toEqual({
-      left: "1440px",
+      left: "1480px",
       top: "80px",
       width: "440px",
-      height: "2000px"
+      height: "688px"
     });
   });
 });

@@ -6,9 +6,12 @@
 // data-boc-digest-float="1" 属性，让 CSS 回落到 reader.css 既有的
 // 居中浮层基础样式。
 //
-// 面板宽度不再跟随锚点夹取 [300, 420]，而是读
-// state.reader.readingContentWidth 档位（narrow 340 / standard 380 / wide 440 /
-// float 强制浮层）——步进器「面板宽度」档即本模块的消费方。
+// 贴栏形态的几何：面板吃掉「锚点左缘 → 视口右缘」整条右侧（B 站容器有最大
+// 宽度，宽屏下锚点右缘与窗口右缘之间是大片死区），纵向钳进一屏（top 跟锚点
+// 但不出视口，底缘贴视口底），内容超高由面板内部滚动消化。
+// state.reader.readingContentWidth 档位（narrow 340 / standard 380 / wide 440）
+// 作贴栏宽度下限：可填宽度不足档位宽时左缘向左延伸补足；float 档强制浮层。
+// 步进器「面板宽度」档即本模块的消费方。
 //
 // player-host 整页接管退役后，本模块是 LAYOUT 层唯一的布局调度器
 //（rAF 合帧 + 脏检查，思路源自旧 player-host 调度器）——digest-host
@@ -34,12 +37,10 @@ const ANCHOR_SELECTORS = [
 
 // 锚点有效硬下限：宽度过小视为隐藏副本/折叠态，跳过落到次优先候选。
 const ANCHOR_MIN_WIDTH = 280;
-// 面板宽度档（readerContentWidth 语义 = 面板宽度档）。贴栏形态的
-// 面板宽度由档位决定（不再跟随锚点宽度），右缘对齐锚点；夹取区间只作安全
-// 下限/上限，档位宽度始终落在区间内。
+// 贴栏宽度下限（readerContentWidth 语义 = 面板宽度档）：贴栏面板正常吃掉
+// 锚点左缘到视口右缘的整条右侧，仅当可填宽度不足档位宽时左缘左移补足。
 const PANEL_MIN_WIDTH = 300;
-const PANEL_MAX_WIDTH = 460;
-// narrow/standard/wide 三档的目标宽度；float 档不走贴栏，强制浮层形态。
+// narrow/standard/wide 三档的下限宽度；float 档不走贴栏，强制浮层形态。
 export const PANEL_WIDTH_BY_MODE: Record<string, number> = {
   narrow: 340,
   standard: 380,
@@ -47,9 +48,10 @@ export const PANEL_WIDTH_BY_MODE: Record<string, number> = {
 };
 const DEFAULT_PANEL_WIDTH = PANEL_WIDTH_BY_MODE.standard;
 
-// 贴播放器右缘时的间距与视口安全边距。
+// 贴播放器右缘时的间距。贴栏纵向钳进一屏的最低高度保底（视口过矮时
+// top 不再上移，宁可口子贴底）。
 const PLAYER_GAP = 12;
-const VIEWPORT_MARGIN = 16;
+const PINNED_MIN_HEIGHT = 240;
 // 窄于该值不进贴栏形态（1000 是估计值，TODO: 手工验证时对照 B 站
 // 右栏折叠断点校准后再定）。
 const FLOAT_VIEWPORT_MIN_WIDTH = 1000;
@@ -57,7 +59,7 @@ const FLOAT_VIEWPORT_MIN_WIDTH = 1000;
 // 理由见文件头注）。
 const REANCHOR_INTERVAL_MS = 800;
 
-// 当前档位的目标面板宽度：未知值（含 float）回落 standard。
+// 当前档位的贴栏宽度下限：未知值（含 float）回落 standard。
 function getPanelTargetWidth(): number {
   return PANEL_WIDTH_BY_MODE[state.reader.readingContentWidth] || DEFAULT_PANEL_WIDTH;
 }
@@ -225,18 +227,21 @@ function applyDigestRect(): void {
     return;
   }
 
-  // 降级 1：锚点全落空但视口够宽且有播放器——贴播放器右缘。
+  // 降级 1：锚点全落空但视口够宽且有播放器——面板占「播放器右缘 + 12 →
+  // 视口右缘」，纵向同样钳进一屏；挤不出下限宽则继续降级。
   if (window.innerWidth >= FLOAT_VIEWPORT_MIN_WIDTH) {
     const playerRect = getPlayerRect();
     if (playerRect) {
+      const right = getViewportRightBound();
       const left = playerRect.right + PLAYER_GAP;
-      const width = Math.min(getPanelTargetWidth(), window.innerWidth - left - VIEWPORT_MARGIN);
+      const width = right - left;
       if (width >= PANEL_MIN_WIDTH) {
+        const top = clampTopIntoViewport(playerRect.top);
         applyPinnedRect(readingView, {
           left,
-          top: playerRect.top,
+          top,
           width,
-          height: playerRect.height
+          height: window.innerHeight - top
         });
         return;
       }
@@ -248,12 +253,29 @@ function applyDigestRect(): void {
   applyFloating();
 }
 
-// 命中锚点后取面板 rect：宽度 = 当前档位目标宽（夹在安全区间内），left 相应
-// 左移保持右缘与锚点右缘对齐。
+// 视口右界：documentElement.clientWidth 不含经典滚动条（页面滚动条保持
+// 可用，宽屏死区被面板吃掉但不动滚动条）；覆盖式滚动条平台它等于
+// innerWidth。jsdom 下 clientWidth 恒 0，回落 innerWidth。
+function getViewportRightBound(): number {
+  return document.documentElement.clientWidth || window.innerWidth;
+}
+
+// 纵向钳进一屏：top 跟锚点/播放器但不小于 0，且不超过「视口底 -
+// 最低高度保底」；底缘恒贴视口底。
+function clampTopIntoViewport(rawTop: number): number {
+  return Math.max(
+    0,
+    Math.min(Math.max(rawTop, 0), window.innerHeight - PINNED_MIN_HEIGHT)
+  );
+}
+
+// 命中锚点后取面板 rect：占「锚点左缘 → 视口右界」整条右侧；可填宽度不足
+// 档位下限宽时左缘向左延伸补足（窄窗/窄栏兜底）。
 function clampAnchorRect(rect: DOMRect): { left: number; top: number; width: number; height: number } {
-  const width = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, getPanelTargetWidth()));
-  const left = rect.right - width;
-  return { left, top: rect.top, width, height: rect.height };
+  const right = getViewportRightBound();
+  const left = Math.min(rect.left, right - getPanelTargetWidth());
+  const top = clampTopIntoViewport(rect.top);
+  return { left, top, width: right - left, height: window.innerHeight - top };
 }
 
 // 降级 1 的播放器 rect：findReaderPlayerHost(video) 的宿主若不可用（video
