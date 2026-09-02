@@ -27,7 +27,7 @@ beforeEach(() => {
     ...globalThis.chrome,
     runtime: {
       ...globalThis.chrome?.runtime,
-      getManifest: vi.fn(() => ({ version: "1.1.4" })),
+      getManifest: vi.fn(() => ({ version: "2.0.0" })),
       onInstalled: { addListener: vi.fn() }
     },
     tabs: {

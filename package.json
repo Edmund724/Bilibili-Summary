@@ -1,6 +1,6 @@
 {
   "name": "bilibili-summary",
-  "version": "1.1.4",
+  "version": "2.0.0",
   "description": "Bilibili 视频字幕抓取与 AI 总结浏览器扩展",
   "directories": {
     "doc": "docs"

@@ -43,9 +43,11 @@
 
 ## 功能图片演示
 
-![Bilibili-Summary 功能演示](docs/images/feature-demo-v2.png)
+![Bilibili-Summary 字幕标签页：逐句时间戳，点击跳转播放位置](docs/images/demo-subtitle.png)
 
-![Bilibili-Summary AI 侧边栏演示](docs/images/ai-sidebar-demo.png)
+![Bilibili-Summary 概览标签页：AI 生成的章节分段](docs/images/demo-overview.png)
+
+![Bilibili-Summary AI 对话标签页：围绕视频内容多轮追问](docs/images/demo-ai-chat.png)
 
 ## 安装方式
 

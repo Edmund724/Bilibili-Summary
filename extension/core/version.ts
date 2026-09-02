@@ -7,4 +7,4 @@
 // 常量一并打进每次页面导航都要解析执行的 classic bootstrap。拆出后 bootstrap
 // 只打包这一行，defaults.ts re-export 该符号，原有消费方（content.js、
 // subtitle/ui.js 等）的 import 路径不变。
-export const BOC_VERSION = "1.1.4";
+export const BOC_VERSION = "2.0.0";

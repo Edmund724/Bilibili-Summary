@@ -25,7 +25,7 @@ import {
 } from "../../extension/shared/content-error-sentinels.js";
 
 const TAB_ID = 7;
-const EXPECTED_VERSION = "1.1.4";
+const EXPECTED_VERSION = "2.0.0";
 const STALE_VERSION = "0.9.0";
 const READER_URL = "https://www.bilibili.com/video/BV1test000000/?boc_reader=1";
 
