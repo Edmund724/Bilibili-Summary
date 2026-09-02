@@ -4,7 +4,7 @@
 // 为什么存在：content 侧无字幕收尾后快照为 subtitleFetchState === "empty" 且字
 // 幕体为空，此时把空 subtitleBody 发给模型只会得到凭标题+热评编造的总结。
 // ensureCurrentContextForSend 在最终快照后据此拦截发送，并按 noSubtitleReason
-// （content 侧 asr/fallback.js 写入、经 sidepanel-get-context payload 透传）给
+// （content 侧 asr/fallback.js 写入、经 reader-get-context payload 透传）给
 // 出对应提示。文案与原因的对应关系锁定在本模块（tests/chat/no-subtitle.test.js）。
 //
 // reason 取值（clipState.noSubtitleReason，见 core/state.js）：

@@ -351,13 +351,7 @@ export function dispatchContentScriptMessage(
       return true;
     }
 
-// PR5c：消息类型改 reader 中性命名（原 sidepanel-*，sidepanel 页面已摘除）；
-// 旧名保留为兼容别名走同一处理器——存量构建的 options/popup 页面或缓存的
-// background bundle 可能仍以旧名发送，别名在下一个发布周期后移除。
-    if (
-      message.type === "reader-get-context" ||
-      (message as { type?: string }).type === "sidepanel-get-context"
-    ) {
+    if (message.type === "reader-get-context") {
       const getContextMessage = message as ReaderGetContextMessage;
       const payload = buildReaderContextPayload();
       const signature = computeContextStateSignature(payload);
@@ -380,10 +374,7 @@ export function dispatchContentScriptMessage(
       return false;
     }
 
-    if (
-      message.type === "reader-get-hot-comments" ||
-      (message as { type?: string }).type === "sidepanel-get-hot-comments"
-    ) {
+    if (message.type === "reader-get-hot-comments") {
       // gateway 动态装载（候选02，见文件头 import 注）：本地 chunk 加载 ~10ms，
       // 被热评网络往返掩盖。装载失败与「无法获取 aid」同型降级：空列表 + note。
       import("../bilibili/gateway.js")
@@ -410,10 +401,7 @@ export function dispatchContentScriptMessage(
       return true;
     }
 
-    if (
-      message.type === "reader-seek-video-time" ||
-      (message as { type?: string }).type === "sidepanel-seek-video-time"
-    ) {
+    if (message.type === "reader-seek-video-time") {
       // video-probe 动态装载（候选02，见文件头 import 注）：本地 chunk ~10ms，
       // 被用户点击到执行的时间差掩盖；响应形状与搬迁前一致（ok/currentTime）。
       // 候选06 seek 深入口：reader 开着时定位收敛为 reader 域单入口

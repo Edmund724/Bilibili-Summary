@@ -6,8 +6,6 @@
 //   ensureChatTabActivated（定位/聚焦）。consumeIntent 均为 false。
 // - player-ai-quick-action-chat：prompt 空 → 落 DEFAULT_PLAYER_AI_QUICK_PROMPT，
 //   经对话 seam 自动发送。
-// - 兼容别名：旧 sidepanel-get-context 消息名与新 reader-get-context 走同一
-//   处理器（payload 组装 + signature 附加，响应形状一致）。
 //
 // 写法与 message-handler-seek.test.js 同款：重依赖全部 vi.mock，state 走真实
 // 模块，单纪元；对话 seam 经 core/lazy-chat-tab mock（组合根本体由
@@ -56,7 +54,7 @@ vi.mock("../../extension/bilibili/gateway.js", () => ({
   fetchHotComments: vi.fn(async () => [])
 }));
 
-import { bindRuntimeEvents, computeContextStateSignature } from "../../extension/core/message-handler.js";
+import { bindRuntimeEvents } from "../../extension/core/message-handler.js";
 import { ensureReaderDomain } from "../../extension/core/lazy-reader.js";
 import { isReaderViewOpen } from "../../extension/reader/state.js";
 import { DEFAULT_PLAYER_AI_QUICK_PROMPT } from "../../extension/core/defaults.js";
@@ -199,51 +197,5 @@ describe("player-ai-quick-action-chat：悬浮按钮快捷动作消费", () => {
     messageListener({ type: "player-ai-quick-action-chat" }, {}, vi.fn());
 
     await vi.waitFor(() => expect(chat.runQuickActionPrompt).toHaveBeenCalledWith(DEFAULT_PLAYER_AI_QUICK_PROMPT));
-  });
-});
-
-describe("兼容别名：旧 sidepanel-get-context 走同一处理器", () => {
-  function seedReadyClip(state) {
-    state.clip.setBvid("BV1alias");
-    state.clip.setAid("9");
-    state.clip.setCid("101");
-    state.clip.setPageIndex(1);
-    state.clip.setTitle("别名测试");
-    state.clip.setSubtitleFetchState("ready");
-    state.clip.setNoSubtitleReason(null);
-  }
-
-  it("旧名与新名响应同形（payload + signature），签名函数单源", async () => {
-    const { state } = await import("../../extension/core/state.js");
-    seedReadyClip(state);
-
-    const oldResp = vi.fn();
-    messageListener({ type: "sidepanel-get-context" }, {}, oldResp);
-    expect(oldResp).toHaveBeenCalledTimes(1);
-
-    const newResp = vi.fn();
-    messageListener({ type: "reader-get-context" }, {}, newResp);
-    expect(newResp).toHaveBeenCalledTimes(1);
-
-    const oldPayload = oldResp.mock.calls[0][0].payload;
-    const newPayload = newResp.mock.calls[0][0].payload;
-    expect(oldResp.mock.calls[0][0].ok).toBe(true);
-    expect(newResp.mock.calls[0][0].ok).toBe(true);
-    expect(oldPayload).toEqual(newPayload);
-    expect(oldPayload.signature).toBe(computeContextStateSignature(newPayload));
-    expect(oldPayload.bvid).toBe("BV1alias");
-  });
-
-  it("旧名 + ifSignature 命中：签名短路 unchanged（与新名同语义）", async () => {
-    const { state } = await import("../../extension/core/state.js");
-    seedReadyClip(state);
-    const { createReaderContextPayload } = await import("../../extension/core/context-payload.js");
-    const payload = createReaderContextPayload({ clip: state.clip, settings: {}, url: location.href });
-    const signature = computeContextStateSignature(payload);
-
-    const sendResponse = vi.fn();
-    messageListener({ type: "sidepanel-get-context", ifSignature: signature }, {}, sendResponse);
-
-    expect(sendResponse).toHaveBeenCalledWith({ ok: true, unchanged: true, signature });
   });
 });

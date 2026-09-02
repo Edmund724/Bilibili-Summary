@@ -10,9 +10,7 @@
 //   列表）；
 // - renderModelSelect：无平台 → disabled +「未配置平台」；有平台 → 按优先级
 //   preferredProviderId > aiPrefs.defaultModel > chrome.storage 选中（闭包缓存）；
-// - setThinkingLevel：归一化 + 渲染 + chrome.storage 写 + save-settings 单键；
-// - 过渡期迁移：chrome.storage 缺键且 localStorage 有值 → 一次性写入；
-//   chrome.storage 已有键时不覆盖（幂等）。
+// - setThinkingLevel：归一化 + 渲染 + chrome.storage 写 + save-settings 单键。
 //
 // 模板同 tests/chat/presets.test.js：vi.hoisted mock shared/messaging；
 // resetModules 切纪元后同纪元 import chat-state 单例；storage fake 注入 deps。
@@ -83,7 +81,6 @@ beforeEach(async () => {
   resetModuleState();
   sendRuntimeMessageMock.mockReset();
   sendRuntimeMessageMock.mockImplementation(async () => ({ ok: true }));
-  localStorage.clear();
   await importModule();
 });
 
@@ -240,8 +237,6 @@ describe("setThinkingLevel", () => {
     expect(sidepanelState.aiThinkingLevel).toBe("high");
     expect(storage.set).toHaveBeenCalledWith({ [THINKING_LEVEL_KEY]: "high" });
     expect(storage.data.get(THINKING_LEVEL_KEY)).toBe("high");
-    // 通道已换：不再写 localStorage
-    expect(localStorage.getItem(THINKING_LEVEL_KEY)).toBeNull();
     expect(sendRuntimeMessageMock).toHaveBeenCalledWith({
       type: "save-settings",
       settings: { aiThinkingLevel: "high" }
@@ -268,51 +263,5 @@ describe("setSelectedProvider / getStoredSelectedProviderId", () => {
     expect(storage.set).toHaveBeenCalledWith({ [SELECTED_PROVIDER_KEY]: "p9" });
     expect(storage.data.get(SELECTED_PROVIDER_KEY)).toBe("p9");
     expect(providerPrefs.getStoredSelectedProviderId()).toBe("p9");
-  });
-});
-
-describe("过渡期迁移（localStorage → chrome.storage.local）", () => {
-  it("chrome.storage 缺键且 localStorage 有值 → 一次性写入 chrome.storage 并生效", async () => {
-    localStorage.setItem(SELECTED_PROVIDER_KEY, "p9");
-    localStorage.setItem(THINKING_LEVEL_KEY, "low");
-    sendRuntimeMessageMock.mockImplementation(async (message) => {
-      if (message.type === "ai-providers-list") {
-        return { providers: [{ id: "p9", name: "平台九", enabled: true }] };
-      }
-      return { ok: true, settings: {} };
-    });
-    const { providerPrefs, storage } = makeHarness();
-
-    await providerPrefs.loadProvidersAndPrefs();
-
-    // 两键一次搬迁写库
-    expect(storage.set).toHaveBeenCalledWith({
-      [SELECTED_PROVIDER_KEY]: "p9",
-      [THINKING_LEVEL_KEY]: "low"
-    });
-    expect(storage.data.get(SELECTED_PROVIDER_KEY)).toBe("p9");
-    expect(storage.data.get(THINKING_LEVEL_KEY)).toBe("low");
-    // 迁移后的值即刻生效：选中平台与思考档位按搬迁值渲染
-    expect(providerPrefs.getStoredSelectedProviderId()).toBe("p9");
-    expect(sidepanelState.aiThinkingLevel).toBe("low");
-  });
-
-  it("chrome.storage 已有键时不被 localStorage 覆盖（迁移幂等）", async () => {
-    localStorage.setItem(SELECTED_PROVIDER_KEY, "p-legacy");
-    localStorage.setItem(THINKING_LEVEL_KEY, "low");
-    sendRuntimeMessageMock.mockImplementation(async (message) => {
-      if (message.type === "ai-providers-list") {
-        return { providers: [{ id: "p1", enabled: true }] };
-      }
-      return { ok: true, settings: { aiThinkingLevel: "high" } };
-    });
-    const { providerPrefs, storage } = makeHarness(makeStorageFake({ [SELECTED_PROVIDER_KEY]: "p1" }));
-
-    await providerPrefs.loadProvidersAndPrefs();
-
-    // 选中平台 storage 已有 → 不搬迁不覆盖
-    const providerPatches = storage.set.mock.calls.filter((call) => SELECTED_PROVIDER_KEY in call[0]);
-    expect(providerPatches).toHaveLength(0);
-    expect(providerPrefs.getStoredSelectedProviderId()).toBe("p1");
   });
 });

@@ -10,10 +10,9 @@
 // sidepanel 页面的 localStorage 换成 chrome.storage.local——reader 上下文与
 // 扩展页 localStorage 不同源，不迁移则「选中的平台」在 reader 内每次丢失
 // （盘点报告风险点 2）。aiThinkingLevel 原有的 sync settings 双持久化保留
-//（读取以 settings ?? storage 为准）。过渡期迁移：loadProvidersAndPrefs 读取
-// 时发现 chrome.storage 缺键且 localStorage（sidepanel 扩展页历史通道）有值
-// 则一次性写入 chrome.storage，保证用户已选平台/档位不丢；迁移幂等（chrome.
-// storage 有键后不再触发），reader 上下文读不到扩展 localStorage，不触发。
+//（读取以 settings ?? storage 为准）。localStorage 过渡迁移已随旧 sidepanel
+// 扩展页退役一并移除：迁移只能发生在扩展页上下文（reader 上下文读不到扩展
+// localStorage），该页面已不存在，无可迁移存量（最坏损失 = 重选一次平台）。
 //
 // 依赖方向（无环）：共享可变状态（providers / aiPrefs / aiThinkingLevel）直接
 // import；sendRuntimeMessage（shared 传输层）、chrome.storage 抽象（可注入，
@@ -73,16 +72,6 @@ export interface ProviderPrefs {
   getStoredSelectedProviderId: () => string;
 }
 
-// sidepanel 扩展页 localStorage 的历史值读取（过渡期迁移专用；reader 上下文
-// 读不到扩展 localStorage，getItem 自然为 null，不触发迁移）。
-function readLegacyLocalStorage(key: string): string | null {
-  try {
-    return typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
-  } catch {
-    return null;
-  }
-}
-
 export function createProviderPrefs(deps: CreateProviderPrefsDeps): ProviderPrefs {
   const { modelSelect, thinkingBtns, widthEls } = deps;
   const storage =
@@ -94,33 +83,16 @@ export function createProviderPrefs(deps: CreateProviderPrefsDeps): ProviderPref
   // 读取由该闭包缓存承接——localStorage 时代「同步读选中平台」的语义。
   let storedSelectedProviderId = "";
 
-  // 读 chrome.storage.local 两个偏好键 + 过渡期一次性搬迁（详见文件头注）。
-  // 返回值 = storage 现值 ∪ 迁移补写的 localStorage 遗留值。
+  // 读 chrome.storage.local 两个偏好键（读取失败按空对象容错，偏好允许丢）。
   async function loadStoredPrefs(): Promise<Record<string, unknown>> {
-    let stored: Record<string, unknown> = {};
-    if (storage) {
-      try {
-        stored = (await storage.get([SELECTED_PROVIDER_KEY, THINKING_LEVEL_KEY])) || {};
-      } catch {
-        stored = {};
-      }
+    if (!storage) {
+      return {};
     }
-    const merged = { ...stored };
-    const patch: Record<string, unknown> = {};
-    const legacyProvider = readLegacyLocalStorage(SELECTED_PROVIDER_KEY);
-    const legacyThinking = readLegacyLocalStorage(THINKING_LEVEL_KEY);
-    if (!(SELECTED_PROVIDER_KEY in stored) && legacyProvider) {
-      patch[SELECTED_PROVIDER_KEY] = legacyProvider;
-      merged[SELECTED_PROVIDER_KEY] = legacyProvider;
+    try {
+      return (await storage.get([SELECTED_PROVIDER_KEY, THINKING_LEVEL_KEY])) || {};
+    } catch {
+      return {};
     }
-    if (!(THINKING_LEVEL_KEY in stored) && legacyThinking) {
-      patch[THINKING_LEVEL_KEY] = legacyThinking;
-      merged[THINKING_LEVEL_KEY] = legacyThinking;
-    }
-    if (storage && Object.keys(patch).length) {
-      await storage.set(patch).catch(() => {});
-    }
-    return merged;
   }
 
   // ai-providers-list 响应里的平台条目由 SidepanelProvider（chat-state.ts）

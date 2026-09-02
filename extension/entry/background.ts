@@ -23,7 +23,7 @@ import {
   createProviderMessageHandlers,
   createAsrRuntimeConfigHandler
 } from "../core/provider-handlers.js";
-import { bgFetchJson } from "../bilibili/gateway.js";
+import { bgFetchJson, isBiliUrl } from "../bilibili/gateway.js";
 // digest-only-ui：侧边栏设置面板的 host 权限代申请（collectOrigins 纯函数）
 import { collectOrigins } from "../core/host-permissions.js";
 // PR5：对话 tab 的 offscreen 文档 ensure 通道（background 侧唯一合法创建点）
@@ -227,6 +227,13 @@ function handleFetchJson(message: Msg<"fetch-json">, _sender: MessageSender, sen
   const url = typeof message.url === "string" ? message.url : "";
   if (!url) {
     sendResponse({ ok: false, error: "Missing subtitle URL" });
+    return false;
+  }
+  // 策略收口到通道：本处理器只为 B 站 API/字幕 CDN 带 cookie 代理取数，
+  // 非 B 站 URL 一律拒绝——调用方（gateway 的 isBiliUrl 前置过滤）之外再挡一层，
+  // 防止未来新调用方漏掉前置过滤时把本通道当成任意 URL 的带凭据代理。
+  if (!isBiliUrl(url)) {
+    sendResponse({ ok: false, error: "Non-Bilibili URL" });
     return false;
   }
 
