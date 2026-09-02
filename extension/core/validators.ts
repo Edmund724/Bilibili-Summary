@@ -45,9 +45,11 @@ export function normalizeReaderLineHeight(value: unknown): string {
 }
 
 export function normalizeReaderContentWidth(value: unknown): string {
-  return ["compact", "narrow", "medium", "wide", "full"].includes(value as string)
+  // fit（填满）是默认档：字幕列表常驻右侧面板后主体只剩标题与视频，固定宽度
+  // 上限徒留空白。旧默认 medium（860px）不在允许列表内，按 fit 迁移。
+  return ["compact", "narrow", "wide", "full", "fit"].includes(value as string)
     ? (value as string)
-    : "medium";
+    : "fit";
 }
 
 export function normalizeReaderChapterVisibility(value: unknown): string {

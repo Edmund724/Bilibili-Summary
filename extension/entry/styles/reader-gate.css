@@ -169,7 +169,6 @@ body[data-boc-reader-mode="1"],
   --boc-reader-subtitle-font-size: 14px;
   --boc-reader-subtitle-line-height: 1.5;
   --boc-reader-letter-spacing: 0em;
-  --boc-reader-content-max: 860px;
   color: var(--boc-reader-text);
 }
 
@@ -261,28 +260,42 @@ body[data-boc-reader-mode="1"][data-boc-reader-letter-spacing="loose"],
   --boc-reader-letter-spacing: 0.072em;
 }
 
+/* 内容宽度固定档（compact/narrow/wide/full）：直接覆盖主体宽度为「档位上限 ∩
+ * 可用区」。未命中这些档位（fit/默认）时主体宽度见下方基础段的填满公式。 */
 html[data-boc-reader-mode="1"][data-boc-reader-content-width="compact"],
 body[data-boc-reader-mode="1"][data-boc-reader-content-width="compact"],
 #boc-reading-view[data-content-width="compact"] {
-  --boc-reader-content-max: 680px;
+  --boc-reader-main-width: min(
+    680px,
+    calc(100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-page-padding))
+  );
 }
 
 html[data-boc-reader-mode="1"][data-boc-reader-content-width="narrow"],
 body[data-boc-reader-mode="1"][data-boc-reader-content-width="narrow"],
 #boc-reading-view[data-content-width="narrow"] {
-  --boc-reader-content-max: 760px;
+  --boc-reader-main-width: min(
+    760px,
+    calc(100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-page-padding))
+  );
 }
 
 html[data-boc-reader-mode="1"][data-boc-reader-content-width="wide"],
 body[data-boc-reader-mode="1"][data-boc-reader-content-width="wide"],
 #boc-reading-view[data-content-width="wide"] {
-  --boc-reader-content-max: 980px;
+  --boc-reader-main-width: min(
+    980px,
+    calc(100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-page-padding))
+  );
 }
 
 html[data-boc-reader-mode="1"][data-boc-reader-content-width="full"],
 body[data-boc-reader-mode="1"][data-boc-reader-content-width="full"],
 #boc-reading-view[data-content-width="full"] {
-  --boc-reader-content-max: 1100px;
+  --boc-reader-main-width: min(
+    1100px,
+    calc(100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-page-padding))
+  );
 }
 
 body[data-boc-reader-mode="1"],
@@ -348,9 +361,11 @@ body[data-boc-reader-mode="1"] {
   --boc-reader-panel-occupied: calc(
     var(--boc-reader-panel-width) + var(--boc-reader-panel-gap) + var(--boc-reader-panel-inset)
   );
-  --boc-reader-main-width: min(
-    var(--boc-reader-content-max),
-    calc(100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-page-padding))
+  /* 默认（fit/填满）：主体 = 面板左侧全部可用区；字幕列表已常驻右侧面板，
+   * 主体只有标题与视频，不再需要可读性宽度上限。固定档位（compact/narrow/
+   * wide/full）的覆盖见上方属性选择器块。 */
+  --boc-reader-main-width: calc(
+    100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-page-padding)
   );
   --boc-reader-rail-width: min(
     var(--boc-reader-rail-target-width),
@@ -547,10 +562,11 @@ body[data-boc-reader-mode="1"] #viewbox_report {
     var(--boc-reader-main-width),
     var(--boc-reader-player-rendered-width, var(--boc-reader-main-width))
   ) !important;
-  /* PR2：主体在「视口 - 右侧面板占用」的左侧可用区内水平居中，最窄退到页边距。 */
+  /* PR2：主体在「视口 - 右侧面板占用」的左侧可用区内水平居中，最窄退到页边距。
+   * 居中基准用视频实际渲染宽（垂直适配收缩后仍居中），未布局前退主体宽。 */
   margin-left: max(
     var(--boc-reader-page-padding),
-    calc((100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-main-width)) / 2)
+    calc((100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-player-rendered-width, var(--boc-reader-main-width))) / 2)
   ) !important;
   margin-right: auto !important;
 }
@@ -684,7 +700,7 @@ body[data-boc-reader-mode="1"] .boc-reading-subtitle::-webkit-scrollbar-thumb:ho
   body[data-boc-reader-mode="1"] #viewbox_report {
     margin-left: max(
       var(--boc-reader-page-padding),
-      calc((100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-main-width)) / 2)
+      calc((100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-player-rendered-width, var(--boc-reader-main-width))) / 2)
     ) !important;
     margin-right: auto !important;
   }

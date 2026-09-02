@@ -169,7 +169,7 @@ describe("设置变更与 data-attribute", () => {
     );
 
     expect(state.reader.readingFontScale).toBe("m");
-    expect(state.reader.readingContentWidth).toBe("medium");
+    expect(state.reader.readingContentWidth).toBe("fit");
     expect(state.reader.readingTheme).toBe("light");
   });
 

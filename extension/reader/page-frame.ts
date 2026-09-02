@@ -69,15 +69,45 @@ function getReaderContentMaxPx() {
   if (state.reader.readingContentWidth === "full") {
     return 1100;
   }
-  return 860;
+  // fit（填满，默认）：不限宽，上限交给可用区宽度与垂直适配
+  //（layoutReaderPlayerHost 的高度约束）。
+  return Number.POSITIVE_INFINITY;
 }
 
 function getReaderPagePaddingPx() {
   return Math.min(32, Math.max(16, window.innerWidth * 0.028));
 }
 
+// 面板与主体的间隙（与 reader-gate.css 的 --boc-reader-panel-gap 同式）。
+function getReaderPanelGapPx() {
+  return Math.min(22, Math.max(14, window.innerWidth * 0.016));
+}
+
 export function getReaderMainWidthLimit() {
-  return Math.max(320, Math.min(getReaderContentMaxPx(), window.innerWidth - getReaderPagePaddingPx() * 2));
+  const pagePadding = getReaderPagePaddingPx();
+  // 面板 fixed 贴右缘，其左缘即主体右界：可用宽 = 面板左缘 - 间隙 - 左边距。
+  // 面板缺失/未渲染（jsdom、窄窗贴满档）退回整口宽减双侧页边距。
+  const panel = document.querySelector(".boc-reading-digest-panel");
+  const panelRect = panel?.getBoundingClientRect();
+  const available =
+    panelRect && panelRect.width > 0
+      ? panelRect.left - getReaderPanelGapPx() - pagePadding
+      : window.innerWidth - pagePadding * 2;
+  return Math.max(320, Math.min(getReaderContentMaxPx(), available));
+}
+
+// 视频垂直适配上限：阅读滚动位（标题顶对齐视口 16px，见
+// alignReaderViewportToPlayer）下整个视频须落进视口，底部留 16px 呼吸。
+// 顶距用「标题→播放器」的文档坐标差换算，与当前滚动位置无关。
+export function getReaderPlayerHeightLimit() {
+  const host = getPlayerHost();
+  if (!host) {
+    return Math.max(240, window.innerHeight - 120);
+  }
+  const hostTop = host.getBoundingClientRect().top;
+  const titleTop = findReaderTitleContainer()?.getBoundingClientRect().top;
+  const topAtReadingScroll = typeof titleTop === "number" ? 16 + (hostTop - titleTop) : hostTop;
+  return Math.max(240, window.innerHeight - topAtReadingScroll - 16);
 }
 
 export function cleanupReaderFloatingArtifacts(playerHostArg = getPlayerHost()) {

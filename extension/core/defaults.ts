@@ -106,7 +106,7 @@ export const DEFAULT_SETTINGS: Settings = {
   readerFontScale: "m",
   readerLetterSpacing: "normal",
   readerLineHeight: "tight",
-  readerContentWidth: "medium",
+  readerContentWidth: "fit",
   readerChapterVisibility: "show",
   readerChapterVisible: true,
   readerTranscriptVisible: true,

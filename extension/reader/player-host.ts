@@ -38,6 +38,7 @@ import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-
 import {
   ids,
   getReaderMainWidthLimit,
+  getReaderPlayerHeightLimit,
   dismissReaderMiniPlayer,
   updateReadingSubtitleTailSpacer
 } from "./page-frame.js";
@@ -442,6 +443,16 @@ export function layoutReaderPlayerHost() {
       const scale = widthLimit / renderedWidth;
       renderedWidth = widthLimit;
       renderedHeight *= scale;
+    }
+
+    // 垂直适配：视频整体须落进视口（右侧 Digest 面板全高，视频超出视口就得
+    // 滚动才能看全）；超出时按高度等比收缩，宽度随动（居中由 CSS 按
+    // --boc-reader-player-rendered-width 处理）。
+    const heightLimit = getReaderPlayerHeightLimit();
+    if (renderedHeight > heightLimit) {
+      const scale = heightLimit / renderedHeight;
+      renderedHeight = heightLimit;
+      renderedWidth *= scale;
     }
 
     const cssWidth = `${Math.round(renderedWidth)}px`;

@@ -121,7 +121,7 @@ function getToggleLabel(key: StepperKey, value: string) {
     fontScale: { xs: "最小", s: "偏小", m: "标准", l: "偏大", xl: "最大" },
     letterSpacing: { tighter: "最紧", tight: "偏紧", normal: "标准", relaxed: "偏松", loose: "最松" },
     lineHeight: { compact: "最紧", tight: "偏紧", normal: "标准", relaxed: "偏松", loose: "最松" },
-    contentWidth: { compact: "最窄", narrow: "偏窄", medium: "标准", wide: "偏宽", full: "最宽" }
+    contentWidth: { compact: "最窄", narrow: "偏窄", wide: "偏宽", full: "最宽", fit: "填满" }
   };
   return labels[key]?.[value] || "标准";
 }
@@ -150,7 +150,7 @@ export function getReaderStepperConfig(settingKey: StepperSettingKey): StepperCo
       buildPayload: (value) => ({ readerLineHeight: value })
     },
     readerContentWidth: {
-      options: ["compact", "narrow", "medium", "wide", "full"],
+      options: ["compact", "narrow", "wide", "full", "fit"],
       labelKey: "contentWidth",
       getCurrent: () => state.reader.readingContentWidth,
       buildPayload: (value) => ({ readerContentWidth: value })
