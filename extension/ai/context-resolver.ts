@@ -1,7 +1,6 @@
 // extension/ai/context-resolver.ts
-// AI 侧边栏上下文解析：拉取视频元信息 + 字幕 + 热评，构建 Markdown 字幕上下文。
-// 本模块由 sidepanel 页面直接调用；B站抓取统一走 bilibili/gateway.js 的
-// bgFetchJson 传输层。
+// AI 对话上下文解析：拉取视频元信息 + 字幕 + 热评，构建 Markdown 字幕上下文。
+// B站抓取统一走 bilibili/gateway.js 的 bgFetchJson 传输层。
 
 import { getSubtitleCacheKey, loadSubtitleFromCache } from "../subtitle/cache.js";
 import {
@@ -29,10 +28,10 @@ import { withTimeout } from "../shared/error-helpers.js";
 import { buildAiContextRef } from "./conversation.js";
 import type { AiContext, HotComment, SubtitleBodyItem } from "./types.js";
 
-// ===== 页内状态（由 sidepanel 注入：ensureReaderContentReady / sendMessageToTab）=====
+// ===== 页内状态（由调用方注入：ensureReaderContentReady / sendMessageToTab）=====
 // 调用方直接传入，避免把注入生命周期耦合进本模块。
 
-interface SidepanelContextResponse {
+interface ContextResponse {
   ok?: boolean;
   unchanged?: boolean;
   payload?: Record<string, unknown>;
@@ -40,7 +39,7 @@ interface SidepanelContextResponse {
   comments?: unknown[];
 }
 
-type SendMessageToTab = (tabId: number, message: Record<string, unknown>) => Promise<SidepanelContextResponse>;
+type SendMessageToTab = (tabId: number, message: Record<string, unknown>) => Promise<ContextResponse>;
 type EnsureReaderContentReady = (tabId: number) => Promise<void>;
 
 // ===== 上下文解析 =====
@@ -62,7 +61,7 @@ function pickPageForAiContext(pages: VideoPage[], ref: AiContext): VideoPage | u
   }
 }
 
-export async function resolveAiSidepanelContext(contextRef: unknown): Promise<AiContext> {
+export async function resolveAiConversationContext(contextRef: unknown): Promise<AiContext> {
   const ref = buildAiContextRef(contextRef);
   if (!ref.isVideoContext || !ref.bvid) {
     return {
@@ -139,7 +138,7 @@ export async function resolveAiSidepanelContext(contextRef: unknown): Promise<Ai
     selectedSubtitleId: String(selectedTrack.id || "").trim(),
     selectedSubtitleUrl: String(selectedTrack.subtitleUrl || "").trim(),
     // 章节透传（来源与本文件 return 里的 chapters 为同一份
-    // subtitleBundle.chapters）：供侧边栏回传 offscreen 后做章节对齐切段
+    // subtitleBundle.chapters）：供对话链回传 offscreen 后做章节对齐切段
     // （budgeter）与追问章节名检索（raw-retrieval）。旧持久化会话 ref 无此
     // 字段时为 undefined，下游 Array.isArray 守卫均已容忍。
     chapters: Array.isArray(subtitleBundle.chapters) ? (subtitleBundle.chapters as unknown as AiContext["chapters"]) : [],
@@ -160,7 +159,7 @@ export async function resolveAiSidepanelContext(contextRef: unknown): Promise<Ai
   };
 }
 
-export async function resolveAiSidepanelPageRef(contextRef: unknown): Promise<{
+export async function resolveAiConversationPageRef(contextRef: unknown): Promise<{
   url: string;
   bvid: string;
   cid: string;
@@ -198,22 +197,22 @@ export async function resolveAiSidepanelPageRef(contextRef: unknown): Promise<{
 // 后台进行"，回退读取当前快照（subtitleFetchState 会告知转写进行中）。
 const REFRESH_WAIT_MS = 10000;
 
-interface GetAiSidepanelStateOptions {
+interface GetAiContextStateOptions {
   forceRefresh?: boolean;
   ifSignature?: string;
 }
 
-interface AiSidepanelStateResult extends Record<string, unknown> {
+interface AiContextStateResult extends Record<string, unknown> {
   unchanged?: boolean;
   hotComments?: unknown[];
   isVideoContext?: boolean;
 }
 
-export async function getAiSidepanelState(
+export async function getAiContextState(
   tabId: number | string | unknown,
-  { forceRefresh = false, ifSignature = "" }: GetAiSidepanelStateOptions = {},
+  { forceRefresh = false, ifSignature = "" }: GetAiContextStateOptions = {},
   tabOps: { ensureReaderContentReady?: EnsureReaderContentReady; sendMessageToTab?: SendMessageToTab } = {}
-): Promise<AiSidepanelStateResult> {
+): Promise<AiContextStateResult> {
   const { ensureReaderContentReady, sendMessageToTab } = tabOps;
   if (!tabId) {
     throw new Error("缺少标签页信息");
@@ -240,15 +239,15 @@ export async function getAiSidepanelState(
   await ensureReaderContentReady!(tab.id);
 
   let contextResp = await sendMessageToTab!(tab.id, {
-    type: "sidepanel-get-context",
+    type: "reader-get-context",
     forceRefresh,
-    // 候选5：透传 SP 上次全量快照的签名；content 判定状态未变时整份省略。
+    // 候选5：透传调用方上次全量快照的签名；content 判定状态未变时整份省略。
     // forceRefresh=true 时 content 侧忽略签名，语义不变。
     ifSignature
   });
 
-  // 候选5 签名短路：content 状态与 SP 快照一致 → 不取字幕、不发 popup-refresh、
-  // 也不拉热评（下方热评块不可达），直接返回 { unchanged: true }（sidepanel
+  // 候选5 签名短路：content 状态与调用方快照一致 → 不取字幕、不发 popup-refresh、
+  // 也不拉热评（下方热评块不可达），直接返回 { unchanged: true }（调用方
   // 据此跳过 apply/渲染）。短路只发生在首查——后面 needsRefresh 分支的复查不
   // 带签名，必然回全量。
   if (contextResp?.ok && contextResp?.unchanged === true) {
@@ -274,13 +273,13 @@ export async function getAiSidepanelState(
     if (!refreshResp?.ok) {
       // 超时（无响应）或 content 报错：不整体失败，回退读取当前快照。
       // 无字幕长视频的 ASR 转写以分钟/小时计，这里必须立刻返回"转写中"的
-      // 可用快照，由 sidepanel 决定等待策略。
-      contextResp = await sendMessageToTab!(tab.id, { type: "sidepanel-get-context" });
+      // 可用快照，由调用方决定等待策略。
+      contextResp = await sendMessageToTab!(tab.id, { type: "reader-get-context" });
       if (!contextResp?.ok || !contextResp?.payload) {
         throw new Error(refreshResp?.error || "当前视频上下文加载失败");
       }
     } else {
-      contextResp = await sendMessageToTab!(tab.id, { type: "sidepanel-get-context" });
+      contextResp = await sendMessageToTab!(tab.id, { type: "reader-get-context" });
     }
   }
 
@@ -292,7 +291,7 @@ export async function getAiSidepanelState(
   // 这里必然是全量（或 forceRefresh 后的复查），为热评多一次往返才值得。
   let hotComments: unknown[] = [];
   try {
-    const commentsResp = await sendMessageToTab!(tab.id, { type: "sidepanel-get-hot-comments" });
+    const commentsResp = await sendMessageToTab!(tab.id, { type: "reader-get-hot-comments" });
     if (commentsResp?.ok && Array.isArray(commentsResp.comments)) {
       hotComments = commentsResp.comments;
     }

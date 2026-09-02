@@ -45,7 +45,9 @@ export const DEFAULT_AI_SYSTEM_PROMPT = [
   "输出时间戳时请使用普通正文格式，如 09:15、01:09:15，不要使用反引号、代码块或表格代码格式包裹时间戳。"
 ].join("\n");
 
-export const PLAYER_AI_QUICK_ACTION_STORAGE_KEY = "boc_player_ai_quick_action_v1";
+// PR5c：player-ai 的 storage 信箱（boc_player_ai_quick_action_v1）已随 AI
+// 侧边栏摘除退役——快捷动作改走消息直发（player-ai-quick-action-chat），
+// 信箱键不再读写；存量键留存在用户 storage 中，无害。
 
 export interface FixedFrontmatterProperty {
   key: string;

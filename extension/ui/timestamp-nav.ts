@@ -137,7 +137,7 @@ async function jumpToAssistantTimestamp(
       await waitForTabComplete(tab.id);
     }
     const response = await deps.sendMessageToActiveTab?.(tab.id, {
-      type: "sidepanel-seek-video-time",
+      type: "reader-seek-video-time",
       seconds: safeSeconds
     });
     if (!response?.ok) {

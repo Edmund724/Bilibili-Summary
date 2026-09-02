@@ -41,8 +41,8 @@ import { buildContextKey, doesTabMatchContextUrl, MAX_SAVED_CONVERSATIONS } from
 import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import {
-  resolveAiSidepanelContext,
-  resolveAiSidepanelPageRef
+  resolveAiConversationContext,
+  resolveAiConversationPageRef
 } from "../ai/context-resolver.js";
 import { normalizeMarkdownForSectionPaste } from "../notes/paste.js";
 // 对话内核（PR5a 已迁 chat 域）：零语义搬运的工厂 + 共享状态单例。
@@ -251,8 +251,8 @@ const conversationStore = createConversationStore({
   removeConversationContextNotice,
   hideHistoryPopover: () => popovers.hideHistoryPopover(),
   loadContextState: (opts) => contextLoad.loadContextState(opts),
-  resolveAiSidepanelContext,
-  resolveAiSidepanelPageRef,
+  resolveAiConversationContext,
+  resolveAiConversationPageRef,
   // 流式中删除当前会话 / 清空全部 / restoreLatest 无匹配时由 store 同步调用：
   // 断 port、清在途一问一答、清消息区并退出流式 UI 态（对应 restartChat 的
   // 清理动作，但不清会话状态——那由 store 自己做）。store 不直接 import

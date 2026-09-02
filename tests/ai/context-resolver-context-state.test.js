@@ -1,22 +1,22 @@
-// 回归测试：background getAiSidepanelState 在「ASR 转写未完成」窗口期的行为。
+// 回归测试：background getAiContextState 在「ASR 转写未完成」窗口期的行为。
 // 用户症状（修复前）：一键总结拿到空 subtitleBody 直接发给模型（模型凭标题+
 // 热评编造"无公开字幕"）；popup-refresh 长事务（等小时级转写）挂起/失败后侧边
 // 栏把上下文清空、误报"当前页面不是 B 站视频页"。
 // 修复后行为：popup-refresh 限时等待，超时回退读取当前快照（带
-// subtitleFetchState:"loading"），sidepanel 据此等待转写完成再发送。
-// getAiSidepanelState 通过 tabOps 注入 ensureReaderContentReady / sendMessageToTab，
+// subtitleFetchState:"loading"），对话侧据此等待转写完成再发送。
+// getAiContextState 通过 tabOps 注入 ensureReaderContentReady / sendMessageToTab，
 // 无需真实 chrome.tabs。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getAiSidepanelState } from "../../extension/ai/context-resolver.js";
+import { getAiContextState } from "../../extension/ai/context-resolver.js";
 
 // 模拟 content script 在「转写进行中」窗口期的状态：refreshClip 已跑完
 // 元信息（title/bvid/aid 已设置），但字幕 body 为空（ASR 转写尚未完成）。
 function makeTranscribingContentResponder(sent, { refreshResponse } = {}) {
   return vi.fn(async (_tabId, message) => {
     sent.push(message);
-    if (message.type === "sidepanel-get-context") {
+    if (message.type === "reader-get-context") {
       return {
         ok: true,
         payload: {
@@ -30,7 +30,7 @@ function makeTranscribingContentResponder(sent, { refreshResponse } = {}) {
         }
       };
     }
-    if (message.type === "sidepanel-get-hot-comments") {
+    if (message.type === "reader-get-hot-comments") {
       return { ok: true, comments: [{ uname: "u", like: 1, message: "m" }] };
     }
     if (message.type === "popup-refresh") {
@@ -40,7 +40,7 @@ function makeTranscribingContentResponder(sent, { refreshResponse } = {}) {
   });
 }
 
-describe("getAiSidepanelState：转写未完成窗口期", () => {
+describe("getAiContextState：转写未完成窗口期", () => {
   let sent;
 
   beforeEach(() => {
@@ -59,7 +59,7 @@ describe("getAiSidepanelState：转写未完成窗口期", () => {
   });
 
   function runGetState(forceRefresh, responderOptions) {
-    return getAiSidepanelState(
+    return getAiContextState(
       1,
       { forceRefresh },
       {
@@ -72,7 +72,7 @@ describe("getAiSidepanelState：转写未完成窗口期", () => {
   it("一键总结路径（forceRefresh=false）：放行 loading 快照且带 subtitleFetchState，不发 popup-refresh", async () => {
     const payload = await runGetState(false);
 
-    // 侧边栏拿到 subtitleFetchState:"loading" 后会等待转写完成再发送；
+    // 对话侧拿到 subtitleFetchState:"loading" 后会等待转写完成再发送；
     // 空字幕不再被无声地当成"没有字幕"发给模型
     expect(payload.subtitleBody).toEqual([]);
     expect(payload.subtitleFetchState).toBe("loading");
@@ -93,7 +93,7 @@ describe("getAiSidepanelState：转写未完成窗口期", () => {
     await assertion;
 
     // 超时后回退读了一次快照
-    const getContextCalls = sent.filter((m) => m.type === "sidepanel-get-context").length;
+    const getContextCalls = sent.filter((m) => m.type === "reader-get-context").length;
     expect(getContextCalls).toBeGreaterThanOrEqual(2);
   });
 
@@ -105,7 +105,7 @@ describe("getAiSidepanelState：转写未完成窗口期", () => {
     await assertion;
 
     // 未超时：不触发第二次快照读取
-    const getContextCalls = sent.filter((m) => m.type === "sidepanel-get-context").length;
+    const getContextCalls = sent.filter((m) => m.type === "reader-get-context").length;
     expect(getContextCalls).toBe(2); // 首查 + refresh 后复查
   });
 });
@@ -122,7 +122,7 @@ const CONTENT_SIGNATURE = "sig-content-v1";
 function makeSignatureAwareResponder(sent) {
   return vi.fn(async (_tabId, message) => {
     sent.push(message);
-    if (message.type === "sidepanel-get-context") {
+    if (message.type === "reader-get-context") {
       if (
         message.forceRefresh !== true &&
         typeof message.ifSignature === "string" &&
@@ -145,7 +145,7 @@ function makeSignatureAwareResponder(sent) {
         }
       };
     }
-    if (message.type === "sidepanel-get-hot-comments") {
+    if (message.type === "reader-get-hot-comments") {
       return { ok: true, comments: [{ uname: "u", like: 1, message: "m" }] };
     }
     if (message.type === "popup-refresh") {
@@ -155,7 +155,7 @@ function makeSignatureAwareResponder(sent) {
   });
 }
 
-describe("getAiSidepanelState：签名短路（候选5）", () => {
+describe("getAiContextState：签名短路（候选5）", () => {
   let sent;
 
   beforeEach(() => {
@@ -170,7 +170,7 @@ describe("getAiSidepanelState：签名短路（候选5）", () => {
   });
 
   function runGetState(options) {
-    return getAiSidepanelState(
+    return getAiContextState(
       1,
       options,
       {
@@ -183,13 +183,13 @@ describe("getAiSidepanelState：签名短路（候选5）", () => {
   it("ifSignature 命中：透传 { unchanged: true }，不发 popup-refresh、不拉热评", async () => {
     const result = await runGetState({ ifSignature: CONTENT_SIGNATURE });
 
-    // SP 收到 unchanged 后跳过 apply/渲染，保持现有快照不动
+    // 调用方收到 unchanged 后跳过 apply/渲染，保持现有快照不动
     expect(result).toEqual({ unchanged: true });
 
     // 一次往返即结束：短路后没有任何后续消息
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ type: "sidepanel-get-context", ifSignature: CONTENT_SIGNATURE, forceRefresh: false });
-    expect(sent.some((m) => m.type === "sidepanel-get-hot-comments")).toBe(false);
+    expect(sent[0]).toMatchObject({ type: "reader-get-context", ifSignature: CONTENT_SIGNATURE, forceRefresh: false });
+    expect(sent.some((m) => m.type === "reader-get-hot-comments")).toBe(false);
     expect(sent.some((m) => m.type === "popup-refresh")).toBe(false);
   });
 
@@ -200,7 +200,7 @@ describe("getAiSidepanelState：签名短路（候选5）", () => {
     expect(payload.signature).toBe(CONTENT_SIGNATURE);
     expect(payload.hotComments).toHaveLength(1);
     expect(payload.isVideoContext).toBe(true);
-    expect(sent.some((m) => m.type === "sidepanel-get-hot-comments")).toBe(true);
+    expect(sent.some((m) => m.type === "reader-get-hot-comments")).toBe(true);
   });
 
   it("forceRefresh=true 绕过短路：签名命中仍走 popup-refresh 全量路径", async () => {

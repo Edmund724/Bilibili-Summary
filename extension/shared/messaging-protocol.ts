@@ -28,30 +28,53 @@ export type PopupCloseReadingViewMessage = {
   type: "popup-close-reading-view";
 };
 
-export type SidepanelGetContextMessage = {
-  type: "sidepanel-get-context";
+// 打开/进入阅读模式并激活「AI 对话」tab：readerUrl 语义同
+// popup-trigger-reading-view（空串 = 已在阅读模式内，只定位/聚焦）；prompt
+// 语义同 player-ai-quick-action（空串 = 只激活对话 tab，不发送）。
+// 消费端（core/message-handler.ts）先处理打开/进入，再经 core/lazy-chat-tab
+// 的 ensureChatTabActivated + runQuickActionPrompt 消费。
+export type PopupTriggerReadingChatMessage = {
+  type: "popup-trigger-reading-chat";
+  readerUrl?: string;
+  prompt?: string;
+};
+
+// PR5c：消息类型改 reader 中性命名（原 sidepanel-*）。旧名保留为兼容别名——
+// 运行时 message-handler 对两类 type 字面量走同一处理器（旧名经 `as {type?}`
+// 比对绕开 union 窄化）；别名在存量消费方迁移后移除。
+export type ReaderGetContextMessage = {
+  type: "reader-get-context";
   forceRefresh?: boolean;
   ifSignature?: string;
 };
 
-export type SidepanelGetHotCommentsMessage = {
-  type: "sidepanel-get-hot-comments";
+export type ReaderGetHotCommentsMessage = {
+  type: "reader-get-hot-comments";
 };
 
-export type SidepanelSeekVideoTimeMessage = {
-  type: "sidepanel-seek-video-time";
+export type ReaderSeekVideoTimeMessage = {
+  type: "reader-seek-video-time";
   seconds?: number | string;
 };
+
+// 兼容别名（旧 sidepanel-* 消息名，形状与对应 Reader*Message 相同）
+export type SidepanelGetContextMessage = ReaderGetContextMessage & { type: "sidepanel-get-context" };
+export type SidepanelGetHotCommentsMessage = ReaderGetHotCommentsMessage & { type: "sidepanel-get-hot-comments" };
+export type SidepanelSeekVideoTimeMessage = ReaderSeekVideoTimeMessage & { type: "sidepanel-seek-video-time" };
 
 export type ContentScriptMessage =
   | PopupGetStateMessage
   | PopupRefreshMessage
   | PopupSelectSubtitleMessage
   | PopupTriggerReadingViewMessage
+  | PopupTriggerReadingChatMessage
   | PopupCloseReadingViewMessage
-  | SidepanelGetContextMessage
-  | SidepanelGetHotCommentsMessage
-  | SidepanelSeekVideoTimeMessage;
+  | ReaderGetContextMessage
+  | ReaderGetHotCommentsMessage
+  | ReaderSeekVideoTimeMessage
+  // background → content 直发：player-ai 悬浮按钮语义反转后的快捷动作消费
+  //（进入/聚焦阅读模式的编排已由 background 完成，content 只消费 prompt）。
+  | PlayerAiQuickActionChatMessage;
 
 export type ContentScriptMessageType = ContentScriptMessage["type"];
 
@@ -62,12 +85,20 @@ export type SaveSettingsMessage = { type: "save-settings"; settings?: unknown };
 export type OpenOptionsMessage = { type: "open-options" };
 // PR5：对话 tab（content script）发送前的 offscreen 文档自愈 ensure——
 // chrome.offscreen / getContexts 仅扩展上下文可用，content script 经此消息
-// 委托 background 幂等创建（sidepanel 在扩展页内直调 ensureChatOffscreenDocument
-// 的等价物，见 reader/chat-tab.ts 的 connectPort）。
+// 委托 background 幂等创建（扩展页内直调 ensureChatOffscreenDocument 的
+// 等价物，见 reader/chat-tab.ts 的 connectPort）。
 export type EnsureOffscreenChatMessage = { type: "ensure-offscreen-chat" };
 export type PlayerAiQuickActionMessage = {
   type: "player-ai-quick-action";
   tabId?: number;
+};
+// player-ai 悬浮按钮语义反转后的消息（工单 08 决议 2）：background 不再打开
+// 侧边栏/写 storage 信箱，改为「进入/聚焦阅读模式 + 定位 AI 对话 tab + 自动
+// 发送快捷提示词」。prompt 由 background 组装，content 侧经 runQuickActionPrompt
+// 消费。
+export type PlayerAiQuickActionChatMessage = {
+  type: "player-ai-quick-action-chat";
+  prompt?: string;
 };
 export type OpenReadingViewTabMessage = {
   type: "open-reading-view-tab";
@@ -128,6 +159,7 @@ export type BackgroundMessage =
   | OpenOptionsMessage
   | EnsureOffscreenChatMessage
   | PlayerAiQuickActionMessage
+  | PopupTriggerReadingChatMessage
   | OpenReadingViewTabMessage
   | CloseReadingViewTabMessage
   | FetchJsonMessage

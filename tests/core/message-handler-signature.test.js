@@ -1,7 +1,7 @@
 // 候选5「sidepanel 上下文同步瘦身」content 侧回归测试：
-// - computeSidepanelStateSignature：签名字段覆盖 SP 消费的全部可变状态，
+// - computeContextStateSignature：签名字段覆盖 对话侧 消费的全部可变状态，
 //   且对 url/title/hotComments 等非判定字段免疫；
-// - sidepanel-get-context 处理器：ifSignature 命中 → 立即回 unchanged（不带
+// - reader-get-context 处理器：ifSignature 命中 → 立即回 unchanged（不带
 //   payload）；签名不匹配 → 全量 payload 附 signature；forceRefresh 绕过短路；
 //   旧调用方不带 ifSignature 自动走全量（向后兼容）。
 // mock 模式沿 tests/core/message-handler-chapters.test.js：重依赖全 mock，
@@ -67,18 +67,18 @@ vi.mock("../../extension/bilibili/gateway.js", () => ({
 
 import {
   bindRuntimeEvents,
-  computeSidepanelStateSignature
+  computeContextStateSignature
 } from "../../extension/core/message-handler.js";
 import {
-  SIDEPANEL_CONTEXT_PAYLOAD_FIELDS,
+  READER_CONTEXT_PAYLOAD_FIELDS,
   SIGNATURE_PARTICIPATING_FIELDS,
   SIGNATURE_INDIRECT_FIELDS,
   SIGNATURE_EXCLUDED_FIELDS,
-  createSidepanelContextPayload,
-  // 纯函数块直接测 sidepanel-payload.js 的单源实现（message-handler 的 re-export
+  createReaderContextPayload,
+  // 纯函数块直接测 context-payload.js 的单源实现（message-handler 的 re-export
   // 与此为同一函数，处理器级行为由上方 describe 覆盖）。
-  computeSidepanelStateSignature
-} from "../../extension/core/sidepanel-payload.js";
+  computeContextStateSignature
+} from "../../extension/core/context-payload.js";
 import { state } from "../../extension/core/state.js";
 
 const onMessageListeners = [];
@@ -95,7 +95,7 @@ const messageListener = onMessageListeners[0];
 
 function requestContext(message = {}) {
   const sendResponse = vi.fn();
-  messageListener({ type: "sidepanel-get-context", ...message }, {}, sendResponse);
+  messageListener({ type: "reader-get-context", ...message }, {}, sendResponse);
   expect(sendResponse).toHaveBeenCalledTimes(1);
   return sendResponse.mock.calls[0][0];
 }
@@ -119,35 +119,35 @@ function seedReadyClip() {
   state.clip.setChapters([]);
 }
 
-describe("computeSidepanelStateSignature 纯函数", () => {
+describe("computeContextStateSignature 纯函数", () => {
   beforeEach(() => {
     seedReadyClip();
   });
 
   it("同一状态 → 签名稳定", () => {
-    const a = computeSidepanelStateSignature(buildPayload());
-    const b = computeSidepanelStateSignature(buildPayload());
+    const a = computeContextStateSignature(buildPayload());
+    const b = computeContextStateSignature(buildPayload());
     expect(a).toBe(b);
     expect(typeof a).toBe("string");
     expect(a.length).toBeGreaterThan(0);
   });
 
   it("签名覆盖字段逐一变化 → 签名变化", () => {
-    const base = computeSidepanelStateSignature(buildPayload());
+    const base = computeContextStateSignature(buildPayload());
 
     // subtitleBody 长度
     state.clip.setSubtitleBody([{ from: 0, to: 5, content: "第一句" }]);
-    expect(computeSidepanelStateSignature(buildPayload())).not.toBe(base);
+    expect(computeContextStateSignature(buildPayload())).not.toBe(base);
     seedReadyClip();
 
     // subtitleFetchState（ASR 转写完成 → 就绪的关键信号）
     state.clip.setSubtitleFetchState("loading");
-    expect(computeSidepanelStateSignature(buildPayload())).not.toBe(base);
+    expect(computeContextStateSignature(buildPayload())).not.toBe(base);
     seedReadyClip();
 
     // selectedSubtitleId
     state.clip.setSelectedSubtitleId("s2");
-    expect(computeSidepanelStateSignature(buildPayload())).not.toBe(base);
+    expect(computeContextStateSignature(buildPayload())).not.toBe(base);
     seedReadyClip();
 
     // subtitleOptions 数量
@@ -155,46 +155,46 @@ describe("computeSidepanelStateSignature 纯函数", () => {
       { id: "s1", subtitleUrl: "u1", lan: "zh" },
       { id: "s2", subtitleUrl: "u2", lan: "en" }
     ]);
-    expect(computeSidepanelStateSignature(buildPayload())).not.toBe(base);
+    expect(computeContextStateSignature(buildPayload())).not.toBe(base);
     seedReadyClip();
 
     // chapters 数量
     state.clip.setChapters([{ title: "开场", from: 0, to: 60 }]);
-    expect(computeSidepanelStateSignature(buildPayload())).not.toBe(base);
+    expect(computeContextStateSignature(buildPayload())).not.toBe(base);
     seedReadyClip();
 
     // includeTimestampInBody（设置项变化）
     state.setSettings({ ...(state.settings || {}), includeTimestampInBody: false });
-    expect(computeSidepanelStateSignature(buildPayload())).not.toBe(base);
+    expect(computeContextStateSignature(buildPayload())).not.toBe(base);
     state.setSettings({ ...(state.settings || {}), includeTimestampInBody: true });
 
     // bvid / cid / pageIndex / subtitleLang
     state.clip.setBvid("BV1other");
-    expect(computeSidepanelStateSignature(buildPayload())).not.toBe(base);
+    expect(computeContextStateSignature(buildPayload())).not.toBe(base);
     seedReadyClip();
     state.clip.setCid("202");
-    expect(computeSidepanelStateSignature(buildPayload())).not.toBe(base);
+    expect(computeContextStateSignature(buildPayload())).not.toBe(base);
     seedReadyClip();
     state.clip.setPageIndex(2);
-    expect(computeSidepanelStateSignature(buildPayload())).not.toBe(base);
+    expect(computeContextStateSignature(buildPayload())).not.toBe(base);
     seedReadyClip();
     state.clip.setSelectedSubtitleLang("en-US");
-    expect(computeSidepanelStateSignature(buildPayload())).not.toBe(base);
+    expect(computeContextStateSignature(buildPayload())).not.toBe(base);
     seedReadyClip();
   });
 
   it("cid 缺失时回退 aid（无 cid 场景仍有稳定键）", () => {
     state.clip.setCid("");
     state.clip.setAid("9");
-    const byAid = computeSidepanelStateSignature(buildPayload());
+    const byAid = computeContextStateSignature(buildPayload());
     state.clip.setAid("");
     state.clip.setCid("9");
-    const byCid = computeSidepanelStateSignature(buildPayload());
+    const byCid = computeContextStateSignature(buildPayload());
     expect(byAid).toBe(byCid);
   });
 
   it("非判定字段（title/url/hotComments/pageCount 等）变化 → 签名不变", () => {
-    const base = computeSidepanelStateSignature(buildPayload());
+    const base = computeContextStateSignature(buildPayload());
     state.clip.setTitle("换了标题");
     state.clip.setPageCount(7);
     state.clip.setSelectedSubtitleUrl("u1?alt=signed");
@@ -202,16 +202,16 @@ describe("computeSidepanelStateSignature 纯函数", () => {
     const payload = buildPayload();
     payload.url = "https://www.bilibili.com/video/BV1sig/?p=9&t=1";
     payload.hotComments = [{ uname: "u", like: 1, message: "m" }];
-    // 数组内容变但长度不变：索引型数组只取长度（与 SP contextKey 去重语义一致）
+    // 数组内容变但长度不变：索引型数组只取长度（与 对话侧 contextKey 去重语义一致）
     payload.subtitleBody = [
       { from: 0, to: 5, content: "完全不同的内容" },
       { from: 5, to: 9, content: "另一条不同的内容" }
     ];
-    expect(computeSidepanelStateSignature(payload)).toBe(base);
+    expect(computeContextStateSignature(payload)).toBe(base);
   });
 });
 
-describe("sidepanel-get-context 签名短路", () => {
+describe("reader-get-context 签名短路", () => {
   beforeEach(() => {
     seedReadyClip();
   });
@@ -222,7 +222,7 @@ describe("sidepanel-get-context 签名短路", () => {
     expect(response.payload).toBeTruthy();
     const payload = response.payload;
     expect(payload.bvid).toBe("BV1sig");
-    expect(payload.signature).toBe(computeSidepanelStateSignature(payload));
+    expect(payload.signature).toBe(computeContextStateSignature(payload));
   });
 
   it("ifSignature 命中 → 立即回 unchanged（无 payload），一次往返", () => {
@@ -234,7 +234,7 @@ describe("sidepanel-get-context 签名短路", () => {
     expect(second.payload).toBeUndefined();
   });
 
-  it("ifSignature 不匹配（SP 换签/换标签页）→ 走全量路径", () => {
+  it("ifSignature 不匹配（对话侧 换签/换标签页）→ 走全量路径", () => {
     const response = requestContext({ ifSignature: "stale-signature" });
     expect(response.ok).toBe(true);
     expect(response.payload?.bvid).toBe("BV1sig");
@@ -276,7 +276,7 @@ function buildPayload() {
 }
 
 // ============================================================
-// sidepanel-payload 形状单源（补齐模块头注承诺的形状锁死断言）
+// context-payload 形状单源（补齐模块头注承诺的形状锁死断言）
 //
 // 覆盖四类对账：
 //   1. 形状快照：payload 字段集合/顺序锁死——未过测试不得增删字段；
@@ -287,7 +287,7 @@ function buildPayload() {
 
 // —— 手写期望固件：改动以上任一清单都必须显式过这里的逐字断言 ——
 
-// sidepanel-get-context 全量 payload 的字段清单（顺序 = 工厂组装序 = 线上 key 序）
+// reader-get-context 全量 payload 的字段清单（顺序 = 工厂组装序 = 线上 key 序）
 const EXPECTED_PAYLOAD_FIELDS = [
   "url",
   "title",
@@ -399,16 +399,16 @@ const EXPECTED_FULL_PAYLOAD = {
 
 // 纯函数块的基础 payload：直接经工厂组（不经处理器），只依赖单源模块
 function makeFullPayload() {
-  return createSidepanelContextPayload({
+  return createReaderContextPayload({
     clip: FULL_CLIP,
     settings: FULL_SETTINGS,
     url: FULL_URL
   });
 }
 
-describe("sidepanel-payload 形状快照与签名三分类对账", () => {
+describe("context-payload 形状快照与签名三分类对账", () => {
   it("字段清单常量逐字锁死（增删字段/重排必须显式过测试）", () => {
-    expect([...SIDEPANEL_CONTEXT_PAYLOAD_FIELDS]).toEqual(EXPECTED_PAYLOAD_FIELDS);
+    expect([...READER_CONTEXT_PAYLOAD_FIELDS]).toEqual(EXPECTED_PAYLOAD_FIELDS);
   });
 
   it("工厂产物的 key 集合与顺序 = 字段清单（形状快照）", () => {
@@ -416,7 +416,7 @@ describe("sidepanel-payload 形状快照与签名三分类对账", () => {
     expect(Object.keys(payload)).toEqual(EXPECTED_PAYLOAD_FIELDS);
   });
 
-  it("处理器接线一致性：经 sidepanel-get-context 组出的 payload key 序 = 字段清单 + signature", () => {
+  it("处理器接线一致性：经 reader-get-context 组出的 payload key 序 = 字段清单 + signature", () => {
     // message-handler 的 buildSidepanelContextPayload 壳只喂运行时输入，产出形状
     // 必须与工厂直出一致；signature 由处理器附加在末尾。
     expect(Object.keys(buildPayload())).toEqual([...EXPECTED_PAYLOAD_FIELDS, "signature"]);
@@ -434,7 +434,7 @@ describe("sidepanel-payload 形状快照与签名三分类对账", () => {
       ...SIGNATURE_INDIRECT_FIELDS,
       ...SIGNATURE_EXCLUDED_FIELDS
     ]);
-    expect([...union].sort()).toEqual([...SIDEPANEL_CONTEXT_PAYLOAD_FIELDS].sort());
+    expect([...union].sort()).toEqual([...READER_CONTEXT_PAYLOAD_FIELDS].sort());
 
     const participating = new Set(SIGNATURE_PARTICIPATING_FIELDS);
     const indirect = new Set(SIGNATURE_INDIRECT_FIELDS);
@@ -451,7 +451,7 @@ describe("sidepanel-payload 形状快照与签名三分类对账", () => {
   });
 
   it("排除清单逐字段机械遍历：实质扰动 → 签名不变", () => {
-    const base = computeSidepanelStateSignature(makeFullPayload());
+    const base = computeContextStateSignature(makeFullPayload());
     // 每个排除字段一个「穿透普通等值比较」的实质扰动值（数组换内容、字符串换值）
     const mutations = {
       hotComments: [{ uname: "评论者", like: 1, message: "热评内容" }],
@@ -471,25 +471,25 @@ describe("sidepanel-payload 形状快照与签名三分类对账", () => {
     for (const field of SIGNATURE_EXCLUDED_FIELDS) {
       const mutated = { ...makeFullPayload(), [field]: mutations[field] };
       expect(
-        computeSidepanelStateSignature(mutated),
+        computeContextStateSignature(mutated),
         `被排除字段 ${field} 变化不应改变签名`
       ).toBe(base);
     }
   });
 
   it("间接字段 aid：cid 在场时签名不变；cid 缺席时经回退投影生效", () => {
-    const base = computeSidepanelStateSignature(makeFullPayload());
+    const base = computeContextStateSignature(makeFullPayload());
     // cid 非空：aid 自身变化不独立驱动签名
-    expect(computeSidepanelStateSignature({ ...makeFullPayload(), aid: "100" })).toBe(base);
+    expect(computeContextStateSignature({ ...makeFullPayload(), aid: "100" })).toBe(base);
     // cid 为空：aid 经 cid 投影回退进入签名
     const withoutCid = { ...makeFullPayload(), cid: "" };
-    const byAid99 = computeSidepanelStateSignature(withoutCid);
-    expect(computeSidepanelStateSignature({ ...withoutCid, aid: "100" })).not.toBe(byAid99);
+    const byAid99 = computeContextStateSignature(withoutCid);
+    expect(computeContextStateSignature({ ...withoutCid, aid: "100" })).not.toBe(byAid99);
   });
 
   it("参与字段逐字段机械遍历：按投影语义扰动 → 签名变化", () => {
     const full = makeFullPayload();
-    const base = computeSidepanelStateSignature(full);
+    const base = computeContextStateSignature(full);
     // 扰动值必须穿透该字段的投影语义：索引型数组（只取长度）用「追加元素」，
     // 归一化标量（trim/Number/!==false）用归一化后不同的值
     const mutations = {
@@ -509,15 +509,15 @@ describe("sidepanel-payload 形状快照与签名三分类对账", () => {
     for (const field of SIGNATURE_PARTICIPATING_FIELDS) {
       const mutated = { ...full, [field]: mutations[field] };
       expect(
-        computeSidepanelStateSignature(mutated),
+        computeContextStateSignature(mutated),
         `参与字段 ${field} 变化应改变签名`
       ).not.toBe(base);
     }
   });
 
-  it("索引型数组等长换内容 → 签名不变（与 SP contextKey 去重语义一致）", () => {
+  it("索引型数组等长换内容 → 签名不变（与 对话侧 contextKey 去重语义一致）", () => {
     const full = makeFullPayload();
-    const base = computeSidepanelStateSignature(full);
+    const base = computeContextStateSignature(full);
     const mutated = {
       ...full,
       subtitleBody: [
@@ -527,11 +527,11 @@ describe("sidepanel-payload 形状快照与签名三分类对账", () => {
       subtitleOptions: [{ id: "s9x" }, { id: "s8x" }],
       chapters: [{ title: "另一章节", from: 5, to: 55 }]
     };
-    expect(computeSidepanelStateSignature(mutated)).toBe(base);
+    expect(computeContextStateSignature(mutated)).toBe(base);
   });
 });
 
-describe("createSidepanelContextPayload 组装映射", () => {
+describe("createReaderContextPayload 组装映射", () => {
   it("完整输入：逐字段与 state 输入映射正确（含字段名映射）", () => {
     const payload = makeFullPayload();
     for (const field of EXPECTED_PAYLOAD_FIELDS) {
@@ -542,7 +542,7 @@ describe("createSidepanelContextPayload 组装映射", () => {
   it("无参/空 clip：全字段落到缺省口径", () => {
     // settings 缺省 → includeTimestampInBody 按 !== false 判 true；url 由调用方
     // 注入，无参时原样透传 undefined。
-    const payload = createSidepanelContextPayload();
+    const payload = createReaderContextPayload();
     const expected = {
       url: undefined,
       title: "",
@@ -572,7 +572,7 @@ describe("createSidepanelContextPayload 组装映射", () => {
   });
 
   it("归一化分支：pageIndex/pageCount/videoDuration 的 Number 归一与缺省回退", () => {
-    const build = (clip) => createSidepanelContextPayload({ clip, settings: {}, url: "u" });
+    const build = (clip) => createReaderContextPayload({ clip, settings: {}, url: "u" });
     // pageIndex：>0 才收（字符串数字收为 number），否则回退 1
     expect(build({ pageIndex: "3" }).pageIndex).toBe(3);
     expect(build({ pageIndex: 0 }).pageIndex).toBe(1);
@@ -587,7 +587,7 @@ describe("createSidepanelContextPayload 组装映射", () => {
   });
 
   it("归一化分支：noSubtitleReason/chapters/subtitleFetchState 的缺省口径", () => {
-    const build = (clip) => createSidepanelContextPayload({ clip, settings: {}, url: "u" });
+    const build = (clip) => createReaderContextPayload({ clip, settings: {}, url: "u" });
     // noSubtitleReason：缺失/空串归一为 null，非空原样透传
     expect(build({}).noSubtitleReason).toBe(null);
     expect(build({ noSubtitleReason: "" }).noSubtitleReason).toBe(null);
@@ -601,7 +601,7 @@ describe("createSidepanelContextPayload 组装映射", () => {
   });
 
   it("includeTimestampInBody 口径：仅显式 false 关闭，缺失按默认 true", () => {
-    const build = (settings) => createSidepanelContextPayload({ clip: {}, settings, url: "u" });
+    const build = (settings) => createReaderContextPayload({ clip: {}, settings, url: "u" });
     expect(build(undefined).includeTimestampInBody).toBe(true);
     expect(build({}).includeTimestampInBody).toBe(true);
     expect(build({ includeTimestampInBody: false }).includeTimestampInBody).toBe(false);
@@ -614,7 +614,7 @@ describe("createSidepanelContextPayload 组装映射", () => {
 // ============================================================
 // 消费方对账锚点（静态扫描）
 //
-// 契约边界（sidepanel-payload.js 头注）：SP 实际持有的快照 =
+// 契约边界（context-payload.js 头注）：对话侧实际持有的快照 =
 //   payload + { signature }（message-handler 附加）
 //          + { hotComments 覆盖, isVideoContext }（background 转发层补写）。
 // 这里把对账结论固化为测试：扫描 sidepanel 消费方源码中对快照的属性访问，
@@ -624,12 +624,12 @@ describe("createSidepanelContextPayload 组装映射", () => {
 // 在 Node 单测里实例化，故对消费方采用源码静态断言而非行为断言。
 // ============================================================
 
-// 允许 SP 读取的快照字段全集 = payload 清单 ∪ 附加层字段 ∪ 两处已记录的兼容项
+// 允许 对话侧 读取的快照字段全集 = payload 清单 ∪ 附加层字段 ∪ 两处已记录的兼容项
 const ALLOWED_SNAPSHOT_FIELDS = new Set([
-  ...SIDEPANEL_CONTEXT_PAYLOAD_FIELDS,
+  ...READER_CONTEXT_PAYLOAD_FIELDS,
   "signature", // message-handler 处理器附加（ifSignature 回传来源）
-  "hotComments", // background getAiSidepanelState 整体覆盖
-  "isVideoContext", // background getAiSidepanelState 补写（content 不组装）
+  "hotComments", // background getAiContextState 整体覆盖
+  "isVideoContext", // background getAiContextState 补写（content 不组装）
   // 兼容回退（已记录，非 payload 字段）：ai/conversation.js 的旧持久化会话
   // ref 兼容读取——context?.pageIndex 缺失时回落 context?.page
   "page",
@@ -655,7 +655,7 @@ function readSource(relativePath) {
 // 扫描源码中 `<receiver>?.field` / `<receiver>.field` 形式的属性访问字段名。
 // lookbehind 防子串误配（如 liveContextData 内含 contextData）；`-` 同样排除
 //——JS 标识符不含连字符，receiver 前出现 `-` 只可能是字符串字面量里的模块
-// 路径（如 "sidepanel-payload.js"），不应参与对账。
+// 路径（如 "context-payload.js"），不应参与对账。
 // 允许 TS 非空断言 `receiver!.field`（迁移期 .ts 源码常见）。
 function scanFields(source, receiver) {
   const pattern = new RegExp(`(?<![A-Za-z0-9_$-])${receiver}[?!]*\\.([A-Za-z_$][\\w$]*)`, "g");
@@ -684,29 +684,26 @@ function assertReconciliation(point, expectedFields, label) {
   }
 }
 
-describe("消费方对账锚点：SP 读取字段 ⊆ payload ∪ {signature, hotComments, isVideoContext}", () => {
-  it("pages/sidepanel.js 直接读取的快照字段", () => {
-    const source = readSource("../../extension/pages/sidepanel.js");
-    // contextData：非视频页判定（isVideoContext）、时间戳跳转（url）、
-    // 无字幕发送拦截（noSubtitleReason）；chip 文案（title）已随候选5 拆分
-    // 迁往 sidepanel-context-load.js（见下一用例）
+describe("消费方对账锚点：对话侧 读取字段 ⊆ payload ∪ {signature, hotComments, isVideoContext}", () => {
+  it("reader/chat-tab.ts 直接读取的快照字段", () => {
+    const source = readSource("../../extension/reader/chat-tab.js");
+    // contextData：非视频页判定（isVideoContext，含 asr notice 显隐与发送守卫）、
+    // 无字幕发送拦截（noSubtitleReason）、时间戳跳转（url）；
+    // chip 文案与 live 匹配已随候选5 拆分迁往 chat/context-load.js
     assertReconciliation(
       scanFields(source, "contextData"),
       ["url", "isVideoContext", "noSubtitleReason"],
-      "sidepanel.js contextData"
+      "chat-tab contextData"
     );
     // liveContextData：整对象存取（轮询数据源 / 新对话快照应用），无字段级读取
-    //（signature 回传与历史列表 live 匹配已随候选5 拆分迁出，见后两个用例）
     assertReconciliation(
       scanFields(source, "liveContextData"),
       [],
-      "sidepanel.js liveContextData"
+      "chat-tab liveContextData"
     );
-    // liveVideoRef 局部别名已随 renderHistoryList 迁往 sidepanel-lists.js
-    assertReconciliation(scanFields(source, "liveVideoRef"), [], "sidepanel.js liveVideoRef");
     // resp.payload 整体落地 liveContextData，无字段级读取（unchanged 判定已
-    // 抽到 sidepanel-context-policy.js，见后面的用例）
-    assertReconciliation(scanFields(source, "payload"), [], "sidepanel.js resp.payload");
+    // 抽到 chat/context-policy.js）
+    assertReconciliation(scanFields(source, "payload"), [], "chat-tab resp.payload");
   });
 
   it("chat/context-load.js：上下文加载读 title/url（chip）与 signature（回传）", () => {
@@ -728,8 +725,8 @@ describe("消费方对账锚点：SP 读取字段 ⊆ payload ∪ {signature, ho
     assertReconciliation(scanFields(source, "payload"), [], "context-load resp.payload");
   });
 
-  it("pages/sidepanel-lists.js：列表渲染读 isVideoContext 与 live 匹配 url", () => {
-    const source = readSource("../../extension/pages/sidepanel-lists.js");
+  it("reader/chat-lists.ts：列表渲染读 isVideoContext 与 live 匹配 url", () => {
+    const source = readSource("../../extension/reader/chat-lists.js");
     // renderSuggestions 的建议区清空判定（isVideoContext）
     assertReconciliation(
       scanFields(source, "contextData"),
@@ -814,14 +811,14 @@ describe("消费方对账锚点：SP 读取字段 ⊆ payload ∪ {signature, ho
     );
   });
 
-  it("ai/context-resolver.js getAiSidepanelState：转发层读取与覆盖契约", () => {
+  it("ai/context-resolver.js getAiContextState：转发层读取与覆盖契约", () => {
     const source = readSource("../../extension/ai/context-resolver.js");
-    const block = sliceBlock(source, "export async function getAiSidepanelState");
+    const block = sliceBlock(source, "export async function getAiContextState");
     // hasLoadedClip 判定（bvid/aid/title）+ needsRefresh 的字幕体空判定（subtitleBody）
     assertReconciliation(
       scanFields(block, "payload"),
       ["bvid", "aid", "title", "subtitleBody"],
-      "getAiSidepanelState payload"
+      "getAiContextState payload"
     );
     // 覆盖契约固化：返回包 = 整包展开 content payload + hotComments 整体覆盖 +
     // isVideoContext 补写（content 侧恒 [] 的字段在此获得真值）
@@ -834,7 +831,7 @@ describe("消费方对账锚点：SP 读取字段 ⊆ payload ∪ {signature, ho
 
   it("chat/chat-runtime.js：整包转发 contextData（含 subtitleBody 省略重传）", () => {
     // offscreen 渲染链（videoDuration/includeTimestampInBody/chapters 等）的字段级
-    // 消费不在 SP 对账锚点范围（由整包展开天然随 payload 下传）；此处仅固化转发
+    // 消费不在 对话侧 对账锚点范围（由整包展开天然随 payload 下传）；此处仅固化转发
     // 形态：contextData 整包展开 + contextKey 命中时删除 subtitleBody 省传输。
     const source = readSource("../../extension/chat/chat-runtime.js");
     expect(source).toMatch(/\.\.\.sidepanelState\.contextData/);

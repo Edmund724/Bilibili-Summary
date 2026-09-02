@@ -30,8 +30,8 @@
 //   entry/content-main.mjs           拷贝自 build-content.js 产物
 //   entry/chunks/*.mjs               拷贝自 build-content.js 产物
 //   entry/offscreen.html             原样拷贝
-//   pages/{popup,options,sidepanel}.js   单文件 bundle
-//   pages/{options,sidepanel}.css    minified
+//   pages/{popup,options}.js         单文件 bundle
+//   pages/options.css                minified
 //   pages/popup.css                  原样拷贝（不在 minify 清单）
 //   pages/*.html                     原样拷贝
 //   icons/*.png                      原样拷贝
@@ -63,7 +63,6 @@ const distDir = path.join(root, "dist");
 // offscreen 入口不在此列——它开 splitting 拆动态 chunk（见 buildOffscreenEntry）。
 const jsEntries = [
   "entry/background.ts",
-  "pages/sidepanel.ts",
   "pages/options.ts",
   "pages/popup.ts",
 ];
@@ -77,7 +76,6 @@ const cssEntries = [
   "entry/styles/reader-gate.css",
   "entry/styles/player-ai.css",
   "pages/options.css",
-  "pages/sidepanel.css",
 ];
 
 // 原样拷贝的文件（产物路径与源路径一致 → html/manifest 零改写）。
@@ -86,7 +84,6 @@ const copyFiles = [
   "entry/offscreen.html",
   "pages/popup.html",
   "pages/options.html",
-  "pages/sidepanel.html",
   "pages/popup.css",
   // content 构建产物（build-content.js 跑完后的最新产物；.map 为 linked
   // sourcemap，devtools 调试用，release zip 由 build_release.py 剔除）。
@@ -310,7 +307,6 @@ function assertManifestReferences() {
   if (manifest.action?.default_popup) refs.push(manifest.action.default_popup);
   for (const p of Object.values(manifest.action?.default_icon ?? {})) refs.push(p);
   if (manifest.options_page) refs.push(manifest.options_page);
-  if (manifest.side_panel?.default_path) refs.push(manifest.side_panel.default_path);
   for (const cs of manifest.content_scripts ?? []) {
     refs.push(...(cs.js ?? []), ...(cs.css ?? []));
   }

@@ -16,7 +16,7 @@
 //   blocked-streaming chatRuntime 流式中或有待发送 prompt
 //   apply-live        以上皆否：live 快照落地并应用到主上下文
 
-// getAiSidepanelState 的响应信封（直调结果经编排壳收窄；
+// getAiContextState 的响应信封（直调结果经编排壳收窄；
 // payload 为 content 侧的上下文快照，本模块只读其 unchanged 信封字段）。
 export interface LoadContextResponse {
   ok?: boolean;
@@ -69,7 +69,7 @@ export function isPinnedContextTruthy(currentConversationMeta: CurrentConversati
   return Boolean(currentConversationMeta?.pinnedContext);
 }
 
-// 决策点一（消息往返之前）：无可用标签页。此时不能调 getAiSidepanelState
+// 决策点一（消息往返之前）：无可用标签页。此时不能调 getAiContextState
 //（tabId 缺失），直接走失败清理。clearTabUrl 为 true：no-tab 分支连 liveTabUrl
 // 一起清（error 分支刚用 tab.url 刷新过它，故为 false，见 resolveLoadContextAction）。
 export function resolveNoTabPlan({ hasPinnedConversation = false, silent = false } = {}): LoadContextPlan {
@@ -87,7 +87,7 @@ export function resolveNoTabPlan({ hasPinnedConversation = false, silent = false
 
 // 决策点二（消息往返之后）：按响应分类 + 运行时标志给出动作计划。
 // 输入全部来自编排壳已拉到的数据：
-//   response              getAiSidepanelState 的结果（含 .catch 兜底对象，可为 null）
+//   response              getAiContextState 的结果（含 .catch 兜底对象，可为 null）
 //   hasPinnedConversation isPinnedContextStrict(sidepanelState.currentConversationMeta)
 //   silent                loadContextState 的静默标志（轮询/补水路径为 true）
 //   isStreaming           chatRuntime.isStreaming()

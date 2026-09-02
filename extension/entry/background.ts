@@ -1,7 +1,6 @@
 import {
   DEFAULT_SETTINGS,
-  DEFAULT_PLAYER_AI_QUICK_PROMPT,
-  PLAYER_AI_QUICK_ACTION_STORAGE_KEY
+  DEFAULT_PLAYER_AI_QUICK_PROMPT
 } from "../core/defaults.js";
 import { PRESETS, ASR_PROVIDER_PRESETS } from "../core/presets.js";
 import { normalizePlayerAiQuickPrompt } from "../core/validators.js";
@@ -13,6 +12,7 @@ import {
   triggerReaderModeCloseInTab,
   triggerReaderModeInTab
 } from "../core/content-orchestration-wiring.js";
+import { sendMessageToTab } from "../shared/tab-utils.js";
 import { getMergedSettings, normalizeSettings, saveSettings } from "../core/settings-store.js";
 import {
   aiProviderStore,
@@ -75,6 +75,12 @@ function handleEnsureOffscreenChat(_message: Msg<"ensure-offscreen-chat">, _send
   return true;
 }
 
+// player-ai 悬浮按钮语义反转（工单 08 决议 2）：不再打开 AI 侧边栏 + 写
+// storage 信箱（boc_player_ai_quick_action_v1 已退役），改为「进入/聚焦阅读
+// 模式 + 定位对话 tab + 自动发送快捷提示词」——triggerReaderModeInTab 复用
+// popup-trigger-reading-view 链（空 readerUrl = 已在阅读模式内，只聚焦），
+// 提示词组装后经 player-ai-quick-action-chat 直发 content script，由 reader
+// 侧对话 seam runQuickActionPrompt 消费。
 function handlePlayerAiQuickAction(message: Msg<"player-ai-quick-action">, sender: MessageSender, sendResponse: SendResponse): boolean {
   const tabId = Number(message.tabId || sender.tab?.id || 0) || 0;
   if (!tabId) {
@@ -82,18 +88,58 @@ function handlePlayerAiQuickAction(message: Msg<"player-ai-quick-action">, sende
     return false;
   }
 
-  const openPromise = openAiSidepanelForTab(tabId);
   getMergedSettings()
     .then(async (settings) => {
       if (!settings.enablePlayerAiQuickAction) {
         throw new Error("AI 按钮未开启");
       }
-      await openPromise;
-      const request = buildPlayerAiQuickActionRequest(tabId, settings.playerAiQuickPrompt);
-      await chrome.storage.local.set({ [PLAYER_AI_QUICK_ACTION_STORAGE_KEY]: request });
+      const prompt = normalizePlayerAiQuickPrompt(settings.playerAiQuickPrompt || DEFAULT_PLAYER_AI_QUICK_PROMPT);
+      const triggered = await triggerReaderModeInTab(tabId, "");
+      if (!triggered) {
+        throw new Error("阅读模式触发失败，请刷新浏览器网页重试");
+      }
+      await sendMessageToTab(tabId, { type: "player-ai-quick-action-chat", prompt });
       sendResponse({ ok: true });
     })
-    .catch((error: Error) => sendResponse({ ok: false, error: error.message || "打开 AI 侧边栏失败" }));
+    .catch((error: Error) => sendResponse({ ok: false, error: error.message || "打开 AI 对话失败" }));
+  return true;
+}
+
+// popup AI 入口改道（PR5c）：先经 popup-trigger-reading-view 链打开/进入阅读
+// 模式，再把「激活对话 tab + 发送快捷提示词」的意图直发 content script——
+// 消费端在 core/message-handler.ts（ensureChatTabActivated + runQuickActionPrompt）。
+function handlePopupTriggerReadingChat(message: Msg<"popup-trigger-reading-chat">, _sender: MessageSender, sendResponse: SendResponse): boolean {
+  const tabId = Number(_sender.tab?.id || 0) || 0;
+  if (!tabId) {
+    sendResponse({ ok: false, error: "找不到当前标签页。" });
+    return false;
+  }
+
+  getMergedSettings()
+    .then(async (settings) => {
+      const prompt = normalizePlayerAiQuickPrompt(settings.playerAiQuickPrompt || DEFAULT_PLAYER_AI_QUICK_PROMPT);
+      const readerUrl = String(message.readerUrl || "").trim();
+      let url = readerUrl;
+      if (url) {
+        try {
+          const parsed = new URL(url);
+          if (parsed.hostname !== "www.bilibili.com") {
+            throw new Error("当前网页不是 B 站视频页");
+          }
+          parsed.searchParams.set("boc_reader", "1");
+          url = parsed.toString();
+        } catch (error) {
+          throw new Error((error as Error).message || "阅读视图地址无效");
+        }
+      }
+      const triggered = await triggerReaderModeInTab(tabId, url);
+      if (!triggered) {
+        throw new Error("阅读视图触发失败，请刷新浏览器网页重试");
+      }
+      await sendMessageToTab(tabId, { type: "popup-trigger-reading-chat", prompt });
+      sendResponse({ ok: true });
+    })
+    .catch((error: Error) => sendResponse({ ok: false, error: error.message || "打开 AI 对话失败" }));
   return true;
 }
 
@@ -256,6 +302,7 @@ const messageHandlers = new Map<BackgroundMessageType, BackgroundHandler>([
   ["open-options", handleOpenOptions as BackgroundHandler],
   ["ensure-offscreen-chat", handleEnsureOffscreenChat as BackgroundHandler],
   ["player-ai-quick-action", handlePlayerAiQuickAction as BackgroundHandler],
+  ["popup-trigger-reading-chat", handlePopupTriggerReadingChat as BackgroundHandler],
   ["open-reading-view-tab", handleOpenReadingViewTab as BackgroundHandler],
   ["close-reading-view-tab", handleCloseReadingViewTab as BackgroundHandler],
   ["fetch-json", handleFetchJson as BackgroundHandler],
@@ -295,29 +342,6 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     // ignore injection failure; user may need a hard refresh
   }
 });
-
-// ===== AI 侧边栏编排（打开面板 + 快速请求）=====
-
-async function openAiSidepanelForTab(tabId: number) {
-  // 仅支持 Chrome（ADR-0002）：侧边栏统一走 chrome.sidePanel，Firefox 的
-  // sidebarAction fallback 已随 Firefox 兼容一并删除。
-  if (chrome.sidePanel?.open) {
-    await chrome.sidePanel.open({ tabId });
-    return;
-  }
-
-  throw new Error("当前浏览器不支持扩展侧边栏");
-}
-
-function buildPlayerAiQuickActionRequest(tabId: number, prompt: string) {
-  const createdAt = Date.now();
-  return {
-    id: `player-ai-${createdAt}-${Math.random().toString(36).slice(2, 8)}`,
-    tabId: Number(tabId || 0) || 0,
-    prompt: normalizePlayerAiQuickPrompt(prompt),
-    createdAt
-  };
-}
 
 // ===== 入口监听 =====
 

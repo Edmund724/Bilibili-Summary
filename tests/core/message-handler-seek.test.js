@@ -1,4 +1,4 @@
-// 候选06：sidepanel-seek-video-time 两形态回归测试。
+// 候选06：reader-seek-video-time 两形态回归测试。
 //
 // 锁定 seek 深入口改造后两个调用点的最终形态：
 // - reader 开着 ⇒ 经 ensureReaderDomain 单入口 seekReadingTarget(seconds,
@@ -73,7 +73,7 @@ function makeVideoStub({ paused = true } = {}) {
 
 async function requestSeek(seconds) {
   const sendResponse = vi.fn();
-  const keepOpen = messageListener({ type: "sidepanel-seek-video-time", seconds }, {}, sendResponse);
+  const keepOpen = messageListener({ type: "reader-seek-video-time", seconds }, {}, sendResponse);
   await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledTimes(1));
   return { response: sendResponse.mock.calls[0][0], keepOpen };
 }
@@ -83,7 +83,7 @@ beforeEach(() => {
   isReaderViewOpen.mockReturnValue(false);
 });
 
-describe("sidepanel-seek-video-time：seek 深入口两形态", () => {
+describe("reader-seek-video-time：seek 深入口两形态", () => {
   it("reader 开着：经 ensureReaderDomain 单入口 seekReadingTarget（resumePlayback:false），处理器不直接碰视频", async () => {
     const video = makeVideoStub();
     const seekReadingTarget = vi.fn(() => 42);

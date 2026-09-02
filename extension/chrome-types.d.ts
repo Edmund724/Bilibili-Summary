@@ -1,6 +1,6 @@
 // extension/chrome-types.d.ts
 // 最小 Chrome 扩展 API 类型声明：本仓库未安装 @types/chrome，声明覆盖迁移模块
-// 实际使用的 runtime / tabs / storage / permissions / scripting / sidePanel /
+// 实际使用的 runtime / tabs / storage / permissions / scripting /
 // offscreen 表面。保持最窄契约，不扩展未使用的方法/事件。
 
 declare namespace chrome {
@@ -124,14 +124,6 @@ declare namespace chrome {
     function executeScript(injection: { target: InjectionTarget; files: string[] }): Promise<InjectionResult[]>;
     function executeScript(injection: { target: InjectionTarget; func: () => unknown }): Promise<InjectionResult[]>;
     function insertCSS(injection: { target: InjectionTarget; files: string[] }): Promise<void>;
-  }
-
-  namespace sidePanel {
-    interface OpenOptions {
-      tabId?: number;
-    }
-
-    const open: ((options: OpenOptions) => Promise<void>) | undefined;
   }
 
   namespace offscreen {

@@ -122,8 +122,8 @@ export interface CreateConversationStoreDeps {
   removeConversationContextNotice: () => void;
   hideHistoryPopover: () => void;
   loadContextState: (opts: LoadContextStateOptions) => Promise<boolean | object>;
-  resolveAiSidepanelContext: (contextRef: ConversationContextRef) => Promise<Record<string, unknown>>;
-  resolveAiSidepanelPageRef: (contextRef: ConversationContextRef) => Promise<Record<string, unknown>>;
+  resolveAiConversationContext: (contextRef: ConversationContextRef) => Promise<Record<string, unknown>>;
+  resolveAiConversationPageRef: (contextRef: ConversationContextRef) => Promise<Record<string, unknown>>;
   stopActiveChat: () => void;
   storage?: StorageArea;
   conversationsStorageKey?: string;
@@ -212,8 +212,8 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     removeConversationContextNotice,
     hideHistoryPopover,
     loadContextState,
-    resolveAiSidepanelContext,
-    resolveAiSidepanelPageRef,
+    resolveAiConversationContext,
+    resolveAiConversationPageRef,
     stopActiveChat,
     storage = (typeof chrome !== "undefined" && chrome?.storage?.local) || undefined,
     conversationsStorageKey = "boc_ai_conversations_v1",
@@ -261,7 +261,7 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
       }
       let response: { ok?: boolean; payload?: unknown; error?: string } = { ok: false };
       try {
-        const payload = await requireDep("resolveAiSidepanelPageRef", resolveAiSidepanelPageRef)(contextRef);
+        const payload = await requireDep("resolveAiConversationPageRef", resolveAiConversationPageRef)(contextRef);
         response = { ok: true, payload };
       } catch (error: unknown) {
         response = { ok: false, error: (error as Error)?.message || String(error || "") };
@@ -587,7 +587,7 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     contextRef: ConversationContextRef
   ): Promise<{ ok?: boolean; payload?: unknown; error?: string }> {
     try {
-      const payload = await requireDep("resolveAiSidepanelContext", resolveAiSidepanelContext)(contextRef);
+      const payload = await requireDep("resolveAiConversationContext", resolveAiConversationContext)(contextRef);
       return { ok: true, payload };
     } catch (error: unknown) {
       return { ok: false, error: (error as Error)?.message || String(error || "") };

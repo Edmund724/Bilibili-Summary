@@ -2,7 +2,6 @@
 // 不再把 ui/ui-renderer.js 拖为静态依赖。
 import { setMessage } from "../shared/ui-status.js";
 import { buildPlayerAiQuickActionIconSvg } from "../ui/icons.js";
-import { isReaderMode } from "../bilibili/video-id-shared.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { getSettings } from "../core/runtime.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
@@ -11,10 +10,6 @@ import { state } from "../core/state.js";
 // playerAi 状态微模块（随 ai 域内聚）：本模块独占读写，不再经 core/state。
 import { playerAiState } from "./player-ai-state.js";
 import { isVisibleReaderControl } from "../shared/dom-utils.js";
-// isReaderViewOpen 位于 reader 状态微模块（候选04 结构归并）：纯 state 读取。
-// 原先经 reader/index.js facade 静态转发，会把整个 reader 域拖进本模块的动态
-// chunk 闭包，并经 esbuild 提升为常驻静态共享 chunk——分层后改走微模块。
-import { isReaderViewOpen } from "../reader/state.js";
 // S3 分层：播放器 AI 样式随本动态 chunk 挂载（节点创建前就绪，见文件尾注释）
 import { ensurePlayerAiStyles, removePlayerAiStyles } from "../shared/style-injector.js";
 
@@ -183,7 +178,8 @@ function schedulePlayerAiQuickActionRetry(): void {
 function syncPlayerAiQuickActionButton(): void {
   const existing = document.getElementById("boc-player-ai-quick-action");
   const existingWrap = existing?.closest(".boc-player-ai-wrap");
-  if (!state.settings?.enablePlayerAiQuickAction || isReaderViewOpen() || isReaderMode()) {
+  if (!state.settings?.enablePlayerAiQuickAction) {
+    // 工单 08 决议 2：按钮常驻（阅读模式内/外都显示），仅设置开关门控挂载。
     removePlayerAiQuickActionButton();
     return;
   }
@@ -271,7 +267,7 @@ function bindPlayerAiQuickActionCursorSync(wrap: HTMLElement): void {
     wrap.classList.remove("is-active");
   };
   const showForCursorActivity = () => {
-    if (!wrap.isConnected || isReaderViewOpen() || isReaderMode()) {
+    if (!wrap.isConnected) {
       wrap.classList.remove("is-active");
       return;
     }
@@ -401,12 +397,7 @@ function syncPlayerAiQuickActionVisuals(button: HTMLElement): void {
 async function handlePlayerAiQuickActionClick(event: MouseEvent): Promise<void> {
   event.preventDefault();
   event.stopPropagation();
-  if (
-    playerAiState.playerAiQuickActionSubmitting ||
-    isReaderViewOpen() ||
-    isReaderMode() ||
-    Date.now() < playerAiState.playerAiQuickActionSuppressedUntil
-  ) {
+  if (playerAiState.playerAiQuickActionSubmitting || Date.now() < playerAiState.playerAiQuickActionSuppressedUntil) {
     return;
   }
 
@@ -421,11 +412,15 @@ async function handlePlayerAiQuickActionClick(event: MouseEvent): Promise<void> 
     if (!state.settings?.enablePlayerAiQuickAction) {
       throw new Error("AI 按钮未开启");
     }
+    // 工单 08 决议 2（语义反转）：按钮常驻。阅读模式外点击 = background 触发
+    // 进入阅读模式；阅读模式内点击 = 直接定位对话 tab。两条路径都由 background
+    // 以 player-ai-quick-action-chat 直发快捷提示词，content 侧经对话 seam
+    // （runQuickActionPrompt）消费：定位对话 tab + 新会话 + 填提示词 + 自动发送。
     const resp = await sendRuntimeMessage({ type: "player-ai-quick-action" });
     if (!resp || typeof resp !== "object" || !(resp as { ok?: unknown }).ok) {
-      throw new Error((resp as { error?: string })?.error || "打开 AI 侧边栏失败");
+      throw new Error((resp as { error?: string })?.error || "打开 AI 对话失败");
     }
-    setMessage("已打开 AI 侧边栏并发送快捷提示词。");
+    setMessage("已定位 AI 对话并发送快捷提示词。");
   } catch (error) {
     setMessage(`AI 快捷操作失败：${getErrorMessage(error)}`);
   } finally {

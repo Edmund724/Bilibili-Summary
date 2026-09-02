@@ -8,7 +8,7 @@ declare namespace chrome {
     // sidepanel init / popup 设置入口打开选项页
     function openOptionsPage(): void;
 
-    // Chrome 116+：查询 offscreen 文档是否存在（sidepanel-offscreen-ensure 的
+    // Chrome 116+：查询 offscreen 文档是否存在（chat/offscreen-ensure 的
     // 存在性判定；Chrome <116 或查询失败时调用方降级为直接 createDocument）
     function getContexts(query: {
       contextTypes?: string[];
@@ -28,7 +28,7 @@ declare namespace chrome {
       ): void;
 
       // PR5：对话 tab 组合根的会话收尾要摘除 providers 刷新监听（bind/unbind
-      // 对称；sidepanel 过渡期监听常驻挂载用不到，声明合并对两侧同时生效）。
+      // 对称；监听常驻挂载时用不到，声明合并对各 context 同时生效）。
       removeListener(
         listener: (changes: Record<string, StorageChange>, areaName: string) => void
       ): void;
@@ -48,11 +48,6 @@ declare namespace chrome {
     }
 
     const onActivated: OnActivatedEvent;
-  }
-
-  namespace sidePanel {
-    // Chrome 114+：Side Panel 不随标签页关闭而销毁
-    function setPanelBehavior(options: { panelBehavior: string }): Promise<void>;
   }
 }
 

@@ -1,7 +1,7 @@
 // popup.ts — 弹出页控制器（自 popup.js 迁移，仅加类型；行为逐字节不变）。
 //
 // 职责：读取活动标签页的字幕快照（popup-refresh / popup-get-state）、字幕
-// 切换（popup-select-subtitle）、下载/复制、阅读视图开关与侧边栏入口。
+// 切换（popup-select-subtitle）、下载/复制、阅读视图开关与 AI 对话入口。
 // content 不可达时的「确保注入 + 重试」时序在 ensureContentScriptReady。
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import { normalizeAsrLanguage } from "../core/presets.js";
@@ -217,24 +217,36 @@ function bindEvents(): void {
 
   el.aiBtn?.addEventListener("click", async () => {
     try {
-      // 仅支持 Chrome（ADR-0002）：走 chrome.sidePanel，Firefox 的
-      // sidebarAction fallback 已删除。
+      // PR5c：AI 入口改道——不再打开侧边栏（sidepanel 已摘除），走
+      // popup-trigger-reading-view 同一条链先打开/进入阅读模式；激活对话 tab
+      // 的意图经 background 转发为 popup-trigger-reading-chat，由 content 侧
+      // 对话 seam（ensureChatTabActivated + runQuickActionPrompt）消费。
       const tab = await getActiveTab();
       if (!tab?.id) {
         setStatus("找不到当前标签页。", true);
         setMessage("找不到当前标签页。");
         return;
       }
-
-      if (chrome.sidePanel?.open) {
-        await chrome.sidePanel.open({ tabId: tab.id });
-      } else {
-        throw new Error("当前浏览器不支持扩展侧边栏");
+      if (!isSupportedBilibiliPage(tab?.url || "")) {
+        setMessage("请先打开一个 B 站视频页。");
+        return;
       }
+
+      const resp = (await sendToRuntime({
+        type: "popup-trigger-reading-chat",
+        readerUrl: isReaderModeUrl(tab?.url || "") ? "" : tab.url
+      })) as ContentResponse;
+      if (!resp?.ok) {
+        setStatus(`打开 AI 对话失败：${resp?.error || "未知错误"}`, true);
+        setMessage(`打开 AI 对话失败：${resp?.error || "未知错误"}`);
+        return;
+      }
+      setMessage("已在阅读模式打开 AI 对话。");
+      setStatus("AI 对话已打开。");
       window.setTimeout(() => window.close(), 80);
     } catch (error) {
-      setStatus(`打开侧边栏失败：${(error as Error)?.message || String(error)}`, true);
-      setMessage(`打开侧边栏失败：${(error as Error)?.message || String(error)}`);
+      setStatus(`打开 AI 对话失败：${(error as Error)?.message || String(error)}`, true);
+      setMessage(`打开 AI 对话失败：${(error as Error)?.message || String(error)}`);
     }
   });
 }

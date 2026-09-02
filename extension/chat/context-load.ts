@@ -1,6 +1,7 @@
 // extension/chat/context-load.ts — 上下文状态加载与上下文 chip（候选5 自
-// sidepanel.ts 迁出；PR5 自 extension/pages/sidepanel-context-load.ts 迁入 chat
-// 域并改造）：loadContextState（拉上下文 → 按策略动作执行编排副作用）、
+// sidepanel.ts 迁出，PR5 自 pages/sidepanel-context-load.ts 迁入 chat 域并
+// 改造；PR5c 随 sidepanel 摘除，chat/* 为对话内核唯一宿主）：
+// loadContextState（拉上下文 → 按策略动作执行编排副作用）、
 // applyContextPayload、updateContextChip、isBoundConversationMismatched、
 // openCurrentContextUrl。分支判定收敛在 ./context-policy.ts（纯函数，继续直
 // import），本模块只负责拉数据、按动作执行。
@@ -8,10 +9,9 @@
 // PR5 改造（上下文组装策略可注入）：loadContextState 的「拉数据」一段抽成
 // ContextFetch 策略注入点，两条实现随本模块导出：
 //   - createMessageChainContextFetch：扩展页消息链（getActiveTab +
-//     getAiSidepanelState 三连消息往返），sidepanel 过渡期继续用，行为与
-//     迁移前逐字节一致；
+//     getAiContextState 三连消息往返），行为与迁移前逐字节一致；
 //   - createInProcessContextFetch：进程内直读（reader 用：直接读 content 侧
-//     state.clip + core/sidepanel-payload 组装，不走消息往返），重演消息链的
+//     state.clip + core/context-payload 组装，不走消息往返），重演消息链的
 //     三件事（工单 08 短路验收）：签名短路（unchanged 不重发字幕体、不拉
 //     热评）、热评拉取时机（仅全量路径，与现状一致）、快照附 signature 供
 //     下一轮 ifSignature。
@@ -26,12 +26,12 @@
 // 不 import 组合根。
 import { buildContextKey, doesTabMatchContextUrl } from "../ai/conversation.js";
 import { truncate } from "../shared/string-utils.js";
-import { getAiSidepanelState } from "../ai/context-resolver.js";
+import { getAiContextState } from "../ai/context-resolver.js";
 import { waitForTabComplete } from "../shared/tab-utils.js";
 import {
-  createSidepanelContextPayload,
-  computeSidepanelStateSignature
-} from "../core/sidepanel-payload.js";
+  createReaderContextPayload,
+  computeContextStateSignature
+} from "../core/context-payload.js";
 import { DEFAULT_SETTINGS, type Settings } from "../core/defaults.js";
 import type { ClipState } from "../core/state.js";
 import {
@@ -44,8 +44,8 @@ import { sidepanelState } from "./chat-state.js";
 import type { SidepanelContextSnapshot } from "./chat-state.js";
 import type { LoadContextStateOptions } from "./conversation-store.js";
 
-// getAiSidepanelState 的 tabOps 消息响应信封（对齐 context-resolver 的
-// SidepanelContextResponse 结构；测试注入宽松桩）
+// getAiContextState 的 tabOps 消息响应信封（对齐 context-resolver 的
+// ContextResponse 结构；测试注入宽松桩）
 interface TabStateResponse {
   ok?: boolean;
   unchanged?: boolean;
@@ -83,22 +83,22 @@ export interface ContextFetchOptions {
 export type ContextFetch = (opts: ContextFetchOptions) => Promise<ContextFetchOutcome>;
 
 // ---------------------------------------------------------------------------
-// 策略一：扩展页消息链（sidepanel 过渡期）
+// 策略一：扩展页消息链（sidepanel 页面已随 PR5c 摘除，策略保留供扩展页复用）
 // ---------------------------------------------------------------------------
 
 export interface MessageChainContextFetchDeps {
   getActiveTab: () => Promise<{ id?: number; url?: string } | null>;
-  // getAiSidepanelState 的 tabOps（content 就绪 + 单发 tab 消息，生产组装点
+  // getAiContextState 的 tabOps（content 就绪 + 单发 tab 消息，生产组装点
   // 传 core/shared 的真实实现；签名对齐 context-resolver 的 EnsureReaderContentReady
   // / SendMessageToTab，测试注入宽松桩）
   ensureReaderContentReady: (tabId: number) => Promise<void>;
   sendMessageToTab: (tabId: number, message: Record<string, unknown>) => Promise<TabStateResponse>;
 }
 
-// 行为与迁移前 loadContextState 内联的「getActiveTab → getAiSidepanelState」
-// 一致：无可用标签页 → no-tab 信封（getAiSidepanelState 不被调用）；往返失败
+// 行为与迁移前 loadContextState 内联的「getActiveTab → getAiContextState」
+// 一致：无可用标签页 → no-tab 信封（getAiContextState 不被调用）；往返失败
 // → error 信封（tabUrl 照带——迁移前 error 分支也刷新 liveTabUrl）。
-// getAiSidepanelState 的错误不外抛，折成 error 信封（error 字段与迁移前同为
+// getAiContextState 的错误不外抛，折成 error 信封（error 字段与迁移前同为
 // (error as Error).message）。
 export function createMessageChainContextFetch(deps: MessageChainContextFetchDeps): ContextFetch {
   return async function fetchContext({ forceRefresh, ifSignature }: ContextFetchOptions): Promise<ContextFetchOutcome> {
@@ -111,7 +111,7 @@ export function createMessageChainContextFetch(deps: MessageChainContextFetchDep
       // 解析器的返回面是 { unchanged: true } 或全量快照（运行时判别），类型上
       // 的宽 boolean 收窄为字面量信封（与消息链现状一致，policy 读 unchanged
       // 严格 === true）。
-      const payload = (await getAiSidepanelState(
+      const payload = (await getAiContextState(
         tab.id,
         {
           forceRefresh,
@@ -143,14 +143,14 @@ export interface InProcessContextFetchDeps {
   settings?: () => Partial<Settings>;
   url?: () => string;
   // 热评拉取（全量路径专用；返回 [] 视为降级）。缺省实现重演 message-handler
-  // 的 sidepanel-get-hot-comments 处理器语义（见 defaultFetchHotComments）。
+  // 的 reader-get-hot-comments 处理器语义（见 defaultFetchHotComments）。
   fetchHotComments?: () => Promise<unknown[]>;
 }
 
-// 缺省热评实现：重演 core/message-handler.ts 的 sidepanel-get-hot-comments
+// 缺省热评实现：重演 core/message-handler.ts 的 reader-get-hot-comments
 // 处理器（gateway 动态装载、getCurrentAid 判定、clipState.setHotComments 落账、
 // 失败降级空列表）。动态 import 避免把 core/state 与 gateway 拖进本策略消费方
-// （sidepanel 过渡期组合根）的静态模块图。
+// （对话组合根）的静态模块图。
 async function defaultFetchHotComments(): Promise<unknown[]> {
   // clipState 热评落账的引用（动态取自 core/state.js；装载失败时无从落账，
   // 与降级语义一致）。
@@ -167,20 +167,20 @@ async function defaultFetchHotComments(): Promise<unknown[]> {
     return comments;
   } catch {
     // 装载/拉取失败时静默降级（落账清空），避免阻断主流程——与
-    // sidepanel-get-hot-comments 处理器的 catch 口径一致
+    // reader-get-hot-comments 处理器的 catch 口径一致
     clipState?.setHotComments([]);
     return [];
   }
 }
 
-// reader 与 content 同进程：直接读 state.clip + core/sidepanel-payload 组装，
+// reader 与 content 同进程：直接读 state.clip + core/context-payload 组装，
 // 不走「扩展页 → background → content」的消息往返。消息链的三件事在此重演
 // （工单 08 短路验收，测试见 tests/chat/context-inprocess.test.js）：
 //   1. 签名短路：ifSignature 与当前 payload 签名一致且非 forceRefresh →
 //      unchanged 信封（不重发字幕体、不拉热评，对应 message-handler
-//      sidepanel-get-context 处理器的现有语义）；
+//      reader-get-context 处理器的现有语义）；
 //   2. 热评时机：仅全量路径拉热评（unchanged 已提前返回），时机与
-//      getAiSidepanelState 现状一致；
+//      getAiContextState 现状一致；
 //   3. 快照附带 signature（对应 content 全量路径的回执附签）与 isVideoContext
 //      补写（对应 background 转发层的补写职责——payload 单源不组装该字段），
 //      loadContextState 落进 liveContextData 供下一轮 ifSignature。
@@ -195,14 +195,14 @@ export function createInProcessContextFetch(deps: InProcessContextFetchDeps = {}
 
   return async function fetchContext({ forceRefresh, ifSignature }: ContextFetchOptions): Promise<ContextFetchOutcome> {
     const tabUrl = getUrl();
-    // 与 message-handler 的 buildSidepanelContextPayload 同口径：字段清单/
-    // 组装/缺省容错全部单源在 core/sidepanel-payload.js。
-    const payload = createSidepanelContextPayload({
+    // 与 message-handler 的 buildReaderContextPayload 同口径：字段清单/
+    // 组装/缺省容错全部单源在 core/context-payload.js。
+    const payload = createReaderContextPayload({
       clip: getClip(),
       settings: getSettings(),
       url: tabUrl
     });
-    const signature = computeSidepanelStateSignature(payload);
+    const signature = computeContextStateSignature(payload);
     if (!forceRefresh && ifSignature && ifSignature === signature) {
       return { kind: "payload", tabUrl, payload: { unchanged: true } };
     }
@@ -212,7 +212,7 @@ export function createInProcessContextFetch(deps: InProcessContextFetchDeps = {}
     return {
       kind: "payload",
       tabUrl,
-      // core/sidepanel-payload 的 ChapterItem/SubtitleOption 与 ai/types 的
+      // core/context-payload 的 ChapterItem/SubtitleOption 与 ai/types 的
       // 同名字段是同形结构类型（可选性/必选性略宽窄不同），消息链同样以此
       // 形状跨域传递，边界处经 unknown 断言对齐 AiContext。
       payload: { ...payload, hotComments, isVideoContext: true, signature } as unknown as ContextFetchPayload
@@ -260,7 +260,7 @@ export function createContextLoad(deps: CreateContextLoadDeps): ContextLoad {
       .catch((error: unknown) => ({ kind: "error", error: (error as Error)?.message }) as ContextFetchOutcome);
 
     if (outcome.kind === "no-tab") {
-      // 决策点一（迁移前为 getActiveTab 落空即走，现由策略信封报告——getAiSidepanelState
+      // 决策点一（迁移前为 getActiveTab 落空即走，现由策略信封报告——getAiContextState
       // 同样不被调用）：无可用标签页，按计划做失败清理（文案/清上下文/
       // 重置视图的取舍全部来自策略计划）。
       const plan = resolveNoTabPlan({ hasPinnedConversation, silent });

@@ -2,16 +2,18 @@ import { state, uiState, clipState } from "./state.js";
 import { suppressUntil } from "../ai/player-ai-state.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
 
-// sidepanel-get-context 的 payload 形状 + 签名投影单源（纯模块）：字段清单、
-// 组装工厂与签名键/排除清单都在 sidepanel-payload.js，本文件只喂运行时输入
-// （state.clip / state.settings / location.href）并 re-export 签名函数。
+// reader-get-context 的 payload 形状 + 签名投影单源（纯模块）：字段清单、
+// 组装工厂与签名键/排除清单都在 context-payload.js，本文件只喂运行时输入
+//（state.clip / state.settings / location.href）并 re-export 签名函数。
 import {
-  createSidepanelContextPayload,
-  computeSidepanelStateSignature
-} from "./sidepanel-payload.js";
+  createReaderContextPayload,
+  computeContextStateSignature
+} from "./context-payload.js";
 
 import { startUrlWatcher, BOC_URL_CHANGE_EVENT } from "./url-watcher.js";
 import { replaceReaderModeUrl } from "../bilibili/reader-url.js";
+import { ensureReaderChatTab } from "./lazy-chat-tab.js";
+import { DEFAULT_PLAYER_AI_QUICK_PROMPT } from "./defaults.js";
 import {
   getErrorMessage,
   isStaleRunError
@@ -20,7 +22,7 @@ import {
 // 候选02 分层惰性：video-probe（getRuntimeVideoElement/findReaderPlayerHost）
 // 原被本模块与 reader 域共享而提升为常驻静态 chunk；其常驻侧唯一消费点是
 // seek 联动处理器（异步），改为处理器内动态 import 后随 reader 域/总结链
-// 切进动态 chunk（详见 sidepanel-seek-video-time 处理器）。
+// 切进动态 chunk（详见 reader-seek-video-time 处理器）。
 
 // 总结链（fetcher/ui + notes/render）经加载器按需引入（候选02 分层惰性）：
 // 链内符号一律 ensureSummarizeChain().then((chain) => chain.xxx())。一键总结
@@ -58,6 +60,7 @@ import {
 } from "../bilibili/video-id-shared.js";
 import type {
   ContentScriptMessage,
+  ReaderGetContextMessage,
   SendResponse
 } from "../shared/messaging-protocol.js";
 // 候选02 分层惰性：gateway（getCurrentAid/fetchHotComments）原被本模块与总结
@@ -113,7 +116,7 @@ export function dispatchContentScriptMessage(
         )
         .catch((error) => {
           // 链装载失败（清缓存重试后仍失败）：无法组装 payload，按错误口径回包
-          // （popup / context-resolver 均对缺 payload 容错，回落 sidepanel 快照）。
+          // （popup / context-resolver 均对缺 payload 容错，回落当前上下文快照）。
           sendResponse({ ok: false, error: getErrorMessage(error) });
         });
       return true;
@@ -188,6 +191,62 @@ export function dispatchContentScriptMessage(
       return true;
     }
 
+    // PR5c：popup AI 入口 / player-ai 悬浮按钮的统一消费端（工单 08 决议 2）——
+    // 先确保 reader shell（popup-trigger-reading-view 同款：URL 改写 + 阅读表 +
+    // reader-mode 属性 + enterReaderMode），再激活对话 tab 并（带 prompt 时）
+    // 自动发送快捷提示词。快捷动作路径传 consumeIntent:false（与快捷发送互不
+    // 踩踏）；无 prompt 则只定位/聚焦对话 tab。发响应不等待 enterReaderMode
+    // 完成（与 popup-trigger-reading-view 的即答语义一致）。
+    if (message.type === "popup-trigger-reading-chat") {
+      suppressUntil(Date.now() + 2500);
+      if (isPlayerAiLoaded()) {
+        loadPlayerAi()
+          .then((playerAi) => playerAi.removePlayerAiQuickActionButton())
+          .catch(() => {});
+      }
+      const readerUrl = String(message.readerUrl || "").trim();
+      const prompt = String(message.prompt || "").trim();
+      ensureUiReady().then(async () => {
+        if (readerUrl) {
+          replaceReaderModeUrl(readerUrl);
+          // S3：先挂阅读表再翻属性（无闪变时序，见 content.js 同款注释）
+          ensureReaderStyles();
+          document.documentElement.setAttribute("data-boc-reader-mode", "1");
+          document.body.setAttribute("data-boc-reader-mode", "1");
+        }
+        if (!isReaderViewOpen()) {
+          // 候选02：enterReaderMode 属 reader 重域，经 ensureReaderDomain 装载后
+          // 进入（点击路径的本地动态装载对用户无感）。
+          await ensureReaderDomain().then((reader) => reader.enterReaderMode());
+        }
+        const chat = await ensureReaderChatTab();
+        if (prompt) {
+          await chat.runQuickActionPrompt(prompt);
+        } else {
+          await chat.ensureChatTabActivated({ consumeIntent: false });
+        }
+      }).catch((error) => {
+        logWarn("[BOC] reading chat trigger failed", error);
+      });
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    // player-ai 悬浮按钮语义反转的消费端（工单 08 决议 2）：阅读模式外/内点击
+    // 统一 = 聚焦对话 tab + 自动发送快捷提示词。进入阅读模式的编排已由
+    // background（triggerReaderModeInTab）完成，此处只消费。
+    if (message.type === "player-ai-quick-action-chat") {
+      const prompt = String(message.prompt || "").trim() || DEFAULT_PLAYER_AI_QUICK_PROMPT;
+      ensureUiReady()
+        .then(() => ensureReaderChatTab())
+        .then((chat) => chat.runQuickActionPrompt(prompt))
+        .catch((error) => {
+          logWarn("[BOC] player-ai quick action chat failed", error);
+        });
+      sendResponse({ ok: true });
+      return true;
+    }
+
     if (message.type === "popup-close-reading-view") {
       // URL 改写保持同步（与旧行为一致地先收敛地址栏）；closeReadingView 属
       // reader 重域，经 ensure 装载后执行（视图开着 ⇒ 域几乎必然已装载，此处
@@ -214,19 +273,26 @@ export function dispatchContentScriptMessage(
       return true;
     }
 
-    if (message.type === "sidepanel-get-context") {
-      const payload = buildSidepanelContextPayload();
-      const signature = computeSidepanelStateSignature(payload);
-      // 候选5 签名短路：调用方（经 background 转发的 sidepanel）带着它上次收到的
+// PR5c：消息类型改 reader 中性命名（原 sidepanel-*，sidepanel 页面已摘除）；
+// 旧名保留为兼容别名走同一处理器——存量构建的 options/popup 页面或缓存的
+// background bundle 可能仍以旧名发送，别名在下一个发布周期后移除。
+    if (
+      message.type === "reader-get-context" ||
+      (message as { type?: string }).type === "sidepanel-get-context"
+    ) {
+      const getContextMessage = message as ReaderGetContextMessage;
+      const payload = buildReaderContextPayload();
+      const signature = computeContextStateSignature(payload);
+      // 候选5 签名短路：调用方（经 background 转发的对话上下文链）带着它上次收到的
       // 全量快照签名来问，content 状态没变就整份省略——不取字幕、不触发上层的
       // popup-refresh 与热评网络拉取，一次往返即返回。仅在非 forceRefresh 时生效：
       // 手动刷新/URL 变化语义上是明确要求全网络重拉。旧调用方不带 ifSignature
       // （空串）自然走全量路径，向后兼容。
       if (
-        message.forceRefresh !== true &&
-        typeof message.ifSignature === "string" &&
-        message.ifSignature &&
-        message.ifSignature === signature
+        getContextMessage.forceRefresh !== true &&
+        typeof getContextMessage.ifSignature === "string" &&
+        getContextMessage.ifSignature &&
+        getContextMessage.ifSignature === signature
       ) {
         sendResponse({ ok: true, unchanged: true, signature });
         return false;
@@ -236,7 +302,10 @@ export function dispatchContentScriptMessage(
       return false;
     }
 
-    if (message.type === "sidepanel-get-hot-comments") {
+    if (
+      message.type === "reader-get-hot-comments" ||
+      (message as { type?: string }).type === "sidepanel-get-hot-comments"
+    ) {
       // gateway 动态装载（候选02，见文件头 import 注）：本地 chunk 加载 ~10ms，
       // 被热评网络往返掩盖。装载失败与「无法获取 aid」同型降级：空列表 + note。
       import("../bilibili/gateway.js")
@@ -263,7 +332,10 @@ export function dispatchContentScriptMessage(
       return true;
     }
 
-    if (message.type === "sidepanel-seek-video-time") {
+    if (
+      message.type === "reader-seek-video-time" ||
+      (message as { type?: string }).type === "sidepanel-seek-video-time"
+    ) {
       // video-probe 动态装载（候选02，见文件头 import 注）：本地 chunk ~10ms，
       // 被用户点击到执行的时间差掩盖；响应形状与搬迁前一致（ok/currentTime）。
       // 候选06 seek 深入口：reader 开着时定位收敛为 reader 域单入口
@@ -310,24 +382,24 @@ export function dispatchContentScriptMessage(
 }
 
 // ============================================================
-// sidepanel-get-context：payload 组装 + 状态签名（候选5 上下文同步瘦身）
+// reader-get-context：payload 组装 + 状态签名（候选5 上下文同步瘦身）
 // ============================================================
 
-// sidepanel-get-context 的全量 payload 组装：字段清单/组装/缺省口径全部单源在
-// core/sidepanel-payload.js（createSidepanelContextPayload），本壳只注入运行时
+// reader-get-context 的全量 payload 组装：字段清单/组装/缺省口径全部单源在
+// core/context-payload.js（createReaderContextPayload），本壳只注入运行时
 // 输入。抽出成函数（而非处理器内联）的唯一原因是签名短路要先拿到 payload 才能
 // 算签名。
-function buildSidepanelContextPayload() {
-  return createSidepanelContextPayload({
+function buildReaderContextPayload() {
+  return createReaderContextPayload({
     clip: state.clip,
     settings: state.settings || DEFAULT_SETTINGS,
     url: location.href
   });
 }
 
-// 签名实现与「哪些字段参与/排除失效判定」的知识单源在 sidepanel-payload.js
-// （签名从 payload 字段清单的投影表派生）；此处 re-export 维持既有导入面。
-export { computeSidepanelStateSignature };
+// 签名实现与「哪些字段参与/排除失效判定」的知识单源在 context-payload.js
+//（签名从 payload 字段清单的投影表派生）；此处 re-export 维持既有导入面。
+export { computeContextStateSignature };
 
 // URL 变化编排（自 core/runtime.js 搬入）：core/url-watcher.js 只负责给 history
 // 打补丁并广播 boc:urlchange（纯机制），本组合根监听 popstate/hashchange/

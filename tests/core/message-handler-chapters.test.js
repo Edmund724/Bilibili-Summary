@@ -1,4 +1,4 @@
-// core/message-handler.js 的 sidepanel-get-context chapters 断供修复回归测试：
+// core/message-handler.js 的 reader-get-context chapters 断供修复回归测试：
 // content 快照 payload 此前不含 chapters——state.clip.chapters 明明有值（fetcher
 // 从字幕 bundle 写入），侧边栏 contextData 却永远拿不到，offscreen 的章节对齐
 // 切段（budgeter）与追问章节名检索（raw-retrieval）双双失明。修复后 payload
@@ -79,14 +79,14 @@ const messageListener = onMessageListeners[0];
 
 function requestContext() {
   const sendResponse = vi.fn();
-  const keepOpen = messageListener({ type: "sidepanel-get-context" }, {}, sendResponse);
+  const keepOpen = messageListener({ type: "reader-get-context" }, {}, sendResponse);
   expect(sendResponse).toHaveBeenCalledTimes(1);
   const response = sendResponse.mock.calls[0][0];
   expect(response.ok).toBe(true);
   return { payload: response.payload, keepOpen };
 }
 
-describe("sidepanel-get-context payload 的 chapters 透传", () => {
+describe("reader-get-context payload 的 chapters 透传", () => {
   beforeEach(() => {
     state.clip.setSubtitleBody([{ from: 0, to: 5, content: "第一句" }]);
     state.clip.setSubtitles([]);

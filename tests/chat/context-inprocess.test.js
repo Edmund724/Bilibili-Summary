@@ -2,13 +2,13 @@
 // 工单 08「消息链短路验收」的进程内直读重演（三事各一条 + 缺省热评实现的对账）：
 //
 //   ① 字幕签名未变 → 不重发字幕体到 offscreen：createInProcessContextFetch 的
-//      签名短路命中（对应 message-handler sidepanel-get-context 处理器现有签名
+//      签名短路命中（对应 message-handler reader-get-context 处理器现有签名
 //      短路语义的进程内重演）→ loadContextState 走 SKIP_UNCHANGED（不落新
 //      payload、contextKey 不变）→ chat-runtime 依 lastAckedContextKey 省略
 //      字幕体。签名短路与 offscreen 省传的接力在进程内路径完整成立。
 //
 //   ② 首次上下文组装时拉热评（时机与消息链现状一致）：仅全量路径拉取（对应
-//      getAiSidepanelState「unchanged 已提前返回，热评只在全量路径」的时机），
+//      getAiContextState「unchanged 已提前返回，热评只在全量路径」的时机），
 //      热评合并进快照（对应 background 转发层的整体覆盖），并随快照附带
 //      signature / isVideoContext 补写（分别对应 content 回执附签与背景层补写
 //      职责）。forceRefresh 语义与消息链一致：忽略签名强制全量。
@@ -21,7 +21,7 @@
 //      kick 补轮放行，发出去的是转写完成后的完整字幕上下文。
 //
 //   ④ 缺省热评实现（defaultFetchHotComments）：重演 message-handler
-//      sidepanel-get-hot-comments 处理器语义——gateway 动态装载、getCurrentAid
+//      reader-get-hot-comments 处理器语义——gateway 动态装载、getCurrentAid
 //      判定、clipState.setHotComments 落账、失败降级空列表。
 //
 // 写法参照 tests/sidepanel 现有手法：resetModules 后同纪元导入被测模块与
@@ -388,7 +388,7 @@ describe("工单 08 短路三事（进程内直读路径）", () => {
 // ===========================================================================
 // 缺省热评实现（defaultFetchHotComments）：message-handler 处理器语义对账
 // ===========================================================================
-describe("缺省热评实现（sidepanel-get-hot-comments 处理器语义重演）", () => {
+describe("缺省热评实现（reader-get-hot-comments 处理器语义重演）", () => {
   function makeBareFetch(clipRef) {
     return createInProcessContextFetch({
       clip: () => clipRef.current,

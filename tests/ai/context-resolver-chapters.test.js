@@ -1,5 +1,5 @@
 // ai/context-resolver.js 的 chapters 断供修复回归测试：
-// resolveAiSidepanelContext 内部早已拿到 subtitleBundle.chapters 用于渲染
+// resolveAiConversationContext 内部早已拿到 subtitleBundle.chapters 用于渲染
 // markdown 的「## 章节」分节，但返回值此前不透传 chapters——侧边栏恢复历史
 // 会话（resolvedContext / contextRef）后章节对齐切段与追问章节名检索双双失明。
 // 修复后返回值带 chapters（与渲染 markdown 同一来源），此测试锁定透传行为。
@@ -42,7 +42,7 @@ vi.mock("../../extension/subtitle/cache.js", async (importOriginal) => ({
   loadSubtitleFromCache: vi.fn(async () => null)
 }));
 
-import { resolveAiSidepanelContext } from "../../extension/ai/context-resolver.js";
+import { resolveAiConversationContext } from "../../extension/ai/context-resolver.js";
 import { fetchSubtitleBundle } from "../../extension/bilibili/gateway.js";
 
 const CONTEXT_REF = {
@@ -51,9 +51,9 @@ const CONTEXT_REF = {
   bvid: "BV1chapters"
 };
 
-describe("resolveAiSidepanelContext chapters 透传", () => {
+describe("resolveAiConversationContext chapters 透传", () => {
   it("返回值携带字幕 bundle 的章节（与渲染 markdown 同一来源）", async () => {
-    const result = await resolveAiSidepanelContext(CONTEXT_REF);
+    const result = await resolveAiConversationContext(CONTEXT_REF);
 
     expect(result.isVideoContext).toBe(true);
     expect(result.bvid).toBe("BV1chapters");
@@ -78,7 +78,7 @@ describe("resolveAiSidepanelContext chapters 透传", () => {
       chapters: []
     });
 
-    const result = await resolveAiSidepanelContext(CONTEXT_REF);
+    const result = await resolveAiConversationContext(CONTEXT_REF);
     expect(result.chapters).toEqual([]);
   });
 
@@ -88,7 +88,7 @@ describe("resolveAiSidepanelContext chapters 透传", () => {
       chapters: undefined
     });
 
-    const result = await resolveAiSidepanelContext(CONTEXT_REF);
+    const result = await resolveAiConversationContext(CONTEXT_REF);
     expect(result.chapters).toEqual([]);
   });
 });
