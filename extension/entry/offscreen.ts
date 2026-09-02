@@ -136,7 +136,11 @@ chrome.runtime.onConnect.addListener((port) => {
     // 全文（本条不自动重发，避免失败风暴）。
     const settled = subtitleSlot.settle(msg);
     if (!settled.ok) {
-      port.postMessage({ type: "error", error: settled.error, code: settled.code });
+      try {
+        port.postMessage({ type: "error", error: settled.error, code: settled.code });
+      } catch {
+        // port 已断开，回执无接收方，忽略（同 withCachedContextKey 的口径）
+      }
       return;
     }
     // 自此所有 chat 回执都附带 cachedContextKey（槽内已确认的 key）：SP 读它
@@ -286,8 +290,16 @@ function askCostGuard(port: PostMessagePort, message: string) {
 // 在原 port 上（本包装只作为下游回吐的发送通道）。
 function withCachedContextKey(port: PostMessagePort, contextKey: string) {
   return {
-    postMessage: (data: Record<string, unknown>) =>
-      port.postMessage({ ...data, cachedContextKey: contextKey })
+    postMessage: (data: Record<string, unknown>) => {
+      try {
+        port.postMessage({ ...data, cachedContextKey: contextKey });
+      } catch {
+        // port 已断开（聊天中途关面板/SPA 换页/刷新），回执无接收方，忽略——
+        // 否则断连后的迟到回执会在 async 消息监听器里抛
+        // "Attempting to use a disconnected port object" 成 unhandled rejection。
+        // 口径与 dispatchAsrDecodeTask 的断连吞错一致。
+      }
+    }
   };
 }
 
