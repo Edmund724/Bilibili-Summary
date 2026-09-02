@@ -37,7 +37,6 @@ import {
   collectNoteSectionRows,
   clearNoteSectionErrors,
   renderAiProviders,
-  renderDefaultModelSelect,
   addAiProviderRow,
   collectAiProviders,
   setTestSuccessHandler,
@@ -81,7 +80,6 @@ interface SettingsFormPayload {
   aiSystemPrompt: string;
   aiInitialQuickPrompts: string[];
   aiPresetPrompts: string[];
-  defaultModel: string;
 }
 
 // validateSettings / validateFixedFrontmatterProperties / validateAiProviders 的
@@ -105,12 +103,6 @@ function buildSettingsHtml(): string {
       <div id="aiProvidersList" class="ai-providers-list"></div>
       <p id="aiProvidersEmpty" class="ai-providers-empty">还没有配置平台，点击下方按钮添加。</p>
       <button id="addAiProviderBtn" class="add-property-btn" type="button">+ 添加平台</button>
-      <div class="boc-set-row">
-        <label class="boc-set-label" for="defaultModel">默认模型</label>
-        <select id="defaultModel" class="boc-set-select">
-          <option value="">未设置</option>
-        </select>
-      </div>
     </section>
 
     <section class="boc-set-group">
@@ -249,7 +241,6 @@ function collectElements(host: HTMLElement) {
     aiProvidersList: byIdIn<HTMLElement>("aiProvidersList"),
     aiProvidersEmpty: byIdIn<HTMLElement>("aiProvidersEmpty"),
     addAiProviderBtn: byIdIn<HTMLButtonElement>("addAiProviderBtn"),
-    defaultModel: byIdIn<HTMLSelectElement>("defaultModel"),
     asrProvidersList: byIdIn<HTMLElement>("asrProvidersList"),
     asrProvidersEmpty: byIdIn<HTMLElement>("asrProvidersEmpty"),
     addAsrProviderBtn: byIdIn<HTMLButtonElement>("addAsrProviderBtn"),
@@ -358,7 +349,7 @@ async function loadSettings(elements: SettingsElements): Promise<void> {
 
   // AI 配置
   const providers = await loadAiProviders();
-  renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, providers, { defaultModel: settings.defaultModel, onRenderDefaultModel: (list) => renderDefaultModelSelect(elements.defaultModel, list, settings.defaultModel) });
+  renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, providers);
 
   // ASR 配置
   elements.asrAutoFallback.checked = settings.asrAutoFallback !== false;
@@ -410,8 +401,7 @@ function collectFormPayload(elements: SettingsElements): SettingsFormPayload {
     notePlaceholderSections: normalizeNotePlaceholderSections(collectNoteSectionRows(elements.noteSectionsList)),
     aiSystemPrompt: String(elements.aiSystemPrompt?.value || "").trim(),
     aiInitialQuickPrompts: collectInitialQuickPrompts(elements),
-    aiPresetPrompts: Array.isArray(savedAiPresetPrompts) ? savedAiPresetPrompts.slice(0, 12) : [],
-    defaultModel: String(elements.defaultModel?.value || "").trim()
+    aiPresetPrompts: Array.isArray(savedAiPresetPrompts) ? savedAiPresetPrompts.slice(0, 12) : []
   };
 }
 
@@ -567,7 +557,7 @@ async function saveSettings(elements: SettingsElements, { requestPermissions = t
       return;
     }
     // 用最新列表（含 hasSavedKey）重新渲染，避免误以为 Key 丢了
-    renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, aiResp.providers || [], { defaultModel: payload.defaultModel, onRenderDefaultModel: (list) => renderDefaultModelSelect(elements.defaultModel, list, payload.defaultModel) });
+    renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, aiResp.providers || []);
 
     // ASR 平台：同样 list 走 sync、apiKey 走 local；空输入沿用已存 Key（后台处理）
     const asrResp = (await sendRuntimeMessage({ type: "asr-providers-save", providers: asrProvidersPayload })) as { ok?: boolean; error?: string; providers?: ProviderRowItem[] };
@@ -647,26 +637,11 @@ function bindSettingsEvents(host: HTMLElement): void {
   [elements.tags].forEach((input) => {
     input?.addEventListener("input", () => input.classList.remove("input-error"));
   });
-  elements.defaultModel?.addEventListener("change", async () => {
-    const defaultModel = String(elements.defaultModel?.value || "").trim();
-    await sendRuntimeMessage({ type: "save-settings", settings: { defaultModel } });
-    const providers = await loadAiProviders();
-    renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, providers, { defaultModel, onRenderDefaultModel: (list) => renderDefaultModelSelect(elements.defaultModel, list, defaultModel) });
-  });
   // ASR：总开关即时持久化
   elements.asrAutoFallback?.addEventListener("change", async () => {
     await sendRuntimeMessage({ type: "save-settings", settings: { asrAutoFallback: elements.asrAutoFallback.checked } });
   });
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === "sync" && "defaultModel" in changes) {
-      const next = String(changes.defaultModel.newValue || "").trim();
-      if (next !== (elements.defaultModel?.value || "").trim()) {
-        elements.defaultModel.value = next;
-        loadAiProviders().then((providers) => {
-          renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, providers, { defaultModel: next, onRenderDefaultModel: (list) => renderDefaultModelSelect(elements.defaultModel, list, next) });
-        });
-      }
-    }
     if (areaName === "sync" && "asrAutoFallback" in changes) {
       elements.asrAutoFallback.checked = changes.asrAutoFallback.newValue !== false;
     }

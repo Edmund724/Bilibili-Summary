@@ -71,7 +71,6 @@ export const ids = {
   readingChatContextChip: "boc-reading-chat-context-chip",
   readingChatHistoryBtn: "boc-reading-chat-history-btn",
   readingChatRefreshBtn: "boc-reading-chat-refresh-btn",
-  readingChatSettingsBtn: "boc-reading-chat-settings-btn",
   readingChatNewBtn: "boc-reading-chat-new-btn",
   readingChatOpenSettings: "boc-reading-chat-open-settings",
   readingChatAsrNotice: "boc-reading-chat-asr-notice",

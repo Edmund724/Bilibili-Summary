@@ -163,15 +163,6 @@ describe("createProviderRow：AI 平台行（options-rows.js 配置）", () => {
     expect(emptyNode.hidden).toBe(false);
   });
 
-  it("renderAiProviders 触发 onRenderDefaultModel 并回传归一化列表", async () => {
-    const rows = await loadAiRows();
-    const { listNode, emptyNode } = makeContainer();
-    const onRenderDefaultModel = vi.fn();
-    rows.renderAiProviders(listNode, emptyNode, [aiItem], { presets: AI_PRESETS, defaultModel: "p1", onRenderDefaultModel });
-    expect(onRenderDefaultModel).toHaveBeenCalledTimes(1);
-    expect(onRenderDefaultModel.mock.calls[0][0]).toEqual([aiItem]);
-  });
-
   it("预设切换：未改过 baseUrl 才跟随新预设，Key 占位符随 requiresKey 更新", async () => {
     const rows = await loadAiRows();
     const { listNode, emptyNode } = makeContainer();

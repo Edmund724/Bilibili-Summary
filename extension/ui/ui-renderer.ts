@@ -210,12 +210,6 @@ export function buildUiHtml(): string {
                       <path d="M8 16H3v5"></path>
                     </svg>
                   </button>
-                  <button id="${ids.readingChatSettingsBtn}" type="button" class="sp-icon-btn" title="打开设置" aria-label="设置">
-                    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-                      <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"></path>
-                      <circle cx="12" cy="12" r="3"></circle>
-                    </svg>
-                  </button>
                   <button id="${ids.readingChatNewBtn}" type="button" class="sp-icon-btn" title="开启新会话" aria-label="开启新会话">
                     <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
                       <path d="M12 5v14"></path>
@@ -445,15 +439,9 @@ export function bindUiEvents(): void {
       .catch((error) => logWarn("[BOC] reader panels render failed", error));
   });
 
-  // digest-only-ui：对话 tab 设置入口与无平台提示的「前往设置」都打开侧边栏
-  // 设置抽屉（原 open-options 消息/独立设置页已删除）——展开面板并渲染。
-  // 两处节点都非必存在：readingChatSettingsBtn 在 buildUiHtml 模板内，但测试
-  // 骨架常只挂字幕 tab 节点；readingChatOpenSettings 更是对话 tab 按态重建的
-  // 链接（缺失时跳过，由 chat-tab 的 onOpenSettings 回调兜底）。
-  const chatSettingsBtn = document.getElementById(ids.readingChatSettingsBtn);
-  if (chatSettingsBtn) {
-    chatSettingsBtn.addEventListener("click", openReaderSettingsPanel);
-  }
+  // digest-only-ui：无平台提示的「前往设置」打开侧边栏设置抽屉（原 open-options
+  // 消息/独立设置页已删除）——展开面板并渲染。该链接由对话 tab 按态重建，
+  // 非必存在（缺失时跳过，由 chat-tab 的 onOpenSettings 回调兜底）。
   const chatOpenSettingsLink = document.getElementById(ids.readingChatOpenSettings);
   if (chatOpenSettingsLink) {
     chatOpenSettingsLink.addEventListener("click", (e) => {

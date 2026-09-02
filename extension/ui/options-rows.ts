@@ -530,31 +530,11 @@ export function renderAiProviders(
   listNode: HTMLElement,
   emptyNode: HTMLElement,
   items: ProviderRowItem[] | null | undefined,
-  { presets = PRESETS, defaultModel = "", onRenderDefaultModel = null }: {
+  { presets = PRESETS }: {
     presets?: readonly AiProviderPreset[];
-    defaultModel?: string;
-    onRenderDefaultModel?: ((items: ProviderRowItem[]) => void) | null;
   } = {}
 ): void {
-  const list = aiProviderRow.render(listNode, emptyNode, items, { presets });
-  if (onRenderDefaultModel) {
-    onRenderDefaultModel(list);
-  }
-}
-
-export function renderDefaultModelSelect(selectNode: HTMLSelectElement, items: ProviderRowItem[] | null | undefined, defaultModel = ""): void {
-  const list = Array.isArray(items) ? items : [];
-  selectNode.innerHTML = '<option value="">未设置</option>' + list
-    .map((item) => {
-      const label = String(item.model || item.name || "").trim();
-      return `<option value="${escapeHtml(item.id)}">${escapeHtml(label)}</option>`;
-    })
-    .join("");
-  if (defaultModel && list.some((item) => item.id === defaultModel)) {
-    selectNode.value = defaultModel;
-  } else {
-    selectNode.value = "";
-  }
+  aiProviderRow.render(listNode, emptyNode, items, { presets });
 }
 
 export function addAiProviderRow(listNode: HTMLElement, emptyNode: HTMLElement, item: ProviderRowItem = {}, { presets = PRESETS }: { presets?: readonly AiProviderPreset[] } = {}): void {

@@ -95,7 +95,6 @@ const els = {
   modelSelect: document.getElementById(ids.readingChatModelSelect) as HTMLSelectElement,
   thinkingToggle: document.getElementById(ids.readingChatThinkingToggle) as HTMLElement,
   thinkingBtns: document.querySelectorAll<HTMLElement>(`#${ids.readingChatThinkingToggle} .sp-thinking-btn`),
-  settingsBtn: document.getElementById(ids.readingChatSettingsBtn) as HTMLButtonElement,
   newChatBtn: document.getElementById(ids.readingChatNewBtn) as HTMLButtonElement,
   presetBtn: document.getElementById(ids.readingChatPresetBtn) as HTMLButtonElement,
   historyBtn: document.getElementById(ids.readingChatHistoryBtn) as HTMLButtonElement,
@@ -628,8 +627,6 @@ function bindEvents(): void {
   els.messages.addEventListener("scroll", () => {
     chatRuntime.setAutoScroll(isMessagesNearBottom());
   });
-  // digest-only-ui：设置入口（els.settingsBtn = readingChatSettingsBtn）的
-  // 绑定已上收到 ui-renderer（打开侧边栏设置抽屉，open-options 消息已删除）。
   els.contextChip.addEventListener("click", () => {
     void openCurrentContextInReader();
   });
