@@ -12,7 +12,7 @@
 // show·removeConversationContextNotice / showConversationContextError /
 // hideHistoryPopover / stopActiveChat）收窄为 3 个能力事件——store 自己编排
 // 渲染时机，caller 只订阅结果：
-//   - onConversationChanged(change)：会话相关状态已落账后发出；历史列表恒随
+//   - onConversationChanged(change)：会话相关状态已写入后发出；历史列表恒随
 //     事件重渲，change 标志（refreshContextChip / historyCleared / resetView）
 //     声明其余需要刷新的呈现面。发火点与反转前各渲染回调的位点逐一对齐：
 //     loadAll/save（仅列表）、hydratePages/apply/hydratePinned 成功（列表+chip）、
@@ -132,7 +132,7 @@ export interface HydratePinnedOptions {
 // 能力事件一：会话相关状态变更声明。历史列表恒随事件重渲；其余呈现面由标志
 // 声明（store 编排「何时」，caller 只实现「各表面怎么刷」）。
 export interface ConversationChange {
-  // 上下文绑定呈现需刷新（contextData / currentContextKey / currentConversationMeta 已落账）
+  // 上下文绑定呈现需刷新（contextData / currentContextKey / currentConversationMeta 已写入）
   refreshContextChip?: boolean;
   // 存档已整体清空（clearAll）——caller 收起历史 popover
   historyCleared?: boolean;
@@ -151,7 +151,7 @@ export type ConversationContextNotice =
 export interface CreateConversationStoreDeps {
   // ---- 上下文获取（数据面，非渲染） ----
   // live 快照静默重取（hydratePinned 分支 2：targetKey === liveContextKey 时
-  // 先刷新 live 快照再落账，ok=false 落回网络解析）。
+  // 先刷新 live 快照再写入，ok=false 落回网络解析）。
   loadContextState: (opts: LoadContextStateOptions) => Promise<boolean | object>;
   // 会话引用解析单接缝（工单 05 合并原 resolveAiConversationContext /
   // resolveAiConversationPageRef 两个同形 dep）：purpose="context" 解析整份
@@ -396,7 +396,7 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     return true;
   }
 
-  // change 缺省仅声明 chip 刷新（apply 的上下文落账语义）；resetView 由
+  // change 缺省仅声明 chip 刷新（apply 的上下文写入语义）；resetView 由
   // applyById 等会话重建入口追加。
   function apply(conversation: Conversation | null | undefined, change: ConversationChange = {}): void {
     if (!conversation) {

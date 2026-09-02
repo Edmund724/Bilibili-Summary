@@ -52,7 +52,7 @@ export type ReaderOverviewPhase = "idle" | "generating" | "ready" | "partial" | 
 interface ReaderOverviewState {
   phase: ReaderOverviewPhase;
   analysis: OverviewAnalysis | null;
-  /** 章节标头「AI 生成」小标注：生成发起时稿件章节为空即 AI 分章 */
+  /** 章节标头「AI 生成」小标注：生成发起时视频自带章节为空即 AI 分章 */
   aiChapters: boolean;
   progressText: string;
   errorText: string;

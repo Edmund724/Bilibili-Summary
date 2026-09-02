@@ -579,12 +579,3 @@ export function setTestSuccessHandler(handler: Parameters<typeof aiProviderRow.s
 export function setAiBeforeDeleteHandler(handler: Parameters<typeof aiProviderRow.setBeforeDeleteHandler>[0]): void {
   aiProviderRow.setBeforeDeleteHandler(handler);
 }
-
-// host 权限代申请：走 core/host-permissions 的单一实现
-// requestProviderOriginsViaBackground（与 ui/settings-panel.ts 的保存链共用）。
-// content script 语境没有 chrome.permissions API（Chromium 该 API 仅扩展自有
-// 页面/SW 可用），经 request-provider-origins 消息由 background SW 代为申请
-// （手势经一次 runtime 消息传导，SW 监听器调用 chrome.permissions.request 前零
-// await，见 entry/background.ts handleRequestProviderOrigins）。预设切换的
-// change 事件即用户手势，调用链在 sendMessage 前零 await；手势缺失时 Chrome
-// 拒绝弹窗、返回失败，由调用方静默处理——保存设置时的正式申请仍在。
