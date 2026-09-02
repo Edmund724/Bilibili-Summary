@@ -176,6 +176,8 @@ extension/
 
 > 仅支持 Chrome / Edge 等 Chromium 浏览器（依赖 sidePanel、offscreen 等 Chrome 专属 API），不支持 Firefox。
 
+### 方式一：下载打包版本（推荐）
+
 1. 解压下载的 zip 包到任意长期保留的文件夹
 2. 打开扩展管理页：
    - Chrome：`chrome://extensions/`
@@ -183,7 +185,36 @@ extension/
 3. 开启"开发者模式"
 4. 点击"加载已解压的扩展程序"，选择解压后的文件夹
 
-安装后请让这个文件夹留在原位。如果移动或删除它，Chrome 中加载的本地扩展会失效，需要从新的存放位置重新加载。
+### 方式二：从源码构建
+
+```bash
+git clone https://github.com/Edmund724/Bilibili-Summary.git
+cd Bilibili-Summary
+npm install
+npm run build          # 生成 dist/（content 分包 + 各入口 bundle，含 sourcemap）
+npm run dev            # watch 模式：首轮全量构建到 dist/ 后持续重建，改代码即生效
+npm run build:release  # 生成 Chrome 打包到 release/（zip 不含 sourcemap）
+```
+
+日常开发：跑 `npm run dev`，在扩展管理页「加载已解压的扩展程序」选择 `dist/`，重建后点扩展的刷新按钮即可。
+
+### 方式三：让编程 Agent 帮你安装
+
+你不需要看懂代码，也不需要会使用命令行。把下面这段话发送给你的编程 Agent：
+
+> 请把这个项目下载或克隆到我选择的长期保留文件夹，告诉我准确的完整路径，并让 Chrome"加载已解压的扩展程序"使用同一个文件夹。如果我在第一次安装时需要位置建议，可以推荐 macOS 或 Linux 上的 `~/Documents/bilibili-summary`，或 Windows 上的 `%USERPROFILE%\Documents\bilibili-summary`，但不要假设我一定使用这些路径。请用简单易懂的语言一步一步指导我完成安装和配置。https://github.com/Edmund724/Bilibili-Summary
+
+你的 Agent 应该帮你：
+
+1. 先询问你想把项目长期保存在哪里，再下载或克隆到那里，并告诉你准确的完整路径。如果你需要建议，可以推荐 macOS 或 Linux 上的 `~/Documents/bilibili-summary`，或 Windows 上的 `%USERPROFILE%\Documents\bilibili-summary`。
+2. 打开下方硅基流动和 ModelScope 官方页面，指导你创建自己的账号。
+3. 指导你在 Chrome 中通过"加载已解压的扩展程序"选择你刚才确定的那个准确项目文件夹。
+4. 告诉你应该在扩展的"设置"页面哪个位置填写 API Key。
+5. 打开一个有字幕的 B 站视频，确认字幕、阅读视图和 AI 对话功能可以使用。
+
+安装后请让这个文件夹留在原位。如果移动或删除它，Chrome 中加载的本地扩展会失效，需要从新的长期存放位置重新加载。
+
+不要把 API Key 发送到 AI 对话、源代码、截图或公开消息中。请你自己在 Bilibili Summary 的设置页面直接填写。编程 Agent 可以告诉你填写位置，但不需要看到 Key。
 
 ## 用编程 Agent 改造成自己的版本
 
