@@ -13,7 +13,7 @@
 // 模块，单纪元；对话 seam 经 core/lazy-chat-tab mock（组合根本体由
 // tests/reader/chat-tab.test.ts 覆盖）。
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../extension/core/lazy-reader.js", () => ({
   ensureReaderDomain: vi.fn(),
@@ -123,6 +123,60 @@ describe("popup-trigger-reading-chat：打开阅读模式并激活对话 tab", (
     expect(chat.ensureChatTabActivated).toHaveBeenCalledWith({ consumeIntent: false });
     expect(ensureReaderDomain).not.toHaveBeenCalled();
     expect(chat.runQuickActionPrompt).not.toHaveBeenCalled();
+  });
+});
+
+describe("空 readerUrl 兜底：视图未开时用当前地址构造阅读 URL", () => {
+  // PR5c 回归：background 的 player-ai/reading-chat 链在「未在阅读模式」时也
+  // 传空 readerUrl（原语义假设空串 = 已在阅读模式内只聚焦）。若 content 侧
+  // 跳过 URL 改写 + 阅读表 + data-boc-reader-mode 门控，enterReaderMode 会
+  // 落在无样式的半进入态（布局微变但阅读模式不出现）。
+  afterEach(() => {
+    document.documentElement.removeAttribute("data-boc-reader-mode");
+    document.body.removeAttribute("data-boc-reader-mode");
+  });
+
+  it("popup-trigger-reading-view：空 readerUrl 且视图未开 → 兜底改写 + 翻门控属性 + enterReaderMode", async () => {
+    const { setLocationUrl, NORMAL_PAGE_URL } = await import("../setup.js");
+    setLocationUrl(NORMAL_PAGE_URL);
+    const { replaceReaderModeUrl } = await import("../../extension/bilibili/reader-url.js");
+    const enterReaderMode = vi.fn(async () => {});
+    ensureReaderDomain.mockResolvedValue({ enterReaderMode });
+
+    const sendResponse = vi.fn();
+    messageListener({ type: "popup-trigger-reading-view", readerUrl: "" }, {}, sendResponse);
+
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+    await vi.waitFor(() => expect(enterReaderMode).toHaveBeenCalledTimes(1));
+    expect(replaceReaderModeUrl).toHaveBeenCalledWith("https://www.bilibili.com/video/BV1test000000/?boc_reader=1");
+    expect(document.documentElement.getAttribute("data-boc-reader-mode")).toBe("1");
+    expect(document.body.getAttribute("data-boc-reader-mode")).toBe("1");
+  });
+
+  it("popup-trigger-reading-view：空 readerUrl 且视图已开 → 保持纯聚焦语义，不改写 URL", async () => {
+    isReaderViewOpen.mockReturnValue(true);
+    const { replaceReaderModeUrl } = await import("../../extension/bilibili/reader-url.js");
+
+    messageListener({ type: "popup-trigger-reading-view", readerUrl: "" }, {}, vi.fn());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(replaceReaderModeUrl).not.toHaveBeenCalled();
+    expect(ensureReaderDomain).not.toHaveBeenCalled();
+  });
+
+  it("popup-trigger-reading-chat：空 readerUrl 且视图未开 → 兜底改写后 enterReaderMode + runQuickActionPrompt", async () => {
+    const { setLocationUrl, NORMAL_PAGE_URL } = await import("../setup.js");
+    setLocationUrl(NORMAL_PAGE_URL);
+    const { replaceReaderModeUrl } = await import("../../extension/bilibili/reader-url.js");
+    const chat = makeChatStub();
+    ensureReaderChatTabMock.mockResolvedValue(chat);
+    ensureReaderDomain.mockResolvedValue({ enterReaderMode: vi.fn(async () => {}) });
+
+    messageListener({ type: "popup-trigger-reading-chat", readerUrl: "", prompt: "总结" }, {}, vi.fn());
+
+    await vi.waitFor(() => expect(chat.runQuickActionPrompt).toHaveBeenCalledWith("总结"));
+    expect(replaceReaderModeUrl).toHaveBeenCalledWith("https://www.bilibili.com/video/BV1test000000/?boc_reader=1");
+    expect(document.documentElement.getAttribute("data-boc-reader-mode")).toBe("1");
   });
 });
 

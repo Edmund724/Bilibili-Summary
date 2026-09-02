@@ -69,6 +69,27 @@ describe("digest-button 注入锚点优先级", () => {
     expect(button.style.background).toBe("rgb(251, 114, 153)");
   });
 
+  it("锚点1：complaint 不在 #arc_toolbar_report 宿主内（稍后再看页形态）仍按文本命中", async () => {
+    // 稍后再看等列表播放页的工具栏没有 #arc_toolbar_report 这层 id 宿主，
+    // 类名 + 文本聚合判定必须兜底命中，否则按钮落到右块尾部（记笔记右侧）。
+    document.body.innerHTML = `
+      <div class="video-toolbar-container">
+        <div class="video-toolbar-right">
+          <div class="video-complaint video-toolbar-right-item"><span>稿件举报</span></div>
+          <div class="video-note"></div>
+        </div>
+      </div>
+      <video src="blob:test"></video>`;
+    const complaint = document.querySelector(".video-complaint");
+
+    await loadModule();
+    await runSettleChain();
+
+    const button = document.getElementById("boc-digest-button");
+    expect(button).not.toBeNull();
+    expect(button.nextElementSibling).toBe(complaint);
+  });
+
   it("锚点1落空（无 .video-complaint）走锚点2：appendChild 到 .video-toolbar-right", async () => {
     document.body.innerHTML = `${makeToolbarHtml({ withComplaint: false })}<video src="blob:test"></video>`;
     const right = document.querySelector(".video-toolbar-right");
@@ -180,6 +201,21 @@ describe("digest-button 幂等与自查", () => {
 
     // 换回播放页：按钮补回（幂等注入）
     setLocationUrl(NORMAL_PAGE_URL);
+    await vi.advanceTimersByTimeAsync(801);
+    expect(document.getElementById("boc-digest-button")).not.toBeNull();
+  });
+
+  it("自查周期：稍后再看页（/list/watchlater?bvid=）是视频播放页，不摘按钮", async () => {
+    // 与 content.ts isSupportedUrl 口径一致：watchlater 由 isWatchlaterPage
+    // 覆盖。自查若只认 /video/  pathname，按钮会在装载后一个周期被摘掉
+    //（用户症状：刚进页看得到，一两秒后消失）。
+    document.body.innerHTML = `${makeToolbarHtml()}<video src="blob:test"></video>`;
+    setLocationUrl("https://www.bilibili.com/list/watchlater?bvid=BV1test000000");
+
+    await loadModule();
+    await runSettleChain();
+    expect(document.getElementById("boc-digest-button")).not.toBeNull();
+
     await vi.advanceTimersByTimeAsync(801);
     expect(document.getElementById("boc-digest-button")).not.toBeNull();
   });

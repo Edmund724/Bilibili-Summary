@@ -55,6 +55,7 @@ import { ensureReaderStyles, removeReaderStyles } from "../shared/style-injector
 
 import {
   isReaderMode,
+  cleanVideoUrl,
   computeCurrentClipSignature,
   stripReaderModeUrl
 } from "../bilibili/video-id-shared.js";
@@ -76,6 +77,26 @@ export function bindRuntimeEvents() {
   chrome.runtime.onMessage.addListener((rawMessage, _sender, sendResponse: SendResponse) => {
     return dispatchContentScriptMessage(rawMessage, sendResponse);
   });
+}
+
+// 空 readerUrl 的语义是「已在阅读模式内，只聚焦/激活」。但 background 的
+// player-ai / reading-chat 链在视图未开时也传空串（triggerReaderModeInTab 的
+// 空 readerUrl 参数）——此时必须用当前地址兜底构造阅读 URL，否则 URL 改写、
+// 阅读表与 data-boc-reader-mode 门控全被跳过，enterReaderMode 落在无样式的
+// 半进入态（页面布局微变但阅读模式不出现）。拼法与 ui/digest-button.ts
+// buildReaderUrl 一致（cleanVideoUrl 清成规范 URL 再加 boc_reader=1）。
+function resolveReaderEntryUrl(readerUrl: string): string {
+  if (readerUrl || isReaderViewOpen()) {
+    return readerUrl;
+  }
+  const base = cleanVideoUrl(location.href);
+  try {
+    const parsed = new URL(base);
+    parsed.searchParams.set("boc_reader", "1");
+    return parsed.toString();
+  } catch {
+    return base;
+  }
 }
 
 // onMessage 监听器的分发主体抽成可导出函数：除 runtime 消息外，页内触发源
@@ -166,7 +187,7 @@ export function dispatchContentScriptMessage(
           .then((playerAi) => playerAi.removePlayerAiQuickActionButton())
           .catch(() => {});
       }
-      const readerUrl = String(message.readerUrl || "").trim();
+      const readerUrl = resolveReaderEntryUrl(String(message.readerUrl || "").trim());
       // 候选03：先确保 UI 壳存在，再设置阅读模式属性并进入重域。ensureUiReady
       // 与后续 reader 操作串成同一 promise 链，避免并发触发导致壳构建两次。
       ensureUiReady().then(() => {
@@ -204,7 +225,7 @@ export function dispatchContentScriptMessage(
           .then((playerAi) => playerAi.removePlayerAiQuickActionButton())
           .catch(() => {});
       }
-      const readerUrl = String(message.readerUrl || "").trim();
+      const readerUrl = resolveReaderEntryUrl(String(message.readerUrl || "").trim());
       const prompt = String(message.prompt || "").trim();
       ensureUiReady().then(async () => {
         if (readerUrl) {

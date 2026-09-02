@@ -18,7 +18,7 @@
 // chrome.runtime.sendMessage：content script 的 sendMessage 不会回环到本文档
 // 自己的 onMessage 监听器，分发主体抽出后监听器与按钮共用同一条处理器路径。
 
-import { cleanVideoUrl, isReaderMode } from "../bilibili/video-id-shared.js";
+import { cleanVideoUrl, isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
 import { dispatchContentScriptMessage } from "../core/message-handler.js";
 import { isReaderViewOpen } from "../reader/state.js";
 
@@ -84,8 +84,11 @@ function delay(ms: number): Promise<void> {
 // ===== 定时自查：补按钮 / 摘按钮 =====
 
 function syncDigestButton(): void {
-  // SPA 换到非 /video/ 页：工具栏按钮无意义，主动摘除。
-  if (!/\/video\//.test(location.pathname)) {
+  // SPA 换到非视频页：工具栏按钮无意义，主动摘除。口径与 content.ts
+  // isSupportedUrl 一致——稍后再看等列表播放页（/list/watchlater?bvid=）
+  // 由 isWatchlaterPage 覆盖，不能只看 /video/ pathname（否则按钮在装载后
+  // 一个自查周期就被摘掉）。
+  if (!/\/video\//.test(location.pathname) && !isWatchlaterPage()) {
     removeDigestButton();
     return;
   }
@@ -155,9 +158,11 @@ export function removeDigestButton(): void {
 }
 
 // 「稿件举报」判定不靠类名单押：aria-label/title/data-text/textContent 聚合后
-// 匹配，类名变更时文本兜底。
+// 匹配，类名变更时文本兜底。#arc_toolbar_report 宿主在稍后再看等列表播放页
+// 不存在，落空时退到全局类名查询（文本判定兜底）。
 function findComplaintNode(): HTMLElement | null {
-  const candidates = document.querySelectorAll("#arc_toolbar_report .video-complaint");
+  const scoped = document.querySelectorAll("#arc_toolbar_report .video-complaint");
+  const candidates = scoped.length > 0 ? scoped : document.querySelectorAll(".video-complaint");
   for (const node of candidates) {
     if (!(node instanceof HTMLElement) || !node.parentElement) {
       continue;
