@@ -3,17 +3,19 @@
 //
 // Deep module owning the reader view lifecycle (enter/close), the settings
 // rendering/steppers and the page-state guards. It depends
-// on the base LAYOUT layer (page-frame.js + player-host.js + hover-chrome.js)
+// on the base LAYOUT layer (page-frame.js + player-host.js + digest-host.js)
 // and on ./sync.js; neither may import it, so the dependency graph stays acyclic:
 //
 //   ports.js        显式回调端口叶子（本模块在文件尾单点注册全部端口实现）
-//   LAYOUT          page-frame.js + player-host.js + hover-chrome.js → ports
+//   LAYOUT          page-frame.js + player-host.js + digest-host.js → ports
 //   SYNC            sync.js                           → LAYOUT + ports
 //   LIFECYCLE       lifecycle.js（本文件）            → SYNC + LAYOUT + ports
 //
-// The player-host layout closure is read here through the exported accessors
-// (getPlayerHost/...); playerRetryTimer's variable itself moved into this
-// module (its owner starts/clears it here), so it is read/written directly.
+// 阶段 2（B 形态）：进入/退出链已收敛——enter 只开壳、渲染并 openDigestHost
+//（播放器不动，不等挂载），close 拆 digest-host 并清理会话态。player-host/
+// hover-chrome 的整页接管实现仍在（sync tick 仍触达 player-host 的 native
+// 布局），但其 lifecycle 驱动链已断，阶段 3 随 A 形态退役。
+// playerRetryTimer 变量留在本模块，仅为 presenter reset 的清除路径保留。
 import { state } from "../core/state.js";
 import { getReaderElement } from "../shared/dom-utils.js";
 import { sleep } from "../shared/utils.js";
@@ -27,8 +29,7 @@ import {
   normalizeReaderContentWidth,
   normalizeReaderSubtitleVisible
 } from "../core/validators.js";
-import { isReaderMode } from "../bilibili/video-id-shared.js";
-import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
+import { getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
 import {
   getReadingSubtitleItems,
@@ -65,28 +66,15 @@ import { READER_CLOSE_ATTRS } from "./presentation-fields.js";
 // LAYOUT (page-frame) functions this module drives:
 import {
   ids,
-  alignReaderViewportToPlayer,
-  applyReaderPageFocus,
-  clearReaderPageFocus,
-  cleanupReaderFloatingArtifacts,
   // 候选06：转写尾部留白自 player-host 迁入 page-frame（内联宿主的滚动留白）。
   updateReadingSubtitleTailSpacer
 } from "./page-frame.js";
-// LAYOUT (player-host) functions this module drives:
-import {
-  getPlayerHost,
-  isReaderPresentationStable,
-  layoutReaderPlayerHost,
-  startReaderPlayerObserver,
-  stopReaderPlayerObserver,
-  ensureReaderPlayerMounted,
-  scheduleReaderMiniPlayerDismiss,
-  cleanupReaderPlayerHost,
-  unbindReaderLayout
-} from "./player-host.js";
-// 候选09：控制条自动隐藏/恢复与头部悬停 chrome 迁往 ./hover-chrome.js；本文件
-// 经该模块驱动头部悬停接线（finishEnterReaderMode）。
-import { bindReaderHeaderActionsHover } from "./hover-chrome.js";
+// LAYOUT (player-host)：B 形态（阶段 2）不再由本域驱动整页接管布局，仅
+// presenter reset 路径仍需停掉播放器观察者（实现与调用链阶段 3 随 A 形态退役）。
+import { stopReaderPlayerObserver } from "./player-host.js";
+// B 形态右栏 Digest 面板定位器：进入时开始贴栏定位，关闭时拆除（A 形态的
+// player-host/hover-chrome 调用链已断，实现阶段 3 删）。
+import { openDigestHost, closeDigestHost } from "./digest-host.js";
 import { resetManualScrollPause, setProgrammaticScrollUntil } from "./state.js";
 // PR2 统一 Digest 面板：进入阅读模式时把右侧面板重置回默认「字幕」标签。
 // tab 切换是纯壳交互，实现在 ui/ui-renderer（bindUiEvents 的标签绑定同文件），
@@ -124,9 +112,9 @@ import {
   triggerReaderOverviewGeneration
 } from "./overview.js";
 
-// playerRetryTimer（readingPlayerRetryTimer）自 reader-impl.js 闭包迁入：属主启动
-//（scheduleReaderPlayerRetry）与清除（closeReadingView、presenter reset）都在本
-// 模块，直读局部变量，不再经 get/setPlayerRetryTimer 访问器。
+// playerRetryTimer（readingPlayerRetryTimer）自 reader-impl.js 闭包迁入：属主
+//（presenter reset 路径）清除在本模块。阶段 2（B 形态）后播放器不再由阅读
+// 模式驱动挂载重试，变量仅为 presenter reset 的清理保留。
 let playerRetryTimer = 0;
 
 // ===== 候选06 端口半边：reader 域唯一显式端口的单点注册 =====
@@ -198,7 +186,6 @@ export function handleReaderPresenterNotification(kind: string, text?: string | 
         renderReadingView();
         renderReadingStatus(String(text || "") || "抓取完成，阅读视图已同步最新字幕。");
         startReadingViewSync();
-        startReaderPlayerObserver();
         syncReadingViewPlayback(true);
         // PR4：字幕就绪即自动生成概览（基线决议「打开即自动生成并缓存」）。
         // 无字幕时保持诚实空态不触发；生成中重复触发被状态机与管线 promise 复用去重。
@@ -254,77 +241,22 @@ export async function enterReaderMode() {
   document.body.setAttribute("data-boc-reading-active", "1");
   hydrateReaderStateFromSettings(state.settings);
   applyReadingViewPresentation();
-  alignReaderViewportToPlayer();
   // PR2：每次打开阅读视图都回到默认「字幕」标签（概览/AI 对话关闭前的停留
   // 状态不跨会话保留；视图开着期间的重渲不打断用户所在标签）。
   resetReaderDigestTabs();
-  // PR5：AI 对话 tab 的待解释意图消费随 tab 激活路径进行（首次切到对话 tab /
-  // 句上「解释」都会走激活；此处不再有占位卡渲染职责）。
   await sleep(0);
   openReaderViewShell(readingView);
-  applyReaderPageFocus();
   renderReadingView();
+  // B 形态：面板贴右栏 fixed 定位（digest-host 负责算 rect/降级浮层）；
+  // 整页接管门控退役，播放器保持 B 站原生布局不动，无需等挂载。
+  openDigestHost();
+  // 字幕未抓取时的后台兜底抓取（原 finishEnterReaderMode 链保留项）：B 形态
+  // 面板以字幕为主内容，不依赖播放器挂载成功，直达路径也必须有数据来源。
+  maybeRefreshReaderSubtitleInBackground();
   // PR4：打开阅读模式即自动生成概览（基线决议；字幕已就绪的直接生成，缓存命中
   // 免重付费。字幕未就绪时为诚实空态，subtitle-ready 通知到达后再触发；切到
   // 概览 tab 也有兜底触发。生成中重复触发被状态机与管线 promise 复用去重）。
   triggerReaderOverviewGeneration();
-
-  const earlyPlayerHost = findReaderPlayerHost(getRuntimeVideoElement());
-  if (earlyPlayerHost) {
-    earlyPlayerHost.setAttribute("data-boc-reader-fading", "1");
-  }
-
-  await sleep(0);
-
-  // Try to mount player, with more retries for slower pages (like watch later)
-  const mounted = await ensureReaderPlayerMounted({ retries: 50, delayMs: 150, forceLayout: true });
-  const mountedPlayerHost = getPlayerHost() || earlyPlayerHost;
-  if (mountedPlayerHost) {
-    mountedPlayerHost.removeAttribute("data-boc-reader-fading");
-  }
-  if (!mounted) {
-    // Don't throw - keep UI open and keep retrying in background
-    renderReadingStatus("正在等待视频播放器就绪...");
-    scheduleReaderPlayerRetry();
-    return;
-  }
-
-  finishEnterReaderMode();
-}
-
-function scheduleReaderPlayerRetry() {
-  if (playerRetryTimer) {
-    window.clearTimeout(playerRetryTimer);
-    playerRetryTimer = 0;
-  }
-  // Keep trying to mount player in background
-  const tryMount = async () => {
-    playerRetryTimer = 0;
-    if (!state.reader.readingViewOpen || !isReaderMode()) return;
-    const mounted = await ensureReaderPlayerMounted({ retries: 10, delayMs: 200, forceLayout: true });
-    const retryHost = getPlayerHost();
-    if (retryHost) {
-      retryHost.removeAttribute("data-boc-reader-fading");
-    }
-    if (mounted) {
-      finishEnterReaderMode();
-    } else if (state.reader.readingViewOpen) {
-      playerRetryTimer = window.setTimeout(tryMount, 500);
-    }
-  };
-  playerRetryTimer = window.setTimeout(tryMount, 500);
-}
-
-function finishEnterReaderMode() {
-  if (!state.reader.readingViewOpen || !isReaderMode()) return;
-
-  alignReaderViewportToPlayer();
-  // PR2：字幕列表常驻右侧面板「字幕」tab，无需再内联搬迁进页面文档流。
-  scheduleReaderMiniPlayerDismiss();
-  maybeRefreshReaderSubtitleInBackground();
-  syncReaderModeAfterMount();
-  settleReaderModePresentation();
-  bindReaderHeaderActionsHover();
 }
 
 function openReaderViewShell(readingView = getReaderElement(ids.readingView)) {
@@ -333,8 +265,8 @@ function openReaderViewShell(readingView = getReaderElement(ids.readingView)) {
   }
   readingView.classList.add("open", "reader-page");
   readingView.setAttribute("aria-hidden", "false");
-  setReadingViewReady(false);
-  renderReadingStatus("正在准备播放器和字幕...");
+  setReadingViewReady(true);
+  renderReadingStatus("阅读视图已就绪，播放视频时字幕会自动高亮。");
 }
 
 export function waitForVideoMetadata(timeoutMs = 5000): Promise<void> {
@@ -354,28 +286,11 @@ export function waitForVideoMetadata(timeoutMs = 5000): Promise<void> {
   });
 }
 
-function syncReaderModeAfterMount() {
-  startReadingViewSync();
-  startReaderPlayerObserver();
-  layoutReaderPlayerHost();
-  syncReadingViewPlayback(true);
-  updateReaderFollowState();
-}
-
-function settleReaderModePresentation() {
-  if (!isReaderPresentationStable()) {
-    setReadingViewReady(false);
-    renderReadingStatus("正在稳定播放器布局...");
-    scheduleReaderPlayerRetry();
-    return false;
-  }
-  setReadingViewReady(true);
-  renderReadingStatus("阅读视图已就绪，播放视频时字幕会自动高亮。");
-  return true;
-}
+// syncReaderModeAfterMount / settleReaderModePresentation 已随整页接管门控退役
+//（阶段 2，B 形态）：播放器挂载/布局/呈现稳定链不再由阅读模式驱动，同步的
+// 启动收敛到 subtitle-ready 通知路径（handleReaderPresenterNotification）。
 
 export function closeReadingView() {
-  cleanupReaderFloatingArtifacts();
   state.reader.setViewOpen(false);
   state.reader.setNativePageMode(false);
   state.reader.setViewReady(false);
@@ -426,20 +341,9 @@ export function closeReadingView() {
   // 生成不取消——管线后台跑完落缓存，重开阅读模式读缓存命中）。
   resetReaderOverviewState();
   stopReadingViewSync();
-  unbindReaderLayout();
-  cleanupReaderPlayerHost();
-  clearReaderPageFocus();
-  const sendingBar = document.querySelector<HTMLElement>(".bpx-player-sending-bar");
-  if (sendingBar) {
-    sendingBar.setAttribute("data-boc-reader-hide-sending-bar", "1");
-    sendingBar.style.setProperty("display", "none", "important");
-    window.setTimeout(() => {
-      sendingBar.style.removeProperty("display");
-      sendingBar.removeAttribute("data-boc-reader-hide-sending-bar");
-    }, 200);
-  }
-  window.setTimeout(() => cleanupReaderFloatingArtifacts(), 40);
-  window.setTimeout(() => cleanupReaderFloatingArtifacts(), 220);
+  // B 形态：拆除右栏定位监听并清 CSS 变量/浮层属性（紧随其后的一轮 render
+  // 不再把门控选择器唤醒，面板安全回落 display:none）。
+  closeDigestHost();
 }
 
 export function renderReadingView() {
@@ -448,7 +352,10 @@ export function renderReadingView() {
   cancelReadingSubtitleAppend();
   const titleNode = document.querySelector(".boc-reading-title");
   const metaNode = getReaderElement(ids.readingMeta);
-  const chapterList = getReaderElement(ids.readingChapterList);
+  // 阶段 2（B 形态）：rail 的章节列表 DOM 已退役，章节渲染由概览 tab 接管，
+  // 这里降级为可选容器（无节点即跳过）；hasChapters 属性链保留（presentation
+  // 属性表不动，阶段 4b 才做窄容器与设置语义改写）。
+  const chapterList = document.getElementById(ids.readingChapterList);
   const subtitleList = getReaderElement(ids.readingSubtitleList);
   const chapters = normalizeChapters(state.clip.chapters || []);
   const body = Array.isArray(state.clip.subtitleBody) ? state.clip.subtitleBody : [];
@@ -463,26 +370,28 @@ export function renderReadingView() {
     metaNode.textContent = buildReadingMetaLine();
   }
 
-  if (chapters.length === 0) {
-    chapterList.innerHTML = '<div class="boc-reading-empty">当前视频没有章节。</div>';
-  } else {
-    chapterList.innerHTML = chapters
-      .map(
-        (item, index) => `
-          <button
-            type="button"
-            class="boc-reading-chapter"
-            data-index="${index}"
-            data-seconds="${Number(item.from || 0) || 0}"
-          >
-            <span class="boc-reading-chapter-time">${escapeHtml(
-              formatCompactTimestamp(item.from, withHours)
-            )}</span>
-            <span class="boc-reading-chapter-title">${escapeHtml(item.title)}</span>
-          </button>
-        `
-      )
-      .join("");
+  if (chapterList) {
+    if (chapters.length === 0) {
+      chapterList.innerHTML = '<div class="boc-reading-empty">当前视频没有章节。</div>';
+    } else {
+      chapterList.innerHTML = chapters
+        .map(
+          (item, index) => `
+            <button
+              type="button"
+              class="boc-reading-chapter"
+              data-index="${index}"
+              data-seconds="${Number(item.from || 0) || 0}"
+            >
+              <span class="boc-reading-chapter-time">${escapeHtml(
+                formatCompactTimestamp(item.from, withHours)
+              )}</span>
+              <span class="boc-reading-chapter-title">${escapeHtml(item.title)}</span>
+            </button>
+          `
+        )
+        .join("");
+    }
   }
 
   if (subtitleItems.length === 0) {

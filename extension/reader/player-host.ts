@@ -410,7 +410,9 @@ export function layoutReaderPlayerHost() {
 
   const readingView = getReaderElement(ids.readingView);
   const playerHostNode = playerHost;
-  const slot = getReaderElement(ids.readingPlayerSlot);
+  // 阶段 2（B 形态）：播放器槽节点已随 stage 退役，改用可选查询（slot 分支
+  // 自然走不到；函数保留待阶段 3 随 A 形态退役，sync tick 仍调它做 native 布局）。
+  const slot = document.getElementById(ids.readingPlayerSlot);
   if (!playerHostNode) {
     return;
   }

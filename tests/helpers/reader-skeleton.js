@@ -77,20 +77,18 @@ export function mountReaderSkeleton(ids) {
   readingView.id = ids.readingView;
   doc.body.appendChild(readingView);
 
-  const readingStatus = doc.createElement("p");
-  readingStatus.id = ids.readingStatus;
-  readingView.appendChild(readingStatus);
-
-  const readingPlayerSlot = doc.createElement("div");
-  readingPlayerSlot.id = ids.readingPlayerSlot;
-  readingView.appendChild(readingPlayerSlot);
-
-  // 统一 Digest 面板壳（PR2）：header / 设置面板 / 三标签 + tab body 与真实
-  // 模板同构；字幕列表 .boc-reading-main 挂在字幕 tab body 内。
+  // 统一 Digest 面板壳（阶段 2 B 形态）：header / 设置面板 / 三标签 + tab body
+  // 与真实模板同构，readingStatus 挪进 header 下方；字幕列表 .boc-reading-main
+  // 挂在字幕 tab body 内。rail（章节栏）与 stage（状态栏/播放器槽）随整页接管
+  // 门控退役，不再搭建（章节列表由概览 tab 提供）。
   const digestPanel = doc.createElement("aside");
   digestPanel.id = ids.readingDigestPanel;
   digestPanel.className = "boc-reading-digest-panel";
   readingView.appendChild(digestPanel);
+
+  const readingStatus = doc.createElement("p");
+  readingStatus.id = ids.readingStatus;
+  digestPanel.appendChild(readingStatus);
 
   const readingMeta = doc.createElement("div");
   readingMeta.id = ids.readingMeta;
@@ -197,10 +195,6 @@ export function mountReaderSkeleton(ids) {
   transcribeProgress.id = ids.readingTranscribeProgress;
   transcribeProgress.className = "boc-reading-asr-foot";
   transcribeBanner.appendChild(transcribeProgress);
-
-  const readingChapterList = doc.createElement("div");
-  readingChapterList.id = ids.readingChapterList;
-  readingView.appendChild(readingChapterList);
 
   const readingMain = doc.createElement("div");
   readingMain.className = "boc-reading-main";

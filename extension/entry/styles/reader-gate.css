@@ -1,42 +1,29 @@
 /* 阅读模式门控段——随阅读模式挂载（S3 分层）：全部规则以
- * data-boc-reader-mode="1" / data-boc-reading-active="1" 为前置，未开启时永不匹配。 */
+ * data-boc-reader-mode="1" / data-boc-reading-active="1" 为前置，未开启时永不匹配。
+ * 阶段 2（B 形态）：整页接管门控退役，本表只剩 Digest 面板的视口定位与
+ * 显隐门控——面板贴右栏 fixed 定位（rect 由 reader/digest-host 写入四个
+ * --boc-digest-* 变量），窄窗/无锚点降级为居中浮层；B 站页面自身的布局、
+ * 播放器与推荐栏一律不动。 */
 
-html[data-boc-reader-mode="1"],
-body[data-boc-reader-mode="1"] {
-  margin: 0 !important;
-  padding: 0 !important;
-  width: 100% !important;
-  min-height: 100% !important;
-  background: #fff !important;
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
-}
-
-body[data-boc-reader-mode="1"] #boc-root {
-  position: absolute;
-  inset: 0;
-  z-index: 2147483646;
-  pointer-events: none;
-}
-
-body[data-boc-reader-mode="1"] #boc-panel {
-  display: none !important;
-}
-
+/* ===== Digest 面板定位 =====
+ * 贴栏态：digest-host 挂载时写 left/top/width/height 四变量，面板按变量定位
+ * （跟滚动，rAF 合帧）。浮层降级态（data-boc-digest-float="1"）：不写变量，
+ * 回落到 reader.css 的居中浮层基础样式（fixed 16px 边距 + 76vh）。
+ * 两态都必须可点：#boc-root 在 reader.css 无 pointer-events 约束
+ * （pointer-events:none 只存在于 ready=0 与旧 A 形态专用壳上），面板自身
+ * pointer-events:auto 即整链可点，无需子元素逐层恢复。 */
 body[data-boc-reader-mode="1"] #boc-reading-view {
-  position: absolute;
-  inset: 0;
-  width: auto;
-  max-width: none;
-  height: 100vh;
-  display: none;
+  position: fixed;
+  left: var(--boc-digest-left, 16px);
+  top: var(--boc-digest-top, 16px);
+  width: var(--boc-digest-width, auto);
+  height: var(--boc-digest-height, min(76vh, 860px));
+  right: auto;
+  bottom: auto;
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-  background: transparent;
+  display: none;
   pointer-events: none;
 }
 
@@ -44,101 +31,49 @@ body[data-boc-reader-mode="1"] #boc-reading-view.open {
   display: block;
 }
 
+/* 浮层降级态：digest-host 未写变量（窄窗/无锚点），面板回到居中浮层基础
+ * 样式（reader.css 的 fixed 16px 边距 + 76vh）——这里只复位贴栏变量定位并
+ * 恢复可点，宽度/高度/圆角/阴影全部沿用基础段。 */
+body[data-boc-reader-mode="1"] #boc-reading-view[data-boc-digest-float="1"] {
+  left: 16px;
+  top: 16px;
+  width: auto;
+  right: 16px;
+  bottom: 16px;
+  height: min(76vh, 860px);
+  border-radius: 18px;
+  box-shadow: 0 28px 60px rgba(15, 23, 42, 0.16);
+  background: #fff;
+  pointer-events: auto;
+}
+
+/* 显隐与就绪门控（保留契约）：ready=0 时整体不可见不可点，防止半就绪态
+ * 挡住右栏推荐内容。 */
 body[data-boc-reader-mode="1"] #boc-reading-view[data-boc-reader-ready="0"] {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
 }
 
-body[data-boc-reader-mode="1"] .boc-reading-header-copy,
-body[data-boc-reader-mode="1"] .boc-reading-status {
-  display: none !important;
+/* 面板壳在门控内的定位兜底：reader.css 基础段已定义面板内部布局
+ * （flex 列 + 圆角 + 阴影），此处只保证在贴栏变量定位下撑满视图节点。 */
+body[data-boc-reader-mode="1"] .boc-reading-digest-panel {
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
 }
 
-body[data-boc-reader-mode="1"] #viewbox_report,
-body[data-boc-reader-mode="1"] .video-info-container,
-body[data-boc-reader-mode="1"] .video-info-title,
-body[data-boc-reader-mode="1"] .video-info-title-inner {
-  margin: 0 !important;
-  padding: 0 !important;
-  row-gap: 0 !important;
-  column-gap: 0 !important;
-}
-
-body[data-boc-reader-mode="1"] #viewbox_report,
-body[data-boc-reader-mode="1"] .video-info-container {
-  margin-bottom: 4px !important;
-}
-
-body[data-boc-reader-mode="1"] .left-container,
-body[data-boc-reader-mode="1"] .scroll-sticky {
-  row-gap: 8px !important;
-  padding-top: 0 !important;
-  overflow: visible !important;
-}
-
-body[data-boc-reader-mode="1"] .video-info-detail,
-body[data-boc-reader-mode="1"] .video-info-meta,
-body[data-boc-reader-mode="1"] .video-data {
-  display: none !important;
-}
-
-body[data-boc-reader-mode="1"] #boc-reading-view[data-boc-reader-follow="manual"] .boc-reading-main,
-body[data-boc-reader-mode="1"] #boc-reading-view[data-boc-reader-follow="manual"] .boc-reading-rail {
-  border-color: rgba(148, 163, 184, 0.8);
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
-}
-
-body[data-boc-reader-mode="1"] #boc-reading-view[data-boc-reader-follow="manual"] .boc-reading-eyebrow::after {
+/* ===== Follow 三态（保留契约） =====
+ * manual 态：面板 header 加「手动浏览中」标注（原 eyebrow 伪元素母题，
+ * rail 退役后挪到 header-copy 旁）。off/manual/auto 三态本身由
+ * reader.css 的 follow 按钮规则消费，这里只补 manual 视觉标注。 */
+body[data-boc-reader-mode="1"] #boc-reading-view[data-boc-reader-follow="manual"] .boc-reading-header-copy::after {
   content: "手动浏览中";
   display: inline-block;
   margin-left: 8px;
   font-size: 11px;
   font-weight: 500;
-  color: #94a3b8;
-}
-
-body[data-boc-reader-mode="1"] .boc-reader-player-host {
-  background: #000 !important;
-}
-
-body[data-boc-reader-mode="1"] #playerWrap {
-  position: static !important;
-  top: auto !important;
-  z-index: auto !important;
-  background: transparent !important;
-}
-
-body[data-boc-reader-mode="1"] .player-wrap,
-body[data-boc-reader-mode="1"] .scroll-sticky {
-  position: static !important;
-  top: auto !important;
-  z-index: auto !important;
-  background: transparent !important;
-}
-
-body[data-boc-reader-mode="1"] [data-boc-reader-player-reset="1"] {
-  position: static !important;
-  inset: auto !important;
-  width: auto !important;
-  height: auto !important;
-  transform: none !important;
-  margin: 0 !important;
-}
-
-body[data-boc-reader-mode="1"] .strip-ad-inner,
-body[data-boc-reader-mode="1"] .inside-wrp,
-body[data-boc-reader-mode="1"] .inside-bg,
-body[data-boc-reader-mode="1"] .hinter-msg,
-body[data-boc-reader-mode="1"] .slide,
-body[data-boc-reader-mode="1"] .cover.b-img,
-body[data-boc-reader-mode="1"] .cover.b-img.sleepy,
-body[data-boc-reader-mode="1"] .b-img.clickable {
-  display: none !important;
-}
-
-body[data-boc-reader-mode="1"] [data-boc-reader-hidden="1"] {
-  display: none !important;
+  color: var(--boc-reader-faint, #a39a8d);
 }
 
 /* ===== 主题 token =====
@@ -260,125 +195,6 @@ body[data-boc-reader-mode="1"][data-boc-reader-letter-spacing="loose"],
   --boc-reader-letter-spacing: 0.072em;
 }
 
-/* 内容宽度固定档（compact/narrow/wide/full）：直接覆盖主体宽度为「档位上限 ∩
- * 可用区」。未命中这些档位（fit/默认）时主体宽度见下方基础段的填满公式。 */
-html[data-boc-reader-mode="1"][data-boc-reader-content-width="compact"],
-body[data-boc-reader-mode="1"][data-boc-reader-content-width="compact"],
-#boc-reading-view[data-content-width="compact"] {
-  --boc-reader-main-width: min(
-    680px,
-    calc(100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-page-padding))
-  );
-}
-
-html[data-boc-reader-mode="1"][data-boc-reader-content-width="narrow"],
-body[data-boc-reader-mode="1"][data-boc-reader-content-width="narrow"],
-#boc-reading-view[data-content-width="narrow"] {
-  --boc-reader-main-width: min(
-    760px,
-    calc(100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-page-padding))
-  );
-}
-
-html[data-boc-reader-mode="1"][data-boc-reader-content-width="wide"],
-body[data-boc-reader-mode="1"][data-boc-reader-content-width="wide"],
-#boc-reading-view[data-content-width="wide"] {
-  --boc-reader-main-width: min(
-    980px,
-    calc(100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-page-padding))
-  );
-}
-
-html[data-boc-reader-mode="1"][data-boc-reader-content-width="full"],
-body[data-boc-reader-mode="1"][data-boc-reader-content-width="full"],
-#boc-reading-view[data-content-width="full"] {
-  --boc-reader-main-width: min(
-    1100px,
-    calc(100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-page-padding))
-  );
-}
-
-body[data-boc-reader-mode="1"],
-body[data-boc-reader-mode="1"] #app,
-body[data-boc-reader-mode="1"] .left-container,
-body[data-boc-reader-mode="1"] .right-container,
-body[data-boc-reader-mode="1"] .right-container-inner,
-body[data-boc-reader-mode="1"] .video-info-container,
-body[data-boc-reader-mode="1"] .video-info-detail,
-body[data-boc-reader-mode="1"] .video-sections-content-list,
-body[data-boc-reader-mode="1"] .video-container-v1,
-body[data-boc-reader-mode="1"] .video-container-v3 {
-  background: var(--boc-reader-page-bg) !important;
-  color: var(--boc-reader-text);
-}
-
-body[data-boc-reader-mode="1"] #app {
-  min-width: 0 !important;
-  width: 100% !important;
-  max-width: none !important;
-}
-
-html[data-boc-reader-mode="1"][data-boc-reader-subtitle-visible="0"] #boc-reading-view .boc-reading-main,
-body[data-boc-reader-mode="1"][data-boc-reader-subtitle-visible="0"] #boc-reading-view .boc-reading-main,
-#boc-reading-view[data-subtitle-visible="0"] .boc-reading-main {
-  display: none !important;
-}
-
-body[data-boc-reader-mode="1"] #boc-reading-view {
-  background: transparent;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-panel {
-  position: fixed;
-  right: calc(var(--boc-reader-panel-inset) + 8px);
-  top: calc(var(--boc-reader-panel-inset) + 56px);
-  width: min(286px, calc(100vw - 48px));
-  z-index: 2147483646;
-  background: var(--boc-reader-surface-2);
-}
-
-/* Simplified reader layout: player in normal flow, subtitle box below with its own scroll. */
-body[data-boc-reader-mode="1"] .boc-reading-player-shell {
-  display: none !important;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-layout,
-body[data-boc-reader-mode="1"] .boc-reading-stage {
-  display: block;
-  height: auto;
-}
-
-html[data-boc-reader-mode="1"],
-body[data-boc-reader-mode="1"] {
-  --boc-reader-page-padding: clamp(16px, 2.8vw, 32px);
-  --boc-reader-layout-gap: clamp(16px, 2vw, 24px);
-  --boc-reader-rail-target-width: clamp(168px, 15vw, 220px);
-  /* 统一 Digest 面板（PR2）：右侧面板占用 = 面板宽 + 与主体的间隙 + 右缘留白；
-   * 左视频区（页面主体）宽度按「视口 - 面板占用 - 左侧页边距」收缩。 */
-  --boc-reader-panel-width: clamp(360px, 30vw, 430px);
-  --boc-reader-panel-gap: clamp(14px, 1.6vw, 22px);
-  --boc-reader-panel-inset: clamp(10px, 1.2vw, 16px);
-  --boc-reader-panel-occupied: calc(
-    var(--boc-reader-panel-width) + var(--boc-reader-panel-gap) + var(--boc-reader-panel-inset)
-  );
-  /* 默认（fit/填满）：主体 = 面板左侧全部可用区；字幕列表已常驻右侧面板，
-   * 主体只有标题与视频，不再需要可读性宽度上限。固定档位（compact/narrow/
-   * wide/full）的覆盖见上方属性选择器块。 */
-  --boc-reader-main-width: calc(
-    100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-page-padding)
-  );
-  --boc-reader-rail-width: min(
-    var(--boc-reader-rail-target-width),
-    max(
-      0px,
-      calc(
-        ((100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-main-width)) / 2) - var(--boc-reader-page-padding) - var(--boc-reader-layout-gap)
-      )
-    )
-  );
-  --boc-reader-subtitle-line-height: 1.404;
-}
-
 html[data-boc-reader-mode="1"][data-boc-reader-line-height="compact"],
 body[data-boc-reader-mode="1"][data-boc-reader-line-height="compact"],
 #boc-reading-view[data-line-height="compact"] {
@@ -409,337 +225,11 @@ body[data-boc-reader-mode="1"][data-boc-reader-line-height="loose"],
   --boc-reader-subtitle-line-height: 1.692;
 }
 
-body[data-boc-reader-mode="1"] .boc-reading-actions {
-  gap: 12px;
-}
-
-/* 统一 Digest 面板（PR2）：右侧全高卡片。面板内布局（header/tabs/tab-body）
- * 见 reader.css 基础段；此处只落视口定位与门控前置。 */
-body[data-boc-reader-mode="1"] .boc-reading-digest-panel {
-  position: fixed;
-  top: var(--boc-reader-panel-inset);
-  right: var(--boc-reader-panel-inset);
-  bottom: var(--boc-reader-panel-inset);
-  width: var(--boc-reader-panel-width);
-  z-index: 2147483646;
-  pointer-events: auto;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-sizing: border-box;
-  background: var(--boc-reader-surface);
-  border: 1px solid var(--boc-reader-border);
-  border-radius: 18px;
-  box-shadow: var(--boc-reader-shadow);
-}
-
-/* native 模式下 header-copy 隐藏（标题由页面 h1 承担），面板头只剩动作按钮 */
-body[data-boc-reader-mode="1"] .boc-reading-header {
-  justify-content: flex-end;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-settings-panel {
-  position: fixed;
-  right: var(--boc-reader-page-padding);
-  top: 72px;
-  width: min(286px, calc(100vw - (var(--boc-reader-page-padding) * 2)));
-  max-height: calc(100vh - 96px);
-  overflow: auto;
-  display: grid;
-  gap: 10px;
-  background: var(--boc-reader-surface-2);
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-settings-group {
-  display: grid;
-  gap: 6px;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-settings-group + .boc-reading-settings-group {
-  border-top: 1px solid var(--boc-reader-border);
-  padding-top: 10px;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-controls .boc-reading-select {
-  min-width: 118px;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-toggle-inline {
-  width: fit-content;
-  background: var(--boc-reader-surface);
-  color: var(--boc-reader-text);
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-settings-panel .boc-reading-eyebrow {
-  font-size: 10px;
-  letter-spacing: 0.06em;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-settings-panel .boc-reading-toggle,
-body[data-boc-reader-mode="1"] .boc-reading-settings-panel .boc-reading-select {
-  min-height: 32px;
-  padding: 0 11px;
-  font-size: 12px;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-settings-panel .boc-reading-toggle {
-  gap: 6px;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-settings-panel .boc-reading-info-list {
-  gap: 4px;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-settings-panel .boc-reading-info-item {
-  gap: 8px;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-settings-panel .boc-reading-info-label,
-body[data-boc-reader-mode="1"] .boc-reading-settings-panel .boc-reading-info-value,
-body[data-boc-reader-mode="1"] .boc-reading-settings-panel .boc-reading-info-copy,
-body[data-boc-reader-mode="1"] .boc-reading-settings-panel .boc-reading-empty,
-body[data-boc-reader-mode="1"] .boc-reading-settings-panel .boc-reading-text-btn {
-  font-size: 12px;
-  line-height: 1.42;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-settings-panel .boc-reading-info-copy {
-  white-space: pre-wrap;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-settings-panel .boc-reading-info-copy.is-collapsed {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 5;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-rail {
-  position: fixed;
-  display: grid !important;
-  left: var(--boc-reader-page-padding) !important;
-  top: 112px !important;
-  width: var(--boc-reader-rail-width) !important;
-  max-height: calc(100vh - 136px) !important;
-  padding: 12px;
-  box-sizing: border-box;
-  background: var(--boc-reader-surface);
-  border: 1px solid var(--boc-reader-border);
-  border-radius: 14px;
-  box-shadow: var(--boc-reader-shadow);
-  pointer-events: auto;
-  z-index: 2147483646;
-}
-
-html[data-boc-reader-mode="1"][data-boc-reader-chapter-visibility="hide"] .boc-reading-rail,
-body[data-boc-reader-mode="1"][data-boc-reader-chapter-visibility="hide"] .boc-reading-rail,
-#boc-reading-view[data-chapter-visibility="hide"] .boc-reading-rail,
-html[data-boc-reader-mode="1"][data-boc-reader-chapter-visibility="auto"][data-boc-reader-has-chapters="0"] .boc-reading-rail,
-body[data-boc-reader-mode="1"][data-boc-reader-chapter-visibility="auto"][data-boc-reader-has-chapters="0"] .boc-reading-rail,
-#boc-reading-view[data-chapter-visibility="auto"][data-has-chapters="0"] .boc-reading-rail {
+/* 内容宽度档：阶段 2 起 --boc-reader-main-width 在 B 形态无消费方（主体宽度
+ * 逻辑随整页接管门控退役）。presentation-fields 的属性链与步进器照旧写值，
+ * 这里保留选择器空档位（阶段 4b 做窄容器与设置语义改写），视觉零效果。 */
+html[data-boc-reader-mode="1"][data-boc-reader-subtitle-visible="0"] #boc-reading-view .boc-reading-main,
+body[data-boc-reader-mode="1"][data-boc-reader-subtitle-visible="0"] #boc-reading-view .boc-reading-main,
+#boc-reading-view[data-subtitle-visible="0"] .boc-reading-main {
   display: none !important;
-}
-
-body[data-boc-reader-mode="1"] .left-container,
-body[data-boc-reader-mode="1"] .scroll-sticky,
-body[data-boc-reader-mode="1"] #playerWrap,
-body[data-boc-reader-mode="1"] .player-wrap,
-body[data-boc-reader-mode="1"] h1.video-title,
-body[data-boc-reader-mode="1"] .video-info-container,
-body[data-boc-reader-mode="1"] #viewbox_report {
-  width: min(
-    var(--boc-reader-main-width),
-    var(--boc-reader-player-rendered-width, var(--boc-reader-main-width))
-  ) !important;
-  max-width: min(
-    var(--boc-reader-main-width),
-    var(--boc-reader-player-rendered-width, var(--boc-reader-main-width))
-  ) !important;
-  /* PR2：主体在「视口 - 右侧面板占用」的左侧可用区内水平居中，最窄退到页边距。
-   * 居中基准用视频实际渲染宽（垂直适配收缩后仍居中），未布局前退主体宽。 */
-  margin-left: max(
-    var(--boc-reader-page-padding),
-    calc((100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-player-rendered-width, var(--boc-reader-main-width))) / 2)
-  ) !important;
-  margin-right: auto !important;
-}
-
-body[data-boc-reader-mode="1"] #playerWrap,
-body[data-boc-reader-mode="1"] .player-wrap {
-  border: 1px solid var(--boc-reader-border);
-  border-bottom: 0;
-  border-radius: 0;
-  background: var(--boc-reader-surface);
-  box-shadow: var(--boc-reader-shadow);
-  box-sizing: border-box;
-  overflow: visible !important;
-  margin-top: -35px !important;
-  height: var(--boc-reader-player-rendered-height, auto) !important;
-  max-height: var(--boc-reader-player-rendered-height, none) !important;
-}
-
-body[data-boc-reader-mode="1"] #playerWrap > *,
-body[data-boc-reader-mode="1"] .player-wrap > *,
-body[data-boc-reader-mode="1"] #playerWrap .bpx-player-container,
-body[data-boc-reader-mode="1"] #playerWrap .bpx-player-video-area,
-body[data-boc-reader-mode="1"] #playerWrap .bpx-player-primary-area,
-body[data-boc-reader-mode="1"] #playerWrap .bpx-player-inner,
-body[data-boc-reader-mode="1"] .player-wrap .bpx-player-container,
-body[data-boc-reader-mode="1"] .player-wrap .bpx-player-video-area,
-body[data-boc-reader-mode="1"] .player-wrap .bpx-player-primary-area,
-body[data-boc-reader-mode="1"] .player-wrap .bpx-player-inner {
-  width: 100% !important;
-  max-width: 100% !important;
-  height: 100% !important;
-  max-height: 100% !important;
-}
-
-/* PR2：字幕列表常驻面板「字幕」tab 内，main 只做 tab 内的弹性占位。 */
-body[data-boc-reader-mode="1"] .boc-reading-main {
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  min-height: 0;
-  flex: 1;
-  background: transparent;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-subtitle,
-body[data-boc-reader-mode="1"] .boc-reading-item,
-body[data-boc-reader-mode="1"] .boc-reading-item .boc-reading-text,
-body[data-boc-reader-mode="1"] .boc-reading-time,
-body[data-boc-reader-mode="1"] .boc-reading-chapter-title,
-body[data-boc-reader-mode="1"] .boc-reading-empty,
-body[data-boc-reader-mode="1"] .boc-reading-info-value,
-body[data-boc-reader-mode="1"] .boc-reading-info-copy {
-  color: var(--boc-reader-text) !important;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-item .boc-reading-text {
-  font-size: var(--boc-reader-subtitle-font-size) !important;
-  line-height: var(--boc-reader-subtitle-line-height) !important;
-  letter-spacing: var(--boc-reader-letter-spacing) !important;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-tail-spacer {
-  width: 100%;
-  min-height: 320px;
-  pointer-events: none;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-status {
-  display: none !important;
-}
-
-body[data-boc-reader-mode="1"] h1.video-title {
-  margin-top: 25px !important;
-  color: var(--boc-reader-text) !important;
-  line-height: 1.5 !important;
-  padding: 0 !important;
-  display: block !important;
-  height: auto !important;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-subtitle::-webkit-scrollbar {
-  width: 6px;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-subtitle::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-subtitle::-webkit-scrollbar-thumb {
-  background: var(--boc-reader-pill-bg);
-}
-
-body[data-boc-reader-mode="1"] .boc-reading-subtitle::-webkit-scrollbar-thumb:hover {
-  background: var(--boc-reader-surface-3);
-}
-
-@media (max-width: 1320px) {
-  html[data-boc-reader-mode="1"],
-  body[data-boc-reader-mode="1"] {
-    --boc-reader-layout-gap: clamp(12px, 1.4vw, 16px);
-    --boc-reader-rail-target-width: clamp(144px, 12vw, 168px);
-  }
-}
-
-@media (max-width: 1320px) {
-  html[data-boc-reader-mode="1"][data-boc-reader-content-width="wide"] .boc-reading-rail,
-  body[data-boc-reader-mode="1"][data-boc-reader-content-width="wide"] .boc-reading-rail,
-  #boc-reading-view[data-content-width="wide"] .boc-reading-rail {
-    display: none !important;
-  }
-}
-
-@media (max-width: 1180px) {
-  body[data-boc-reader-mode="1"] .boc-reading-rail {
-    display: none !important;
-  }
-
-  /* 窄窗口档：面板收缩，主体宽度公式随变量自动跟随。 */
-  html[data-boc-reader-mode="1"],
-  body[data-boc-reader-mode="1"] {
-    --boc-reader-panel-width: min(380px, 38vw);
-  }
-
-  body[data-boc-reader-mode="1"] .left-container,
-  body[data-boc-reader-mode="1"] .scroll-sticky,
-  body[data-boc-reader-mode="1"] #playerWrap,
-  body[data-boc-reader-mode="1"] .player-wrap,
-  body[data-boc-reader-mode="1"] h1.video-title,
-  body[data-boc-reader-mode="1"] .video-info-container,
-  body[data-boc-reader-mode="1"] #viewbox_report {
-    margin-left: max(
-      var(--boc-reader-page-padding),
-      calc((100vw - var(--boc-reader-panel-occupied) - var(--boc-reader-player-rendered-width, var(--boc-reader-main-width))) / 2)
-    ) !important;
-    margin-right: auto !important;
-  }
-}
-
-/* 极窄窗口：面板贴满剩余宽度，保证字幕仍可读。 */
-@media (max-width: 860px) {
-  html[data-boc-reader-mode="1"],
-  body[data-boc-reader-mode="1"] {
-    --boc-reader-panel-width: calc(100vw - (2 * var(--boc-reader-page-padding)));
-    --boc-reader-panel-gap: 0px;
-    --boc-reader-panel-inset: 8px;
-  }
-}
-
-body[data-boc-reader-mode="1"] .bpx-player-mini-warp,
-body[data-boc-reader-mode="1"] .bpx-player-mini-close,
-body[data-boc-reader-mode="1"] .bpx-player-ending-panel,
-body[data-boc-reader-mode="1"] .bpx-player-ending-related,
-body[data-boc-reader-mode="1"] .ad-report,
-body[data-boc-reader-mode="1"] [class*="ad-report"],
-body[data-boc-reader-mode="1"] [class*="mini-player"],
-body[data-boc-reader-mode="1"] [class*="picture-in-picture"] {
-  display: none !important;
-}
-
-/* 播放器原生字幕层隐藏：enterReaderMode 写 body data-boc-reading-active="1"，
- * close 时随 close 清单清除（presentation-fields.js readingActive 字段）。 */
-body[data-boc-reading-active="1"] .boc-reader-player-host .bpx-player-subtitle-wrap,
-body[data-boc-reading-active="1"] .boc-reader-player-host .bpx-player-subtitle-panel,
-body[data-boc-reading-active="1"] .boc-reader-player-host .bpx-player-subtitle-container,
-body[data-boc-reading-active="1"] .boc-reader-player-host .bilibili-player-video-subtitle,
-body[data-boc-reading-active="1"] .boc-reader-player-host .subtitle-wrap,
-body[data-boc-reading-active="1"] .boc-reader-player-host [class*="subtitle"],
-body[data-boc-reading-active="1"] .boc-reader-player-host .bpx-player-sending-bar,
-body[data-boc-reading-active="1"] .bpx-player-sending-bar {
-  display: none !important;
-}
-
-body[data-boc-reading-active="1"] [data-boc-reader-fading] {
-  visibility: hidden !important;
 }

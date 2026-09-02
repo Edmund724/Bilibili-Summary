@@ -1,15 +1,14 @@
-// 反馈回路：阅读模式章节栏显隐 bug（"勾选章节与否，左侧都不再出现章节"）。
+// 反馈回路：阅读模式章节属性链（历史 bug："勾选章节与否，左侧都不再出现章节"）。
 //
 // 与 lifecycle.test.js 的区别：这里用真实 UI 模板（ensureUiReady/buildUiHtml）
-// 与真实事件绑定（bindUiEvents），并覆盖现有测试没走到的链路：
-//   A. 进入阅读模式时章节已在 state → 渲染 + 三处 data 属性契约
-//   B. 章节经 presenter seam 迟到（subtitle-ready）→ 应触发重渲染
+// 与真实事件绑定（bindUiEvents），覆盖属性链路：
+//   A. 进入阅读模式时章节已在 state → has-chapters/visibility 三处 data 属性契约
+//      （阶段 2 B 形态：rail 章节列表 DOM 退役，属性链保留，阶段 4b 才做语义改写）
+//   B. 章节经 presenter seam 迟到（subtitle-ready）→ 属性应更新
 //   C. 真实复选框 change 事件 → data-*-chapter-visibility 应跟随勾选态
-//   D. JS 写入的属性名必须与阅读表（reader-gate.css）隐藏选择器匹配（CSS/JS 契约）
-//   E. hydrateReaderStateFromSettings 读取的设置 key 必须存在于 DEFAULT_SETTINGS
+//   D. hydrateReaderStateFromSettings 读取的设置 key 必须存在于 DEFAULT_SETTINGS
+// （原 rail 渲染断言与 gate CSS 隐藏选择器契约随 rail 退役删除）
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
 import { mountPlayerChain } from "../helpers/reader-skeleton.js";
@@ -51,10 +50,6 @@ function seedSubtitleBody() {
   ];
 }
 
-function chapterButtons() {
-  return document.querySelectorAll(`#${ids.readingChapterList} .boc-reading-chapter`);
-}
-
 function railVisibilityAttrs() {
   const readingView = document.getElementById(ids.readingView)!;
   return {
@@ -90,8 +85,8 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
-  it("A. 进入阅读模式：章节渲染到列表，且三处 has-chapters/visibility 属性落位", async () => {
+describe("章节属性链反馈回路（真实模板 + 真实绑定）", () => {
+  it("A. 进入阅读模式：三处 has-chapters/visibility 属性落位", async () => {
     seedChapters();
     seedSubtitleBody();
     initEssentials.bindReaderPresenter();
@@ -99,9 +94,6 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
     document.documentElement.setAttribute("data-boc-reader-mode", "1");
     document.body.setAttribute("data-boc-reader-mode", "1");
     await reader.enterReaderMode();
-
-    expect(chapterButtons().length).toBe(2);
-    expect(chapterButtons()[0].textContent).toContain("开场");
 
     const attrs = railVisibilityAttrs();
     expect(attrs.readingViewHasChapters).toBe("1");
@@ -112,7 +104,7 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
     expect(attrs.bodyChapterVisibility).toBe("auto");
   });
 
-  it("B. 章节经 presenter seam 迟到（subtitle-ready）后应重渲染出章节", async () => {
+  it("B. 章节经 presenter seam 迟到（subtitle-ready）后属性应更新", async () => {
     seedSubtitleBody();
     initEssentials.bindReaderPresenter();
 
@@ -120,8 +112,7 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
     document.body.setAttribute("data-boc-reader-mode", "1");
     await reader.enterReaderMode();
 
-    // 进入时无章节：空态 + has-chapters=0（此时 CSS 会隐藏整个 rail）
-    expect(chapterButtons().length).toBe(0);
+    // 进入时无章节：has-chapters=0
     expect(railVisibilityAttrs().readingViewHasChapters).toBe("0");
 
     // 模拟 fetcher 抓取完成：章节写入 state 后经 presenter 通知 reader
@@ -132,9 +123,8 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
     // 内经 ensureReaderDomain() 装载 reader 域后转发处理体，通知处理由同步变为
     // 装载后异步。断言语义不变（迟到章节触发重渲染），仅补装载等待。
     await vi.waitFor(() => {
-      expect(chapterButtons().length).toBe(2);
+      expect(railVisibilityAttrs().readingViewHasChapters).toBe("1");
     });
-    expect(railVisibilityAttrs().readingViewHasChapters).toBe("1");
   });
 
   it("C. 勾选/取消章节复选框（真实 change 事件）应切换 chapter-visibility 属性", async () => {
@@ -150,7 +140,7 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
     expect(checkbox).not.toBe(null);
     expect(checkbox.checked).toBe(true);
 
-    // 取消勾选 → hide（CSS 隐藏 rail）
+    // 取消勾选 → hide
     // 候选02 分层惰性：ui-renderer 的 change 回调经 ensureReaderDomain（缓存
     // promise）转发 updateReaderPreferences，属性写入由同步变为装载后异步；
     // 断言语义不变，仅补装载等待。
@@ -162,7 +152,7 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
     expect(railVisibilityAttrs().htmlChapterVisibility).toBe("hide");
     expect(railVisibilityAttrs().bodyChapterVisibility).toBe("hide");
 
-    // 重新勾选 → auto（有章节时 CSS 显示 rail）
+    // 重新勾选 → auto（有章节时）
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event("change", { bubbles: true }));
     await vi.waitFor(() => {
@@ -170,40 +160,9 @@ describe("章节栏显隐反馈回路（真实模板 + 真实绑定）", () => {
     });
     expect(railVisibilityAttrs().htmlChapterVisibility).toBe("auto");
     expect(railVisibilityAttrs().bodyChapterVisibility).toBe("auto");
-
-    // 章节按钮应始终在 DOM 中（显隐由 CSS 属性驱动，不销毁列表）
-    expect(chapterButtons().length).toBe(2);
   });
 
-  it("D. CSS 契约：阅读表（reader-gate.css）隐藏 rail 的选择器必须引用 JS 实际写入的属性名", () => {
-    // S3 分层：门控 CSS 迁往 entry/styles/reader-gate.css（随阅读模式挂载），
-    // 契约文件跟随（路径经 manifest 声明/运行时挂载，构建校验覆盖存在性）。
-    const cssPath = resolve(process.cwd(), "extension/entry/styles/reader-gate.css");
-    const css = readFileSync(cssPath, "utf8");
-
-    // 找到控制 .boc-reading-rail display:none 的规则块
-    const hideRule = css.match(/[^{}]*\.boc-reading-rail[^{}]*\{[^}]*display:\s*none[^}]*\}/s);
-    expect(hideRule, "reader-gate.css 中应存在隐藏 .boc-reading-rail 的规则").not.toBe(null);
-    const selectors = hideRule![0];
-
-    // JS 侧实际写入的属性（lifecycle.js applyReadingViewPresentation /
-    // updateReaderChapterPresence）必须全部被选择器引用，否则属性写了也白写。
-    expect(selectors).toContain('[data-chapter-visibility="hide"]'); // readingView 短名
-    expect(selectors).toContain('[data-has-chapters="0"]'); // readingView 短名
-    expect(selectors).toContain('[data-boc-reader-chapter-visibility="hide"]'); // html/body
-    expect(selectors).toContain('[data-boc-reader-has-chapters="0"]'); // html/body
-
-    // 反向：选择器里出现的 chapter 相关属性名，JS 必须真的会写。
-    // 从 renderReadingView + applyReadingViewPresentation 路径取真实写入值比对。
-    const readingView = document.getElementById(ids.readingView)!;
-    state.clip.chapters = [{ title: "x", from: 0 }];
-    reader.renderReadingView();
-    reader.updateReaderPreferences({ readerChapterVisible: false }, { persist: false });
-    expect(readingView.getAttribute("data-chapter-visibility")).toBe("hide");
-    expect(document.body.getAttribute("data-boc-reader-chapter-visibility")).toBe("hide");
-  });
-
-  it("E. 设置 key 契约：reader 读取的 readerChapterVisible 必须存在于 DEFAULT_SETTINGS", () => {
+  it("D. 设置 key 契约：reader 读取的 readerChapterVisible 必须存在于 DEFAULT_SETTINGS", () => {
     // hydrateReaderStateFromSettings 读 settings.readerChapterVisible，
     // updateReaderPreferences 持久化的也是 readerChapterVisible。
     // 若 DEFAULT_SETTINGS 缺失该 key，storage 里没有历史值时读到的语义依赖

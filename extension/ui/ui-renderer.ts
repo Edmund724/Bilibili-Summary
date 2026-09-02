@@ -100,23 +100,14 @@ export function buildUiHtml(): string {
     </aside>
 
     <section id="${ids.readingView}" aria-hidden="true" data-boc-reader-ready="0" aria-busy="true">
-      <div class="boc-reading-layout">
-        <aside class="boc-reading-rail">
-          <div class="boc-reading-eyebrow">章节</div>
-          <div id="${ids.readingChapterList}" class="boc-reading-list"></div>
-        </aside>
-
-        <section class="boc-reading-stage">
-          <p id="${ids.readingStatus}" class="boc-reading-status">使用页面原生播放器联动章节和字幕。</p>
-
-          <div class="boc-reading-player-shell">
-            <div id="${ids.readingPlayerSlot}" class="boc-reading-player-slot"></div>
-          </div>
-
-          <!-- 统一 Digest 面板（PR2）：右侧 430px 卡片壳，三标签 = 字幕 / 概览 / AI 对话。
-               字幕列表整体挂进字幕 tab body（分批渲染/点句跳转/跟随播放等行为不变）；
-               概览（PR4）与 AI 对话（PR5）分别由各自的状态机/组合根接管。 -->
-          <aside id="${ids.readingDigestPanel}" class="boc-reading-digest-panel" aria-label="Digest 面板">
+      <!-- 统一 Digest 面板（阶段 2，B 形态）：右栏面板壳，三标签 = 字幕 / 概览 /
+           AI 对话。rail（章节栏）与 stage（状态栏/播放器槽）随整页接管门控退役
+           ——章节列表由概览 tab 提供，播放器保持 B 站原生布局不动；
+           readingStatus 挪进面板 header 下方（id 不变，subtitle/ai/chat 各域
+           经 shared/ui-status.js 持续写入）。字幕列表整体挂进字幕 tab body
+           （分批渲染/点句跳转/跟随播放等行为不变）；概览（PR4）与 AI 对话
+           （PR5）分别由各自的状态机/组合根接管。 -->
+      <aside id="${ids.readingDigestPanel}" class="boc-reading-digest-panel" aria-label="Digest 面板">
             <header class="boc-reading-header">
               <div class="boc-reading-header-copy">
                 <strong class="boc-reading-title">${escapeHtml(state.clip.title || "B站字幕阅读")}</strong>
@@ -134,6 +125,8 @@ export function buildUiHtml(): string {
                 </button>
               </div>
             </header>
+
+            <p id="${ids.readingStatus}" class="boc-reading-status">使用页面原生播放器联动章节和字幕。</p>
 
             <section id="${ids.readingSettingsPanel}" class="boc-reading-panel boc-reading-settings-panel" hidden>
               <section class="boc-reading-settings-group">
@@ -361,9 +354,7 @@ export function buildUiHtml(): string {
                 </footer>
               </div>
             </div>
-          </aside>
-        </section>
-      </div>
+      </aside>
     </section>
   `;
 }
@@ -436,7 +427,10 @@ export function bindUiEvents(): void {
   const readingLineHeightSelect = byId(ids.readingLineHeightSelect);
   const readingContentWidthSelect = byId(ids.readingContentWidthSelect);
   const readingDescriptionBtn = byId(ids.readingDescriptionBtn);
-  const chapterList = byId(ids.readingChapterList);
+  // 阶段 2（B 形态）：rail 随整页接管门控退役，章节列表 DOM 移除；委托目标
+  // 降级为可选（章节跳转/手动滚动接管由概览 tab 的列表承接）。byId 会因缺
+  // 节点抛错，这里用查询兜底。
+  const chapterList = document.getElementById(ids.readingChapterList);
   const subtitleList = byId(ids.readingSubtitleList);
 
   // Digest 面板三标签切换（纯壳交互，见上方 setReaderDigestTab 注释）。
@@ -749,20 +743,22 @@ export function bindUiEvents(): void {
   };
   subtitleList.addEventListener("scroll", handleReaderManualScroll);
   subtitleList.addEventListener("wheel", handleReaderManualScroll, { passive: true });
-  chapterList.addEventListener("wheel", handleReaderManualScroll, { passive: true });
-  chapterList.addEventListener("pointerdown", () => {
-    loadReaderDomain()
-      .then((reader) => reader.noteManualReaderInteraction(3500))
-      .catch(() => {});
-  });
+  if (chapterList) {
+    chapterList.addEventListener("wheel", handleReaderManualScroll, { passive: true });
+    chapterList.addEventListener("pointerdown", () => {
+      loadReaderDomain()
+        .then((reader) => reader.noteManualReaderInteraction(3500))
+        .catch(() => {});
+    });
+    chapterList.addEventListener("click", (event) => {
+      loadReaderDomain()
+        .then((reader) => reader.onReadingChapterClick(event))
+        .catch(() => {});
+    });
+  }
   subtitleList.addEventListener("pointerdown", () => {
     loadReaderDomain()
       .then((reader) => reader.noteManualReaderInteraction(3500))
-      .catch(() => {});
-  });
-  chapterList.addEventListener("click", (event) => {
-    loadReaderDomain()
-      .then((reader) => reader.onReadingChapterClick(event))
       .catch(() => {});
   });
   subtitleList.addEventListener("click", (event) => {

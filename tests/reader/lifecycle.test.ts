@@ -11,12 +11,25 @@ let state: TestState;
 let shell: typeof import("../../extension/reader/index.js");
 let ids: typeof import("../../extension/reader/state.js").ids;
 let impl: typeof shell;
+let digestHost: typeof import("../../extension/reader/digest-host.js");
+
+// B 形态（阶段 2）：digest-host 以 spy 包装（实现保留），验证进入即开始贴右栏
+// 定位、关闭即拆除。vi.mock 会被提升到模块求值前，须放在顶层。
+vi.mock("../../extension/reader/digest-host.js", async (importActual) => {
+  const actual = await importActual() as typeof import("../../extension/reader/digest-host.js");
+  return {
+    openDigestHost: vi.fn(actual.openDigestHost),
+    closeDigestHost: vi.fn(actual.closeDigestHost),
+    refreshDigestHostRect: vi.fn(actual.refreshDigestHostRect)
+  };
+});
 
 async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state as TestState;
   shell = await import("../../extension/reader/index.js");
   ids = (await import("../../extension/reader/state.js")).ids;
+  digestHost = await import("../../extension/reader/digest-host.js");
   impl = shell;
   return { state, shell, ids };
 }
@@ -50,7 +63,10 @@ afterEach(() => {
 });
 
 describe("reader 生命周期", () => {
-  it("进入阅读模式：打开视图、写 data 属性、渲染章节/字幕列表", async () => {
+  it("进入阅读模式：打开视图、写 data 属性、渲染字幕列表并打开 digest-host", async () => {
+    // B 形态（阶段 2）：播放器挂载/整页接管链退役，进入不再绑定视频同步——
+    // 绑定由 sync tick 的 bindReadingViewVideo 兜底。digest-host 以 spy 验证
+    // 进入即开始贴右栏定位、关闭即拆除。
     state.clip.title = "测试视频";
     state.clip.author = "up主";
     state.clip.chapters = [
@@ -77,31 +93,26 @@ describe("reader 生命周期", () => {
     expect(document.documentElement.getAttribute("data-boc-reader-mode")).toBe("1");
     expect(document.body.getAttribute("data-boc-reader-mode")).toBe("1");
 
-    // 章节与字幕列表渲染
+    // B 形态不再渲染 rail 章节列表（章节由概览 tab 提供）；字幕列表照常渲染
     const chapterButtons = readingView.querySelectorAll(".boc-reading-chapter") as NodeListOf<HTMLElement>;
-    expect(chapterButtons.length).toBe(2);
-    expect(chapterButtons[0].dataset.seconds).toBe("0");
-    expect(chapterButtons[1].dataset.seconds).toBe("30");
-    expect(chapterButtons[0].textContent).toContain("开场");
+    expect(chapterButtons.length).toBe(0);
 
     const subtitleItems = readingView.querySelectorAll(".boc-reading-item") as NodeListOf<HTMLElement>;
     expect(subtitleItems.length).toBe(2);
     expect(subtitleItems[1].dataset.seconds).toBe("10");
     expect(subtitleItems[1].textContent).toContain("今天讲测试");
 
-    // 视图进入 ready 状态（stub 播放器有可见尺寸）
+    // B 形态不驱动播放器挂载：视图打开即 ready，无挂载等待文案
     expect(state.reader.readingViewReady).toBe(true);
     expect(readingView.getAttribute("data-boc-reader-ready")).toBe("1");
     expect(readingView.getAttribute("aria-busy")).toBe("false");
 
-    // 播放器挂载绑定 stub 视频
-    const video = document.querySelector("video") as HTMLVideoElement;
-    expect(video.__bocReadingSyncController).toBeInstanceOf(AbortController);
-    expect(syncRunning()).toBe(true);
+    // 进入即开始右栏定位（digest-host open），且不等播放器
+    expect(digestHost.openDigestHost).toHaveBeenCalledTimes(1);
 
-    // 关闭视图以清掉 interval/重试/controls-recovery 等定时器，避免污染后续测试
+    // 关闭视图以清掉同步定时器等，避免污染后续测试
     shell.closeReadingView();
-    // 让 alignReaderViewportToPlayer 的 120ms 定时器在 DOM 尚存时跑完
+    expect(digestHost.closeDigestHost).toHaveBeenCalledTimes(1);
     await new Promise((resolve) => setTimeout(resolve, 150));
   });
 
@@ -117,10 +128,9 @@ describe("reader 生命周期", () => {
 
     await shell.enterReaderMode();
 
-    // 播放器挂载成功后会绑定视频同步监听（AbortController 管理）与同步定时器
+    // B 形态：进入不再绑定视频同步（视图打开即就绪，不等播放器）
     const video = document.querySelector("video") as HTMLVideoElement;
-    expect(video.__bocReadingSyncController).toBeInstanceOf(AbortController);
-    expect(syncRunning()).toBe(true);
+    expect(syncRunning()).toBe(false);
 
     shell.closeReadingView();
 
@@ -134,11 +144,10 @@ describe("reader 生命周期", () => {
     expect(document.documentElement.getAttribute("data-boc-reader-theme")).toBe(null);
     expect(document.body.getAttribute("data-boc-reader-theme")).toBe(null);
 
-    // 同步已停止：interval 清除、视频事件监听移除
+    // 同步保持未运行、视频事件监听不存在
     expect(syncRunning()).toBe(false);
     expect(video.__bocReadingSyncController).toBeUndefined();
 
-    // 让 alignReaderViewportToPlayer 的 120ms 定时器等在 DOM 尚存时跑完
     await new Promise((resolve) => setTimeout(resolve, 150));
   });
 

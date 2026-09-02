@@ -160,9 +160,13 @@ function resolveActiveItem(cached: ActiveItemCache, index: number, list: HTMLEle
 
 function setActiveReadingItems(subtitleIndex: number, chapterIndex: number, shouldScroll = false) {
   const subtitleList = getReaderElement(ids.readingSubtitleList);
-  const chapterList = getReaderElement(ids.readingChapterList);
+  // 阶段 2（B 形态）：rail 章节列表 DOM 已退役，章节高亮降级为可选容器（无
+  // 节点即跳过写组）；activeChapterIndex 状态照常维护（概览 tab 的高亮消费）。
+  const chapterList = document.getElementById(ids.readingChapterList);
   const subtitleHit = resolveActiveItem(lastActiveItems.subtitle, subtitleIndex, subtitleList, "boc-reading-item");
-  const chapterHit = resolveActiveItem(lastActiveItems.chapter, chapterIndex, chapterList, "boc-reading-chapter");
+  const chapterHit = chapterList
+    ? resolveActiveItem(lastActiveItems.chapter, chapterIndex, chapterList, "boc-reading-chapter")
+    : { next: null, current: null, unchanged: true };
 
   if (!subtitleHit.unchanged) {
     if (subtitleHit.current && subtitleHit.current !== subtitleHit.next) {

@@ -104,7 +104,7 @@ describe("播放同步与高亮", () => {
     const readingView = document.getElementById(ids.readingView) as HTMLElement;
     expect(readingView.querySelectorAll(".boc-reading-item").length).toBe(3);
     expect(readingView.querySelector(".boc-reading-item.is-active")).toBe(null);
-    expect(readingView.querySelector(".boc-reading-chapter.is-active")).toBe(null);
+    expect(readingView.querySelector(".boc-reading-chapter")).toBe(null);
   });
 
   it("syncReadingViewPlayback：按 currentTime 切换字幕与章节高亮", () => {
@@ -121,18 +121,18 @@ describe("播放同步与高亮", () => {
     sync.syncReadingViewPlayback();
 
     const readingView = document.getElementById(ids.readingView) as HTMLElement;
+    // B 形态（阶段 2）：rail 章节列表 DOM 退役，章节高亮断言删除（概览 tab
+    // 承接章节导航，其 seek 链路由 overview.test.ts 覆盖）
     const activeSubtitle = readingView.querySelector(".boc-reading-item.is-active") as HTMLElement;
-    const activeChapter = readingView.querySelector(".boc-reading-chapter.is-active") as HTMLElement;
     expect(activeSubtitle.dataset.index).toBe("1");
     expect(activeSubtitle.textContent).toContain("第二句");
-    expect(activeChapter.dataset.index).toBe("0");
 
     // 状态同步到 readerState
     expect(state.reader.readingActiveSubtitleIndex).toBe(1);
     expect(state.reader.readingActiveChapterIndex).toBe(0);
   });
 
-  it("video timeupdate 事件驱动同步并切换高亮", () => {
+  it("video timeupdate 事件驱动同步并切换字幕高亮", () => {
     state.reader.readingViewOpen = true;
     state.reader.readingNativePageMode = true;
     shell.renderReadingView();
@@ -143,9 +143,7 @@ describe("播放同步与高亮", () => {
 
     const readingView = document.getElementById(ids.readingView) as HTMLElement;
     const activeSubtitle = readingView.querySelector(".boc-reading-item.is-active") as HTMLElement;
-    const activeChapter = readingView.querySelector(".boc-reading-chapter.is-active") as HTMLElement;
     expect(activeSubtitle.dataset.index).toBe("2");
-    expect(activeChapter.dataset.index).toBe("1");
     expect(state.reader.readingActiveSubtitleIndex).toBe(2);
     expect(state.reader.readingActiveChapterIndex).toBe(1);
   });
@@ -161,29 +159,6 @@ describe("播放同步与高亮", () => {
 
     expect(controller!.signal.aborted).toBe(true);
     expect(video.__bocReadingSyncController).toBeUndefined();
-  });
-
-  it("点击章节跳转：设置 video.currentTime 并高亮对应字幕", async () => {
-    state.reader.readingViewOpen = true;
-    state.reader.readingNativePageMode = true;
-    shell.renderReadingView();
-    playerHost.bindReadingViewVideo(video);
-    video.play = vi.fn(() => Promise.resolve());
-    uiRenderer.bindUiEvents();
-
-    const readingView = document.getElementById(ids.readingView) as HTMLElement;
-    const secondChapter = readingView.querySelectorAll(".boc-reading-chapter")[1] as HTMLElement;
-    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
-    secondChapter.dispatchEvent(event);
-
-    // 候选02 分层惰性：章节点击回调经 ui-renderer 的 ensureReaderDomain（缓存
-    // promise）转发，跳转为装载后微任务。断言语义不变，仅补装载等待。
-    await vi.waitFor(() => {
-      expect(video.currentTime).toBe(30);
-    });
-    const activeChapter = readingView.querySelector(".boc-reading-chapter.is-active") as HTMLElement;
-    expect(activeChapter.dataset.index).toBe("1");
-    expect(state.reader.readingActiveChapterIndex).toBe(1);
   });
 
   it("点击字幕跳转：选择文本时忽略，空白选区时跳转", async () => {

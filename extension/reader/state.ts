@@ -29,6 +29,8 @@ export const ids = {
   closeBtn: "boc-close-btn",
   settingsBtn: "boc-settings-btn",
   readingView: "boc-reading-view",
+  // 阶段 2（B 形态）：播放器槽 DOM 随 stage 退役，表项保留——player-host 的
+  // native 布局路径仍引用（阶段 3 随 A 形态一并删）。
   readingPlayerSlot: "boc-reading-player-slot",
   readingStatus: "boc-reading-status",
   readingCloseBtn: "boc-reading-close-btn",
@@ -49,6 +51,9 @@ export const ids = {
   readingInfoDescription: "boc-reading-info-description",
   readingDescriptionBtn: "boc-reading-description-btn",
   readingMeta: "boc-reading-meta",
+  // 阶段 2（B 形态）：rail 章节列表 DOM 退役，表项保留——renderReadingView /
+  // sync 高亮 / bindUiEvents 的可选容器查询仍引用（章节导航由概览 tab 承接，
+  // 阶段 3 清 A 形态残留时一并删）。
   readingChapterList: "boc-reading-chapters",
   readingSubtitleList: "boc-reading-subtitle",
   readingSubtitleTailSpacer: "boc-reading-tail-spacer",
