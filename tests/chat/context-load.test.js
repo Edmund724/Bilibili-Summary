@@ -38,7 +38,10 @@ async function importModule() {
   const module = await import("../../extension/chat/context-load.js");
   const state = (await import("../../extension/chat/chat-state.js")).chatSessionState;
   createContextLoad = module.createContextLoad;
-  createMessageChainContextFetch = module.createMessageChainContextFetch;
+  // 工单 07 装配收口：消息链策略自 chat/context-load 迁 core/context-assembly
+  //（context-payload 锚定的唯一装配链），导入路径随迁，断言语义零变化。
+  const assemblyModule = await import("../../extension/core/context-assembly.js");
+  createMessageChainContextFetch = assemblyModule.createMessageChainContextFetch;
   chatSessionState = state;
 }
 

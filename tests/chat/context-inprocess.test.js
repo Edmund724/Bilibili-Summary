@@ -42,8 +42,9 @@ const { gatewayMock, clipStateMock } = vi.hoisted(() => ({
 }));
 
 // 仅供缺省热评实现（④）命中的 mock；①②③ 注入自己的 fetchHotComments，
-// 不触达这两个模块。context-load / chat-runtime 的静态 import 图不含
-// core/state.js（sidepanel-payload 与 chat-state 对它是 type-only / 无依赖）。
+// 不触达这两个模块。core/context-assembly 对 core/state / gateway 是动态 import
+//（缺省热评实现专属），chat-runtime 的静态 import 图不含 core/state.js
+//（sidepanel-payload 与 chat-state 对它是 type-only / 无依赖）。
 vi.mock("../../extension/bilibili/gateway.js", () => ({
   getCurrentAid: gatewayMock.getCurrentAid,
   fetchHotComments: gatewayMock.fetchHotComments
@@ -68,9 +69,12 @@ const HOT_COMMENTS = [{ uname: "热评君", message: "前方高能" }];
 
 async function importModules() {
   const contextLoadModule = await import("../../extension/chat/context-load.js");
-  createInProcessContextFetch = contextLoadModule.createInProcessContextFetch;
-  createInProcessPinnedContextResolver = contextLoadModule.createInProcessPinnedContextResolver;
   createContextLoad = contextLoadModule.createContextLoad;
+  // 工单 07 装配收口：装配策略自 chat/context-load 迁 core/context-assembly
+  //（context-payload 锚定的唯一装配链），导入路径随迁，断言语义零变化。
+  const assemblyModule = await import("../../extension/core/context-assembly.js");
+  createInProcessContextFetch = assemblyModule.createInProcessContextFetch;
+  createInProcessPinnedContextResolver = assemblyModule.createInProcessPinnedContextResolver;
   const storeModule = await import("../../extension/chat/conversation-store.js");
   createConversationStore = storeModule.createConversationStore;
   const runtimeModule = await import("../../extension/chat/chat-runtime.js");

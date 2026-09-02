@@ -12,8 +12,10 @@
 //   conversation-store（pinned 补水的 context 解析 dep 接复合适配器：会话
 //     contextRef 与当前 clip 身份一致 → 进程内快照装配（工单 04 短路，零网络
 //     解析）；未命中走 ai/context-resolver 的 bgFetchJson 通道，content script
-//     可用）+ context-load（createInProcessContextFetch：进程内
-//     直读 state.clip，工单 08 三事已配测试）+ providers + presets +
+//     可用）+ context-load（编排壳）+ 装配链（createInProcessContextFetch /
+//     createInProcessPinnedContextResolver：AiContext 装配唯一入口，工单 07
+//     收口到 core/context-assembly，锚定 context-payload 的形状/签名单源；
+//     工单 08 三事已配测试）+ providers + presets +
 //     subtitle-wait + no-subtitle + notices/lists/popovers（三壳重建于
 //     reader/chat-{notices,lists,popovers}.ts，逻辑照抄）。URL 变化的实时上下文
 //     同步调度（原 chat/context-sync.ts 的防抖状态机，工单 05 并回为本地闭包）
@@ -61,7 +63,10 @@ import { createConversationStore } from "../chat/conversation-store.js";
 import { chatSessionState } from "../chat/chat-state.js";
 import { createPresetPrompts } from "../chat/presets.js";
 import { createProviderPrefs } from "../chat/providers.js";
-import { createContextLoad, createInProcessContextFetch, createInProcessPinnedContextResolver } from "../chat/context-load.js";
+import { createContextLoad } from "../chat/context-load.js";
+// AiContext 装配链唯一入口（工单 07 收口）：进程内直读策略 + pinned 补水身份
+// 短路，形状/校验/签名单源在 core/context-payload。
+import { createInProcessContextFetch, createInProcessPinnedContextResolver } from "../core/context-assembly.js";
 // 上下文加载失败文案：ensureCurrentContextForSend 的失败闸共用策略模块常量。
 import { CONTEXT_READ_FAILED_MESSAGE, isPinnedContextTruthy } from "../chat/context-policy.js";
 import { updateModelSelectWidth } from "../ui/model-select-width.js";
@@ -342,7 +347,8 @@ const popovers = createReaderChatPopovers({
 // 上下文状态加载（读当前页状态 → 按策略动作执行编排副作用）+ context chip。
 // 流式守卫判定惰性取 chatRuntime（回调执行时实例已存在）。
 // PR5：拉数据一段为 ContextFetch 策略注入——reader 与 content 同进程，用
-// createInProcessContextFetch 直读 state.clip（不走扩展页消息链）。
+// createInProcessContextFetch 直读 state.clip（不走扩展页消息链；装配策略
+// 自工单 07 起收口在 core/context-assembly 的唯一装配链）。
 const contextLoad = createContextLoad({
   fetchContext: createInProcessContextFetch({
     clip: () => state.clip,
@@ -768,8 +774,9 @@ async function refreshProvidersAndPrefsAfterExternalChange(): Promise<void> {
 }
 
 // ============================================================
-// 上下文状态加载 / context chip：编排壳在 ../chat/context-load.ts（策略判定在
-// ../chat/context-policy.ts）；下方为整段迁自 sidepanel.ts 的页面级编排函数。
+// 上下文状态加载 / context chip：编排壳在 ../chat/context-load.ts（装配策略在
+// ../core/context-assembly.ts，动作判定在 ../chat/context-policy.ts）；下方为
+// 整段迁自 sidepanel.ts 的页面级编排函数。
 // ============================================================
 
 // 【整段迁移自 sidepanel.ts】post-sync 分支编排：流式守卫 + 三个渲染回调。

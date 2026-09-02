@@ -1,5 +1,16 @@
 // extension/ai/context-resolver.ts
-// AI 对话上下文解析：拉取视频元信息 + 字幕 + 热评，构建 Markdown 字幕上下文。
+// AI 对话上下文的纯网络路径适配器（arch-slim/07 收口后的角色）：仅在「无页面 /
+// 无标签页」场景被消费，不持有进程内装配策略——AiContext 快照的装配知识单源在
+// core/context-payload（形状/校验/签名）+ core/context-assembly（唯一装配链）。
+//   resolveAiConversationContext   按任意 contextRef 经 bgFetchJson 拉取视频
+//                                  元信息/字幕装配上下文：pinned 补水身份短路
+//                                  未命中（无当前页面可快照）时的兜底，组合根
+//                                  经 conversation-store 的 resolveAiConversationRef
+//                                  接缝注入（purpose="context"）；
+//   resolveAiConversationPageRef  分页信息解析（purpose="page"）；
+//   getAiContextState             扩展页消息链的 tab transport（无标签页世界经
+//                                  core/context-assembly 的
+//                                  createMessageChainContextFetch 调用）。
 // B站抓取统一走 bilibili/gateway.js 的 bgFetchJson 传输层。
 
 import { getSubtitleCacheKey, loadSubtitleFromCache } from "../subtitle/cache.js";
