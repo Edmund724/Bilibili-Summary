@@ -100,8 +100,8 @@ export function buildUiHtml(): string {
     </aside>
 
     <section id="${ids.readingView}" aria-hidden="true" data-boc-reader-ready="0" aria-busy="true">
-      <!-- 统一 Digest 面板（阶段 2，B 形态）：右栏面板壳，三标签 = 字幕 / 概览 /
-           AI 对话。rail（章节栏）与 stage（状态栏/播放器槽）随整页接管门控退役
+      <!-- 统一 Digest 面板（B 形态）：右栏面板壳，三标签 = 字幕 / 概览 /
+           AI 对话。rail（章节栏）与 stage（状态栏/播放器槽）已随整页接管退役
            ——章节列表由概览 tab 提供，播放器保持 B 站原生布局不动；
            readingStatus 挪进面板 header 下方（id 不变，subtitle/ai/chat 各域
            经 shared/ui-status.js 持续写入）。字幕列表整体挂进字幕 tab body
@@ -427,7 +427,7 @@ export function bindUiEvents(): void {
   const readingLineHeightSelect = byId(ids.readingLineHeightSelect);
   const readingContentWidthSelect = byId(ids.readingContentWidthSelect);
   const readingDescriptionBtn = byId(ids.readingDescriptionBtn);
-  // 阶段 3：rail 章节列表 DOM 已随整页接管退役（章节跳转/手动滚动接管由概览
+  // rail 章节列表 DOM 已随整页接管退役（章节跳转/手动滚动接管由概览
   // tab 的列表承接，见 readingOverviewBody 的委托）。
   const subtitleList = byId(ids.readingSubtitleList);
 

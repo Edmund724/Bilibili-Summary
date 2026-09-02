@@ -1,8 +1,8 @@
 /* 统一 Digest 面板内部布局（#boc-reading-view 基础布局）——随阅读模式挂载的
  * 非门控段（S3 分层）：页面无 data-boc-reader-mode 时视图 display:none 静默，
- * 挂载后任何时刻建节点都不会闪现。阶段 4b：#boc-reading-view 的唯一内容是
+ * 挂载后任何时刻建节点都不会闪现。#boc-reading-view 的唯一内容是
  * Digest 面板（三标签 300–460px 窄容器），rail/stage/player-slot 等整页接管
- * 期布局随其退役删除；视口定位（贴栏/浮层）在 reader-gate.css 门控段。 */
+ * 期布局已随其退役删除；视口定位（贴栏/浮层）在 reader-gate.css 门控段。 */
 
 #boc-reading-view {
   position: fixed;
@@ -552,7 +552,7 @@
   gap: 7px;
 }
 
-/* 设置面板分组与三态开关行（阶段 4b 窄容器适配） */
+/* 设置面板分组与三态开关行（窄容器适配） */
 #boc-reading-view .boc-reading-settings-group {
   display: grid;
   gap: 7px;

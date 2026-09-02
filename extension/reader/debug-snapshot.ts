@@ -1,14 +1,14 @@
 // Reader 调试快照（自 lifecycle.js 迁出）。
 // __BOC_READER_DEBUG_SNAPSHOT__ 全局函数的真身：采集阅读视图/播放器宿主链的
 // getBoundingClientRect + getComputedStyle + data 属性，产出一份可序列化布局
-// 快照，用于排查播放器宿主/面板布局走样。注册在 ./init-essentials.js（常驻
+// 快照，用于排查 Digest 面板/播放器布局走样。注册在 ./init-essentials.js（常驻
 // 轻量），只在手动调用全局函数时经 ensureReaderDomain 装载 reader 域后转发；
 // 对外经 reader/index.js 动态域入口转发本导出。
 //
-// 阶段 3（B 形态收尾）：原 player-host 的宿主访问器（getPlayerHost）与呈现
-// 稳定性/浮动布局判定（isReaderPresentationStable/hasNativeReaderPlayerLayoutIssue）
-// 随整页接管退役——readyStable/hasLayoutIssue 字段删除，宿主一律经探针
-// findReaderPlayerHost 现查；player-reset 局部标记也随宿主复位逻辑一并删除。
+// B 形态收尾：player-host 退役时一并删掉了快照里的宿主访问器（getPlayerHost）
+// 与呈现稳定性/浮动布局判定（isReaderPresentationStable/
+// hasNativeReaderPlayerLayoutIssue）——readyStable/hasLayoutIssue 字段已移除，
+// 宿主一律经探针 findReaderPlayerHost 现查。
 //
 // 依赖方向（无环）：core/state、bilibili 探针/URL 工具、reader/state.js 的 ids 表；
 // 本模块不被 reader 域内任何实现模块 import。
@@ -91,7 +91,6 @@ export function createReaderDebugSnapshot(label = "manual") {
     readerMode: document.documentElement.getAttribute("data-boc-reader-mode"),
     readingActive: document.body.getAttribute("data-boc-reading-active"),
     readingViewOpen: state.reader.readingViewOpen,
-    readingNativePageMode: state.reader.readingNativePageMode,
     readingViewReady: state.reader.readingViewReady,
     hasRoot: Boolean(document.getElementById(ids.root)),
     hasReadingView: Boolean(document.getElementById(ids.readingView)),

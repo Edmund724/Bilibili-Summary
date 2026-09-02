@@ -21,7 +21,7 @@
 // (./ports.js, registered once by lifecycle.js), keeping the dependency graph
 // acyclic: SYNC → LAYOUT. 不允许任何 `?.[` 式静默端口调用回潮。
 //
-// 阶段 3（B 形态收尾）：player-host/hover-chrome 随整页接管退役。原 stop 路径
+// B 形态收尾：player-host/hover-chrome 随整页接管退役。原 stop 路径
 // 的 clearLayoutTimersForSyncStop/closeReaderCleanup/stopReaderPlayerObserver/
 // unbindReaderPlayerControlsHover、tick 的 native 布局调度与 playerChanged →
 // queueEnsureReaderPlayerMounted 均已删除——video 重绑由 bindReadingViewVideo
@@ -105,7 +105,7 @@ export function syncReadingViewPlayback(forceScroll = false) {
 // 在文档时，整段跳过 querySelector 与 classList 写。列表整段重建
 //（renderReadingView）会使旧节点脱离文档、缓存自动失效回退到现查；分批渲染
 // 未追到目标时节点为 null，同样回退现查（条目上屏后的下一拍自然补上高亮）。
-// 阶段 3：章节高亮缓存随 rail 章节列表 DOM 退役一并删除。
+// 章节高亮缓存已随 rail 章节列表 DOM（整页接管形态）退役一并删除。
 const lastActiveItems: { subtitle: ActiveItemCache } = {
   subtitle: { index: -1, node: null }
 };
@@ -133,7 +133,7 @@ function resolveActiveItem(cached: ActiveItemCache, index: number, list: HTMLEle
 
 function setActiveReadingItems(subtitleIndex: number, chapterIndex: number, shouldScroll = false) {
   const subtitleList = getReaderElement(ids.readingSubtitleList);
-  // 阶段 3：rail 章节列表 DOM 已随整页接管退役，章节高亮写组整段删除；
+  // rail 章节列表 DOM 已随整页接管退役，章节高亮写组整段删除；
   // activeChapterIndex 状态照常维护（概览 tab 的高亮消费）。
   const subtitleHit = resolveActiveItem(lastActiveItems.subtitle, subtitleIndex, subtitleList, "boc-reading-item");
 

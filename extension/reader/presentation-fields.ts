@@ -143,7 +143,7 @@ export const READER_PRESENTATION_FIELDS: ReaderPresentationField[] = [
     readValue: (reader) => reader.readingLineHeight
   },
   {
-    // 阶段 4b：readerContentWidth 语义 = Digest 面板宽度档（narrow/standard/
+    // readerContentWidth 语义 = Digest 面板宽度档（narrow/standard/
     // wide/float，接线在 digest-host），属性链照旧写值供 CSS/测试观察。
     id: "contentWidth",
     kind: "presentation",

@@ -75,6 +75,7 @@ export interface Settings {
   readerFontScale: string;
   readerLetterSpacing: string;
   readerLineHeight: string;
+  // 面板宽度档（narrow/standard/wide/float），接线在 reader/digest-host.ts
   readerContentWidth: string;
   readerChapterVisibility: string;
   readerChapterVisible: boolean;

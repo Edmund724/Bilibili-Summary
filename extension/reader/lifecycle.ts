@@ -11,9 +11,8 @@
 //   SYNC            sync.js（本文件）                      → SYNC + LAYOUT + ports
 //   LIFECYCLE       lifecycle.js（本文件）            → SYNC + LAYOUT + ports
 //
-// 阶段 3（B 形态收尾）：player-host/hover-chrome 随整页接管整体退役——进入
-// 链只开壳、渲染并 openDigestHost（播放器不动），close 拆 digest-host 并清理
-// 会话态；presenter reset 只清同步与 playerRetryTimer。
+// B 形态（右栏 Digest 面板）：进入链只开壳、渲染并 openDigestHost（播放器
+// 不动），close 拆 digest-host 并清理会话态；presenter reset 只停同步。
 import { state } from "../core/state.js";
 import { getReaderElement } from "../shared/dom-utils.js";
 import { sleep } from "../shared/utils.js";
@@ -50,7 +49,7 @@ import { requestSubtitleRefresh, persistReaderSettingsThroughSeam } from "./pres
 // presentation.js 移回此处（原 lifecycle.js 分节回归）。本文件只保留 reader 域
 // 的重活：进入/退出生命周期、阅读视图渲染、偏好/面板呈现与 presenter 通知
 // 处理体（候选09 迁出：字幕分批渲染状态机 → ./batched-render.js，调试快照 →
-// ./debug-snapshot.js，控制条/头部悬停 chrome → ./hover-chrome.js）。
+// ./debug-snapshot.js）。
 import {
   renderReadingStatus,
   hydrateReaderStateFromSettings,
@@ -62,13 +61,12 @@ import { READER_CLOSE_ATTRS } from "./presentation-fields.js";
 // LAYOUT (state) functions this module drives:
 import {
   ids,
-  // 候选06：转写尾部留白（PR2 起高度基准为字幕列表容器自身；阶段 4a 自
-  // page-frame 并入 state）。
+  // 候选06：转写尾部留白（PR2 起高度基准为字幕列表容器自身；后自 page-frame
+  // 并入 state）。
   updateReadingSubtitleTailSpacer
 } from "./state.js";
-// B 形态右栏 Digest 面板定位器：进入时开始贴栏定位，关闭时拆除。阶段 3 起
-// 整页接管链（player-host/hover-chrome）已整体退役；阶段 4a 起 page-frame
-// 剪枝体系随之退役，LAYOUT 层只剩 video-bind + digest-host。
+// B 形态右栏 Digest 面板定位器：进入时开始贴栏定位，关闭时拆除。LAYOUT 层
+// 只剩 video-bind + digest-host。
 import { openDigestHost, closeDigestHost, refreshDigestHostRect } from "./digest-host.js";
 import { resetManualScrollPause, setProgrammaticScrollUntil } from "./state.js";
 // PR2 统一 Digest 面板：进入阅读模式时把右侧面板重置回默认「字幕」标签。
@@ -106,11 +104,6 @@ import {
   resetReaderOverviewState,
   triggerReaderOverviewGeneration
 } from "./overview.js";
-
-// playerRetryTimer（readingPlayerRetryTimer）自 reader-impl.js 闭包迁入：属主
-//（presenter reset 路径）清除在本模块。阶段 3 起播放器不再由阅读模式驱动，
-// 变量仅为 presenter reset 的清理保留。
-let playerRetryTimer = 0;
 
 // ===== 候选06 端口半边：reader 域唯一显式端口的单点注册 =====
 //
@@ -167,12 +160,6 @@ export function handleReaderPresenterNotification(kind: string, text?: string | 
   switch (kind) {
     case "reset":
       stopReadingViewSync();
-      // 原 clearLayoutTimersForSyncStop 内的 playerRetryTimer 清除分支随变量
-      // 迁入本模块：stopReadingViewSync 不再清它，在此补齐同等清除。
-      if (playerRetryTimer) {
-        window.clearTimeout(playerRetryTimer);
-        playerRetryTimer = 0;
-      }
       break;
     case "subtitle-ready":
       if (state.reader.readingViewOpen) {
@@ -231,7 +218,6 @@ function renderReadingSubtitleSelect() {
 export async function enterReaderMode() {
   const readingView = getReaderElement(ids.readingView);
   state.reader.setViewOpen(true);
-  state.reader.setNativePageMode(true);
   document.body.setAttribute("data-boc-reading-active", "1");
   hydrateReaderStateFromSettings(state.settings);
   applyReadingViewPresentation();
@@ -242,7 +228,7 @@ export async function enterReaderMode() {
   openReaderViewShell(readingView);
   renderReadingView();
   // B 形态：面板贴右栏 fixed 定位（digest-host 负责算 rect/降级浮层）；
-  // 整页接管门控退役，播放器保持 B 站原生布局不动，无需等挂载。
+  // 播放器保持 B 站原生布局不动，无需等挂载。
   openDigestHost();
   // 字幕未抓取时的后台兜底抓取（原 finishEnterReaderMode 链保留项）：B 形态
   // 面板以字幕为主内容，不依赖播放器挂载成功，直达路径也必须有数据来源。
@@ -280,13 +266,12 @@ export function waitForVideoMetadata(timeoutMs = 5000): Promise<void> {
   });
 }
 
-// syncReaderModeAfterMount / settleReaderModePresentation 已随整页接管门控退役
-//（阶段 2，B 形态）：播放器挂载/布局/呈现稳定链不再由阅读模式驱动，同步的
+// syncReaderModeAfterMount / settleReaderModePresentation 已随整页接管退役
+//（B 形态）：播放器挂载/布局/呈现稳定链不再由阅读模式驱动，同步的
 // 启动收敛到 subtitle-ready 通知路径（handleReaderPresenterNotification）。
 
 export function closeReadingView() {
   state.reader.setViewOpen(false);
-  state.reader.setNativePageMode(false);
   state.reader.setViewReady(false);
   state.reader.setSettingsExpanded(false);
   state.reader.setNextScrollBehavior("smooth");
@@ -294,10 +279,6 @@ export function closeReadingView() {
   // so a later manual interaction is never swallowed by stale deadlines.
   resetManualScrollPause();
   setProgrammaticScrollUntil(0);
-  if (playerRetryTimer) {
-    window.clearTimeout(playerRetryTimer);
-    playerRetryTimer = 0;
-  }
   const readingView = getReaderElement(ids.readingView);
   readingView.classList.remove("open", "reader-page");
   readingView.setAttribute("aria-hidden", "true");
@@ -346,9 +327,8 @@ export function renderReadingView() {
   cancelReadingSubtitleAppend();
   const titleNode = document.querySelector(".boc-reading-title");
   const metaNode = getReaderElement(ids.readingMeta);
-  // 阶段 3：rail 章节列表 DOM 已随整页接管退役，章节渲染由概览 tab 接管；
-  // hasChapters 属性链保留（presentation 属性表不动，阶段 4b 才做窄容器与
-  // 设置语义改写）。
+  // 章节渲染由概览 tab 接管（rail 章节列表 DOM 已随整页接管退役）；
+  // hasChapters 属性链保留（presentation 属性表与 CSS 消费方仍读它）。
   const chapters = normalizeChapters(state.clip.chapters || []);
   const body = Array.isArray(state.clip.subtitleBody) ? state.clip.subtitleBody : [];
   const subtitleItems = getReadingSubtitleItems();
@@ -449,7 +429,7 @@ export function updateReaderPreferences(next: Partial<Record<string, unknown>>, 
   });
   applyReadingViewPresentation();
   renderReaderPanels();
-  // 阶段 4b：readerContentWidth 是面板宽度档，档位变化立即重算面板 rect
+  // readerContentWidth 是面板宽度档，档位变化立即重算面板 rect
   //（digest-host 读档位映射目标宽度；float 档直接切浮层形态）。
   if (state.reader.readingContentWidth !== prevContentWidth && state.reader.readingViewOpen) {
     refreshDigestHostRect();

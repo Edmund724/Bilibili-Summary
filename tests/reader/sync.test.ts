@@ -109,7 +109,6 @@ describe("播放同步与高亮", () => {
 
   it("syncReadingViewPlayback：按 currentTime 切换字幕与章节高亮", () => {
     state.reader.readingViewOpen = true;
-    state.reader.readingNativePageMode = true;
     shell.renderReadingView();
 
     // 手动绑定 stub 视频（与挂载路径一致）
@@ -134,7 +133,6 @@ describe("播放同步与高亮", () => {
 
   it("video timeupdate 事件驱动同步并切换字幕高亮", () => {
     state.reader.readingViewOpen = true;
-    state.reader.readingNativePageMode = true;
     shell.renderReadingView();
     playerHost.bindReadingViewVideo(video);
 
@@ -163,7 +161,6 @@ describe("播放同步与高亮", () => {
 
   it("点击字幕跳转：选择文本时忽略，空白选区时跳转", async () => {
     state.reader.readingViewOpen = true;
-    state.reader.readingNativePageMode = true;
     shell.renderReadingView();
     playerHost.bindReadingViewVideo(video);
     video.play = vi.fn(() => Promise.resolve());

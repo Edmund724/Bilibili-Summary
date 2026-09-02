@@ -42,7 +42,6 @@ export type ChapterItem = {
 
 type ReaderBusinessState = {
   readingViewOpen: boolean;
-  readingNativePageMode: boolean;
   readingAutoScroll: boolean;
   readingTheme: string;
   readingFontScale: string;
@@ -66,7 +65,6 @@ type ReaderInternalState = {
 
 type ReaderSetters = {
   setViewOpen(value: boolean): void;
-  setNativePageMode(value: boolean): void;
   setAutoScroll(value: boolean): void;
   setTheme(value: string): void;
   setFontScale(value: string): void;
@@ -88,7 +86,6 @@ type ReaderStateWritable = ReaderBusinessState & ReaderInternalState & ReaderSet
 
 const readerState: ReaderStateWritable = {
   readingViewOpen: false,
-  readingNativePageMode: false,
   readingAutoScroll: true,
   readingTheme: "light",
   readingFontScale: "m",
@@ -106,7 +103,6 @@ const readerState: ReaderStateWritable = {
   readingDocumentClickBound: false,
   readingViewReady: false,
   setViewOpen(value) { this.readingViewOpen = value; },
-  setNativePageMode(value) { this.readingNativePageMode = value; },
   setAutoScroll(value) { this.readingAutoScroll = value; },
   setTheme(value) { this.readingTheme = value; },
   setFontScale(value) { this.readingFontScale = value; },

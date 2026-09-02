@@ -11,7 +11,7 @@
 //
 // 为什么聚合前独立成叶子：id 表被 UI 模板（ui/ui-renderer.js buildUiHtml）、
 // 总结链（subtitle/ui.js）与 reader 域实现（video-bind/sync/lifecycle）三方
-// 共享。若继续由旧 page-frame.js 持有，常驻侧为取一份纯数据就得静态拖入整个
+// 共享。若由 LAYOUT 域持有，常驻侧为取一份纯数据就得静态拖入整个
 // LAYOUT 域。聚合后本文件仍是 content 静态 chunk 的轻量部分，不 import reader
 // 域任何重实现。
 
@@ -149,7 +149,7 @@ export function setProgrammaticScrollUntil(until: number) {
   programmaticScrollUntil = until;
 }
 
-// ===== 转写尾部留白（阶段 4a 自 page-frame.js 并入） =====
+// ===== 转写尾部留白（自 page-frame.js 并入） =====
 //
 // 消费方：batched-render 分批追加、lifecycle 的整段渲染，均属 reader 动态
 // chunk，故随消费方落在本动态域聚合文件；此处不得 import 其他 reader 域模块

@@ -1,18 +1,17 @@
-// Reader LAYOUT 层 · digest-host 域（右栏 Digest 面板定位器，本阶段纯增量、
-// 无消费方，项目行为零变化）。
+// Reader LAYOUT 层 · digest-host 域（右栏 Digest 面板定位器）。
 //
 // 职责：计算右栏 rect 并写入 #boc-reading-view 的 CSS 变量
-// --boc-digest-left/top/width/height。定位 CSS（阶段 2）才会消费这些变量，
+// --boc-digest-left/top/width/height。定位 CSS（reader-gate.css）消费这些变量，
 // 本模块只负责「算 + 写」；浮层形态（降级 2）不写变量，改设
-// data-boc-digest-float="1" 属性，让阶段 2 的 CSS 回落到 reader.css 既有的
+// data-boc-digest-float="1" 属性，让 CSS 回落到 reader.css 既有的
 // 居中浮层基础样式。
 //
-// 阶段 4b：面板宽度不再跟随锚点夹取 [300, 420]，改为读
+// 面板宽度不再跟随锚点夹取 [300, 420]，而是读
 // state.reader.readingContentWidth 档位（narrow 340 / standard 380 / wide 440 /
 // float 强制浮层）——步进器「面板宽度」档即本模块的消费方。
 //
-// 阶段 3：player-host 整页接管已退役，本模块是 LAYOUT 层唯一的布局调度器
-//（rAF 合帧 + 脏检查，思路源自候选10 批1 的旧 player-host 调度器）——digest-host
+// player-host 整页接管退役后，本模块是 LAYOUT 层唯一的布局调度器
+//（rAF 合帧 + 脏检查，思路源自旧 player-host 调度器）——digest-host
 // 的写组是四个 CSS 变量与一个浮层属性，快照结构独立。
 //
 // 为什么不用 MutationObserver：弹幕每飘一条都是变更事件，白烧 CPU（见
@@ -35,7 +34,7 @@ const ANCHOR_SELECTORS = [
 
 // 锚点有效硬下限：宽度过小视为隐藏副本/折叠态，跳过落到次优先候选。
 const ANCHOR_MIN_WIDTH = 280;
-// 面板宽度档（阶段 4b：readerContentWidth 语义 = 面板宽度档）。贴栏形态的
+// 面板宽度档（readerContentWidth 语义 = 面板宽度档）。贴栏形态的
 // 面板宽度由档位决定（不再跟随锚点宽度），右缘对齐锚点；夹取区间只作安全
 // 下限/上限，档位宽度始终落在区间内。
 const PANEL_MIN_WIDTH = 300;
@@ -51,7 +50,7 @@ const DEFAULT_PANEL_WIDTH = PANEL_WIDTH_BY_MODE.standard;
 // 贴播放器右缘时的间距与视口安全边距。
 const PLAYER_GAP = 12;
 const VIEWPORT_MARGIN = 16;
-// 窄于该值不进贴栏形态（1000 是估计值，TODO(阶段2): 手工验证时对照 B 站
+// 窄于该值不进贴栏形态（1000 是估计值，TODO: 手工验证时对照 B 站
 // 右栏折叠断点校准后再定）。
 const FLOAT_VIEWPORT_MIN_WIDTH = 1000;
 // 定时自查间隔：SPA 换页把锚点节点换掉后靠它重锚（不用 MutationObserver，
@@ -245,7 +244,7 @@ function applyDigestRect(): void {
   }
 
   // 降级 2：窄窗 / 连播放器都没有——浮层形态。不写四个变量，改设浮层
-  // 属性，阶段 2 的 CSS 让面板回落到 reader.css 居中浮层基础样式。
+  // 属性，reader-gate.css 让面板回落到 reader.css 居中浮层基础样式。
   applyFloating();
 }
 

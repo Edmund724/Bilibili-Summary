@@ -63,7 +63,7 @@ afterEach(() => {
 
 describe("reader 生命周期", () => {
   it("进入阅读模式：打开视图、写 data 属性、渲染字幕列表并打开 digest-host", async () => {
-    // B 形态（阶段 2）：播放器挂载/整页接管链退役，进入不再绑定视频同步——
+    // B 形态：播放器挂载/整页接管链退役，进入不再绑定视频同步——
     // 绑定由 sync tick 的 bindReadingViewVideo 兜底。digest-host 以 spy 验证
     // 进入即开始贴右栏定位、关闭即拆除。
     state.clip.title = "测试视频";

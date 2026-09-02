@@ -45,9 +45,9 @@ export function normalizeReaderLineHeight(value: unknown): string {
 }
 
 export function normalizeReaderContentWidth(value: unknown): string {
-  // 阶段 4b 语义改写：readerContentWidth 是 Digest 面板宽度档（narrow 340 /
-  // standard 380 / wide 440 / float 浮层全宽），不再是整页主体宽度档。
-  // 旧档位（compact/narrow/wide/full/fit/medium 等）一律归一到新默认 standard。
+  // readerContentWidth 是 Digest 面板宽度档（narrow 340 /
+  // standard 380 / wide 440 / float 浮层全宽），不是整页主体宽度档。
+  // 旧档位（compact/narrow/wide/full/fit/medium 等）一律归一到默认 standard。
   return ["narrow", "standard", "wide", "float"].includes(value as string)
     ? (value as string)
     : "standard";

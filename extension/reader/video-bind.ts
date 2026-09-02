@@ -1,13 +1,13 @@
-// Reader LAYOUT 层 · video-bind 域（阶段 3 自退役的 player-host.js 迁出）。
+// Reader LAYOUT 层 · video-bind 域（自退役的 player-host.js 迁出）。
 //
 // 本文件只拥有「video 播放事件 ↔ 阅读视图同步」的绑定生命周期：
 //   - bindReadingViewVideo：把 timeupdate/seeked/loadedmetadata 经
 //     AbortController 绑到 video 上，事件回调经 ports.js 显式端口驱动 SYNC；
 //   - unbindReadingViewVideoSync：abort 即移除整组监听。
 //
-// 阶段 3（B 形态收尾）：player-host 整页接管随 Digest 面板形态退役，原绑定
+// B 形态收尾：player-host 整页接管随 Digest 面板形态退役，原绑定
 // 实现里的挂载/布局分支一并删除——loadedmetadata 不再触发 layoutReaderPlayerHost，
-// seeked 不再排队控制条恢复（B 形态用户用原生控制条），宿主变化不再排队
+// seeked 不再排队控制条恢复（面板形态用户用原生控制条），宿主变化不再排队
 // ensureReaderPlayerMounted（video 换新时「重新绑定」由本函数首行的
 // readingVideoEl 比对兜底，sync tick 与 seek 入口都会路过）。原 player-host 的
 // videoEventsBound 模块级标志删除：绑定与否以元素上的 __bocReadingSyncController
@@ -47,7 +47,7 @@ export function bindReadingViewVideo(video: HTMLVideoElement | null = getRuntime
   const syncHandler = (event: Event) => {
     if (state.reader.readingViewOpen) {
       // seek 后的滚动跟随重置为 auto（程序化滚动窗口）；布局/控制条恢复分支
-      // 随 player-host 整页接管退役（见文件头注）。
+      // 已随 player-host 整页接管退役（见文件头注）。
       if (event?.type === "seeked") {
         state.reader.setNextScrollBehavior("auto");
       }

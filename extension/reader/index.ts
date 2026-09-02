@@ -12,7 +12,7 @@
 //   SYNC            sync.js                                        → LAYOUT + ports
 //   LIFECYCLE       lifecycle.js                                   → SYNC + LAYOUT + ports
 // （ports.js 为零依赖叶子，承载逆依赖回调；lifecycle.js 启动时单点注册。
-//   阶段 3 起 player-host/hover-chrome 随整页接管退役。）
+//   player-host/hover-chrome 已随整页接管退役。）
 //
 // Import-cycle note (issue 08): the reader implementation modules deliberately
 // import nothing from core/runtime.js — they read reader DOM ids through local
@@ -44,7 +44,7 @@ export { createReaderDebugSnapshot } from "./debug-snapshot.js";
 
 // ===== LAYOUT 层：video-bind.js + digest-host.js =====
 
-// 阅读视图的播放器绑定（LAYOUT · video-bind 域，阶段 3 自 player-host 迁出）
+// 阅读视图的播放器绑定（LAYOUT · video-bind 域，自退役的 player-host 迁出）
 export { bindReadingViewVideo } from "./video-bind.js";
 
 // ===== sync.js (SYNC): playback↔subtitle sync =====

@@ -77,10 +77,10 @@ export function mountReaderSkeleton(ids) {
   readingView.id = ids.readingView;
   doc.body.appendChild(readingView);
 
-  // 统一 Digest 面板壳（阶段 2 B 形态）：header / 设置面板 / 三标签 + tab body
+  // 统一 Digest 面板壳（B 形态）：header / 设置面板 / 三标签 + tab body
   // 与真实模板同构，readingStatus 挪进 header 下方；字幕列表 .boc-reading-main
-  // 挂在字幕 tab body 内。rail（章节栏）与 stage（状态栏/播放器槽）随整页接管
-  // 门控退役，不再搭建（章节列表由概览 tab 提供）。
+  // 挂在字幕 tab body 内。rail（章节栏）与 stage（状态栏/播放器槽）已随整页接管
+  // 退役，不再搭建（章节列表由概览 tab 提供）。
   const digestPanel = doc.createElement("aside");
   digestPanel.id = ids.readingDigestPanel;
   digestPanel.className = "boc-reading-digest-panel";
@@ -307,7 +307,7 @@ export function mountReaderSkeleton(ids) {
   return { readingView, readingMain, digestPanel };
 }
 
-// 给播放器链上的元素补可见尺寸，保证 video-probe / player-host 判定通过。
+// 给播放器链上的元素补可见尺寸，保证 video-probe 判定通过。
 // （PR2：#boc-reading-inline-host 随字幕列表搬进统一面板而移除，列表容器
 // 自身不再需要可见尺寸 mock——sync 域滚动路径对其不可见容器本就走兜底。）
 export function mockPlayerRects(extraSelectors = []) {

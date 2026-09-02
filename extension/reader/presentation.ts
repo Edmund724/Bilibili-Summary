@@ -1,5 +1,5 @@
-// Reader 排版/设置呈现层（候选02 分层惰性：自 lifecycle.js / page-frame.js /
-// player-host.js 迁出的常驻微模块）。
+// Reader 排版/设置呈现层（候选02 分层惰性：自 lifecycle.js 与已退役的
+// page-frame.js / player-host.js 迁出的常驻微模块）。
 //
 // 这里只收拢「启动路径必需」的轻呈现函数：阅读视图的排版应用
 //（applyReadingViewPresentation）、设置水合（hydrateReaderStateFromSettings）、
