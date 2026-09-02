@@ -1,6 +1,7 @@
 // ai/completion.js 纯协议接缝测试（候选 03）：
 // 假 fetch 全覆盖——请求构造对照表（尾斜杠归一 / Bearer 有无 / reasoning_effort
-// 三态 / stream 真假 / max_tokens 探针 / 额外头合并）、SSE 解析（多事件 / [DONE] /
+// 三态 + disableThinking 显式关思考字段族 / stream 真假 / max_tokens 探针 /
+// 额外头合并）、SSE 解析（多事件 / [DONE] /
 // 半行 buffer）、溢出判定（子串+正则样本，自 budget-single-shot 迁移）、
 // 重试 policy（流式默认 2 次 + onRetry 时序、非流式默认 0 次、溢出/abort 不重试）、
 // abort 传播、fetchImpl 注入。不 import port/DOM，走返回/throw 错误模型。
@@ -102,7 +103,7 @@ describe("请求构造对照表（url / body / headers）", () => {
     expect(noKey.headers["Content-Type"]).toBe("application/json");
   });
 
-  it("reasoning_effort 三态：off 不发参数，low / high 映射；stream 真假写进 body", async () => {
+  it("reasoning_effort 三态：off 不发参数，low / high 映射；stream 真假写进 body；disableThinking 上线路", async () => {
     // 按请求体 stream 动态回响应：流式给 SSE 响应（可读体），非流式给 JSON 响应。
     const fetchMock = vi.fn(async (_url, init) =>
       JSON.parse(init.body).stream
@@ -121,6 +122,7 @@ describe("请求构造对照表（url / body / headers）", () => {
     await run({ stream: true, thinkingLevel: "low" });
     await run({ stream: true, thinkingLevel: "high" });
     await run({ stream: true });
+    await run({ stream: false, thinkingLevel: "off", disableThinking: true });
 
     const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body));
     expect(bodies[0]).toEqual({
@@ -134,6 +136,13 @@ describe("请求构造对照表（url / body / headers）", () => {
       model: "test-model",
       messages: [{ role: "user", content: "hi" }],
       stream: true
+    });
+    // 第 5 发：显式关思考字段族真的进了请求体（不只在纯函数层）
+    expect(bodies[4]).toMatchObject({
+      stream: false,
+      reasoning_effort: "none",
+      thinking: { type: "disabled" },
+      enable_thinking: false
     });
   });
 
@@ -227,6 +236,25 @@ describe("buildChatRequestBody / normalizeThinkingLevel（自 client.js 迁入�
     const base = { model: "test-model", messages: [] };
     expect(buildChatRequestBody({ ...base })).toEqual({ model: "test-model", messages: [], stream: false });
     expect(buildChatRequestBody({ ...base, thinkingLevel: "medium" })).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("disableThinking（档位 off）：发 OpenAI 兼容族的显式关思考字段", () => {
+    const base = { model: "test-model", messages: [], stream: false };
+    expect(buildChatRequestBody({ ...base, disableThinking: true })).toMatchObject({
+      reasoning_effort: "none",
+      thinking: { type: "disabled" },
+      enable_thinking: false
+    });
+  });
+
+  it("disableThinking 不覆盖用户主动选的思考档位：low/high 时只发 reasoning_effort", () => {
+    const base = { model: "test-model", messages: [], stream: false };
+    expect(buildChatRequestBody({ ...base, thinkingLevel: "low", disableThinking: true })).toEqual({
+      model: "test-model",
+      messages: [],
+      stream: false,
+      reasoning_effort: "low"
+    });
   });
 
   it("normalizeThinkingLevel 只接受 off/low/high，其余回落 off", () => {

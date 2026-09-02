@@ -89,7 +89,7 @@ describe("buildExplainMessages", () => {
 });
 
 describe("explainSelection", () => {
-  it("走非流式单次请求，思考档位钉死 off（不跟随对话 tab 的档位），返回 trim 后的解释", async () => {
+  it("走非流式单次请求，思考显式关闭（档位 off + disableThinking），返回 trim 后的解释", async () => {
     const text = await explain.explainSelection({
       provider: { baseUrl: "https://api.test/v1", apiKey: "sk", model: "m" },
       videoTitle: "T",
@@ -104,6 +104,7 @@ describe("explainSelection", () => {
     const args = completionMock.chatCompletion.mock.calls[0][0];
     expect(args.stream).toBe(false);
     expect(args.thinkingLevel).toBe("off");
+    expect(args.disableThinking).toBe(true);
     expect(args.maxTokens).toBeGreaterThan(0);
     expect(args.messages[1].content).toContain("传递信息的工具");
   });

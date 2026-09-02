@@ -25,6 +25,19 @@ export const OPENAI_CHAT_PATH = "/chat/completions";
 // 思考档位：off 不发任何参数；low / high 映射到 OpenAI 兼容的 reasoning_effort。
 const AI_THINKING_LEVELS = ["off", "low", "high"];
 
+// OpenAI 兼容族的「显式关闭思考」字段集（档位为 off 且调用方要求显式关闭时发）。
+// 各家字段名不同且互不冲突，一次全发，认的一方生效、不认的一方按未知参数忽略：
+//   reasoning_effort: "none"      —— OpenAI GPT-5 系的官方关思考值
+//   thinking: {type:"disabled"}   —— DeepSeek / GLM / Kimi / MiniMax / 豆包的混合思考开关
+//   enable_thinking: false        —— Qwen（DashScope 兼容模式）/ vLLM / SiliconFlow 系
+// 写点唯一：若某个平台对未知参数严格报错（表现为 HTTP 400），把对应那条从表里删掉
+// 即可，调用方（ai/explain.js 的选区解释）不需要改动。
+const THINKING_DISABLE_FIELDS = {
+  reasoning_effort: "none",
+  thinking: { type: "disabled" },
+  enable_thinking: false
+};
+
 export function normalizeThinkingLevel(value: unknown): string {
   return AI_THINKING_LEVELS.includes(String(value)) ? String(value) : "off";
 }
@@ -35,6 +48,8 @@ interface BuildChatRequestBodyInput {
   stream?: boolean;
   thinkingLevel?: string;
   maxTokens?: number | null;
+  /** 显式关思考：仅档位为 off 时生效，见 THINKING_DISABLE_FIELDS */
+  disableThinking?: boolean;
 }
 
 interface ChatRequestBody {
@@ -43,17 +58,23 @@ interface ChatRequestBody {
   stream: boolean;
   reasoning_effort?: string;
   max_tokens?: number;
+  thinking?: { type: string };
+  enable_thinking?: boolean;
 }
 
 /**
  * 构造 chat/completions 请求体（纯函数，便于单测；请求构造单点）。
  * stream 显式传递（流式 true / 非流式 false）；maxTokens 供探针传 1。
+ * disableThinking：调用方要的是「一定别想」（如选区解释要即时答案）。档位是
+ * low/high 说明用户主动要思考，此时不注入关闭字段（不覆盖用户选择）。
  */
-export function buildChatRequestBody({ model, messages, stream = false, thinkingLevel, maxTokens }: BuildChatRequestBodyInput): ChatRequestBody {
+export function buildChatRequestBody({ model, messages, stream = false, thinkingLevel, maxTokens, disableThinking = false }: BuildChatRequestBodyInput): ChatRequestBody {
   const body: ChatRequestBody = { model, messages, stream };
   const level = normalizeThinkingLevel(thinkingLevel);
   if (level !== "off") {
     body.reasoning_effort = level;
+  } else if (disableThinking) {
+    Object.assign(body, THINKING_DISABLE_FIELDS);
   }
   if (maxTokens != null) {
     body.max_tokens = maxTokens;
@@ -211,6 +232,8 @@ interface ChatCompletionInput {
   stream?: boolean;
   signal?: AbortSignal | null;
   thinkingLevel?: string;
+  /** 显式关思考（仅 thinkingLevel 为 off 时生效）；见 buildChatRequestBody */
+  disableThinking?: boolean;
   retries?: number;
   probe?: boolean;
   maxTokens?: number | null;
@@ -240,7 +263,8 @@ interface ChatCompletionInput {
  *   fetch/http 阶段的失败未吐过任何事件，不触发。
  * - headers: 额外请求头（探针的 Accept 等）；Content-Type 固定 JSON，
  *   Authorization 已存在时不重复注入。
- * - thinkingLevel / maxTokens / signal / fetchImpl（默认 globalThis.fetch）。
+ * - thinkingLevel / disableThinking（档位 off 时显式发关思考字段族）/
+ *   maxTokens / signal / fetchImpl（默认 globalThis.fetch）。
  * 错误模型见文件头注释。
  */
 export async function chatCompletion({
@@ -249,6 +273,7 @@ export async function chatCompletion({
   stream = false,
   signal,
   thinkingLevel,
+  disableThinking = false,
   retries,
   probe = false,
   maxTokens,
@@ -280,6 +305,7 @@ export async function chatCompletion({
     messages,
     stream,
     thinkingLevel,
+    disableThinking,
     maxTokens: probe ? (maxTokens ?? 1) : maxTokens
   });
 

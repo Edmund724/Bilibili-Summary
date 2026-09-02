@@ -106,11 +106,13 @@ export function buildExplainMessages({
 
 /**
  * 发一次解释请求，返回模型给出的解释文本（已 trim）。
- * 思考档位显式钉死 "off"：解释要的是即时性，不跟随用户在对话 tab 选的档位
- *（ai/completion.js 的口径：off = 请求体不带 reasoning_effort，模型按默认
- * 快路径回答；「不要思考过程」的措辞另写在系统提示词里，兜住服务端默认开
- * 思考的平台）。中止（signal）与网络/HTTP 失败按 ai/completion.js 的错误模型
- * 上抛，由调用方落 error 态展示；空回复按错误处理（模型没给东西不算成功）。
+ * 思考档位显式钉死「关」：thinkingLevel:"off" + disableThinking:true——不跟随
+ * 用户在对话 tab 选的档位，并在请求体里发 OpenAI 兼容族的显式关闭字段
+ *（ai/completion.js 的 THINKING_DISABLE_FIELDS），服务端默认开思考的平台
+ *（Qwen / DeepSeek / GLM / Kimi / GPT-5）也一并压住；「不要思考过程」的措辞
+ * 留在系统提示词里做第二道闸。中止（signal）与网络/HTTP 失败按
+ * ai/completion.js 的错误模型上抛，由调用方落 error 态展示；空回复按错误处理
+ *（模型没给东西不算成功）。
  */
 export async function explainSelection({
   provider,
@@ -128,6 +130,7 @@ export async function explainSelection({
     messages,
     stream: false,
     thinkingLevel: "off",
+    disableThinking: true,
     signal,
     maxTokens: EXPLAIN_MAX_TOKENS,
     retries: 1
