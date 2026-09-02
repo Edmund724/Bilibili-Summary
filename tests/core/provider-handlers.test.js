@@ -1,6 +1,6 @@
 // provider-handlers.js createProviderMessageHandlers 工厂测试。
 // background.js 的 AI / ASR Provider 消息家族共用该工厂：验证标准处理器
-// （list/get/save/remove/test/setKey）的响应负载契约、异步回包返回 true、
+// （list/get/save/remove/test）的响应负载契约、异步回包返回 true、
 // 同步失败回包返回 false，以及 test 对探针输入的装配（Key 优先取消息
 // 直带值，否则按 providerId 读已存 Key）。用 fake deps 驱动，不碰
 // chrome.storage。
@@ -25,7 +25,6 @@ function makeDeps(overrides = {}) {
     saveProviders: vi.fn(async (items) => items.map((p) => ({ ...p, hasSavedKey: false }))),
     deleteProvider: vi.fn(async () => [{ id: "p2", name: "P2", hasSavedKey: false }]),
     loadKeys: vi.fn(async () => ({ p1: "stored-key" })),
-    saveKey: vi.fn(async () => {}),
     probe: vi.fn(async () => ({ ok: true })),
     ...overrides
   };
@@ -118,26 +117,6 @@ describe("get（读取已存 Key）", () => {
     expect(handlers.get({}, {}, sendResponse)).toBe(false);
     expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "缺少 providerId" });
     expect(deps.loadKeys).not.toHaveBeenCalled();
-  });
-});
-
-describe("setKey（注入 saveKey 时才存在）", () => {
-  it("透传 (providerId, apiKey) 并回包 { ok: true }", async () => {
-    const deps = makeDeps();
-    const handlers = createProviderMessageHandlers(deps);
-    const { sendResponse, response } = makeChannel();
-
-    expect(typeof handlers.setKey).toBe("function");
-    expect(handlers.setKey({ providerId: "p1", apiKey: " new-key " }, {}, sendResponse)).toBe(true);
-    expect(await response).toEqual({ ok: true });
-    expect(deps.saveKey).toHaveBeenCalledWith("p1", " new-key ");
-  });
-
-  it("未注入 saveKey 的家族（ASR 形状）不带 setKey 处理器", () => {
-    const { saveKey: _omit, ...rest } = makeDeps();
-    const handlers = createProviderMessageHandlers(rest);
-    expect(handlers.setKey).toBeUndefined();
-    expect(Object.keys(handlers).sort()).toEqual(["get", "list", "remove", "save", "test"]);
   });
 });
 

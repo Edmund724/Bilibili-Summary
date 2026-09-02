@@ -9,7 +9,7 @@
 // 面板是唯一界面——状态/消息的可见宿主收敛到面板 header 下方的
 // #boc-reading-status（renderReadingStatus 同节点：sync tick 的进度文案会覆盖
 // 抓取/操作提示，语义上正是「当前状态行」，阅读视图未开时节点不存在则静默
-// 只写 state，popup payload 与转写横幅仍从 state 取值）。）
+// 只写 state，clip 快照 payload 与转写横幅仍从 state 取值）。）
 
 import { state, uiState } from "../core/state.js";
 import { ids } from "../reader/state.js";

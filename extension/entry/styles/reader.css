@@ -43,14 +43,6 @@
   min-width: 0;
 }
 
-.boc-reading-eyebrow {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: #9ca3af;
-  text-transform: uppercase;
-}
-
 .boc-reading-title {
   display: block;
   margin: 0;
@@ -426,9 +418,7 @@
 }
 
 #boc-reading-view .boc-reading-meta,
-#boc-reading-view .boc-reading-status,
-#boc-reading-view .boc-reading-panel-grid label,
-#boc-reading-view .boc-reading-info-label {
+#boc-reading-view .boc-reading-status {
   font-size: 16px;
   color: var(--boc-reader-muted);
 }
@@ -488,7 +478,6 @@
   box-shadow: var(--boc-reader-shadow);
 }
 
-#boc-reading-view .boc-reading-panel-grid label,
 #boc-reading-view .boc-reading-info-group {
   display: grid;
   gap: 6px;

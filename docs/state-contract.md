@@ -27,7 +27,7 @@ object — prefer the `xxxState` spelling in new code.
 The `playerAi` namespace has moved out of the core bag: it is fully owned by the `ai` domain
 (`ai/player-ai.ts` is the only business writer) and lives in `ai/player-ai-state.ts` as
 `playerAiState`, with the same Readonly-fields + setter whitelist shape as the core namespaces.
-Its one external writer — `core/message-handler.ts` on `popup-trigger-reading-view` — goes
+Its one external writer — `core/message-handler.ts` on `reader-enter` — goes
 through the intent-level `suppressUntil(timestamp)` helper exported by that module, so callers
 outside `ai/` never touch player-AI slots directly.
 

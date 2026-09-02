@@ -74,7 +74,7 @@ export type ReaderContextPayload = {
 //                         背景层重选字幕轨时作 previousLang 偏好。
 //   selectedSubtitleId    会话持久化、segment-cache 缓存键、背景层 previousId 偏好。
 //   selectedSubtitleUrl   会话持久化、segment-cache 缓存键、背景层 previousUrl 偏好。
-//   subtitleOptions       对话侧 侧当前无直接读取（保留：与 popup 侧 payload 字段同名
+//   subtitleOptions       对话侧 侧当前无直接读取（保留：与 clip 快照 payload 字段同名
 //                         同源 state.clip.subtitles，且签名按其长度判定换轨）。
 //   chapters              offscreen 章节对齐切段（budgeter）与追问章节名检索
 //                         （raw-retrieval/followup-context）。

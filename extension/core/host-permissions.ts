@@ -21,6 +21,8 @@
 //   则不回收；被删项自身按 id 剔除——钩子早于 DOM row.remove() 执行，不剔除就
 //   永远判定「仍被占用」。
 
+import { sendRuntimeMessage } from "../shared/messaging.js";
+
 // 探针/权限缺失时的统一可操作文案（AI 探针、ASR 探针共享）
 export const HOST_PERMISSION_HINT = "该平台域名未授权，请在保存时允许权限";
 
@@ -87,6 +89,33 @@ export async function requestProviderOrigins(
     };
   }
   return { ok: true, origins };
+}
+
+// ===== 跨语境代申请（设置面板保存链 / AI 平台行预设切换链的唯一通道） =====
+
+export interface ProviderOriginsProxyResult {
+  ok: boolean;
+  error?: string;
+}
+
+// host 权限代申请的单一实现：content script 语境没有 chrome.permissions API
+// （Chromium 该 API 仅扩展自有页面/SW 可用），发 request-provider-origins 消息
+// 由 SW 代为申请；扩展页面语境（防御性分支）直接走 requestProviderOrigins。
+// 手势安全由两段各自保证，缺一不可：
+// - 本函数两个分支的申请发起（requestProviderOrigins 的同步段 / sendRuntimeMessage
+//   调用）之前零 await，调用方（click/change 手势处理器）再保证「调用本函数前
+//   零先行 await」——逐调用方扫描见 tests/ui/options-save-gesture.test.js；
+// - SW 处理器（entry/background.ts 的 handleRequestProviderOrigins）在
+//   chrome.permissions.request 前零 await，手势随一次 runtime 消息传导。
+// 返回 { ok, error? }：ok=false 时 error 为可操作提示（用户拒绝 / 环境不支持 /
+// SW 侧报错）；调用方对结果不关心的（预设切换链）可忽略返回值。
+export async function requestProviderOriginsViaBackground(baseUrls: string[]): Promise<ProviderOriginsProxyResult> {
+  if (typeof globalThis.chrome?.permissions?.request === "function") {
+    const result = await requestProviderOrigins(baseUrls);
+    return { ok: result.ok, error: result.error };
+  }
+  const resp = (await sendRuntimeMessage({ type: "request-provider-origins", baseUrls })) as { ok?: boolean; error?: string } | null;
+  return { ok: Boolean(resp?.ok), error: resp?.error };
 }
 
 // 当前扩展是否已获该 URL（或 baseUrl）的 host 权限。拿不到 chrome.permissions

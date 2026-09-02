@@ -1,7 +1,7 @@
 // extension/core/provider-handlers.ts
 // Provider 消息处理器的通用工厂。
 // extension/entry/background.js 里 AI 平台与 ASR 平台各有一组形状相同的
-// 消息处理器（列表 / 读取 Key / 保存列表 / 写单个 Key / 删除 / 可选的连通性测试），
+// 消息处理器（列表 / 读取 Key / 保存列表 / 删除 / 可选的连通性测试），
 // 本工厂提取这组共享结构：调用方注入对应 store 的函数与可选探针，换回一组
 // (message, sender, sendResponse) → boolean 形状的标准处理器。background 的
 // 路由表保持消息名不变，只换处理器指向。不持有状态、不直接碰
@@ -11,7 +11,6 @@
 // - list / save / remove 成功 → { ok: true, providers: items }
 // - get 成功 → { ok: true, apiKey }；缺 providerId → 同步回包
 //   { ok: false, error: "缺少 providerId" } 并返回 false
-// - setKey 成功 → { ok: true }
 // - test 成功 → 原样转发探针负载；输入不完整 → 同步回包 { ok: false, error }
 //   并返回 false
 // - 所有 Promise 路径返回 true（异步回包）
@@ -32,7 +31,6 @@ export interface ProviderMessageHandlersDeps {
   saveProviders: (items: unknown[]) => Promise<unknown[]>;
   deleteProvider: (providerId: string) => Promise<unknown[]>;
   loadKeys: () => Promise<Record<string, string>>;
-  saveKey?: (providerId: string, apiKey: string) => Promise<unknown>;
   probe?: (provider: unknown) => Promise<unknown>;
   pickTestProvider?: (message: ProviderHandlersMessage) => { provider: unknown } | { error: string };
 }
@@ -43,7 +41,6 @@ export interface ProviderMessageHandlers {
   save: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
   remove: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
   test?: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
-  setKey?: (message: unknown, sender: unknown, sendResponse: SendResponse) => boolean;
 }
 
 export function createProviderMessageHandlers({
@@ -51,7 +48,6 @@ export function createProviderMessageHandlers({
   saveProviders,
   deleteProvider,
   loadKeys,
-  saveKey,
   probe,
   pickTestProvider
 }: ProviderMessageHandlersDeps): ProviderMessageHandlers {
@@ -125,14 +121,6 @@ export function createProviderMessageHandlers({
     return true;
   }
 
-  function setKey(message: unknown, _sender: unknown, sendResponse: SendResponse): boolean {
-    const msg = message as ProviderHandlersMessage;
-    saveKey!(String(msg.providerId || ""), String(msg.apiKey || ""))
-      .then(() => sendResponse({ ok: true }))
-      .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
   function test(message: unknown, _sender: unknown, sendResponse: SendResponse): boolean {
     const picked = pickProbeProvider(message as ProviderHandlersMessage);
     if ("error" in picked) {
@@ -153,11 +141,6 @@ export function createProviderMessageHandlers({
   // background.js 不再注册 test 消息，工厂保留能力供需要它的场景使用）。
   if (hasProbe) {
     handlers.test = test;
-  }
-  // ASR 平台没有“写单个 Key”的消息（Key 随 saveProviders 收割进 local），
-  // 只有注入了 saveKey 的家族才带 setKey 处理器。
-  if (saveKey) {
-    handlers.setKey = setKey;
   }
   return handlers;
 }

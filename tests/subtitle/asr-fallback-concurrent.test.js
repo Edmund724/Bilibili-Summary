@@ -153,11 +153,11 @@ describe("ASR 转写中并发调用（共享转写、成果落缓存）", () => 
   it("转写 pending 时第二次调用命中共享单元：不重启、成果写缓存一次、发起者让位等待者收尾", async () => {
     const pending = stubPendingPipeline();
 
-    // 第一次调用（例如侧边栏 init / popup-refresh #1 触发）→ 开始转写
+    // 第一次调用（例如侧边栏 init / clip-refresh #1 触发）→ 开始转写
     const first = fallback.maybeRunAsrFallback({ runId: 1 });
     await vi.waitFor(() => expect(deps.runAsrPipeline).toHaveBeenCalledTimes(1));
 
-    // 转写进行中，第二次调用（侧边栏 focus/tab 切换 sync 触发的 popup-refresh #2，
+    // 转写进行中，第二次调用（侧边栏 focus/tab 切换 sync 触发的 clip-refresh #2，
     // fetchRunId 前进到 2）
     clipState.setFetchRunId(2);
     const second = fallback.maybeRunAsrFallback({ runId: 2 });

@@ -55,6 +55,7 @@ import {
   setAsrBeforeDeleteHandler
 } from "./options-asr-rows.js";
 import {
+  requestProviderOriginsViaBackground,
   revokeOrphanOrigin,
   permissionRevokeErrorMessage
 } from "../core/host-permissions.js";
@@ -658,28 +659,11 @@ function bindSettingsEvents(host: HTMLElement): void {
   });
 }
 
-// ===== host 权限申请（background 代申请） =====
+// ===== host 权限申请 =====
 
-interface PermissionRequestResult {
-  ok: boolean;
-  error?: string;
-}
-
+// 代申请走 core/host-permissions 的单一实现 requestProviderOriginsViaBackground：
 // content script 语境没有 chrome.permissions API（Chromium 该 API 仅扩展自有
-// 页面/SW 可用），改走 background 消息代为申请；手势经一次 runtime 消息传导，
-// SW 监听器在调用 chrome.permissions.request 前零 await（见
-// entry/background.ts handleRequestProviderOrigins）。
-async function requestProviderOriginsViaBackground(baseUrls: string[]): Promise<PermissionRequestResult> {
-  if (typeof globalThis.chrome?.permissions?.request === "function") {
-    // 扩展页面语境（防御性分支）：直接申请，不走消息。
-    return requestProviderOriginsDirect(baseUrls);
-  }
-  const resp = (await sendRuntimeMessage({ type: "request-provider-origins", baseUrls })) as { ok?: boolean; error?: string };
-  return { ok: Boolean(resp?.ok), error: resp?.error };
-}
-
-async function requestProviderOriginsDirect(baseUrls: string[]): Promise<PermissionRequestResult> {
-  const { requestProviderOrigins } = await import("../core/host-permissions.js");
-  const result = await requestProviderOrigins(baseUrls);
-  return { ok: result.ok, error: result.error };
-}
+// 页面/SW 可用），经 request-provider-origins 消息由 SW 代为申请；手势经一次
+// runtime 消息传导，SW 监听器在调用 chrome.permissions.request 前零 await（见
+// entry/background.ts handleRequestProviderOrigins，手势不变式测试
+// tests/ui/options-save-gesture.test.js 扫描全部调用方与 SW 处理器）。

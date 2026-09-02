@@ -18,7 +18,7 @@ import { refreshDerivedContent, rebuildDerivedContent } from "./core.js";
 // ===== 链层交互（候选02 分层惰性：自 ui/ui-renderer.js 移入） =====
 //
 // copyMarkdown / copySubtitleTranscript / downloadSubtitle / onSubtitleChange /
-// getPopupPayload 只服务总结链与面板交互，留在 ui-renderer（常驻）会把它对
+// buildClipSnapshotPayload 只服务总结链与面板交互，留在 ui-renderer（常驻）会把它对
 // selection.js（isAiSubtitle）及 cache/cache-lru 的依赖一并拖回常驻。
 // setStatus/setMessage 仍在 shared/ui-status：URL 变化编排与本模块错误提示在
 // 启动期使用。
@@ -112,7 +112,7 @@ export async function downloadSubtitle(): Promise<void> {
   setMessage(`已下载：${filename}`);
 }
 
-export function getPopupPayload(): Record<string, unknown> {
+export function buildClipSnapshotPayload(): Record<string, unknown> {
   const subtitleOptions = (state.clip.subtitles || []).map((item) => {
     const label = item.lanDoc || item.lan || "unknown";
     const isAi = isAiSubtitle(item);

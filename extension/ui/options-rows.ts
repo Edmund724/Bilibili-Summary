@@ -19,6 +19,7 @@ import {
 } from "../core/validators.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
+import { requestProviderOriginsViaBackground } from "../core/host-permissions.js";
 import { testAiProviderConnection } from "../ai/provider-test.js";
 import {
   createProviderRow,
@@ -579,19 +580,11 @@ export function setAiBeforeDeleteHandler(handler: Parameters<typeof aiProviderRo
   aiProviderRow.setBeforeDeleteHandler(handler);
 }
 
-// host 权限代申请：content script 语境没有 chrome.permissions API（Chromium 该
-// API 仅扩展自有页面/SW 可用），与 ui/settings-panel.ts 的保存链共用同一条
-// request-provider-origins 消息，由 background SW 代为申请（手势经一次 runtime
-// 消息传导，SW 监听器调用 chrome.permissions.request 前零 await，见
-// entry/background.ts handleRequestProviderOrigins）。预设切换的 change 事件
-// 即用户手势，调用链在 sendMessage 前零 await；手势缺失时 Chrome 拒绝弹窗、
-// 返回失败，由调用方静默处理——保存设置时的正式申请仍在。
-export async function requestProviderOriginsViaBackground(baseUrls: string[]): Promise<void> {
-  if (typeof globalThis.chrome?.permissions?.request === "function") {
-    // 扩展页面语境（防御性分支）：直接申请，不走消息。
-    const { requestProviderOrigins } = await import("../core/host-permissions.js");
-    await requestProviderOrigins(baseUrls);
-    return;
-  }
-  await sendRuntimeMessage({ type: "request-provider-origins", baseUrls });
-}
+// host 权限代申请：走 core/host-permissions 的单一实现
+// requestProviderOriginsViaBackground（与 ui/settings-panel.ts 的保存链共用）。
+// content script 语境没有 chrome.permissions API（Chromium 该 API 仅扩展自有
+// 页面/SW 可用），经 request-provider-origins 消息由 background SW 代为申请
+// （手势经一次 runtime 消息传导，SW 监听器调用 chrome.permissions.request 前零
+// await，见 entry/background.ts handleRequestProviderOrigins）。预设切换的
+// change 事件即用户手势，调用链在 sendMessage 前零 await；手势缺失时 Chrome
+// 拒绝弹窗、返回失败，由调用方静默处理——保存设置时的正式申请仍在。

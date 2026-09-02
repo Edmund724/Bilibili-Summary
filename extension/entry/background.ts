@@ -6,10 +6,8 @@ import { PRESETS, ASR_PROVIDER_PRESETS } from "../core/presets.js";
 import { normalizePlayerAiQuickPrompt } from "../core/validators.js";
 import { isSupportedBilibiliPage } from "../bilibili/video-id-shared.js";
 import {
-  ensureReaderContentReady,
   injectReaderContent,
   probeContentScriptVersion,
-  triggerReaderModeCloseInTab,
   triggerReaderModeInTab
 } from "../core/content-orchestration-wiring.js";
 import { sendMessageToTab } from "../shared/tab-utils.js";
@@ -61,7 +59,7 @@ function handleSaveSettings(message: Msg<"save-settings">, _sender: MessageSende
 // content script 无 chrome.permissions API，用户手势经本次 runtime 消息传导到
 // 本处理器——chrome.permissions.request 必须是处理器内的第一个动作（任何先行
 // await 都会耗尽手势，被 Chrome 以「缺少用户手势」拒绝，见
-// ui/settings-panel.ts 的 requestProviderOriginsViaBackground）。
+// core/host-permissions.ts 的 requestProviderOriginsViaBackground）。
 function handleRequestProviderOrigins(message: Msg<"request-provider-origins">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   const origins = collectOrigins(message.baseUrls);
   if (origins.length === 0) {
@@ -103,7 +101,7 @@ function handleEnsureOffscreenChat(_message: Msg<"ensure-offscreen-chat">, _send
 // player-ai 悬浮按钮语义反转（工单 08 决议 2）：不再打开 AI 侧边栏 + 写
 // storage 信箱（boc_player_ai_quick_action_v1 已退役），改为「进入/聚焦阅读
 // 模式 + 定位对话 tab + 自动发送快捷提示词」——triggerReaderModeInTab 复用
-// popup-trigger-reading-view 链（空 readerUrl = 已在阅读模式内，只聚焦），
+// reader-enter 链（空 readerUrl = 已在阅读模式内，只聚焦），
 // 提示词组装后经 player-ai-quick-action-chat 直发 content script，由 reader
 // 侧对话 seam runQuickActionPrompt 消费。
 function handlePlayerAiQuickAction(message: Msg<"player-ai-quick-action">, sender: MessageSender, sendResponse: SendResponse): boolean {
@@ -130,10 +128,10 @@ function handlePlayerAiQuickAction(message: Msg<"player-ai-quick-action">, sende
   return true;
 }
 
-// popup AI 入口改道（PR5c）：先经 popup-trigger-reading-view 链打开/进入阅读
+// AI 对话入口改道（PR5c）：先经 reader-enter 链打开/进入阅读
 // 模式，再把「激活对话 tab + 发送快捷提示词」的意图直发 content script——
 // 消费端在 core/message-handler.ts（ensureChatTabActivated + runQuickActionPrompt）。
-function handlePopupTriggerReadingChat(message: Msg<"popup-trigger-reading-chat">, _sender: MessageSender, sendResponse: SendResponse): boolean {
+function handleReaderEnterChat(message: Msg<"reader-enter-chat">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   const tabId = Number(_sender.tab?.id || 0) || 0;
   if (!tabId) {
     sendResponse({ ok: false, error: "找不到当前标签页。" });
@@ -161,65 +159,10 @@ function handlePopupTriggerReadingChat(message: Msg<"popup-trigger-reading-chat"
       if (!triggered) {
         throw new Error("阅读视图触发失败，请刷新浏览器网页重试");
       }
-      await sendMessageToTab(tabId, { type: "popup-trigger-reading-chat", prompt });
+      await sendMessageToTab(tabId, { type: "reader-enter-chat", prompt });
       sendResponse({ ok: true });
     })
     .catch((error: Error) => sendResponse({ ok: false, error: error.message || "打开 AI 对话失败" }));
-  return true;
-}
-
-function handleOpenReadingViewTab(message: Msg<"open-reading-view-tab">, _sender: MessageSender, sendResponse: SendResponse): boolean {
-  const url = String(message.url || "").trim();
-  const tabId = Number(message.tabId || 0) || 0;
-  if (!url) {
-    sendResponse({ ok: false, error: "缺少视频地址" });
-    return false;
-  }
-  if (!tabId) {
-    sendResponse({ ok: false, error: "缺少标签页信息" });
-    return false;
-  }
-
-  let readerUrl = "";
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname !== "www.bilibili.com") {
-      throw new Error("当前网页不是 B 站视频页");
-    }
-    parsed.searchParams.set("boc_reader", "1");
-    readerUrl = parsed.toString();
-  } catch (error) {
-    sendResponse({ ok: false, error: (error as Error).message || "阅读视图地址无效" });
-    return false;
-  }
-
-  ensureReaderContentReady(tabId)
-    .then(() => triggerReaderModeInTab(tabId, readerUrl))
-    .then((triggered) => {
-      if (!triggered) {
-        throw new Error("阅读视图触发失败，请刷新浏览器网页重试");
-      }
-      sendResponse({ ok: true });
-    })
-    .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
-  return true;
-}
-
-function handleCloseReadingViewTab(message: Msg<"close-reading-view-tab">, _sender: MessageSender, sendResponse: SendResponse): boolean {
-  const tabId = Number(message.tabId || 0) || 0;
-  if (!tabId) {
-    sendResponse({ ok: false, error: "缺少标签页信息" });
-    return false;
-  }
-
-  triggerReaderModeCloseInTab(tabId)
-    .then((closed) => {
-      if (!closed) {
-        throw new Error("退出阅读视图失败，请刷新浏览器网页重试");
-      }
-      sendResponse({ ok: true });
-    })
-    .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
   return true;
 }
 
@@ -257,8 +200,7 @@ const aiProviderHandlers = createProviderMessageHandlers({
   loadProviders: aiProviderStore.loadProviders,
   saveProviders: aiProviderStore.saveProviders,
   deleteProvider: aiProviderStore.deleteProvider,
-  loadKeys: aiProviderStore.loadKeys,
-  saveKey: aiProviderStore.saveKey
+  loadKeys: aiProviderStore.loadKeys
 });
 
 function handleAiPresetsList(_message: Msg<"ai-presets-list">, _sender: MessageSender, sendResponse: SendResponse): boolean {
@@ -336,22 +278,18 @@ const messageHandlers = new Map<BackgroundMessageType, BackgroundHandler>([
   ["request-provider-origins", handleRequestProviderOrigins as BackgroundHandler],
   ["ensure-offscreen-chat", handleEnsureOffscreenChat as BackgroundHandler],
   ["player-ai-quick-action", handlePlayerAiQuickAction as BackgroundHandler],
-  ["popup-trigger-reading-chat", handlePopupTriggerReadingChat as BackgroundHandler],
-  ["open-reading-view-tab", handleOpenReadingViewTab as BackgroundHandler],
-  ["close-reading-view-tab", handleCloseReadingViewTab as BackgroundHandler],
+  ["reader-enter-chat", handleReaderEnterChat as BackgroundHandler],
   ["fetch-json", handleFetchJson as BackgroundHandler],
   ["ai-providers-list", aiProviderHandlers.list as BackgroundHandler],
   ["ai-presets-list", handleAiPresetsList as BackgroundHandler],
   ["get-ai-provider-key", aiProviderHandlers.get as BackgroundHandler],
   ["ai-providers-save", aiProviderHandlers.save as BackgroundHandler],
-  ["ai-provider-set-key", aiProviderHandlers.setKey! as BackgroundHandler],
   ["ai-providers-delete", aiProviderHandlers.remove as BackgroundHandler],
   ["ai-providers-models", handleAiProvidersModels as BackgroundHandler],
   ["asr-presets-list", handleAsrPresetsList as BackgroundHandler],
   ["asr-providers-list", asrProviderHandlers.list as BackgroundHandler],
   ["asr-providers-save", asrProviderHandlers.save as BackgroundHandler],
   ["asr-providers-delete", asrProviderHandlers.remove as BackgroundHandler],
-  ["get-asr-provider-key", asrProviderHandlers.get as BackgroundHandler],
   ["get-asr-runtime-config", handleGetAsrRuntimeConfig as BackgroundHandler],
   ["offload-task", handleOffloadTask as BackgroundHandler]
 ]);

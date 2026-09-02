@@ -1,11 +1,11 @@
 // 总结链（subtitle/fetcher.js 抓取编排 + subtitle/ui.js + notes/render.js 及其
 // 独占依赖）的按需加载器（候选02 分层惰性）。
 //
-// 为什么惰性：抓字幕/笔记渲染链（~20KB）只在首次抓字幕（popup-refresh、刷新
+// 为什么惰性：抓字幕/笔记渲染链（~20KB）只在首次抓字幕（clip-refresh、刷新
 // 抓取按钮、URL 变化自动刷新、阅读模式进入后的后台刷新）时才有职责。候选02
 // 之前它经 message-handler / ui-renderer 的静态 import 常驻。分层后这里成为
 // 动态 import 边：esbuild 把 fetcher 连同其独占依赖切进独立 chunk，只在首次
-// ensureSummarizeChain() 时才下载。一键总结热路径（点击 AI 键 → popup-refresh）
+// ensureSummarizeChain() 时才下载。一键总结热路径（点击 AI 键 → clip-refresh）
 // 上的装载是本地 chunk 动态 import（~10ms），被两轮消息往返完全掩盖。
 //
 // 写法与 core/lazy-player-ai.js、core/lazy-reader.js 同款：加载器本体收拢于
@@ -19,7 +19,7 @@
 //
 // 失败语义：加载失败清空缓存 promise，允许下次触发重试。
 //
-// 消费约定：链内函数（refreshClip/loadSubtitle/resetClipState/getPopupPayload/
+// 消费约定：链内函数（refreshClip/loadSubtitle/resetClipState/buildClipSnapshotPayload/
 // onSubtitleChange/copyMarkdown/downloadSubtitle）不静态 import fetcher/ui，
 // 一律 `ensureSummarizeChain().then((chain) => chain.xxx())`；promise 缓存天然
 // 去重并发调用。reader 侧的 requestSubtitleRefresh（presenter seam）在无
@@ -43,12 +43,12 @@ export interface SummarizeChain {
   // PR3：阅读模式字幕 tab「复制」——复制字幕纯文本（transcript，buildTxt 管线）
   copySubtitleTranscript(): Promise<void>;
   downloadSubtitle(): Promise<void>;
-  getPopupPayload(): Record<string, unknown>;
+  buildClipSnapshotPayload(): Record<string, unknown>;
   readVideoDescription(): string;
 }
 
 async function loadSummarizeChain(): Promise<SummarizeChain> {
-  // fetcher（抓取编排 + resetClipState）与 ui（popup payload / 复制下载回调）
+  // fetcher（抓取编排 + resetClipState）与 ui（clip 快照 payload / 复制下载回调）
   // 同属链层，一次 ensure 全部就位；两文件间本就互相引用（ui → fetcher），
   // 并行装载只是把等待重叠。
   const [fetcher, chainUi] = await Promise.all([import("./fetcher.js"), import("./ui.js")]);

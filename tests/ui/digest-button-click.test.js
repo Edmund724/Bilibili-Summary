@@ -1,8 +1,8 @@
 // 统一 Digest 阅读模式 PR1 验收（消息路径）：Digest 按钮点击发出
-// popup-trigger-reading-view 且 readerUrl 带 boc_reader=1。
+// reader-enter 且 readerUrl 带 boc_reader=1。
 //
 // 生产路径：按钮 click → handleDigestButtonClick 构造 {type, readerUrl} →
-// dispatchContentScriptMessage → 处理器 popup-trigger-reading-view 分支 →
+// dispatchContentScriptMessage → 处理器 reader-enter 分支 →
 // ensureUiReady().then(replaceReaderModeUrl(readerUrl))。
 //
 // 重依赖按 message-handler-seek.test.js 同款 vi.mock；独立文件 = 独立模块
@@ -57,7 +57,7 @@ afterEach(() => {
 });
 
 describe("digest-button 点击行为", () => {
-  it("点击发出 popup-trigger-reading-view，readerUrl 为带 boc_reader=1 的规范视频 URL", async () => {
+  it("点击发出 reader-enter，readerUrl 为带 boc_reader=1 的规范视频 URL", async () => {
     setLocationUrl("https://www.bilibili.com/video/BV1test000000/?p=2&spm_id_from=x");
     document.body.innerHTML = `${makeToolbarHtml()}<video src="blob:test"></video>`;
 

@@ -149,7 +149,7 @@ export function createBackgroundContentOrchestrator(deps: BackgroundContentOrche
 
       try {
         const response = await sendMessageToTab(tabId, {
-          type: "popup-trigger-reading-view",
+          type: "reader-enter",
           readerUrl
         });
         if (response?.ok) {
@@ -183,7 +183,7 @@ export function createBackgroundContentOrchestrator(deps: BackgroundContentOrche
 
       try {
         const response = await sendMessageToTab(tabId, {
-          type: "popup-close-reading-view"
+          type: "reader-close"
         });
         if (response?.ok) {
           return true;

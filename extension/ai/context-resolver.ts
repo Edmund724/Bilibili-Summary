@@ -191,7 +191,7 @@ export async function resolveAiConversationPageRef(contextRef: unknown): Promise
 
 // ===== 页内状态获取（依赖注入 tabOps：ensureReaderContentReady + sendMessageToTab）=====
 
-// popup-refresh 的响应要等 content 的 refreshClip 全程完成；无字幕长视频会
+// clip-refresh 的响应要等 content 的 refreshClip 全程完成；无字幕长视频会
 // 触发小时级 ASR 转写，消息通道撑不住这种长事务（挂起期间任何失败都会让
 // 侧边栏把上下文清空、误报"不是 B 站视频页"）。限时等待，超时视为"抓取仍在
 // 后台进行"，回退读取当前快照（subtitleFetchState 会告知转写进行中）。
@@ -246,7 +246,7 @@ export async function getAiContextState(
     ifSignature
   });
 
-  // 候选5 签名短路：content 状态与调用方快照一致 → 不取字幕、不发 popup-refresh、
+  // 候选5 签名短路：content 状态与调用方快照一致 → 不取字幕、不发 clip-refresh、
   // 也不拉热评（下方热评块不可达），直接返回 { unchanged: true }（调用方
   // 据此跳过 apply/渲染）。短路只发生在首查——后面 needsRefresh 分支的复查不
   // 带签名，必然回全量。
@@ -267,7 +267,7 @@ export async function getAiContextState(
 
   if (needsRefresh) {
     const refreshResp = await withTimeout(
-      sendMessageToTab!(tab.id, { type: "popup-refresh" }),
+      sendMessageToTab!(tab.id, { type: "clip-refresh" }),
       REFRESH_WAIT_MS
     );
     if (!refreshResp?.ok) {

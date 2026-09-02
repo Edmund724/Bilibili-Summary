@@ -68,7 +68,7 @@ export function createLiveContextSync(deps: CreateLiveContextSyncDeps): LiveCont
 
   // 触发源的事件处理体（监听挂载留在组合根 bindEvents，语义与迁移前一致）：
   //   - 可见性/聚焦/切签：一律 forceRefresh=false——全网络重拉（content 侧
-  //     popup-refresh → refreshClip 全量重抓字幕）不是它们的语义，状态是否有变
+  //     clip-refresh → refreshClip 全量重抓字幕）不是它们的语义，状态是否有变
   //     交给签名短路判定：content 侧未变时一次往返即返回 unchanged，不再有
   //     任何字幕/热评网络开销。
   //   - tabs.onUpdated：URL 变化保持 forceRefresh=true（切 P/切视频必须全网络

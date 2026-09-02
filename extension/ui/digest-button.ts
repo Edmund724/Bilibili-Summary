@@ -14,13 +14,13 @@
 // 顺带覆盖 SPA 换页（不触发事件）。纪律与水合等待均照搬参考仓库
 // .scratch/bilibili-digest/content.js（工单调查报告 §二）。
 //
-// 点击行为：不发 background 消息。直接构造 popup-trigger-reading-view 消息交给
+// 点击行为：不发 background 消息。直接构造 reader-enter 消息交给
 // content 侧处理器（core/message-handler.ts 已实现的阅读模式进入路径），
 // readerUrl 用 cleanVideoUrl 清成规范视频 URL 再加 boc_reader=1，与 background
-// handleOpenReadingViewTab 的拼法一致。经 dispatchContentScriptMessage 分发而非
+// triggerReaderModeInTab 的拼法一致。经 dispatchContentScriptMessage 分发而非
 // chrome.runtime.sendMessage：content script 的 sendMessage 不会回环到本文档
 // 自己的 onMessage 监听器，分发主体抽出后监听器与按钮共用同一条处理器路径。
-// 失同步自愈同理：自查派发 popup-restore-reading-view（处理器先按 DOM 实况
+// 失同步自愈同理：自查派发 reader-restore（处理器先按 DOM 实况
 // 收敛失同步状态，再走与点击完全相同的进入链）。
 
 import { cleanVideoUrl, isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
@@ -138,7 +138,7 @@ function syncDigestButton(): void {
     removeDigestButton();
     return;
   }
-  // 失同步两态，交由 popup-restore-reading-view 处理器自愈（连续确认 + 退避见
+  // 失同步两态，交由 reader-restore 处理器自愈（连续确认 + 退避见
   // 上方常量注）：
   //   - 状态开着而壳失整：面板被页面重渲染摘走，按钮被守卫永久压住——用户看到
   //     「侧边栏和按钮一起消失，只能刷新」的正是它；
@@ -150,7 +150,7 @@ function syncDigestButton(): void {
       brokenTicks = 0;
       lastRestoreAt = now;
       dispatchContentScriptMessage(
-        { type: "popup-restore-reading-view", readerUrl: buildReaderUrl() },
+        { type: "reader-restore", readerUrl: buildReaderUrl() },
         () => {}
       );
     }
@@ -297,7 +297,7 @@ function handleDigestButtonClick(event: MouseEvent): void {
     return;
   }
   dispatchContentScriptMessage(
-    { type: "popup-trigger-reading-view", readerUrl: buildReaderUrl() },
+    { type: "reader-enter", readerUrl: buildReaderUrl() },
     () => {}
   );
 }

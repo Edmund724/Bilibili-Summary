@@ -4,46 +4,38 @@
 
 // ===== content script 处理的 runtime 消息 =====
 
-export type PopupGetStateMessage = {
-  type: "popup-get-state";
+export type ClipRefreshMessage = {
+  type: "clip-refresh";
 };
 
-export type PopupRefreshMessage = {
-  type: "popup-refresh";
-};
-
-export type PopupSelectSubtitleMessage = {
-  type: "popup-select-subtitle";
-  url?: string;
-  lang?: string;
-  subtitleId?: string;
-};
-
-export type PopupTriggerReadingViewMessage = {
-  type: "popup-trigger-reading-view";
+export type ReaderEnterMessage = {
+  type: "reader-enter";
   readerUrl?: string;
 };
 
-export type PopupCloseReadingViewMessage = {
-  type: "popup-close-reading-view";
+// 退出阅读模式（SW 侧 triggerReaderModeCloseInTab 的重试发送；面板关闭按钮走
+// 页内直调 reader 域，不经消息）。消费端（core/message-handler.ts）收敛地址栏
+// 后交 reader 域 closeReadingView + 摘阅读表（工单 02 起由 exitReaderShell 收口）。
+export type ReaderCloseMessage = {
+  type: "reader-close";
 };
 
 // 阅读视图自愈恢复（ui/digest-button.ts 的 800ms 自查在失同步时派发）：
 // URL 带 boc_reader=1 而视图没开（直达进入失败）、或状态开着而壳被页面重渲染
 // 摘掉（状态-DOM 失同步）时，按 DOM 实况收敛状态后重走进入链。readerUrl 语义
-// 同 popup-trigger-reading-view。仅 content 页内源使用（dispatchContentScriptMessage）。
-export type PopupRestoreReadingViewMessage = {
-  type: "popup-restore-reading-view";
+// 同 reader-enter。仅 content 页内源使用（dispatchContentScriptMessage）。
+export type ReaderRestoreMessage = {
+  type: "reader-restore";
   readerUrl?: string;
 };
 
 // 打开/进入阅读模式并激活「AI 对话」tab：readerUrl 语义同
-// popup-trigger-reading-view（空串 = 已在阅读模式内，只定位/聚焦）；prompt
+// reader-enter（空串 = 已在阅读模式内，只定位/聚焦）；prompt
 // 语义同 player-ai-quick-action（空串 = 只激活对话 tab，不发送）。
 // 消费端（core/message-handler.ts）先处理打开/进入，再经 core/lazy-chat-tab
 // 的 ensureChatTabActivated + runQuickActionPrompt 消费。
-export type PopupTriggerReadingChatMessage = {
-  type: "popup-trigger-reading-chat";
+export type ReaderEnterChatMessage = {
+  type: "reader-enter-chat";
   readerUrl?: string;
   prompt?: string;
 };
@@ -66,13 +58,11 @@ export type ReaderSeekVideoTimeMessage = {
 };
 
 export type ContentScriptMessage =
-  | PopupGetStateMessage
-  | PopupRefreshMessage
-  | PopupSelectSubtitleMessage
-  | PopupTriggerReadingViewMessage
-  | PopupTriggerReadingChatMessage
-  | PopupRestoreReadingViewMessage
-  | PopupCloseReadingViewMessage
+  | ClipRefreshMessage
+  | ReaderEnterMessage
+  | ReaderCloseMessage
+  | ReaderEnterChatMessage
+  | ReaderRestoreMessage
   | ReaderGetContextMessage
   | ReaderGetHotCommentsMessage
   | ReaderSeekVideoTimeMessage
@@ -111,15 +101,6 @@ export type PlayerAiQuickActionChatMessage = {
   type: "player-ai-quick-action-chat";
   prompt?: string;
 };
-export type OpenReadingViewTabMessage = {
-  type: "open-reading-view-tab";
-  url?: string;
-  tabId?: number;
-};
-export type CloseReadingViewTabMessage = {
-  type: "close-reading-view-tab";
-  tabId?: number;
-};
 export type FetchJsonMessage = { type: "fetch-json"; url?: string };
 
 export type AiProvidersListMessage = { type: "ai-providers-list" };
@@ -129,11 +110,6 @@ export type GetAiProviderKeyMessage = {
   providerId?: string;
 };
 export type AiProvidersSaveMessage = { type: "ai-providers-save"; providers?: unknown };
-export type AiProviderSetKeyMessage = {
-  type: "ai-provider-set-key";
-  providerId?: string;
-  apiKey?: string;
-};
 export type AiProvidersDeleteMessage = {
   type: "ai-providers-delete";
   providerId?: string;
@@ -152,10 +128,6 @@ export type AsrProvidersDeleteMessage = {
   type: "asr-providers-delete";
   providerId?: string;
 };
-export type GetAsrProviderKeyMessage = {
-  type: "get-asr-provider-key";
-  providerId?: string;
-};
 export type GetAsrRuntimeConfigMessage = { type: "get-asr-runtime-config" };
 
 export type OffloadTaskMessage = {
@@ -170,22 +142,18 @@ export type BackgroundMessage =
   | RequestProviderOriginsMessage
   | EnsureOffscreenChatMessage
   | PlayerAiQuickActionMessage
-  | PopupTriggerReadingChatMessage
-  | OpenReadingViewTabMessage
-  | CloseReadingViewTabMessage
+  | ReaderEnterChatMessage
   | FetchJsonMessage
   | AiProvidersListMessage
   | AiPresetsListMessage
   | GetAiProviderKeyMessage
   | AiProvidersSaveMessage
-  | AiProviderSetKeyMessage
   | AiProvidersDeleteMessage
   | AiProvidersModelsMessage
   | AsrPresetsListMessage
   | AsrProvidersListMessage
   | AsrProvidersSaveMessage
   | AsrProvidersDeleteMessage
-  | GetAsrProviderKeyMessage
   | GetAsrRuntimeConfigMessage
   | OffloadTaskMessage;
 

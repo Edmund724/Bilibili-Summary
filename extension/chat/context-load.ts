@@ -183,7 +183,7 @@ async function defaultFetchHotComments(): Promise<unknown[]> {
 //   3. 快照附带 signature（对应 content 全量路径的回执附签）与 isVideoContext
 //      补写（对应 background 转发层的补写职责——payload 单源不组装该字段），
 //      loadContextState 落进 liveContextData 供下一轮 ifSignature。
-// 「popup-refresh 驱动抓取」不在此重演：reader 世界的抓取由 reader 自身的
+// 「clip-refresh 驱动抓取」不在此重演：reader 世界的抓取由 reader 自身的
 // URL 变化编排（message-handler bindUrlChangeHandler）驱动；转写中发送的等待
 // 由 subtitle-wait 在发送路径承担（三事之三）。
 export function createInProcessContextFetch(deps: InProcessContextFetchDeps = {}): ContextFetch {

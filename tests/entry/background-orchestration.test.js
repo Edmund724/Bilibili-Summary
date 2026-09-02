@@ -247,7 +247,7 @@ describe("triggerReaderModeInTab", () => {
 
     expect(deps.sendMessageToTab).toHaveBeenCalledTimes(1);
     expect(deps.sendMessageToTab).toHaveBeenCalledWith(TAB_ID, {
-      type: "popup-trigger-reading-view",
+      type: "reader-enter",
       readerUrl: READER_URL
     });
     expect(deps.probeOnce).not.toHaveBeenCalled();
@@ -326,7 +326,7 @@ describe("triggerReaderModeCloseInTab", () => {
 
     expect(deps.sendMessageToTab).toHaveBeenCalledTimes(1);
     expect(deps.sendMessageToTab).toHaveBeenCalledWith(TAB_ID, {
-      type: "popup-close-reading-view"
+      type: "reader-close"
     });
     expect(deps.isTabReaderModeOff).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);

@@ -113,75 +113,30 @@ export function dispatchContentScriptMessage(
     }
     const message = rawMessage as ContentScriptMessage;
 
-    if (message.type === "popup-get-state") {
-      // 候选02：getPopupPayload 属总结链层，经 ensure 装载后组装（热路径本地
-      // 动态 import ~10ms）。装载失败回错误（popup 对缺 payload 有兜底渲染）。
-      // digest-only-ui：popup 页面已删除，popup-* 消息仅剩 background 的阅读
-      // 上下文链（context-resolver/chat 内核）在用，处理器保留以维持该链路。
-      ensureSummarizeChain()
-        .then((chain) => sendResponse({ ok: true, payload: chain.getPopupPayload() }))
-        .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
-      return true;
-    }
-
-    if (message.type === "popup-refresh") {
+    if (message.type === "clip-refresh") {
       // 候选03：刷新抓取会写面板 DOM（resetClipState / renderMeta 等），先确保
       // UI 壳存在。首开面板/首次刷新的惰性装载开销被用户动作掩盖。
-      // digest-only-ui：popup 已删除，本消息由背景上下文链（context-resolver
-      // 的 needsRefresh 分支）触发，ensureUiReady 保证阅读视图壳可写。
+      // 本消息由背景上下文链（context-resolver 的 needsRefresh 分支）触发，
+      // ensureUiReady 保证阅读视图壳可写。
       ensureUiReady()
         .then(() => ensureSummarizeChain())
         .then((chain) =>
           chain
             .refreshClip()
-            .then(() => sendResponse({ ok: true, payload: chain.getPopupPayload() }))
+            .then(() => sendResponse({ ok: true, payload: chain.buildClipSnapshotPayload() }))
             .catch((error) =>
-              sendResponse({ ok: false, error: getErrorMessage(error), payload: chain.getPopupPayload() })
+              sendResponse({ ok: false, error: getErrorMessage(error), payload: chain.buildClipSnapshotPayload() })
             )
         )
         .catch((error) => {
           // 链装载失败（清缓存重试后仍失败）：无法组装 payload，按错误口径回包
-          // （popup / context-resolver 均对缺 payload 容错，回落当前上下文快照）。
+          // （context-resolver 对缺 payload 容错，回落当前上下文快照）。
           sendResponse({ ok: false, error: getErrorMessage(error) });
         });
       return true;
     }
 
-    if (message.type === "popup-select-subtitle") {
-      const url = String(message.url || "").trim();
-      const lang = String(message.lang || "unknown");
-      const subtitleId = String(message.subtitleId || "");
-      if (!url) {
-        // 候选02：错误路径的 payload 同样取自链层，经 ensure 装载后回包。
-        ensureSummarizeChain()
-          .then((chain) =>
-            sendResponse({ ok: false, error: "Missing subtitle URL", payload: chain.getPopupPayload() })
-          )
-          .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
-        return true;
-      }
-      // 候选03：字幕切换会渲染面板 DOM，先确保 UI 壳存在。
-      ensureUiReady()
-        .then(() => ensureSummarizeChain())
-        .then((chain) =>
-          chain
-            .loadSubtitle(url, lang, state.clip.fetchRunId, subtitleId)
-            .then(() => {
-              setStatus("字幕切换完成。");
-              // digest-only-ui：popup 已删除；字幕切换后的阅读视图渲染由
-              // presenter seam 的 subtitle-ready 通知驱动（renderReadingView），
-              // 不再回写 popup 的下拉。
-              sendResponse({ ok: true, payload: chain.getPopupPayload() });
-            })
-            .catch((error) =>
-              sendResponse({ ok: false, error: getErrorMessage(error), payload: chain.getPopupPayload() })
-            )
-        )
-        .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
-      return true;
-    }
-
-    if (message.type === "popup-trigger-reading-view") {
+    if (message.type === "reader-enter") {
       suppressUntil(Date.now() + 2500);
       // 原为同步 remove；懒加载后「未加载 ⇒ 无按钮」可直接跳过，已加载时经
       // promise 移除（延后一个 tick，视觉无差异）。失败静默：移除按钮失败
@@ -224,10 +179,10 @@ export function dispatchContentScriptMessage(
     //     true，digest 按钮被自查守卫永久压住——表现为「侧边栏和按钮一起消失，
     //     只能刷新」。closeReadingView 顶部才置状态、取壳节点失败会先抛错，所以
     //     收敛前必须先 ensureUiReady 把壳补回来。
-    // 收敛后与 popup-trigger-reading-view 走同一条进入链（URL 改写 + 阅读表 +
+    // 收敛后与 reader-enter 走同一条进入链（URL 改写 + 阅读表 +
     // 门控属性 + enterReaderMode）；重开会话态由各 tab 的恢复路径接管（对话从
     // 会话历史恢复、概览读缓存）。
-    if (message.type === "popup-restore-reading-view") {
+    if (message.type === "reader-restore") {
       suppressUntil(Date.now() + 2500);
       ensureUiReady().then(async () => {
         if (isReaderViewOpen()) {
@@ -250,7 +205,7 @@ export function dispatchContentScriptMessage(
         const readerUrl = resolveReaderEntryUrl(String(message.readerUrl || "").trim());
         if (readerUrl) {
           replaceReaderModeUrl(readerUrl);
-          // S3：先挂阅读表再翻属性（无闪变时序，见 popup-trigger-reading-view 同款注释）
+          // S3：先挂阅读表再翻属性（无闪变时序，见 reader-enter 同款注释）
           ensureReaderStyles();
           document.documentElement.setAttribute("data-boc-reader-mode", "1");
           document.body.setAttribute("data-boc-reader-mode", "1");
@@ -269,13 +224,13 @@ export function dispatchContentScriptMessage(
       return true;
     }
 
-    // PR5c：popup AI 入口 / player-ai 悬浮按钮的统一消费端（工单 08 决议 2）——
-    // 先确保 reader shell（popup-trigger-reading-view 同款：URL 改写 + 阅读表 +
+    // PR5c：AI 对话入口 / player-ai 悬浮按钮的统一消费端（工单 08 决议 2）——
+    // 先确保 reader shell（reader-enter 同款：URL 改写 + 阅读表 +
     // reader-mode 属性 + enterReaderMode），再激活对话 tab 并（带 prompt 时）
     // 自动发送快捷提示词。快捷动作路径传 consumeIntent:false（与快捷发送互不
     // 踩踏）；无 prompt 则只定位/聚焦对话 tab。发响应不等待 enterReaderMode
-    // 完成（与 popup-trigger-reading-view 的即答语义一致）。
-    if (message.type === "popup-trigger-reading-chat") {
+    // 完成（与 reader-enter 的即答语义一致）。
+    if (message.type === "reader-enter-chat") {
       suppressUntil(Date.now() + 2500);
       if (isPlayerAiLoaded()) {
         loadPlayerAi()
@@ -325,7 +280,7 @@ export function dispatchContentScriptMessage(
       return true;
     }
 
-    if (message.type === "popup-close-reading-view") {
+    if (message.type === "reader-close") {
       // URL 改写保持同步（与旧行为一致地先收敛地址栏）；closeReadingView 属
       // reader 重域，经 ensure 装载后执行（视图开着 ⇒ 域几乎必然已装载，此处
       // 只是兜底直开路径）。
@@ -357,7 +312,7 @@ export function dispatchContentScriptMessage(
       const signature = computeContextStateSignature(payload);
       // 候选5 签名短路：调用方（经 background 转发的对话上下文链）带着它上次收到的
       // 全量快照签名来问，content 状态没变就整份省略——不取字幕、不触发上层的
-      // popup-refresh 与热评网络拉取，一次往返即返回。仅在非 forceRefresh 时生效：
+      // clip-refresh 与热评网络拉取，一次往返即返回。仅在非 forceRefresh 时生效：
       // 手动刷新/URL 变化语义上是明确要求全网络重拉。旧调用方不带 ifSignature
       // （空串）自然走全量路径，向后兼容。
       if (

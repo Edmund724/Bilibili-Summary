@@ -129,7 +129,7 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
   } = deps;
 
   // 进行中的 ASR 转写共享单元（Map<cacheKey, { promise, platformName, videoKey }>）：
-  // 同视频并发 refreshClip（侧边栏 focus/切 tab 的 sync 都会经 popup-refresh
+  // 同视频并发 refreshClip（侧边栏 focus/切 tab 的 sync 都会经 clip-refresh
   // 触发新一轮抓取）与"切走再切回"在此命中后等待同一 promise，不再重启转写。
   // 历史上每次 refreshClip 都 fetchRunId+1，几小时的长视频转写会被下一次 sync
   // 静默打断——成果既不写缓存也不进总结上下文，用户再点抓取只能从头重转。
@@ -237,7 +237,7 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
       setStatus(`无字幕轨，正在使用语音识别（${platformName}）生成字幕…`);
       broadcastSubtitleStatus("asr-transcribing");
 
-      // 同视频并发抓取（侧边栏 sync 触发的 popup-refresh 等）与"切走再切回"
+      // 同视频并发抓取（侧边栏 sync 触发的 clip-refresh 等）与"切走再切回"
       // 命中进行中的转写：等待共享 promise 而不是重启——重启会让几小时成果
       // 作废且永不落缓存。命中即共享，缓存写入由发起者的 promise 链负责。
       const active = activeAsrTranscribes.get(cacheKey);
