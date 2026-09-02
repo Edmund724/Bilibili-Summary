@@ -185,7 +185,6 @@ describe("概览状态机与触发", () => {  it("无字幕：不触发生成，
     const text = overviewText();
     expect(text).toContain("开场");
     expect(text).toContain("为什么测试难写");
-    expect(text).toContain("金句");
     expect(text).toContain("测试不是目的，而是反馈。");
     // 章节与金句都是可点击跳播目标
     expect(overviewBody().querySelectorAll(".boc-reading-ov-chapter").length).toBe(2);
@@ -245,9 +244,8 @@ describe("概览状态机与触发", () => {  it("无字幕：不触发生成，
     runOverviewMock.mockResolvedValue(SAMPLE_ANALYSIS);
     await reader.triggerReaderOverviewGeneration();
     const sectionHead = overviewBody().querySelector(".boc-reading-ov-h")?.parentElement?.textContent || "";
-    // AI 分章：章节标头带标注；金句标头恒带「AI 精选」
+    // AI 分章：章节标头带标注；金句已归章（无独立金句标头，见归章渲染测试）
     expect(overviewText()).toContain("AI 生成");
-    expect(overviewText()).toContain("AI 精选");
     expect(sectionHead).toBeDefined();
 
     // 自带章节（短路径）：重开生成后不标「AI 生成」
@@ -258,7 +256,6 @@ describe("概览状态机与触发", () => {  it("无字幕：不触发生成，
     expect(runOverviewMock).toHaveBeenCalledTimes(1);
     const headings = Array.from(overviewBody().querySelectorAll(".boc-reading-ov-h")).map((node) => node.textContent || "");
     expect(headings.some((heading) => heading.includes("章节") && !heading.includes("AI 生成"))).toBe(true);
-    expect(headings.some((heading) => heading.includes("金句") && heading.includes("AI 精选"))).toBe(true);
   });
 
   it("partial：失败区间标记条 + 重试失败区间按钮（forceRefresh 重跑）", async () => {
@@ -322,6 +319,115 @@ describe("概览状态机与触发", () => {  it("无字幕：不触发生成，
     expect(runOverviewMock).not.toHaveBeenCalled();
     expect(overviewText()).toContain("概览生成失败");
     expect(overviewText()).toContain("还没有配置 AI 平台");
+  });
+});
+
+describe("金句归章渲染（自带章节 / AI 分章 / 无章节）", () => {
+  // 产物统一形状：两章（from 100 / 200）+ 三金句（orphan 30、章一 120、章二 250）。
+  // 渲染层不区分产物来源（07 票决议「UI 不区分来源」），自带章节与 AI 分章
+  // 用同一形状断言归章；归章由真实的 groupQuotesIntoChapters 完成（本套件只
+  // mock runOverviewAnalysis，analysis.js 其余导出走真实实现）。
+  const GROUPED_ANALYSIS: OverviewAnalysis = {
+    chapters: [
+      { from: 100, to: 200, title: "章一", summary: "前半段" },
+      { from: 200, to: 300, title: "章二", summary: "后半段" }
+    ],
+    quotes: [
+      { from: 30, content: "开篇点题的金句" },
+      { from: 120, content: "章一里的原话金句" },
+      { from: 250, content: "章二里的原话金句" }
+    ]
+  };
+
+  function quoteCard(seconds: number): HTMLElement | null {
+    return overviewBody().querySelector<HTMLElement>(`.boc-reading-ov-quote[data-seconds='${seconds}']`);
+  }
+
+  it("自带章节视频：金句按 from 归进稿件章节，时间戳与原话保真", async () => {
+    seedClip({ chapters: [{ from: 100, title: "章一" }, { from: 200, title: "章二" }] });
+    runOverviewMock.mockResolvedValue({ ...GROUPED_ANALYSIS, quotes: GROUPED_ANALYSIS.quotes.slice(1) });
+
+    await reader.triggerReaderOverviewGeneration();
+
+    // 归章：章卡之后紧跟该章的金句卡（120 归章一、250 归章二）
+    const ch1 = overviewBody().querySelector<HTMLElement>(".boc-reading-ov-chapter[data-seconds='100']")!;
+    const ch2 = overviewBody().querySelector<HTMLElement>(".boc-reading-ov-chapter[data-seconds='200']")!;
+    expect(ch1.nextElementSibling?.matches(".boc-reading-ov-quote[data-seconds='120']")).toBe(true);
+    expect(ch2.nextElementSibling?.matches(".boc-reading-ov-quote[data-seconds='250']")).toBe(true);
+    // 时间戳与原话保真：显示秒数与金句文本原样，不重排不改写
+    expect(quoteCard(120)?.textContent).toContain("章一里的原话金句");
+    expect(quoteCard(250)?.textContent).toContain("章二里的原话金句");
+    const text = overviewText();
+    expect(text.indexOf("章一里的原话金句")).toBeGreaterThan(text.indexOf("章一"));
+    expect(text.indexOf("章二里的原话金句")).toBeGreaterThan(text.indexOf("章二"));
+  });
+
+  it("AI 分章视频：金句同样按 from 落进 AI 章节，章节标头带「AI 生成」", async () => {
+    seedClip();
+    runOverviewMock.mockResolvedValue({ ...GROUPED_ANALYSIS, quotes: GROUPED_ANALYSIS.quotes.slice(1) });
+
+    await reader.triggerReaderOverviewGeneration();
+
+    const ch1 = overviewBody().querySelector<HTMLElement>(".boc-reading-ov-chapter[data-seconds='100']")!;
+    const ch2 = overviewBody().querySelector<HTMLElement>(".boc-reading-ov-chapter[data-seconds='200']")!;
+    expect(ch1.nextElementSibling?.matches(".boc-reading-ov-quote[data-seconds='120']")).toBe(true);
+    expect(ch2.nextElementSibling?.matches(".boc-reading-ov-quote[data-seconds='250']")).toBe(true);
+    expect(overviewText()).toContain("AI 生成");
+  });
+
+  it("orphan 金句（早于第一章）：单列「其他金句」组，不硬塞进最近章节", async () => {
+    seedClip({ chapters: [{ from: 100, title: "章一" }] });
+    runOverviewMock.mockResolvedValue({
+      chapters: [{ from: 100, to: 300, title: "章一", summary: "" }],
+      quotes: [
+        { from: 30, content: "开篇点题的金句" },
+        { from: 150, content: "章一里的原话金句" }
+      ]
+    });
+
+    await reader.triggerReaderOverviewGeneration();
+
+    // 章内金句归章一；orphan 金句在「其他金句」次级标头之下
+    const ch1 = overviewBody().querySelector<HTMLElement>(".boc-reading-ov-chapter[data-seconds='100']")!;
+    expect(ch1.nextElementSibling?.matches(".boc-reading-ov-quote[data-seconds='150']")).toBe(true);
+    const subhead = overviewBody().querySelector<HTMLElement>(".boc-reading-ov-subhead")!;
+    expect(subhead.textContent).toContain("其他金句");
+    expect(subhead.nextElementSibling?.matches(".boc-reading-ov-quote[data-seconds='30']")).toBe(true);
+  });
+
+  it("无章节视频：维持平铺——章节空态 + 独立金句 section（AI 精选）", async () => {
+    seedClip();
+    runOverviewMock.mockResolvedValue({
+      chapters: [],
+      quotes: [
+        { from: 125, content: "平铺金句甲" },
+        { from: 200, content: "平铺金句乙" }
+      ]
+    });
+
+    await reader.triggerReaderOverviewGeneration();
+
+    expect(overviewText()).toContain("没有可用的章节");
+    const headings = Array.from(overviewBody().querySelectorAll(".boc-reading-ov-h")).map((node) => node.textContent || "");
+    expect(headings.some((heading) => heading.includes("金句") && heading.includes("AI 精选"))).toBe(true);
+    // 平铺：金句卡不带归章缩进（is-nested），按 from 升序铺在金句 section 下
+    const quotes = Array.from(overviewBody().querySelectorAll<HTMLElement>(".boc-reading-ov-quote"));
+    expect(quotes.map((node) => node.dataset.seconds)).toEqual(["125", "200"]);
+    expect(quotes.every((node) => !node.classList.contains("is-nested"))).toBe(true);
+  });
+
+  it("有章节但金句为空：章节照常呈现，金句空态不丢", async () => {
+    seedClip({ chapters: [{ from: 100, title: "章一" }] });
+    runOverviewMock.mockResolvedValue({
+      chapters: [{ from: 100, to: 300, title: "章一", summary: "" }],
+      quotes: []
+    });
+
+    await reader.triggerReaderOverviewGeneration();
+
+    expect(overviewText()).toContain("章一");
+    expect(overviewBody().querySelectorAll(".boc-reading-ov-quote").length).toBe(0);
+    expect(overviewText()).toContain("没有可用的金句");
   });
 });
 

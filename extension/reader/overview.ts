@@ -33,6 +33,9 @@ import { resolveActiveProvider } from "../ai/active-provider.js";
 import {
   runOverviewAnalysis,
   buildSubtitleSignature,
+  groupQuotesIntoChapters,
+  type AnalysisChapter,
+  type AnalysisQuote,
   type OverviewAnalysis
 } from "../ai/analysis.js";
 import { shouldShowHoursInNote } from "../notes/render.js";
@@ -377,69 +380,85 @@ function buildResultSectionsHtml(): string {
   }
 
   const withHours = shouldShowHoursInNote(state, getClipBody());
-  const sections: string[] = [];
-
-  // —— 章节（「AI 生成」小标注仅 AI 分章显示；自带章节不标）——
+  // 章节缺标题 / 金句缺文本的残条目不渲染（与既有空态判定同口径）。
   const chapters = (Array.isArray(analysis.chapters) ? analysis.chapters : []).filter(
     (item) => item && String(item.title || "").trim()
   );
+  const quotes = (Array.isArray(analysis.quotes) ? analysis.quotes : []).filter(
+    (item) => item && String(item?.content || "").trim()
+  );
   const chapterBadge = overview.aiChapters ? '<span class="boc-reading-ov-badge">AI 生成</span>' : "";
-  sections.push(`
+  const quotesEmptyNote = quotes.length === 0 ? '<div class="boc-reading-ov-empty">没有可用的金句。</div>' : "";
+
+  // —— 无章节视频：维持平铺——章节空态 + 独立金句 section（卡片按 from 平铺）——
+  if (chapters.length === 0) {
+    return `
+      <section class="boc-reading-ov-section">
+        <div class="boc-reading-ov-h">章节</div>
+        <div class="boc-reading-ov-empty">没有可用的章节。</div>
+      </section>
+      <section class="boc-reading-ov-section">
+        <div class="boc-reading-ov-h">金句<span class="boc-reading-ov-badge">AI 精选</span></div>
+        ${quotesEmptyNote}${quotes.map((item) => quoteCardHtml(item, withHours, false)).join("")}
+      </section>
+    `;
+  }
+
+  // —— 有章节：金句归章（groupQuotesIntoChapters）——每章卡后紧跟该章金句卡，
+  // 早于第一章的 orphan 金句单列「其他金句」，不硬塞进最近的章节。两条路径
+  // （AI 分章 / 自带章节短路径）产物同构，UI 不区分来源（概览票 07 决议）。
+  const { grouped, orphans } = groupQuotesIntoChapters(chapters, quotes);
+  const chapterBlocks = grouped
+    .map(({ chapter, quotes: chapterQuotes }) => {
+      return `${chapterCardHtml(chapter, withHours)}${chapterQuotes.map((item) => quoteCardHtml(item, withHours, true)).join("")}`;
+    })
+    .join("");
+  const orphanBlock = orphans.length
+    ? `<div class="boc-reading-ov-subhead">其他金句<span class="boc-reading-ov-badge">AI 精选</span></div>${orphans
+        .map((item) => quoteCardHtml(item, withHours, false))
+        .join("")}`
+    : "";
+  return `
     <section class="boc-reading-ov-section">
       <div class="boc-reading-ov-h">章节${chapterBadge}</div>
-      ${
-        chapters.length === 0
-          ? '<div class="boc-reading-ov-empty">没有可用的章节。</div>'
-          : chapters
-              .map((item) => {
-                const from = Number(item.from) || 0;
-                const desc = String(item.summary || "").trim();
-                return `
-                  <button type="button" class="boc-reading-ov-chapter" data-seconds="${from}">
-                    <span class="boc-reading-time">${escapeHtml(formatCompactTimestamp(from, withHours))}</span>
-                    <span class="boc-reading-ov-chapter-copy">
-                      <span class="boc-reading-ov-chapter-title">${escapeHtml(String(item.title))}</span>
-                      ${desc ? `<span class="boc-reading-ov-chapter-desc">${escapeHtml(desc)}</span>` : ""}
-                    </span>
-                  </button>
-                `;
-              })
-              .join("")
-      }
+      ${chapterBlocks}${orphanBlock}${quotesEmptyNote}
     </section>
-  `);
+  `;
+}
 
-  // —— 金句卡（白底 + 左 3px accent 边 + 右下角时间戳 + Copy 按钮）——
-  const quotes = Array.isArray(analysis.quotes) ? analysis.quotes : [];
-  sections.push(`
-    <section class="boc-reading-ov-section">
-      <div class="boc-reading-ov-h">金句<span class="boc-reading-ov-badge">AI 精选</span></div>
-      ${
-        quotes.length === 0
-          ? '<div class="boc-reading-ov-empty">没有可用的金句。</div>'
-          : quotes
-              .map((item) => {
-                const from = Number(item?.from) || 0;
-                const content = String(item?.content || "").trim();
-                if (!content) {
-                  return "";
-                }
-                return `
-                  <button type="button" class="boc-reading-ov-quote" data-seconds="${from}">
-                    <span class="boc-reading-ov-quote-text">「${escapeHtml(content)}」</span>
-                    <span class="boc-reading-ov-quote-foot">
-                      <span class="boc-reading-time">${escapeHtml(formatCompactTimestamp(from, withHours))}</span>
-                      <span class="boc-reading-ov-quote-copy" role="button" data-overview-action="copy-quote" data-quote="${escapeHtml(content)}" data-seconds="${from}">Copy</span>
-                    </span>
-                  </button>
-                `;
-              })
-              .join("")
-      }
-    </section>
-  `);
+// 章节卡（时间戳 pill + 标题 + 小结，点击跳播）。
+function chapterCardHtml(item: AnalysisChapter, withHours: boolean): string {
+  const from = Number(item.from) || 0;
+  const desc = String(item.summary || "").trim();
+  return `
+    <button type="button" class="boc-reading-ov-chapter" data-seconds="${from}">
+      <span class="boc-reading-time">${escapeHtml(formatCompactTimestamp(from, withHours))}</span>
+      <span class="boc-reading-ov-chapter-copy">
+        <span class="boc-reading-ov-chapter-title">${escapeHtml(String(item.title))}</span>
+        ${desc ? `<span class="boc-reading-ov-chapter-desc">${escapeHtml(desc)}</span>` : ""}
+      </span>
+    </button>
+  `;
+}
 
-  return sections.join("");
+// 金句卡（白底 + 左 3px accent 边 + 右下角时间戳 + Copy 按钮）。
+// nested = 归章形态（挂在所属章节卡之后，缩进表达从属）；平铺形态（无章节 /
+// orphan 组）不加。时间戳与原话原样呈现，不重排不改写。
+function quoteCardHtml(item: AnalysisQuote, withHours: boolean, nested: boolean): string {
+  const from = Number(item?.from) || 0;
+  const content = String(item?.content || "").trim();
+  if (!content) {
+    return "";
+  }
+  return `
+    <button type="button" class="boc-reading-ov-quote${nested ? " is-nested" : ""}" data-seconds="${from}">
+      <span class="boc-reading-ov-quote-text">「${escapeHtml(content)}」</span>
+      <span class="boc-reading-ov-quote-foot">
+        <span class="boc-reading-time">${escapeHtml(formatCompactTimestamp(from, withHours))}</span>
+        <span class="boc-reading-ov-quote-copy" role="button" data-overview-action="copy-quote" data-quote="${escapeHtml(content)}" data-seconds="${from}">Copy</span>
+      </span>
+    </button>
+  `;
 }
 
 // ============================================================
