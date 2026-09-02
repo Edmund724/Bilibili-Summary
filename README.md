@@ -1,6 +1,6 @@
 # Bilibili-Summary｜一键总结 B 站视频
 
-> **本仓库说明**：本仓库（Bilibili-Summary）是在上游源仓库 [haixiong1997/Bilibili-Obsidian-Clipper](https://github.com/haixiong1997/Bilibili-Obsidian-Clipper) 的基础上由本人进行二次修改（fork）的版本，保留了上游的 MIT License 与版权归属。
+> **本仓库说明**：本项目基于 [haixiong1997/Bilibili-Obsidian-Clipper](https://github.com/haixiong1997/Bilibili-Obsidian-Clipper) 二次修改，沿用原仓库的 MIT License。
 
 > UI 设计参考了 [YouTube Digest](https://github.com/zarazhangrui/youtube-digest)。
 
