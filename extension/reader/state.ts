@@ -10,7 +10,7 @@
 // ===== ids.js：reader 私有 DOM id 表 =====
 //
 // 为什么聚合前独立成叶子：id 表被 UI 模板（ui/ui-renderer.js buildUiHtml）、
-// 总结链（subtitle/ui.js）与 reader 域实现（page-frame/player-host/sync/
+// 总结链（subtitle/ui.js）与 reader 域实现（page-frame/video-bind/sync/
 // lifecycle）三方共享。若继续由 page-frame.js 持有，常驻侧为取一份纯数据
 // 就得静态拖入整个 LAYOUT 域。聚合后本文件仍是 content 静态 chunk 的轻量
 // 部分，不 import reader 域任何重实现。
@@ -29,9 +29,6 @@ export const ids = {
   closeBtn: "boc-close-btn",
   settingsBtn: "boc-settings-btn",
   readingView: "boc-reading-view",
-  // 阶段 2（B 形态）：播放器槽 DOM 随 stage 退役，表项保留——player-host 的
-  // native 布局路径仍引用（阶段 3 随 A 形态一并删）。
-  readingPlayerSlot: "boc-reading-player-slot",
   readingStatus: "boc-reading-status",
   readingCloseBtn: "boc-reading-close-btn",
   readingRefreshBtn: "boc-reading-refresh-btn",
@@ -51,10 +48,6 @@ export const ids = {
   readingInfoDescription: "boc-reading-info-description",
   readingDescriptionBtn: "boc-reading-description-btn",
   readingMeta: "boc-reading-meta",
-  // 阶段 2（B 形态）：rail 章节列表 DOM 退役，表项保留——renderReadingView /
-  // sync 高亮 / bindUiEvents 的可选容器查询仍引用（章节导航由概览 tab 承接，
-  // 阶段 3 清 A 形态残留时一并删）。
-  readingChapterList: "boc-reading-chapters",
   readingSubtitleList: "boc-reading-subtitle",
   readingSubtitleTailSpacer: "boc-reading-tail-spacer",
   // 统一 Digest 面板（PR2）：右侧面板壳 + 三标签（字幕/概览/AI 对话）分段控件。
@@ -127,7 +120,7 @@ export function isReaderViewOpen() {
 
 // ===== scroll-state.js：阅读视图滚动状态共享叶子 =====
 //
-// 这是 SYNC（./sync.js）与 LAYOUT（./page-frame.js + ./player-host.js）的共享
+// 这是 SYNC（./sync.js）与 LAYOUT（./page-frame.js + ./video-bind.js）的共享
 // 叶子：拥有手动滚动暂停与程序化滚动两个截止时间的唯一声明与读写函数。
 // 放在独立叶子里，让 SYNC 与 LAYOUT 共享同一份状态而不需要访问器穿越
 // reader-impl 的闭包 seam，也保持依赖图无环——本模块不 import reader 域内

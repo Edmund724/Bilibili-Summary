@@ -6,7 +6,7 @@
 // 状态栏文案（renderReadingStatus）与步进器控件的静态模板/监听绑定
 //（buildReaderStepperControl / bindReaderStepperControl）。它们是启动路径
 //（content.js init 的 hydrate/apply、ui-renderer 建 UI 壳的 stepper 模板）的
-// 直接依赖——留在 lifecycle.js/player-host.js 会把整个 reader 域拖回常驻。
+// 直接依赖——留在 lifecycle.js 会把整个 reader 域拖回常驻。
 //（PR2：原内联宿主呈现 applyInlineHostPresentation 已随字幕列表搬进统一面板
 // 一并移除。）
 //

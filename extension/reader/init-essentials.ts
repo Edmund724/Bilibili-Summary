@@ -8,7 +8,7 @@
 //
 // 依赖全部为常驻叶子（core/state、shared/logging、./presenter、
 // ./presentation、./view-state、core/lazy-reader、./presentation-fields 纯常量），
-// 不 import lifecycle/player-host/page-frame/sync。
+// 不 import lifecycle/page-frame/sync 等 reader 域重实现。
 import { state, uiState } from "../core/state.js";
 import { logWarn } from "../shared/logging.js";
 import {

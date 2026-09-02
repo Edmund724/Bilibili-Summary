@@ -427,10 +427,8 @@ export function bindUiEvents(): void {
   const readingLineHeightSelect = byId(ids.readingLineHeightSelect);
   const readingContentWidthSelect = byId(ids.readingContentWidthSelect);
   const readingDescriptionBtn = byId(ids.readingDescriptionBtn);
-  // 阶段 2（B 形态）：rail 随整页接管门控退役，章节列表 DOM 移除；委托目标
-  // 降级为可选（章节跳转/手动滚动接管由概览 tab 的列表承接）。byId 会因缺
-  // 节点抛错，这里用查询兜底。
-  const chapterList = document.getElementById(ids.readingChapterList);
+  // 阶段 3：rail 章节列表 DOM 已随整页接管退役（章节跳转/手动滚动接管由概览
+  // tab 的列表承接，见 readingOverviewBody 的委托）。
   const subtitleList = byId(ids.readingSubtitleList);
 
   // Digest 面板三标签切换（纯壳交互，见上方 setReaderDigestTab 注释）。
@@ -743,19 +741,6 @@ export function bindUiEvents(): void {
   };
   subtitleList.addEventListener("scroll", handleReaderManualScroll);
   subtitleList.addEventListener("wheel", handleReaderManualScroll, { passive: true });
-  if (chapterList) {
-    chapterList.addEventListener("wheel", handleReaderManualScroll, { passive: true });
-    chapterList.addEventListener("pointerdown", () => {
-      loadReaderDomain()
-        .then((reader) => reader.noteManualReaderInteraction(3500))
-        .catch(() => {});
-    });
-    chapterList.addEventListener("click", (event) => {
-      loadReaderDomain()
-        .then((reader) => reader.onReadingChapterClick(event))
-        .catch(() => {});
-    });
-  }
   subtitleList.addEventListener("pointerdown", () => {
     loadReaderDomain()
       .then((reader) => reader.noteManualReaderInteraction(3500))

@@ -2,9 +2,11 @@
 //
 // 本文件拥有页面框架：DOM 焦点（applyReaderPageFocus）/剪枝与阅读模式页面
 // 状态守卫（bindNormalPageStateGuard），以及 reader 私有 DOM id 表（ids，两域
-// 与 facade 共用）。播放器宿主（挂载/布局/控制条/观察器）在 ./player-host.js；
-// 两域互调一律走显式模块导出：本文件导出 getReaderMainWidthLimit/dismissReader
-// MiniPlayer，player-host.js 导出 getPlayerHost/layoutReaderPlayerHost。
+// 与 facade 共用）。阶段 3（B 形态收尾）：播放器宿主域（player-host.js）与
+// 悬停 chrome（hover-chrome.js）随整页接管退役——本文件原跨域导出
+// getReaderMainWidthLimit/getReaderPlayerHeightLimit/dismissReaderMiniPlayer/
+// cleanupReaderFloatingArtifacts 的消费方只剩该域，已一并删除；视频事件绑定
+// 迁往 ./video-bind.js。
 //
 // PR2 统一 Digest 面板：字幕列表常驻右侧面板「字幕」tab，原内联宿主机制
 //（moveReadingMainInline / restoreReadingMainInline / applyInlineHostPresentation）
@@ -19,11 +21,9 @@
 // 候选04：isReaderViewOpen/ids/scroll-state/page-state 已收进 ./state.js。
 // 本文件继续经 re-export 保持域内旧 import 路径不变，但真实来源统一为 state.js。
 import { state } from "../core/state.js";
-import { getReaderElement, isVisibleReaderControl } from "../shared/dom-utils.js";
+import { getReaderElement } from "../shared/dom-utils.js";
 import { isReaderMode } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
-// 跨域模块接口：播放器宿主状态与布局函数（player-host.js 导出）。
-import { getPlayerHost, layoutReaderPlayerHost } from "./player-host.js";
 // 候选02 分层惰性：id 表已迁往 ./state.js（常驻微模块），本文件内部仍大量按 id
 // 读写 reader DOM，经该 import 取用（此前为本地 const 定义，迁移后补上）。
 import { ids } from "./state.js";
@@ -55,71 +55,6 @@ export {
 //
 // Multi-page (分P) resolution lives in the pure page-context seam (issue 02);
 // consumers import ./page-context.js directly (established seam, see facade).
-
-function getReaderContentMaxPx() {
-  if (state.reader.readingContentWidth === "compact") {
-    return 680;
-  }
-  if (state.reader.readingContentWidth === "narrow") {
-    return 760;
-  }
-  if (state.reader.readingContentWidth === "wide") {
-    return 980;
-  }
-  if (state.reader.readingContentWidth === "full") {
-    return 1100;
-  }
-  // fit（填满，默认）：不限宽，上限交给可用区宽度与垂直适配
-  //（layoutReaderPlayerHost 的高度约束）。
-  return Number.POSITIVE_INFINITY;
-}
-
-function getReaderPagePaddingPx() {
-  return Math.min(32, Math.max(16, window.innerWidth * 0.028));
-}
-
-// 面板与主体的间隙（与 reader-gate.css 的 --boc-reader-panel-gap 同式）。
-function getReaderPanelGapPx() {
-  return Math.min(22, Math.max(14, window.innerWidth * 0.016));
-}
-
-export function getReaderMainWidthLimit() {
-  const pagePadding = getReaderPagePaddingPx();
-  // 面板 fixed 贴右缘，其左缘即主体右界：可用宽 = 面板左缘 - 间隙 - 左边距。
-  // 面板缺失/未渲染（jsdom、窄窗贴满档）退回整口宽减双侧页边距。
-  const panel = document.querySelector(".boc-reading-digest-panel");
-  const panelRect = panel?.getBoundingClientRect();
-  const available =
-    panelRect && panelRect.width > 0
-      ? panelRect.left - getReaderPanelGapPx() - pagePadding
-      : window.innerWidth - pagePadding * 2;
-  return Math.max(320, Math.min(getReaderContentMaxPx(), available));
-}
-
-// 视频垂直适配上限：阅读滚动位（标题顶对齐视口 16px，见
-// alignReaderViewportToPlayer）下整个视频须落进视口，底部留 16px 呼吸。
-// 顶距用「标题→播放器」的文档坐标差换算，与当前滚动位置无关。
-export function getReaderPlayerHeightLimit() {
-  const host = getPlayerHost();
-  if (!host) {
-    return Math.max(240, window.innerHeight - 120);
-  }
-  const hostTop = host.getBoundingClientRect().top;
-  const titleTop = findReaderTitleContainer()?.getBoundingClientRect().top;
-  const topAtReadingScroll = typeof titleTop === "number" ? 16 + (hostTop - titleTop) : hostTop;
-  return Math.max(240, window.innerHeight - topAtReadingScroll - 16);
-}
-
-export function cleanupReaderFloatingArtifacts(playerHostArg = getPlayerHost()) {
-  if (document.pictureInPictureElement) {
-    document.exitPictureInPicture().catch(() => {});
-  }
-  dismissReaderMiniPlayer(playerHostArg);
-  const runtimeHost = findReaderPlayerHost(getRuntimeVideoElement());
-  if (runtimeHost && runtimeHost !== playerHostArg) {
-    dismissReaderMiniPlayer(runtimeHost);
-  }
-}
 
 export function applyReaderPageFocus() {
   clearReaderPageFocus();
@@ -167,8 +102,8 @@ export function clearReaderPageFocus() {
 
 // 转写列表尾部留白（候选06 自 player-host.js 迁入；PR2 起高度基准为字幕
 // 列表容器自身的可视高度——列表是面板 tab 内的滚动容器，留白保证末屏内容
-// 也能滚到容器顶部）。消费方：player-host.layoutReaderPlayerHost（native/slot
-// 两分支收尾）、lifecycle 的分批追加/整段渲染，均经合法静态边取用。
+// 也能滚到容器顶部）。消费方：batched-render 分批追加、lifecycle 的整段渲染，
+// 均经合法静态边取用。
 export function updateReadingSubtitleTailSpacer() {
   const spacer = document.getElementById(ids.readingSubtitleTailSpacer);
   if (!spacer) {
@@ -269,119 +204,4 @@ function findReaderTitleContainer(): Element | null {
   return title;
 }
 
-export function dismissReaderMiniPlayer(playerHostArg: Element | null = getPlayerHost()) {
-  const explicitClose = Array.from(document.querySelectorAll(".bpx-player-mini-close")).find(isVisibleReaderControl);
-  if (explicitClose) {
-    (explicitClose as HTMLElement).click();
-    return true;
-  }
 
-  if (!playerHostArg) {
-    return false;
-  }
-
-  const computed = window.getComputedStyle(playerHostArg);
-  const fixedLike = computed.position === "fixed" || /mini|picture|float|fixed-player/i.test((playerHostArg as HTMLElement).className || "");
-  if (!fixedLike) {
-    return false;
-  }
-
-  const roots = Array.from(
-    new Set(
-      [
-        playerHostArg,
-        playerHostArg.parentElement,
-        playerHostArg.closest("#playerWrap"),
-        playerHostArg.closest("#bilibili-player")
-      ].filter((n): n is Element => Boolean(n))
-    )
-  );
-
-  const selectors = [
-    ".bpx-player-mini-close",
-    "[class*='mini'][class*='close']",
-    "[class*='close']",
-    "button[aria-label*='关闭']",
-    "button[title*='关闭']",
-    "[role='button'][aria-label*='关闭']",
-    "[role='button'][title*='关闭']"
-  ];
-
-  for (const root of roots) {
-    for (const selector of selectors) {
-      const candidates = Array.from(root.querySelectorAll(selector)).filter(isVisibleReaderControl);
-      const button = candidates.sort((a, b) => {
-        const rectA = a.getBoundingClientRect();
-        const rectB = b.getBoundingClientRect();
-        return rectA.width * rectA.height - rectB.width * rectB.height;
-      })[0];
-      if (button) {
-        (button as HTMLElement).click();
-        return true;
-      }
-    }
-  }
-
-  const playerRect = playerHostArg.getBoundingClientRect();
-  for (const root of roots) {
-    const fallback = Array.from(root.querySelectorAll("button, [role='button'], [tabindex], div, span"))
-      .filter((node): node is Element => {
-        if (!isVisibleReaderControl(node)) {
-          return false;
-        }
-        const rect = node.getBoundingClientRect();
-        const style = window.getComputedStyle(node);
-        const nearTopRight =
-          rect.width <= 48 &&
-          rect.height <= 48 &&
-          rect.left >= playerRect.right - 96 &&
-          rect.top <= playerRect.top + 96;
-        return nearTopRight && (style.cursor === "pointer" || node.hasAttribute("role") || node.hasAttribute("tabindex"));
-      })
-      .sort((a, b) => {
-        const rectA = a.getBoundingClientRect();
-        const rectB = b.getBoundingClientRect();
-        return rectA.top + (playerRect.right - rectA.right) - (rectB.top + (playerRect.right - rectB.right));
-      })[0];
-
-    if (fallback) {
-      (fallback as HTMLElement).click();
-      return true;
-    }
-  }
-
-  return false;
-}
-
-export function alignReaderViewportToPlayer() {
-  if (!isReaderMode()) {
-    return;
-  }
-
-  const titleNode = findReaderTitleContainer();
-  const playerHostNode = getPlayerHost() || findReaderPlayerHost(getRuntimeVideoElement());
-  const anchor = titleNode || playerHostNode;
-  if (!anchor) {
-    return;
-  }
-
-  const titleRect = titleNode?.getBoundingClientRect?.();
-  const playerRect = playerHostNode?.getBoundingClientRect?.();
-  const top = Math.min(
-    titleRect?.top ?? Number.POSITIVE_INFINITY,
-    playerRect?.top ?? Number.POSITIVE_INFINITY
-  );
-  if (!Number.isFinite(top)) {
-    return;
-  }
-
-  const nextTop = Math.max(0, window.scrollY + top - 16);
-  window.scrollTo({ top: nextTop, behavior: "auto" });
-  window.setTimeout(() => {
-    if (!state.reader.readingViewOpen || !isReaderMode()) {
-      return;
-    }
-    window.scrollTo({ top: nextTop, behavior: "auto" });
-    layoutReaderPlayerHost();
-  }, 120);
-}

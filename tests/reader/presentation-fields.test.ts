@@ -96,7 +96,6 @@ beforeEach(async () => {
 afterEach(async () => {
   try {
     shell.stopReadingViewSync();
-    shell.stopReaderPlayerObserver();
   } catch {
     // ignore
   }
@@ -242,8 +241,8 @@ describe("C. storage 键 ↔ 字段一一对应", () => {
 
 describe("D. 源码扫描：data-boc-* 属性字面量必须登记在案", () => {
   // 覆盖四个表驱动消费方 + 仍然直写 mode 的组合根/消息处理器 + CSS/模板/探针
-  // 消费方。page-frame / player-host / sync 属端口半边的并行改造区，其属性均为
-  // LOCAL 局部标志（keep/hidden/controls-* 等），不纳入扫描面。
+  // 消费方。page-frame / sync 属端口半边的并行改造区，其属性均为
+  // LOCAL 局部标志（keep/hidden 等），不纳入扫描面。
   const SCANNED_FILES = [
     "extension/reader/presentation.ts",
     "extension/reader/lifecycle.ts",

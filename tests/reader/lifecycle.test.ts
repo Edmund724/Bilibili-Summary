@@ -51,10 +51,9 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  // 清理 enterReaderMode 注册的播放器观察者/定时器，避免 jsdom MutationObserver 在清理后回调
+  // 清理 enterReaderMode 启动的同步定时器，避免 jsdom 定时器在清理后回调
   try {
     impl.stopReadingViewSync();
-    impl.stopReaderPlayerObserver();
   } catch {
     // ignore
   }

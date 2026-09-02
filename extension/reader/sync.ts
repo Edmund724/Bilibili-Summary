@@ -8,24 +8,29 @@
 // Layer graph (acyclic; ports.js is the zero-dependency leaf):
 //
 //   ports.js  显式回调端口（本域逆依赖的唯一通道，lifecycle 单点注册）
-//   LAYOUT    page-frame.js + player-host.js        → ports
-//                               module-level closure: playerHost, videoEventsBound,
-//                               scroll-pause variables, timer variables
+//   LAYOUT    page-frame.js + video-bind.js + digest-host.js → ports
+//                               module-level closure: scroll-pause variables,
+//                               timer variables
 //   SYNC      sync.js（本文件）                     → LAYOUT + ports
 //                               syncTimer lives here; scroll deadlines live here;
-//                               reads/writes the layout closure only through the
-//                               exported layout functions (imported below)
+//                               video 事件绑定经静态边 import ./video-bind.js
 //   LIFECYCLE lifecycle.js                          → SYNC + LAYOUT
 //
 // LAYOUT must not import this module — its layout/shell functions that need
 // sync-domain behavior call it through the explicit reader ports leaf
 // (./ports.js, registered once by lifecycle.js), keeping the dependency graph
 // acyclic: SYNC → LAYOUT. 不允许任何 `?.[` 式静默端口调用回潮。
+//
+// 阶段 3（B 形态收尾）：player-host/hover-chrome 随整页接管退役。原 stop 路径
+// 的 clearLayoutTimersForSyncStop/closeReaderCleanup/stopReaderPlayerObserver/
+// unbindReaderPlayerControlsHover、tick 的 native 布局调度与 playerChanged →
+// queueEnsureReaderPlayerMounted 均已删除——video 重绑由 bindReadingViewVideo
+// 兜底（readingVideoEl 变化即重绑）。
 import { state } from "../core/state.js";
 import { formatCompactTimestamp } from "../shared/string-utils.js";
 import { getReaderElement } from "../shared/dom-utils.js";
 import { findActiveSubtitleIndex, findActiveChapterIndex } from "../subtitle/core.js";
-import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
+import { getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import {
   ids,
   isManualScrollPaused,
@@ -33,18 +38,7 @@ import {
   setManualScrollPaused,
   setProgrammaticScrollUntil
 } from "./state.js";
-import {
-  getPlayerHost,
-  bindReadingViewVideo,
-  unbindReadingViewVideoSync,
-  queueEnsureReaderPlayerMounted,
-  scheduleReaderLayout,
-  stopReaderPlayerObserver,
-  unbindReaderPlayerControlsHover,
-  closeReaderCleanup,
-  setVideoEventsBound,
-  clearLayoutTimersForSyncStop
-} from "./player-host.js";
+import { bindReadingViewVideo, unbindReadingViewVideoSync } from "./video-bind.js";
 // 候选02 分层惰性：状态栏文案属常驻微模块，直接 import（不再经 player-host 转发）。
 import { renderReadingStatus } from "./presentation.js";
 // 候选06 端口半边：SYNC → LIFECYCLE 的字幕同步补渲染经显式端口回调
@@ -78,12 +72,7 @@ export function stopReadingViewSync() {
     window.clearInterval(syncTimer);
     syncTimer = 0;
   }
-  clearLayoutTimersForSyncStop();
-  closeReaderCleanup();
-  stopReaderPlayerObserver();
-  unbindReaderPlayerControlsHover();
   unbindReadingViewVideoSync();
-  setVideoEventsBound(false);
 }
 
 export function syncReadingViewPlayback(forceScroll = false) {
@@ -91,29 +80,13 @@ export function syncReadingViewPlayback(forceScroll = false) {
     return;
   }
 
-  if (state.reader.readingNativePageMode) {
-    // 候选10 批1：每拍 250ms 的 native 布局改走 rAF 合帧调度（与 scroll 事件
-    // 同一调度），一帧至多一次「读→算→写」；layout 内部带脏检查，稳态零写。
-    scheduleReaderLayout();
-  }
-
-  const runtimeVideo = getRuntimeVideoElement();
-  const runtimeHost = findReaderPlayerHost(runtimeVideo);
-  if (runtimeVideo && runtimeHost) {
-    const playerChanged =
-      runtimeVideo !== state.reader.readingVideoEl || runtimeHost !== getPlayerHost();
-    if (playerChanged) {
-      queueEnsureReaderPlayerMounted();
-    }
-  }
-
-  const video = bindReadingViewVideo(runtimeVideo || state.reader.readingVideoEl);
-  if (!video) {
+  const bound = bindReadingViewVideo(getRuntimeVideoElement() || state.reader.readingVideoEl);
+  if (!bound) {
     renderReadingStatus("当前页面没有找到可联动的视频播放器。");
     return;
   }
 
-  const currentTime = Number(video.currentTime || 0) || 0;
+  const currentTime = Number(bound.currentTime || 0) || 0;
   const subtitleIndex = findActiveSubtitleIndex(currentTime);
   const chapterIndex = findActiveChapterIndex(currentTime);
   const changed =
@@ -128,13 +101,13 @@ export function syncReadingViewPlayback(forceScroll = false) {
   updateReadingTranscribeBanner();
 }
 
-// 候选10 批1：上次激活高亮的缓存（字幕 + 章节各一份）。index 未变且上次写入的
-// 节点仍连接在文档时，整段跳过 querySelector 与 classList 写。列表整段重建
-// （renderReadingView）会使旧节点脱离文档、缓存自动失效回退到现查；分批渲染
+// 候选10 批1：上次激活高亮的缓存（字幕）。index 未变且上次写入的节点仍连接
+// 在文档时，整段跳过 querySelector 与 classList 写。列表整段重建
+//（renderReadingView）会使旧节点脱离文档、缓存自动失效回退到现查；分批渲染
 // 未追到目标时节点为 null，同样回退现查（条目上屏后的下一拍自然补上高亮）。
-const lastActiveItems: { subtitle: ActiveItemCache; chapter: ActiveItemCache } = {
-  subtitle: { index: -1, node: null },
-  chapter: { index: -1, node: null }
+// 阶段 3：章节高亮缓存随 rail 章节列表 DOM 退役一并删除。
+const lastActiveItems: { subtitle: ActiveItemCache } = {
+  subtitle: { index: -1, node: null }
 };
 
 // 解析本次应激活的节点：命中缓存时返回 unchanged=true（DOM 已是目标状态，
@@ -160,13 +133,9 @@ function resolveActiveItem(cached: ActiveItemCache, index: number, list: HTMLEle
 
 function setActiveReadingItems(subtitleIndex: number, chapterIndex: number, shouldScroll = false) {
   const subtitleList = getReaderElement(ids.readingSubtitleList);
-  // 阶段 2（B 形态）：rail 章节列表 DOM 已退役，章节高亮降级为可选容器（无
-  // 节点即跳过写组）；activeChapterIndex 状态照常维护（概览 tab 的高亮消费）。
-  const chapterList = document.getElementById(ids.readingChapterList);
+  // 阶段 3：rail 章节列表 DOM 已随整页接管退役，章节高亮写组整段删除；
+  // activeChapterIndex 状态照常维护（概览 tab 的高亮消费）。
   const subtitleHit = resolveActiveItem(lastActiveItems.subtitle, subtitleIndex, subtitleList, "boc-reading-item");
-  const chapterHit = chapterList
-    ? resolveActiveItem(lastActiveItems.chapter, chapterIndex, chapterList, "boc-reading-chapter")
-    : { next: null, current: null, unchanged: true };
 
   if (!subtitleHit.unchanged) {
     if (subtitleHit.current && subtitleHit.current !== subtitleHit.next) {
@@ -178,16 +147,6 @@ function setActiveReadingItems(subtitleIndex: number, chapterIndex: number, shou
     lastActiveItems.subtitle.index = subtitleIndex;
     lastActiveItems.subtitle.node = subtitleHit.next;
   }
-  if (!chapterHit.unchanged) {
-    if (chapterHit.current && chapterHit.current !== chapterHit.next) {
-      chapterHit.current.classList.remove("is-active");
-    }
-    if (chapterHit.next) {
-      chapterHit.next.classList.add("is-active");
-    }
-    lastActiveItems.chapter.index = chapterIndex;
-    lastActiveItems.chapter.node = chapterHit.next;
-  }
 
   if (shouldScroll && state.reader.readingAutoScroll) {
     if (isManualScrollPaused()) {
@@ -198,8 +157,7 @@ function setActiveReadingItems(subtitleIndex: number, chapterIndex: number, shou
     }
     let scrollSubtitleNode = subtitleHit.next;
     // 候选10 批2：字幕列表分批渲染后，跳转/跟随的目标条目可能还没追加上屏。
-    // 先同步补渲染到目标 index 再取节点滚动，保证「跳不过去」不发生；章节
-    // 列表始终整段渲染，无此问题。
+    // 先同步补渲染到目标 index 再取节点滚动，保证「跳不过去」不发生。
     if (!scrollSubtitleNode && subtitleIndex >= 0) {
       // 候选06：补渲染实现属 LIFECYCLE（分批渲染状态机在 lifecycle.js），经
       // 显式端口回调（lifecycle 启动时注册，缺失即抛错，不再静默返回 true）。
@@ -219,19 +177,15 @@ function setActiveReadingItems(subtitleIndex: number, chapterIndex: number, shou
     if (scrollSubtitleNode) {
       scrollReadingSubtitleItemIntoView(scrollSubtitleNode);
     }
-    if (chapterHit.next) {
-      scrollReadingRailItemIntoView(chapterHit.next);
-    }
   }
 
   state.reader.setActiveSubtitleIndex(subtitleIndex);
   state.reader.setActiveChapterIndex(chapterIndex);
 }
 
+// 章节列表 DOM 退役后的兜底滚动：退化为与旧 rail 相同的 scrollIntoView 语义
+//（隐藏容器/节点不可滚时对隐藏节点无操作）。
 function scrollReadingRailItemIntoView(node: HTMLElement) {
-  if (!node) {
-    return;
-  }
   setProgrammaticScrollUntil(Date.now() + 600);
   node.scrollIntoView({
     behavior: "smooth",

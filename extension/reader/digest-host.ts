@@ -7,9 +7,9 @@
 // data-boc-digest-float="1" 属性，让阶段 2 的 CSS 回落到 reader.css 既有的
 // 居中浮层基础样式。
 //
-// 与 player-host.ts 的关系：rAF 合帧 + 脏检查的调度思路抽自其
-// scheduleReaderLayout（候选10 批1），但不共享代码——digest-host 的写组是
-// 四个 CSS 变量与一个浮层属性，快照结构不同，且本模块不改 player-host。
+// 阶段 3：player-host 整页接管已退役，本模块是 LAYOUT 层唯一的布局调度器
+//（rAF 合帧 + 脏检查，思路源自候选10 批1 的旧 player-host 调度器）——digest-host
+// 的写组是四个 CSS 变量与一个浮层属性，快照结构独立。
 //
 // 为什么不用 MutationObserver：弹幕每飘一条都是变更事件，白烧 CPU（见
 // ui/digest-button.ts 头注）；SPA 换页换掉锚点节点的场景由 800ms 定时自查
@@ -54,7 +54,7 @@ let resizeObserver: ResizeObserver | null = null;
 let observedAnchor: Element | null = null;
 let layoutRafId = 0;
 // 上次写组快照：与本次计算结果全同则整组跳写，避免每个滚动事件的无谓样式
-// 失效（脏检查思路同 player-host 的 lastLayoutSnapshot）。浮层分支记
+// 失效（脏检查快照 lastSnapshot）。浮层分支记
 // floating: true，与贴栏分支互斥，形态切换天然强制重写。
 let lastSnapshot: { floating: boolean; values: string[] } | null = null;
 

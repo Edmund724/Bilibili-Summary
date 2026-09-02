@@ -341,9 +341,5 @@ export const LOCAL_FLAG_ATTRIBUTES = new Set([
   "data-boc-reader-keep",             // page-frame 剪枝：保留节点标记
   "data-boc-reader-hidden",           // page-frame 剪枝：隐藏节点标记
   "data-boc-reader-ready",            // 视图就绪态（ui-renderer 模板初值 / close 复位 "0"）
-  "data-boc-reader-fading",           // 播放器挂载淡入过渡（lifecycle 写入/移除）
-  "data-boc-reader-hide-sending-bar", // close 时瞬时隐藏 B 站发送条
-  "data-boc-reader-controls-forced",  // player-host 控件条强制显示
-  "data-boc-reader-no-cursor-cleared", // player-host 光标清理标记
-  "data-boc-reader-player-reset"      // player-host 播放器复位标记
+  "data-boc-reader-hide-sending-bar"  // close 时瞬时隐藏 B 站发送条
 ]);

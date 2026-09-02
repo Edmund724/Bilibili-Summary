@@ -5,7 +5,7 @@
 // 通知到达且阅读视图打开时才有职责。候选02 之前它被 message-handler 与
 // player-ai 的静态 import（reader/index barrel）拖进常驻闭包，经 esbuild 提升
 // 为 93KB 共享静态 chunk。分层后这里成为动态 import 边：esbuild 会把 facade
-// 连同 lifecycle/page-frame/player-host/sync 切进独立 chunk，只在首次
+// 连同 lifecycle/page-frame/sync 切进独立 chunk，只在首次
 // ensureReaderDomain() 时才下载。
 //
 // 写法与 core/lazy-player-ai.ts、subtitle/lazy.ts 同款：加载器本体收拢于

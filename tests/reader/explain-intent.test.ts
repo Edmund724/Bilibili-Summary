@@ -77,7 +77,6 @@ beforeEach(async () => {
 afterEach(async () => {
   try {
     reader.stopReadingViewSync();
-    reader.stopReaderPlayerObserver();
     reader.closeReadingView();
   } catch {
     // ignore

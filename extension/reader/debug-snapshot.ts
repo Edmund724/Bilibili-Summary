@@ -1,24 +1,21 @@
 // Reader 调试快照（自 lifecycle.js 迁出）。
-//
 // __BOC_READER_DEBUG_SNAPSHOT__ 全局函数的真身：采集阅读视图/播放器宿主链的
 // getBoundingClientRect + getComputedStyle + data 属性，产出一份可序列化布局
-// 快照，用于排查宿主浮动/小窗/面板布局走样。注册在 ./init-essentials.js（常驻
+// 快照，用于排查播放器宿主/面板布局走样。注册在 ./init-essentials.js（常驻
 // 轻量），只在手动调用全局函数时经 ensureReaderDomain 装载 reader 域后转发；
 // 对外经 reader/index.js 动态域入口转发本导出。
 //
-// 依赖方向（无环）：core/state、bilibili 探针/URL 工具、reader/state.js 的 ids 表、
-// player-host 的宿主访问器与呈现稳定性判定（LAYOUT 层）；本模块不被 reader
-// 域内任何实现模块 import。
+// 阶段 3（B 形态收尾）：原 player-host 的宿主访问器（getPlayerHost）与呈现
+// 稳定性/浮动布局判定（isReaderPresentationStable/hasNativeReaderPlayerLayoutIssue）
+// 随整页接管退役——readyStable/hasLayoutIssue 字段删除，宿主一律经探针
+// findReaderPlayerHost 现查；player-reset 局部标记也随宿主复位逻辑一并删除。
+//
+// 依赖方向（无环）：core/state、bilibili 探针/URL 工具、reader/state.js 的 ids 表；
+// 本模块不被 reader 域内任何实现模块 import。
 import { state } from "../core/state.js";
 import { cleanVideoUrl } from "../bilibili/video-id-shared.js";
 import { findReaderPlayerHost, getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import { ids } from "./state.js";
-import {
-  getPlayerHost,
-  getReaderPlayerWrapNode,
-  hasNativeReaderPlayerLayoutIssue,
-  isReaderPresentationStable
-} from "./player-host.js";
 
 export function createReaderDebugSnapshot(label = "manual") {
   const pickNodeSnapshot = (selector: string) => {
@@ -54,14 +51,12 @@ export function createReaderDebugSnapshot(label = "manual") {
       },
       attrs: {
         readerKeep: node.getAttribute("data-boc-reader-keep"),
-        readerHidden: node.getAttribute("data-boc-reader-hidden"),
-        readerReset: node.getAttribute("data-boc-reader-player-reset")
+        readerHidden: node.getAttribute("data-boc-reader-hidden")
       }
     };
   };
 
-  const playerHostNode = getPlayerHost() || findReaderPlayerHost(getRuntimeVideoElement());
-  const wrapNode = getReaderPlayerWrapNode(playerHostNode);
+  const playerHostNode = findReaderPlayerHost(getRuntimeVideoElement());
   const video = state.reader.readingVideoEl || getRuntimeVideoElement();
   const hostChain = [];
   let current = playerHostNode;
@@ -88,8 +83,7 @@ export function createReaderDebugSnapshot(label = "manual") {
         transform: style.transform,
         overflow: style.overflow,
         zIndex: style.zIndex
-      },
-      readerReset: current.getAttribute("data-boc-reader-player-reset")
+      }
     });
     current = current.parentElement;
     depth += 1;
@@ -103,8 +97,6 @@ export function createReaderDebugSnapshot(label = "manual") {
     readingViewOpen: state.reader.readingViewOpen,
     readingNativePageMode: state.reader.readingNativePageMode,
     readingViewReady: state.reader.readingViewReady,
-    readyStable: isReaderPresentationStable(playerHostNode),
-    hasLayoutIssue: hasNativeReaderPlayerLayoutIssue(playerHostNode),
     hasRoot: Boolean(document.getElementById(ids.root)),
     hasReadingView: Boolean(document.getElementById(ids.readingView)),
     playerHost: playerHostNode
@@ -112,13 +104,6 @@ export function createReaderDebugSnapshot(label = "manual") {
           tag: playerHostNode.tagName,
           id: playerHostNode.id || "",
           className: typeof playerHostNode.className === "string" ? playerHostNode.className : ""
-        }
-      : null,
-    wrapNode: wrapNode
-      ? {
-          tag: wrapNode.tagName,
-          id: wrapNode.id || "",
-          className: typeof wrapNode.className === "string" ? wrapNode.className : ""
         }
       : null,
     video: video
