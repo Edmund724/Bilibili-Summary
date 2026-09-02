@@ -25,7 +25,6 @@
 // hasPendingUserPrompt 惰性互引 chatRuntime 实例）经工厂 deps 注入。本模块
 // 不 import 组合根。
 import { buildContextKey, doesTabMatchContextUrl } from "../ai/conversation.js";
-import { truncate } from "../shared/string-utils.js";
 import { getAiContextState } from "../ai/context-resolver.js";
 import { waitForTabComplete } from "../shared/tab-utils.js";
 import {
@@ -372,8 +371,9 @@ export function createContextLoad(deps: CreateContextLoadDeps): ContextLoad {
       return;
     }
 
-    const shortTitle = sidepanelState.contextData.title ? truncate(sidepanelState.contextData.title, 19) : "未知视频";
-    contextChip.textContent = shortTitle;
+    // 标题不按字数硬截：chip 已占满 header 剩余宽度，溢出交给 CSS
+    // text-overflow: ellipsis 按真实盒宽裁（短标题也能铺满整个 chip）。
+    contextChip.textContent = sidepanelState.contextData.title || "未知视频";
     const mismatch = isBoundConversationMismatched();
     contextChip.classList.toggle("is-mismatch", mismatch);
     contextChip.title = sidepanelState.contextData.url

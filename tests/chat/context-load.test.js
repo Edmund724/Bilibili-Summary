@@ -266,13 +266,13 @@ describe("updateContextChip", () => {
     expect(contextChip.classList.contains("is-mismatch")).toBe(false);
   });
 
-  it("有上下文：标题截断 19 字 + disabled 随 url 有无", () => {
+  it("有上下文：标题整串写入 chip（溢出交 CSS ellipsis）+ disabled 随 url 有无", () => {
     sidepanelState.contextData = { title: "一".repeat(30), url: "https://x" };
     const { contextLoad, contextChip } = makeHarness();
 
     contextLoad.updateContextChip();
 
-    expect(contextChip.textContent).toBe("一".repeat(19) + "...");
+    expect(contextChip.textContent).toBe("一".repeat(30));
     expect(contextChip.disabled).toBe(false);
   });
 

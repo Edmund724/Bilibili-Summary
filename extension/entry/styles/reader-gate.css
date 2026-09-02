@@ -72,7 +72,7 @@ body[data-boc-reader-mode="1"] #boc-reading-view[data-boc-reader-follow="manual"
   content: "手动浏览中";
   display: inline-block;
   margin-left: 8px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--boc-reader-faint, #a39a8d);
 }
@@ -102,7 +102,7 @@ body[data-boc-reader-mode="1"],
   --boc-reader-pill-bg: #f0e9df;
   --boc-reader-highlight: #fdeeda;
   --boc-reader-shadow: 0 18px 40px rgba(112, 93, 64, 0.1);
-  --boc-reader-subtitle-font-size: 14px;
+  --boc-reader-subtitle-font-size: 16px;
   --boc-reader-subtitle-line-height: 1.5;
   --boc-reader-letter-spacing: 0em;
   color: var(--boc-reader-text);
