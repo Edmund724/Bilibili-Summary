@@ -98,6 +98,7 @@ Bilibili-Summary 需要两个 Key：
 2. 创建账号并登录。
 3. 在控制台的 API Key 管理页创建一个新 Key。
 4. 复制 Key，粘贴到 Bilibili Summary 设置中的 **硅基流动 API Key**。
+5. 在模型下拉框中选择转写模型，建议选 `XingChenAGI/XingChenASR-Diarize-V3.0`。
 
 如果页面流程有变化，请查看 [硅基流动官方文档](https://docs.siliconflow.cn/)。
 
@@ -112,14 +113,7 @@ ModelScope 提供每日签到免费积分，注册后每天登录官网即可领
 
 在阅读面板（Digest）右上角点齿轮按钮打开 **设置** 抽屉，Key 只能粘贴到这里的设置输入框中。不要把 Key 发到 AI 对话、项目文件、截图或公开消息中。
 
-推荐的 ModelScope 配置：
-
-```text
-Base URL: https://api-inference.modelscope.cn/v1
-Model: deepseek-ai/DeepSeek-V3.1 或其他 ModelScope 可用模型
-```
-
-Bilibili Summary 不锁定模型，可以在设置中自由切换。如果 ModelScope 积分不足或想用其他服务，也可以在「AI 模型平台」中添加其他平台。
+添加平台时选择 ModelScope 预设，Base URL 会自动填充。粘贴 Token 后，点模型名称旁的箭头即可拉取可用模型列表，从中选择一个，无需手动填写。想换模型或改用其他平台，随时在设置的「AI 模型平台」中修改。
 
 API Key 保存在本机的 Chrome 扩展本地存储中，非敏感设置经 Chrome 账号同步。发布包不包含也不读取 `config.js`。
 
