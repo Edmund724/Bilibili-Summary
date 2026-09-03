@@ -33,7 +33,6 @@ import { resolveActiveProvider } from "../ai/active-provider.js";
 import {
   runOverviewAnalysis,
   buildSubtitleSignature,
-  groupQuotesIntoChapters,
   type AnalysisChapter,
   type AnalysisQuote,
   type OverviewAnalysis
@@ -399,29 +398,23 @@ function buildResultSectionsHtml(): string {
       </section>
       <section class="boc-reading-ov-section">
         <div class="boc-reading-ov-h">金句<span class="boc-reading-ov-badge">AI 精选</span></div>
-        ${quotesEmptyNote}${quotes.map((item) => quoteCardHtml(item, withHours, false)).join("")}
+        ${quotesEmptyNote}${quotes.map((item) => quoteCardHtml(item, withHours)).join("")}
       </section>
     `;
   }
 
-  // —— 有章节：金句归章（groupQuotesIntoChapters）——每章卡后紧跟该章金句卡，
-  // 早于第一章的 orphan 金句单列「其他金句」，不硬塞进最近的章节。两条路径
-  // （AI 分章 / 自带章节短路径）产物同构，UI 不区分来源（概览票 07 决议）。
-  const { grouped, orphans } = groupQuotesIntoChapters(chapters, quotes);
-  const chapterBlocks = grouped
-    .map(({ chapter, quotes: chapterQuotes }) => {
-      return `${chapterCardHtml(chapter, withHours)}${chapterQuotes.map((item) => quoteCardHtml(item, withHours, true)).join("")}`;
-    })
-    .join("");
-  const orphanBlock = orphans.length
-    ? `<div class="boc-reading-ov-subhead">其他金句<span class="boc-reading-ov-badge">AI 精选</span></div>${orphans
-        .map((item) => quoteCardHtml(item, withHours, false))
-        .join("")}`
-    : "";
+  // —— 有章节：章节与金句分区呈现——章节 section 只放章节卡，金句单列独立
+  // section（卡片按 from 平铺），不与章节混排。两条路径（AI 分章 / 自带章节
+  // 短路径）产物同构，UI 不区分来源（概览票 07 决议）。
+  const chapterBlocks = chapters.map((item) => chapterCardHtml(item, withHours)).join("");
   return `
     <section class="boc-reading-ov-section">
       <div class="boc-reading-ov-h">章节${chapterBadge}</div>
-      ${chapterBlocks}${orphanBlock}${quotesEmptyNote}
+      ${chapterBlocks}
+    </section>
+    <section class="boc-reading-ov-section">
+      <div class="boc-reading-ov-h">金句<span class="boc-reading-ov-badge">AI 精选</span></div>
+      ${quotesEmptyNote}${quotes.map((item) => quoteCardHtml(item, withHours)).join("")}
     </section>
   `;
 }
@@ -442,16 +435,15 @@ function chapterCardHtml(item: AnalysisChapter, withHours: boolean): string {
 }
 
 // 金句卡（白底 + 左 3px accent 边 + 右下角时间戳 + Copy 按钮）。
-// nested = 归章形态（挂在所属章节卡之后，缩进表达从属）；平铺形态（无章节 /
-// orphan 组）不加。时间戳与原话原样呈现，不重排不改写。
-function quoteCardHtml(item: AnalysisQuote, withHours: boolean, nested: boolean): string {
+// 时间戳与原话原样呈现，不重排不改写。
+function quoteCardHtml(item: AnalysisQuote, withHours: boolean): string {
   const from = Number(item?.from) || 0;
   const content = String(item?.content || "").trim();
   if (!content) {
     return "";
   }
   return `
-    <button type="button" class="boc-reading-ov-quote${nested ? " is-nested" : ""}" data-seconds="${from}">
+    <button type="button" class="boc-reading-ov-quote" data-seconds="${from}">
       <span class="boc-reading-ov-quote-text">「${escapeHtml(content)}」</span>
       <span class="boc-reading-ov-quote-foot">
         <span class="boc-reading-time">${escapeHtml(formatCompactTimestamp(from, withHours))}</span>

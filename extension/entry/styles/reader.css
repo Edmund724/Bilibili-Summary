@@ -1168,24 +1168,6 @@
   color: var(--boc-reader-accent, #fb7299);
 }
 
-/* 归章金句卡（is-nested，arch-slim/06）：挂在所属章节卡之后，缩进表达从属。
- * 平铺形态（无章节 / orphan 组）不缩进。 */
-.boc-reading-ov-quote.is-nested {
-  width: auto;
-  margin-left: 20px;
-}
-
-/* orphan 金句（早于第一章）的次级标头「其他金句」：比 section 标头轻一级 */
-.boc-reading-ov-subhead {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--boc-reader-faint, #a39a8d);
-  margin: 12px 0 8px;
-}
-
 /* 状态条（生成中 / 部分失败 / 失败）+ 不确定进度细条 */
 .boc-reading-ov-strip {
   display: flex;
