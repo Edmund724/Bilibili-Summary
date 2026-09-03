@@ -98,7 +98,10 @@ Bilibili-Summary 需要两个 Key：
 2. 创建账号并登录。
 3. 在控制台的 API Key 管理页创建一个新 Key。
 4. 复制 Key，粘贴到 Bilibili Summary 设置中的 **硅基流动 API Key**。
-5. 模型名默认 `FunAudioLLM/SenseVoiceSmall`，也可自行填写其他模型名。
+5. 模型名默认 `FunAudioLLM/SenseVoiceSmall`，点模型名右侧的箭头可拉取该平台全部可选模型。常用转写模型的区别：
+   - `XingChenAGI/XingChenASR-V3.2-Ultra`：免费，返回句级时间戳，字幕可逐句点击跳播，推荐选用。
+   - `FunAudioLLM/SenseVoiceSmall`：免费，但不返回时间戳，字幕只能按音频分片粗略定位。
+   - `Qwen/Qwen3-ASR-1.7B`：收费模型，需要付费额度。
 
 如果页面流程有变化，请查看 [硅基流动官方文档](https://docs.siliconflow.cn/)。
 
@@ -141,7 +144,7 @@ Firefox、Safari、移动浏览器和其他 Chromium 浏览器没有测试过。
 
 ### 硅基流动
 
-硅基流动提供免费语音转写额度，无字幕视频的转写通常不收费或费用极低。使用前请查看 [硅基流动定价页面](https://siliconflow.cn/pricing) 确认最新规则。
+硅基流动提供免费语音转写额度，用免费模型（如 `XingChenAGI/XingChenASR-V3.2-Ultra`、`FunAudioLLM/SenseVoiceSmall`）转写无字幕视频通常不收费。`Qwen/Qwen3-ASR-1.7B` 是收费模型，按量计费。使用前请查看 [硅基流动定价页面](https://siliconflow.cn/pricing) 确认最新规则。
 
 ### ModelScope
 
