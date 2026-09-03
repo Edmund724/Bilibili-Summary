@@ -78,6 +78,11 @@ export const ANALYSIS_LATE_THRESHOLD_RATIO = 0.75;
 // 校验上限：章节数 / 金句数（对齐参考仓库 validateAnalysis 的裁剪量级）。
 export const MAX_ANALYSIS_CHAPTERS = 100;
 export const MAX_ANALYSIS_QUOTES = 50;
+// 空正文重试的输出预算上限：思考型模型（如 step-3.7-flash）会无视关思考字段族
+// 强制思考，思考把 max_tokens 耗尽（finish_reason=length）后 content 空串返回，
+// parseLooseJson 只会抛出难懂的「Unexpected end of JSON input」。首次调用空正文
+// 时按原估算加倍（封顶此处）重试一次，给思考之后的正文留出落出空间。
+export const EMPTY_TEXT_RETRY_MAX_TOKENS_CEILING = 16384;
 
 // ============================================================
 // 系统提示词（全静态，逐字节可前缀缓存；变量全部在用户提示词侧）
@@ -1005,6 +1010,8 @@ function makeEmptyAnalysisError(): Error {
 
 // 单次模型调用 → 宽容解析 → 校验。maxTokens 按正文长度估算（ratio 0.5，
 // 前情回顾只进输入不进输出）；非流式显式 retries 由调用方给（单次 2 / 分段走池层重试）。
+// 空正文（含纯空白）按「思考占满输出预算」加倍预算重试一次，仍空则抛可读错误
+// （EMPTY_TEXT_RETRY_MAX_TOKENS_CEILING 处有根因说明）。
 async function requestValidatedPart({
   provider,
   systemPrompt,
@@ -1031,14 +1038,18 @@ async function requestValidatedPart({
     { role: "system", content: systemPrompt },
     { role: "user", content: built.prompt }
   ];
-  const text = await chatCompletionImpl({
-    provider,
-    messages,
-    thinkingLevel,
-    signal,
-    retries,
-    maxTokens: estimateOutputTokens(built.transcriptChars, { ratio: 0.5, floor: 2048 })
-  });
+  const baseMaxTokens = estimateOutputTokens(built.transcriptChars, { ratio: 0.5, floor: 2048 });
+  const requestBase = { provider, messages, thinkingLevel, signal, retries };
+  let text = await chatCompletionImpl({ ...requestBase, maxTokens: baseMaxTokens });
+  if (!String(text ?? "").trim()) {
+    text = await chatCompletionImpl({
+      ...requestBase,
+      maxTokens: Math.min(baseMaxTokens * 2, EMPTY_TEXT_RETRY_MAX_TOKENS_CEILING)
+    });
+  }
+  if (!String(text ?? "").trim()) {
+    throw new Error("模型没有返回正文（输出预算可能被思考过程占满），请重试。");
+  }
   return validateAnalysis(parseLooseJson(String(text ?? "")), built.timing.maxTimestampSeconds, minSeconds);
 }
 

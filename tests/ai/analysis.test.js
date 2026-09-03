@@ -302,6 +302,48 @@ describe("双路径分派", () => {
 });
 
 // ============================================================
+// 空正文重试（思考型模型把输出预算花在 reasoning 上）
+// ============================================================
+
+describe("空正文重试", () => {
+  // 真实故障：step-3.7-flash 无视关思考字段族，思考耗尽 max_tokens（finish_reason=length）
+  // 后 content 空串返回 → parseLooseJson("") 抛「Unexpected end of JSON input」。
+  it("首次调用空正文 → 加倍 max_tokens 重试一次并正常解析", async () => {
+    const calls = [];
+    const good = JSON.stringify({
+      chapters: [{ title: "章1", timestampSeconds: 5, summary: "甲" }],
+      keyQuotes: [{ quote: "金句1", timestampSeconds: 30 }]
+    });
+    const chatCompletion = vi.fn(async (input) => {
+      calls.push(input);
+      return calls.length === 1 ? "" : good;
+    });
+    const result = await mod.runOverviewAnalysis(
+      { provider: makeProvider(), context: makeContext({ subtitleBody: makeSubtitleBody(50000) }) },
+      { chatCompletion }
+    );
+
+    expect(chatCompletion).toHaveBeenCalledTimes(2);
+    // 重试调用按原估算预算加倍，给思考之后的正文留出空间
+    expect(calls[1].maxTokens).toBe(calls[0].maxTokens * 2);
+    expect(calls[1].messages).toEqual(calls[0].messages);
+    expect(result.chapters.map((c) => c.title)).toEqual(["章1"]);
+    expect(result.quotes).toEqual([{ from: 30, content: "金句1" }]);
+  });
+
+  it("重试后仍空正文 → 抛可读错误，而不是「Unexpected end of JSON input」", async () => {
+    const chatCompletion = vi.fn(async () => "");
+    await expect(
+      mod.runOverviewAnalysis(
+        { provider: makeProvider(), context: makeContext({ subtitleBody: makeSubtitleBody(50000) }) },
+        { chatCompletion }
+      )
+    ).rejects.toThrow(/模型没有返回正文/);
+    expect(chatCompletion).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ============================================================
 // 部分失败降级（failedRanges）与单次路径失败
 // ============================================================
 
