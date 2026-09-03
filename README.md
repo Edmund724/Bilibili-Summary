@@ -98,7 +98,7 @@ Bilibili-Summary 需要两个 Key：
 2. 创建账号并登录。
 3. 在控制台的 API Key 管理页创建一个新 Key。
 4. 复制 Key，粘贴到 Bilibili Summary 设置中的 **硅基流动 API Key**。
-5. 在模型下拉框中选择转写模型，建议选 `XingChenAGI/XingChenASR-Diarize-V3.0`。
+5. 模型名默认 `FunAudioLLM/SenseVoiceSmall`，也可自行填写其他模型名。
 
 如果页面流程有变化，请查看 [硅基流动官方文档](https://docs.siliconflow.cn/)。
 

@@ -44,8 +44,7 @@ const ASR_PRESETS = [
     name: "SiliconFlow 硅基流动（免费）",
     type: "openai-transcriptions",
     baseUrl: "https://api.siliconflow.cn/v1",
-    model: "FunAudioLLM/SenseVoiceSmall",
-    modelOptions: [{ value: "FunAudioLLM/SenseVoiceSmall", label: "SenseVoice" }]
+    model: "FunAudioLLM/SenseVoiceSmall"
   },
   {
     id: "local-whisper",
@@ -403,7 +402,7 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     model: "FunAudioLLM/SenseVoiceSmall"
   };
 
-  it("渲染行结构：名称输入 + 模型下拉 + 选用 radio，删除/状态行复用 AI 类名", async () => {
+  it("渲染行结构：名称输入 + 模型名文本输入 + 选用 radio，删除/状态行复用 AI 类名", async () => {
     const rows = await loadAsrRows();
     const { listNode, emptyNode } = makeContainer();
     rows.renderAsrProviders(listNode, emptyNode, [asrItem, { id: "asr2", presetId: "local-whisper" }], { presets: ASR_PRESETS, activeId: "asr2" });
@@ -416,11 +415,9 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     expect(row.dataset.currentPresetId).toBe("siliconflow");
     // 名称输入（AI 行没有），名称取自预设
     expect(row.querySelector(".asr-provider-name").value).toBe("SiliconFlow 硅基流动（免费）");
-    // 预设带 modelOptions → 模型渲染为下拉框
-    const modelSelect = row.querySelector("select.asr-provider-model");
-    expect(modelSelect).not.toBeNull();
-    expect(modelSelect.value).toBe("FunAudioLLM/SenseVoiceSmall");
-    // whisper 预设无 modelOptions → 模型为文本输入，值跟随预设 model
+    // 模型名为可自由编辑的文本输入，值取已保存 model
+    expect(row.querySelector("input.asr-provider-model").value).toBe("FunAudioLLM/SenseVoiceSmall");
+    // whisper 预设行模型值跟随预设 model
     expect(allRows[1].querySelector("input.asr-provider-model").value).toBe("whisper-large-v3");
     // 选用 radio：activeId 命中 asr2
     const radios = listNode.querySelectorAll(".asr-provider-active-radio");
@@ -436,19 +433,7 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     expect(row.querySelector("button.secondary-btn.asr-provider-test")).not.toBeNull();
   });
 
-  it("已保存 model 不在下拉选项中时追加保留项", async () => {
-    const rows = await loadAsrRows();
-    const { listNode, emptyNode } = makeContainer();
-    rows.renderAsrProviders(listNode, emptyNode, [{ ...asrItem, model: "legacy-model" }], { presets: ASR_PRESETS });
-    const modelSelect = listNode.querySelector("select.asr-provider-model");
-    expect(Array.from(modelSelect.options).map((o) => o.value)).toEqual([
-      "FunAudioLLM/SenseVoiceSmall",
-      "legacy-model"
-    ]);
-    expect(modelSelect.value).toBe("legacy-model");
-  });
-
-  it("预设切换：未改过 baseUrl 才跟随；模型字段重建、名称跟随、Key 清空", async () => {
+  it("预设切换：未改过 baseUrl 才跟随；模型名跟随、名称跟随、Key 清空，模型字段不累积", async () => {
     const rows = await loadAsrRows();
     const { listNode, emptyNode } = makeContainer();
     rows.renderAsrProviders(listNode, emptyNode, [asrItem], { presets: ASR_PRESETS });
@@ -458,12 +443,11 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     const apikeyInput = row.querySelector(".asr-provider-apikey");
     apikeyInput.value = "sk-old";
 
-    // 未改过 baseUrl → 跟随 whisper 预设；模型字段由下拉重建为文本输入；
+    // 未改过 baseUrl → 跟随 whisper 预设；模型名跟随预设；
     // 名称无条件跟随；Key 清空
     select.value = "local-whisper";
     select.dispatchEvent(new Event("change"));
     expect(baseUrlInput.value).toBe("http://localhost:8000/v1");
-    expect(row.querySelector("select.asr-provider-model")).toBeNull();
     expect(row.querySelector("input.asr-provider-model").value).toBe("whisper-large-v3");
     expect(row.querySelector(".asr-provider-name").value).toBe("本地 Whisper 服务");
     expect(apikeyInput.value).toBe("");
@@ -474,10 +458,12 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     select.value = "siliconflow";
     select.dispatchEvent(new Event("change"));
     expect(baseUrlInput.value).toBe("https://my-asr.example.com/v1");
-    // 模型字段重建回下拉框
-    expect(row.querySelector("input.asr-provider-model")).toBeNull();
-    expect(row.querySelector("select.asr-provider-model").value).toBe("FunAudioLLM/SenseVoiceSmall");
+    expect(row.querySelector("input.asr-provider-model").value).toBe("FunAudioLLM/SenseVoiceSmall");
     expect(row.querySelector(".asr-provider-name").value).toBe("SiliconFlow 硅基流动（免费）");
+    // 回归：多次切换后模型字段仍只有一个（历史 bug：自定义下拉外壳随切换累积）
+    select.value = "local-whisper";
+    select.dispatchEvent(new Event("change"));
+    expect(row.querySelectorAll(".asr-provider-model")).toHaveLength(1);
   });
 
   it("测试连接：直调探针（provider 对象仅重输 Key 时携带 apiKey）；成功回调保存", async () => {

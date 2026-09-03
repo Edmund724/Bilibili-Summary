@@ -7,18 +7,12 @@
 //   openai-transcriptions：OpenAI 兼容 multipart 端点（SiliconFlow / 本地 Whisper / 自定义）
 // supportsTimestamps 决定时间戳合成方式。
 
-export interface AsrProviderPresetModelOption {
-  value: string;
-  label: string;
-}
-
 export interface AsrProviderPreset {
   id: string;
   name: string;
   type: string;
   baseUrl: string;
   model: string;
-  modelOptions?: AsrProviderPresetModelOption[];
   supportsTimestamps: boolean;
   note?: string;
   language?: string;
@@ -30,16 +24,9 @@ export const ASR_PROVIDER_PRESETS: readonly AsrProviderPreset[] = [
     name: "SiliconFlow 硅基流动（免费）",
     type: "openai-transcriptions",
     baseUrl: "https://api.siliconflow.cn/v1",
-    model: "XingChenAGI/XingChenASR-V3.2",
-    // 模型名固定为四选一下拉；Qwen3-ASR 为收费模型，其余免费。
-    modelOptions: [
-      { value: "Qwen/Qwen3-ASR-1.7B", label: "Qwen/Qwen3-ASR-1.7B（收费）" },
-      { value: "XingChenAGI/XingChenASR-V3.2", label: "XingChenAGI/XingChenASR-V3.2" },
-      { value: "XingChenAGI/XingChenASR-Diarize-V3.0", label: "XingChenAGI/XingChenASR-Diarize-V3.0" },
-      { value: "XingChenAGI/XingChenASR-V3.2-Ultra", label: "XingChenAGI/XingChenASR-V3.2-Ultra" }
-    ],
+    model: "FunAudioLLM/SenseVoiceSmall",
     supportsTimestamps: true,
-    note: "模型名从下拉四选一；Qwen/Qwen3-ASR-1.7B 为收费模型。英文视频请在插件页顶部切换为 English 后重新刷新。"
+    note: "模型名默认 FunAudioLLM/SenseVoiceSmall，可自行填写其他模型。英文视频请在插件页顶部切换为 English 后重新刷新。"
   },
   {
     id: "local-whisper",

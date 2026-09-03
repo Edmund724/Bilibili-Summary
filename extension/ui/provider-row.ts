@@ -50,7 +50,7 @@ export interface ProviderRowItem {
 }
 
 // 平台预设的结构子集（工厂骨架读取 id/name/baseUrl，注入回调按需读取
-// model/requiresKey/modelOptions/type）：AiProviderPreset（core/presets）与
+// model/requiresKey/type）：AiProviderPreset（core/presets）与
 // AsrProviderPreset 均按结构兼容传入。
 export interface ProviderRowPreset {
   id: string;
@@ -59,7 +59,6 @@ export interface ProviderRowPreset {
   model?: string;
   type?: string;
   requiresKey?: boolean;
-  modelOptions?: Array<{ value: string; label: string }>;
 }
 
 // 行内状态 <p> 的写入口（wireRowExtras 注入用）：node 允许缺失（缺失即静默）。

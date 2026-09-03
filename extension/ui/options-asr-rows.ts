@@ -1,7 +1,7 @@
 // extension/ui/options-asr-rows.ts
 // 设置页"语音转写平台"区块行构建器：与 AI 平台行（options-rows.js）共用
 // ui/provider-row.js 的 createProviderRow，本文件只提供 ASR 侧真实差异：
-// 名称输入、模型字段随预设 modelOptions 在下拉/文本间切换、选用 radio、
+// 名称输入、可自由编辑的模型名文本输入、选用 radio、
 // asr-providers-* 报文（连通性测试已直调 asr/provider-test.js，不再发消息）。
 // 行内删除按钮与状态行复用 ai-provider-remove / ai-provider-status 类名
 // （既有耦合，DOM 契约保持不变）。行构建器只依赖参数与回调，不直接访问 DOM 全局。
@@ -15,31 +15,10 @@ import { initCustomSelect } from "./custom-select.js";
 
 const ASR_STATUS_SUCCESS_MIN_MS = 2000;
 
-// 模型名字段：预设带 modelOptions 时渲染为下拉框（如 SiliconFlow 的 ASR 模型），
-// 否则保持可自由编辑的文本输入，供本地 Whisper / 自定义端点使用。
-function buildAsrModelField(preset: ProviderRowPreset | null, model: string): string {
-  const rawOptions = preset?.modelOptions;
-  const modelOptions = Array.isArray(rawOptions) && rawOptions.length > 0 ? rawOptions : null;
-  if (!modelOptions) {
-    return `<input class="asr-provider-model" type="text" placeholder="模型名（如 FunAudioLLM/SenseVoiceSmall）" value="${escapeHtml(model)}" />`;
-  }
-  const valueSet = new Set(modelOptions.map((o) => String(o?.value ?? "")));
-  let optionsHtml = modelOptions.map((o) => {
-    const value = String(o?.value ?? "");
-    return `<option value="${escapeHtml(value)}" ${value === model ? "selected" : ""}>${escapeHtml(o?.label ?? value)}</option>`;
-  }).join("");
-  // 已保存的 model 不在下拉选项里（如旧版 FunAudioLLM/SenseVoiceSmall）时，
-  // 追加一项以保留原值，避免保存时被静默替换成默认选项。
-  if (model && !valueSet.has(model)) {
-    optionsHtml += `<option value="${escapeHtml(model)}" selected>${escapeHtml(model)}</option>`;
-  }
-  return `<select class="asr-provider-model" title="模型名">${optionsHtml}</select>`;
-}
-
-// 带 modelOptions 的预设渲染出原生 select，转成自定义下拉（与平台预设下拉一致）
-function initAsrModelCustomSelect(row: HTMLElement): void {
-  const select = row.querySelector("select.asr-provider-model");
-  if (select) initCustomSelect(select as HTMLSelectElement, "custom-select-wrapper asr-model-wrapper");
+// 模型名字段：所有预设均为可自由编辑的文本输入（含 SiliconFlow），
+// 默认值取预设 model，用户可改填任意模型名。
+function buildAsrModelField(_preset: ProviderRowPreset | null, model: string): string {
+  return `<input class="asr-provider-model" type="text" placeholder="模型名（如 FunAudioLLM/SenseVoiceSmall）" value="${escapeHtml(model)}" />`;
 }
 
 const asrProviderRow = createProviderRow({
@@ -70,11 +49,9 @@ const asrProviderRow = createProviderRow({
       选用
     </label>`,
   onPresetChange: (row, _previousPreset, next) => {
-    // 模型名随预设切换重建：带 modelOptions 的预设渲染为下拉框，否则为文本输入；
     // 模型名与名称无条件跟随——上一平台的模型对新平台无意义；
     // API Key 输入框清空，避免旧平台的 Key 在测试/保存时误发给新平台。
-    row.querySelector(".asr-provider-model")!.outerHTML = buildAsrModelField(next, next.model || "");
-    initAsrModelCustomSelect(row);
+    (row.querySelector(".asr-provider-model") as HTMLInputElement).value = next.model || "";
     (row.querySelector(".asr-provider-name") as HTMLInputElement).value = next.name || "";
     (row.querySelector(".asr-provider-apikey") as HTMLInputElement).value = "";
   },
@@ -133,7 +110,6 @@ export function renderAsrProviders(
   asrProviderRow.render(listNode, emptyNode, items, { presets, activeId });
   listNode.querySelectorAll<HTMLElement>(".asr-provider-row").forEach((row) => {
     convertRowPresetToCustom(row);
-    initAsrModelCustomSelect(row);
   });
 }
 
@@ -143,7 +119,6 @@ export function addAsrProviderRow(listNode: HTMLElement, emptyNode: HTMLElement,
   const lastRow = rows[rows.length - 1];
   if (lastRow) {
     convertRowPresetToCustom(lastRow);
-    initAsrModelCustomSelect(lastRow);
   }
 }
 
