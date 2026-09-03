@@ -56,12 +56,15 @@
 ### 方式一：下载打包版本（推荐）
 
 1. 解压下载的 zip 包到任意长期保留的文件夹
+
 2. 打开扩展管理页：
    
    - Chrome：`chrome://extensions/`
    
    - Edge：`edge://extensions/`
+
 3. 开启"开发者模式"
+
 4. 点击"加载已解压的扩展程序"，选择解压后的文件夹
 
 ### 方式二：从源码构建
@@ -152,7 +155,7 @@ API Key 保存在你设备上的 Chrome 扩展本地存储中，非敏感设置�
 - 本地笔记，以及最近字幕、概览和翻译的本地缓存。
 - 无字幕视频的语音识别回退（硅基流动 / 本地 Whisper）。
 
-稍后再看页面的阅读视图体验尚不完善，但 AI 侧边栏和播放器快捷按钮已经支持。Shorts、直播、私密视频、受访问限制的视频，以及没有原生字幕的视频可能无法使用。目前没有测试 Firefox、Safari、移动浏览器或其他 Chromium 浏览器。
+目前没有测试 Firefox、Safari、移动浏览器或其他 Chromium 浏览器。
 
 ## 免费额度与成本
 
@@ -202,62 +205,6 @@ API Key 保存在你设备上的 Chrome 扩展本地存储中，非敏感设置�
 
 如果没有您使用的平台，可选择「自定义」预设，手动填写该平台的 API Base URL（需兼容 OpenAI 协议）即可。
 
-## 项目结构
-
-```
-extension/
-├── manifest.json          # 扩展清单
-├── entry/                 # 入口（background、content、offscreen）
-├── ai/                    # AI 客户端、SSE 流式解析、播放器 AI 按钮
-├── asr/                   # 语音识别（音频分片、转写、WAV 编码）
-├── bilibili/              # B 站 API 网关与视频 ID 解析
-├── core/                  # 核心状态、运行时、消息处理
-├── notes/                 # 笔记/导出渲染（Markdown、SRT、TXT）
-├── subtitle/              # 字幕抓取、缓存与处理
-├── reader/                # 阅读视图（生命周期/同步/布局）
-├── ui/                    # UI 渲染（面板、Markdown、时间戳导航）
-├── shared/                # 跨模块工具（DOM、日志、字符串处理等）
-└── icons/                 # 扩展图标
-```
-
-> `extension/entry/content-bootstrap.iife.js`、`entry/content-main.mjs` 与 `entry/chunks/` 是构建产物，由 `npm run build` 生成（content 部分由 scripts/build-content.js 产出），已加入 `.gitignore`，请勿手动编辑。
-
-## 二次开发与个性化
-
-项目完全开源，你可以下载源码后，用 AI 编程工具按个人工作流修改功能。
-
-常见修改方向：
-
-1. 用 `git clone` 下载源码到本地
-2. 用 Cursor、Codex、Claude Code 等 AI 编程工具打开项目文件夹
-3. 描述你想调整的功能，例如：
-   
-   - 调整 AI 总结视频的提示词和输出格式
-   
-   - 新增自定义总结命令或快捷方式
-   
-   - 修改视频总结的触发方式（自动总结 / 播放器按钮 / 侧边栏手动触发）
-4. 修改完成后跑 `npm run build`（或开发时直接 `npm run dev` 持续重建），在浏览器扩展管理页选择 `dist/` 文件夹进行本地加载
-5. 打开 B 站视频页测试字幕抓取、AI 对话和视频总结是否正常
-
-建议先本地测试确认正常，再替换日常使用版本；修改前建议备份原始代码，以便回退。
-
-你可以尝试：
-
-- 调整 AI 总结视频的提示词和输出格式
-- 新增自定义总结命令或快捷方式
-- 修改视频总结的触发方式（自动总结 / 播放器按钮 / 侧边栏手动触发）
-- 增加更多翻译语言或自定义总结模板
-- 增加生词本功能，保存单词、原句、解释和视频时间戳
-- 把笔记和生词导出到 Markdown、CSV、Anki 或其他学习工具
-- 增加主题筛选，只展示与你目标相关的章节
-- 增加本地模型选项，获得不同的隐私和成本方案
-- 改善键盘操作、字体大小和高对比度等无障碍体验
-
-请保持用户自行填写 API Key 的方式，不要将密钥硬编码到源码中。修改后请运行下方检查，并在真实视频上测试。
-
-如需切换到其他 AI 平台或模型，先用编程 Agent 打开你在 Chrome 中加载的同一个项目文件夹。然后打开 Bilibili Summary 设置并点击 **Copy customization prompt**。发送前替换 `[PROVIDER]` 和 `[MODEL]`，但不要加入任何 API Key。Agent 修改完代码后，请自行在对应设置项填写 Key。
-
 ## 隐私和数据流向
 
 Bilibili Summary 会直接从扩展向服务商发送请求：
@@ -294,10 +241,6 @@ Bilibili Summary 没有账号系统、广告、分析统计或行为追踪。硅
 
 「一键总结」依赖 sidePanel 与 offscreen 两个 Chrome 专属 API，Firefox 下侧边栏、音频解码/转写等核心功能无法工作，因此发布只提供 Chrome 变体（Chrome / Edge 等 Chromium 浏览器均可使用）。
 
-### 稍后再看页面和普通视频页有什么区别？
-
-普通视频页的字幕抓取、阅读视图、AI 侧边栏和播放器 AI 按钮均已适配；稍后再看页面的阅读视图体验尚不完善，但 AI 侧边栏和播放器快捷按钮已经支持。
-
 ### ModelScope 提示积分不足怎么办？
 
 请在 ModelScope 官网完成当日签到以获取免费积分。如果已签到但仍提示不足，请检查 ModelScope 账号的额度与限速状态，或稍后再试。
@@ -317,6 +260,66 @@ npm run build
 ```
 
 Agent 还应该在 Chrome 中重新加载扩展，并测试多个真实 B 站视频。自动检查通过，不代表真实服务请求和 B 站交互一定正常。
+
+## 项目结构
+
+```
+extension/
+├── manifest.json          # 扩展清单
+├── entry/                 # 入口（background、content、offscreen）
+├── ai/                    # AI 客户端、SSE 流式解析、播放器 AI 按钮
+├── asr/                   # 语音识别（音频分片、转写、WAV 编码）
+├── bilibili/              # B 站 API 网关与视频 ID 解析
+├── core/                  # 核心状态、运行时、消息处理
+├── notes/                 # 笔记/导出渲染（Markdown、SRT、TXT）
+├── subtitle/              # 字幕抓取、缓存与处理
+├── reader/                # 阅读视图（生命周期/同步/布局）
+├── ui/                    # UI 渲染（面板、Markdown、时间戳导航）
+├── shared/                # 跨模块工具（DOM、日志、字符串处理等）
+└── icons/                 # 扩展图标
+```
+
+> `extension/entry/content-bootstrap.iife.js`、`entry/content-main.mjs` 与 `entry/chunks/` 是构建产物，由 `npm run build` 生成（content 部分由 scripts/build-content.js 产出），已加入 `.gitignore`，请勿手动编辑。
+
+## 二次开发与个性化
+
+项目完全开源，你可以下载源码后，用 AI 编程工具按个人工作流修改功能。
+
+常见修改方向：
+
+1. 用 `git clone` 下载源码到本地
+
+2. 用 Codex、Kimi Code 、ZCode、DeepSeek Harness等 AI 编程工具打开项目文件夹
+
+3. 描述你想调整的功能，例如：
+   
+   - 调整 AI 总结视频的提示词和输出格式
+   
+   - 新增自定义总结命令或快捷方式
+   
+   - 修改视频总结的触发方式（自动总结 / 播放器按钮 / 侧边栏手动触发）
+
+4. 修改完成后跑 `npm run build`（或开发时直接 `npm run dev` 持续重建），在浏览器扩展管理页选择 `dist/` 文件夹进行本地加载
+
+5. 打开 B 站视频页测试字幕抓取、AI 对话和视频总结是否正常
+
+建议先本地测试确认正常，再替换日常使用版本；修改前建议备份原始代码，以便回退。
+
+你可以尝试：
+
+- 调整 AI 总结视频的提示词和输出格式
+- 新增自定义总结命令或快捷方式
+- 修改视频总结的触发方式（自动总结 / 播放器按钮 / 侧边栏手动触发）
+- 增加更多翻译语言或自定义总结模板
+- 增加生词本功能，保存单词、原句、解释和视频时间戳
+- 把笔记和生词导出到 Markdown、CSV、Anki 或其他学习工具
+- 增加主题筛选，只展示与你目标相关的章节
+- 增加本地模型选项，获得不同的隐私和成本方案
+- 改善键盘操作、字体大小和高对比度等无障碍体验
+
+请保持用户自行填写 API Key 的方式，不要将密钥硬编码到源码中。修改后请运行上方「给编程 Agent 的检查命令」，并在真实视频上测试。
+
+如需切换到其他 AI 平台或模型，先用编程 Agent 打开你在 Chrome 中加载的同一个项目文件夹。然后打开 Bilibili Summary 设置并点击 **Copy customization prompt**。发送前替换 `[PROVIDER]` 和 `[MODEL]`，但不要加入任何 API Key。Agent 修改完代码后，请自行在对应设置项填写 Key。
 
 ## 开源许可
 
