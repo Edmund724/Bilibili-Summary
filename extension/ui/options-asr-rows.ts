@@ -23,7 +23,7 @@ const ASR_STATUS_SUCCESS_MIN_MS = 2000;
 function buildAsrModelField(_preset: ProviderRowPreset | null, model: string): string {
   return buildModelPickerField({
     inputClass: "asr-provider-model",
-    placeholder: "模型名（如 FunAudioLLM/SenseVoiceSmall）",
+    placeholder: "模型名（点右侧箭头拉取可选模型）",
     value: model
   });
 }

@@ -24,9 +24,9 @@ export const ASR_PROVIDER_PRESETS: readonly AsrProviderPreset[] = [
     name: "SiliconFlow 硅基流动（免费）",
     type: "openai-transcriptions",
     baseUrl: "https://api.siliconflow.cn/v1",
-    model: "FunAudioLLM/SenseVoiceSmall",
+    model: "XingChenAGI/XingChenASR-V3.2-Ultra",
     supportsTimestamps: true,
-    note: "模型名默认 FunAudioLLM/SenseVoiceSmall，可自行填写其他模型。英文视频请在插件页顶部切换为 English 后重新刷新。"
+    note: "推荐模型 XingChenAGI/XingChenASR-V3.2-Ultra，点模型名右侧箭头可拉取全部可选模型。英文视频请在插件页顶部切换为 English 后重新刷新。"
   },
   {
     id: "local-whisper",

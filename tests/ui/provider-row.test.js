@@ -49,7 +49,7 @@ const ASR_PRESETS = [
     name: "SiliconFlow 硅基流动（免费）",
     type: "openai-transcriptions",
     baseUrl: "https://api.siliconflow.cn/v1",
-    model: "FunAudioLLM/SenseVoiceSmall"
+    model: "XingChenAGI/XingChenASR-V3.2-Ultra"
   },
   {
     id: "local-whisper",
@@ -405,7 +405,7 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     id: "asr1",
     presetId: "siliconflow",
     baseUrl: "https://api.siliconflow.cn/v1",
-    model: "FunAudioLLM/SenseVoiceSmall"
+    model: "XingChenAGI/XingChenASR-V3.2-Ultra"
   };
 
   it("渲染行结构：名称输入 + 模型名文本输入 + 选用 radio，删除/状态行复用 AI 类名", async () => {
@@ -422,7 +422,7 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     // 名称输入（AI 行没有），名称取自预设
     expect(row.querySelector(".asr-provider-name").value).toBe("SiliconFlow 硅基流动（免费）");
     // 模型名为「输入 + 下拉拉取」组合控件（与 AI 行同一控件），值取已保存 model
-    expect(row.querySelector("input.asr-provider-model").value).toBe("FunAudioLLM/SenseVoiceSmall");
+    expect(row.querySelector("input.asr-provider-model").value).toBe("XingChenAGI/XingChenASR-V3.2-Ultra");
     expect(row.querySelector(".ai-provider-model-toggle")).not.toBeNull();
     expect(row.querySelector(".ai-provider-model-dropdown").hidden).toBe(true);
     // whisper 预设行模型值跟随预设 model
@@ -466,7 +466,7 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     select.value = "siliconflow";
     select.dispatchEvent(new Event("change"));
     expect(baseUrlInput.value).toBe("https://my-asr.example.com/v1");
-    expect(row.querySelector("input.asr-provider-model").value).toBe("FunAudioLLM/SenseVoiceSmall");
+    expect(row.querySelector("input.asr-provider-model").value).toBe("XingChenAGI/XingChenASR-V3.2-Ultra");
     expect(row.querySelector(".asr-provider-name").value).toBe("SiliconFlow 硅基流动（免费）");
     // 回归：多次切换后模型字段仍只有一个（历史 bug：自定义下拉外壳随切换累积）
     select.value = "local-whisper";
@@ -475,7 +475,7 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
   });
 
   it("模型下拉：点击 toggle 直调 listAsrModels 并填充选项，选中写回输入框", async () => {
-    listAsrModelsMock.mockImplementation(async () => ({ ok: true, models: ["FunAudioLLM/SenseVoiceSmall", "other-asr-model"] }));
+    listAsrModelsMock.mockImplementation(async () => ({ ok: true, models: ["XingChenAGI/XingChenASR-V3.2-Ultra", "other-asr-model"] }));
     const rows = await loadAsrRows();
     const { listNode, emptyNode } = makeContainer();
     rows.renderAsrProviders(listNode, emptyNode, [asrItem], { presets: ASR_PRESETS });
@@ -493,7 +493,7 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     expect(sendRuntimeMessageMock).not.toHaveBeenCalled();
     expect(dropdown.hidden).toBe(false);
     const options = Array.from(dropdown.querySelectorAll(".ai-provider-model-option"));
-    expect(options.map((li) => li.dataset.model)).toEqual(["FunAudioLLM/SenseVoiceSmall", "other-asr-model"]);
+    expect(options.map((li) => li.dataset.model)).toEqual(["XingChenAGI/XingChenASR-V3.2-Ultra", "other-asr-model"]);
 
     fireClick(options[1]);
     expect(row.querySelector(".asr-provider-model").value).toBe("other-asr-model");
@@ -522,7 +522,7 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
       name: "我的 ASR",
       type: "openai-transcriptions",
       baseUrl: "https://api.siliconflow.cn/v1",
-      model: "FunAudioLLM/SenseVoiceSmall"
+      model: "XingChenAGI/XingChenASR-V3.2-Ultra"
     });
     expect(sendRuntimeMessageMock).not.toHaveBeenCalled();
     expect(onTestSuccess).toHaveBeenCalledWith("asr1");

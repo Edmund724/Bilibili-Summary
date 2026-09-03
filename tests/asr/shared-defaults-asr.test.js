@@ -42,10 +42,9 @@ describe("ASR_PROVIDER_PRESETS", () => {
     expect(presetById("siliconflow-sensevoice").supportsTimestamps).toBe(true);
   });
 
-  it("SiliconFlow 默认模型为 FunAudioLLM/SenseVoiceSmall，模型名自由填写（无下拉选项）", () => {
+  it("SiliconFlow 默认模型为推荐的 XingChenASR-V3.2-Ultra（免费且带句级时间戳）", () => {
     const sf = presetById("siliconflow-sensevoice");
-    expect(sf.model).toBe("FunAudioLLM/SenseVoiceSmall");
-    expect(sf.modelOptions).toBeUndefined();
+    expect(sf.model).toBe("XingChenAGI/XingChenASR-V3.2-Ultra");
   });
 });
 
