@@ -272,6 +272,11 @@
 
 .boc-reading-subtitle {
   width: 100%;
+  /* 必须 border-box：默认 content-box 下 width:100% 再叠左右 padding 会比
+   * .boc-reading-main（overflow:hidden）宽 16px，右缘连同滚动条一起被裁掉，
+   * 表现为「滚动条不可见」（18dba67 误删滚动条定制也没救回来，真正的根因
+   * 在这里）。概览/chat 两个滚动容器没设 width:100%，所以幸免。 */
+  box-sizing: border-box;
   flex: 1;
   min-height: 0;
   margin: 0 auto;
@@ -281,9 +286,40 @@
   pointer-events: auto;
 }
 
-/* 字幕列表滚动条不做任何定制：概览 tab（.boc-reading-overview）已验证
- * 浏览器默认滚动条在面板内清晰可见，字幕列表直接沿用同款默认样式——
- * 曾经在此处的 ::-webkit-scrollbar 定制反而让滚动条不可见，已移除。 */
+/* 三个 tab 的滚动容器共用同一套细滚动条（字幕列表 / 概览 / AI 对话消息区）。
+ * 显式定义 ::-webkit-scrollbar 让 Chrome 对容器改绘经典滚动条、常驻可见，
+ * 不受系统 overlay 态影响；不设 scrollbar-width——Chrome 121+ 起标准属性
+ * 非 auto 时会让 ::-webkit-scrollbar 整组失效，二者只能取其一。
+ * thumb 用 faint（浅底上够可见），hover 加深为 muted；8px 槽内 2px 透明
+ * 描边 + content-box 裁出 4px 圆角细条，与面板卡片圆角语言一致。 */
+.boc-reading-subtitle::-webkit-scrollbar,
+.boc-reading-overview::-webkit-scrollbar,
+.boc-reading-chat .chat-messages::-webkit-scrollbar {
+  width: 8px;
+}
+
+.boc-reading-subtitle::-webkit-scrollbar-track,
+.boc-reading-overview::-webkit-scrollbar-track,
+.boc-reading-chat .chat-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.boc-reading-subtitle::-webkit-scrollbar-thumb,
+.boc-reading-overview::-webkit-scrollbar-thumb,
+.boc-reading-chat .chat-messages::-webkit-scrollbar-thumb {
+  background: var(--boc-reader-faint, #a39a8d);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+.boc-reading-subtitle::-webkit-scrollbar-thumb:hover,
+.boc-reading-overview::-webkit-scrollbar-thumb:hover,
+.boc-reading-chat .chat-messages::-webkit-scrollbar-thumb:hover {
+  background: var(--boc-reader-muted, #6f675c);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
 .boc-reading-chapter,
 .boc-reading-item {
   width: 100%;
@@ -1391,17 +1427,7 @@
   scroll-behavior: smooth;
 }
 
-.boc-reading-chat .chat-messages::-webkit-scrollbar {
-  width: 6px;
-}
-
-.boc-reading-chat .chat-messages::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.boc-reading-chat .chat-messages::-webkit-scrollbar-thumb {
-  background: var(--boc-reader-pill-bg, #f0e9df);
-}
+/* 消息区滚动条走三滚动容器共用规则（.boc-reading-subtitle 处定义）。 */
 
 .boc-reading-chat .chat-suggestions {
   display: flex;
