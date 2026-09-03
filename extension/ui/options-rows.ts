@@ -1,8 +1,9 @@
 // extension/ui/options-rows.ts
 // 选项页三类行构建器（固定属性 / 笔记段落 / AI 平台）与纯验证逻辑。
 // AI 平台行的构建本体由 ui/provider-row.js 的 createProviderRow 承担（与 ASR 行共用），
-// 本文件只提供 AI 侧真实差异：模型字段形态、模型下拉拉取、报文形状（连通性
-// 测试已改直调 ai/provider-test.js）与既有导出签名。
+// 本文件只提供 AI 侧真实差异：模型字段（ui/model-picker.js 的输入 + 下拉拉取控件，
+// 拉取走 ai-providers-models 消息）、报文形状（连通性测试已改直调
+// ai/provider-test.js）与既有导出签名。
 // 行构建器只依赖参数与回调，不直接访问 DOM 全局；验证函数不触碰 DOM。
 
 import { PRESETS, type AiProviderPreset } from "../core/presets.js";
@@ -21,12 +22,11 @@ import { escapeHtml } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { requestProviderOriginsViaBackground } from "../core/host-permissions.js";
 import { testAiProviderConnection } from "../ai/provider-test.js";
+import { buildModelPickerField, wireModelPicker } from "./model-picker.js";
 import {
   createProviderRow,
   TRASH_ICON_PATHS,
-  type ProviderRowElement,
-  type ProviderRowItem,
-  type ProviderRowShowStatus
+  type ProviderRowItem
 } from "./provider-row.js";
 
 const MAX_NOTE_PLACEHOLDER_SECTIONS = 5;
@@ -383,16 +383,11 @@ const aiProviderRow = createProviderRow({
     const requiresKey = item.requiresKey !== false && preset?.requiresKey !== false;
     return hasSavedKey ? "已保存" : (requiresKey ? "API Key" : "API Key（可选）");
   },
-  buildModelField: (preset, model) => `
-    <div class="ai-provider-model-wrapper">
-      <input class="ai-provider-model" type="text" placeholder="模型名（如 gpt-4o-mini）" value="${escapeHtml(model)}" />
-      <button type="button" class="ai-provider-model-toggle" title="从 baseUrl 拉取可用模型" aria-label="从 baseUrl 拉取可用模型">
-        <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-          <path d="M6 9l6 6 6-6"></path>
-        </svg>
-      </button>
-      <ul class="ai-provider-model-dropdown" hidden></ul>
-    </div>`,
+  buildModelField: (preset, model) => buildModelPickerField({
+    inputClass: "ai-provider-model",
+    placeholder: "模型名（如 gpt-4o-mini）",
+    value: model
+  }),
   onPresetChange: (row, _previousPreset, next) => {
     // AI 行不清空已输 Key，只随新预设更新占位符（可选 Key 平台提示"（可选）"）
     const apikeyInput = row.querySelector(".ai-provider-apikey") as HTMLInputElement;
@@ -408,7 +403,20 @@ const aiProviderRow = createProviderRow({
       requestProviderOriginsViaBackground([baseUrl]).catch(() => {});
     }
   },
-  wireRowExtras: wireAiModelControls,
+  wireRowExtras: (row, { showStatus }) => wireModelPicker(row, {
+    inputClass: "ai-provider-model",
+    baseUrlClass: "ai-provider-baseurl",
+    apiKeyClass: "ai-provider-apikey",
+    statusClass: "ai-provider-status",
+    showStatus,
+    // AI 侧模型列表仍走 SW 消息（core/ai-provider-store.js 直连拉取）
+    fetchModels: ({ baseUrl, apiKey, providerId }) => sendRuntimeMessage({
+      type: "ai-providers-models",
+      baseUrl,
+      apiKey,
+      providerId
+    }) as Promise<{ ok?: boolean; models?: string[]; error?: string } | null>
+  }),
   // 连通性测试直调 ai/provider-test.js（不再走 ai-providers-test 消息往返）：
   // options 页同属扩展 context，host_permissions 生效，跨域 fetch 无需 SW 中转；
   // Key 代查（重输优先、否则按 providerId 读已存 Key）收口在探针入口内。
@@ -421,119 +429,6 @@ const aiProviderRow = createProviderRow({
     }),
   buildDeleteMessage: (providerId) => ({ type: "ai-providers-delete", providerId })
 });
-
-// 模型下拉交互（AI 专属，经 wireRowExtras 接入工厂）：点击 toggle 从 baseUrl
-// 拉取可用模型列表，选中写回输入框；手输模型或选中选项时收起下拉。
-function wireAiModelControls(row: ProviderRowElement, { showStatus }: { showStatus: ProviderRowShowStatus }): void {
-  row.querySelector(".ai-provider-model-toggle")?.addEventListener("click", async (e) => {
-    e.stopPropagation();
-    const statusNode = row.querySelector(".ai-provider-status") as HTMLElement | null;
-    const baseUrl = (row.querySelector(".ai-provider-baseurl") as HTMLInputElement).value.trim();
-    const apiKey = (row.querySelector(".ai-provider-apikey") as HTMLInputElement).value.trim();
-    const modelInput = row.querySelector(".ai-provider-model") as HTMLInputElement;
-    const dropdown = row.querySelector(".ai-provider-model-dropdown") as HTMLElement;
-
-    if (!baseUrl) {
-      showStatus(statusNode, "请先填写 baseUrl", true);
-      return;
-    }
-
-    const isAlreadyOpen = !dropdown.hidden;
-    closeAllModelDropdowns();
-
-    if (isAlreadyOpen) {
-      return;
-    }
-
-    modelInput.classList.remove("input-error");
-    if (statusNode) {
-      statusNode.textContent = "";
-      statusNode.hidden = true;
-    }
-
-    dropdown.innerHTML = "";
-    dropdown.hidden = false;
-    const loadingLi = document.createElement("li");
-    loadingLi.className = "ai-provider-model-option ai-provider-model-loading";
-    loadingLi.textContent = "正在拉取模型列表...";
-    dropdown.appendChild(loadingLi);
-
-    try {
-      const resp = (await sendRuntimeMessage({
-        type: "ai-providers-models",
-        baseUrl,
-        apiKey,
-        providerId: row.dataset.providerId || ""
-      })) as { ok?: boolean; models?: string[]; error?: string } | null;
-
-      dropdown.innerHTML = "";
-      if (resp?.ok && Array.isArray(resp.models) && resp.models.length > 0) {
-        const currentModel = modelInput.value.trim();
-        resp.models.forEach((modelId) => {
-          const li = document.createElement("li");
-          li.className = "ai-provider-model-option";
-          li.dataset.model = modelId;
-          li.textContent = modelId;
-          if (modelId === currentModel) {
-            li.dataset.selected = "true";
-          }
-          dropdown.appendChild(li);
-        });
-        const countLi = document.createElement("li");
-        countLi.className = "ai-provider-model-count";
-        countLi.textContent = `已加载 ${resp.models.length} 个模型`;
-        dropdown.appendChild(countLi);
-      } else if (resp?.ok) {
-        const li = document.createElement("li");
-        li.className = "ai-provider-model-message";
-        li.textContent = "未找到可用模型";
-        dropdown.appendChild(li);
-      } else {
-        const li = document.createElement("li");
-        li.className = "ai-provider-model-message ai-provider-model-error";
-        li.textContent = resp?.error || "拉取失败";
-        dropdown.appendChild(li);
-      }
-
-
-    } catch (error) {
-      dropdown.innerHTML = "";
-      const li = document.createElement("li");
-      li.className = "ai-provider-model-message ai-provider-model-error";
-      const message = (error as Error).message;
-      if (message && message.includes("port closed")) {
-        li.textContent = "连接中断，请重试";
-      } else {
-        li.textContent = message || "拉取失败";
-      }
-      dropdown.appendChild(li);
-    }
-  });
-
-  row.querySelector(".ai-provider-model")?.addEventListener("input", () => {
-    const dropdown = row.querySelector(".ai-provider-model-dropdown") as HTMLElement | null;
-    if (dropdown) dropdown.hidden = true;
-  });
-
-  row.querySelector(".ai-provider-model-dropdown")?.addEventListener("click", (e) => {
-    const option = (e.target as HTMLElement).closest(".ai-provider-model-option") as HTMLElement | null;
-    if (!option) return;
-    e.stopPropagation();
-    const modelInput = row.querySelector(".ai-provider-model");
-    if (modelInput && option.dataset.model) {
-      (modelInput as HTMLInputElement).value = option.dataset.model;
-    }
-    if (modelInput) modelInput.classList.remove("input-error");
-    const dropdown = row.querySelector(".ai-provider-model-dropdown") as HTMLElement | null;
-    if (dropdown) dropdown.hidden = true;
-  });
-}
-
-function closeAllModelDropdowns(): void {
-  document.querySelectorAll<HTMLElement>(".ai-provider-model-dropdown").forEach((dropdown) => {
-    dropdown.hidden = true;
-  });
-}
 
 export function renderAiProviders(
   listNode: HTMLElement,

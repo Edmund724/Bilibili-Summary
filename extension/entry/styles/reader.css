@@ -2612,7 +2612,8 @@
   min-width: 0;
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-wrapper .ai-provider-model {
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-wrapper .ai-provider-model,
+#boc-reading-view .boc-reading-settings-host .ai-provider-model-wrapper .asr-provider-model {
   flex: 1;
   min-width: 0;
   padding-right: 30px !important;
@@ -2760,8 +2761,13 @@
   accent-color: var(--boc-reader-accent, #fb7299);
 }
 
-/* ASR 平台行把「模型/平台名称」做成内联下拉/输入（asr-provider-model 复用
- * select/input 行样式；预设切换重建时类名不变） */
+/* ASR 平台行把「模型/平台名称」做成内联输入；模型字段是
+ * ui/model-picker.js 的「输入 + 下拉拉取」组合控件（复用 AI 侧
+ * ai-provider-model-* 类名），外壳占满所在栅格 */
+#boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-model-wrapper {
+  width: 100%;
+}
+
 #boc-reading-view .boc-reading-settings-host .asr-provider-row .asr-provider-model,
 #boc-reading-view .boc-reading-settings-host .asr-provider-row .asr-provider-name {
   height: 32px;

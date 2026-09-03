@@ -14,10 +14,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 import { TRASH_ICON_PATHS } from "../../extension/ui/provider-row.js";
 
-const { sendRuntimeMessageMock, testAiProviderConnectionMock, testAsrConnectionMock } = vi.hoisted(() => ({
+const { sendRuntimeMessageMock, testAiProviderConnectionMock, testAsrConnectionMock, listAsrModelsMock } = vi.hoisted(() => ({
   sendRuntimeMessageMock: vi.fn(),
   testAiProviderConnectionMock: vi.fn(),
-  testAsrConnectionMock: vi.fn()
+  testAsrConnectionMock: vi.fn(),
+  listAsrModelsMock: vi.fn()
 }));
 
 vi.mock("../../extension/shared/messaging.js", () => ({
@@ -30,6 +31,10 @@ vi.mock("../../extension/ai/provider-test.js", () => ({
 
 vi.mock("../../extension/asr/provider-test.js", () => ({
   testAsrConnection: testAsrConnectionMock
+}));
+
+vi.mock("../../extension/asr/provider-models.js", () => ({
+  listAsrModels: listAsrModelsMock
 }));
 
 const AI_PRESETS = [
@@ -101,6 +106,7 @@ beforeEach(() => {
   testAiProviderConnectionMock.mockImplementation(async () => ({ ok: true }));
   testAsrConnectionMock.mockReset();
   testAsrConnectionMock.mockImplementation(async () => ({ ok: true }));
+  listAsrModelsMock.mockReset();
   confirmMock = vi.fn(() => true);
   vi.stubGlobal("confirm", confirmMock);
 });
@@ -415,8 +421,10 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     expect(row.dataset.currentPresetId).toBe("siliconflow");
     // 名称输入（AI 行没有），名称取自预设
     expect(row.querySelector(".asr-provider-name").value).toBe("SiliconFlow 硅基流动（免费）");
-    // 模型名为可自由编辑的文本输入，值取已保存 model
+    // 模型名为「输入 + 下拉拉取」组合控件（与 AI 行同一控件），值取已保存 model
     expect(row.querySelector("input.asr-provider-model").value).toBe("FunAudioLLM/SenseVoiceSmall");
+    expect(row.querySelector(".ai-provider-model-toggle")).not.toBeNull();
+    expect(row.querySelector(".ai-provider-model-dropdown").hidden).toBe(true);
     // whisper 预设行模型值跟随预设 model
     expect(allRows[1].querySelector("input.asr-provider-model").value).toBe("whisper-large-v3");
     // 选用 radio：activeId 命中 asr2
@@ -464,6 +472,32 @@ describe("createProviderRow：ASR 平台行（options-asr-rows.js 配置）", ()
     select.value = "local-whisper";
     select.dispatchEvent(new Event("change"));
     expect(row.querySelectorAll(".asr-provider-model")).toHaveLength(1);
+  });
+
+  it("模型下拉：点击 toggle 直调 listAsrModels 并填充选项，选中写回输入框", async () => {
+    listAsrModelsMock.mockImplementation(async () => ({ ok: true, models: ["FunAudioLLM/SenseVoiceSmall", "other-asr-model"] }));
+    const rows = await loadAsrRows();
+    const { listNode, emptyNode } = makeContainer();
+    rows.renderAsrProviders(listNode, emptyNode, [asrItem], { presets: ASR_PRESETS });
+    const row = listNode.querySelector(".asr-provider-row");
+    const dropdown = row.querySelector(".ai-provider-model-dropdown");
+
+    fireClick(row.querySelector(".ai-provider-model-toggle"));
+    await flushMicrotasks();
+    // ASR 侧直调 provider-models.js，不经 SW 消息
+    expect(listAsrModelsMock).toHaveBeenCalledWith({
+      baseUrl: "https://api.siliconflow.cn/v1",
+      apiKey: "",
+      providerId: "asr1"
+    });
+    expect(sendRuntimeMessageMock).not.toHaveBeenCalled();
+    expect(dropdown.hidden).toBe(false);
+    const options = Array.from(dropdown.querySelectorAll(".ai-provider-model-option"));
+    expect(options.map((li) => li.dataset.model)).toEqual(["FunAudioLLM/SenseVoiceSmall", "other-asr-model"]);
+
+    fireClick(options[1]);
+    expect(row.querySelector(".asr-provider-model").value).toBe("other-asr-model");
+    expect(dropdown.hidden).toBe(true);
   });
 
   it("测试连接：直调探针（provider 对象仅重输 Key 时携带 apiKey）；成功回调保存", async () => {

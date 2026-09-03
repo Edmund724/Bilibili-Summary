@@ -1,8 +1,9 @@
 // extension/ui/options-asr-rows.ts
 // 设置页"语音转写平台"区块行构建器：与 AI 平台行（options-rows.js）共用
 // ui/provider-row.js 的 createProviderRow，本文件只提供 ASR 侧真实差异：
-// 名称输入、可自由编辑的模型名文本输入、选用 radio、
-// asr-providers-* 报文（连通性测试已直调 asr/provider-test.js，不再发消息）。
+// 名称输入、模型字段（ui/model-picker.js 的输入 + 下拉拉取控件，拉取直调
+// asr/provider-models.js）、选用 radio、asr-providers-* 报文（连通性测试已
+// 直调 asr/provider-test.js，不再发消息）。
 // 行内删除按钮与状态行复用 ai-provider-remove / ai-provider-status 类名
 // （既有耦合，DOM 契约保持不变）。行构建器只依赖参数与回调，不直接访问 DOM 全局。
 
@@ -10,15 +11,21 @@ import { ASR_PROVIDER_PRESETS, type AsrProviderPreset } from "../core/presets.js
 import { escapeHtml } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { testAsrConnection } from "../asr/provider-test.js";
+import { listAsrModels } from "../asr/provider-models.js";
 import { createProviderRow, type ProviderRowElement, type ProviderRowItem, type ProviderRowPreset } from "./provider-row.js";
+import { buildModelPickerField, wireModelPicker } from "./model-picker.js";
 import { initCustomSelect } from "./custom-select.js";
 
 const ASR_STATUS_SUCCESS_MIN_MS = 2000;
 
-// 模型名字段：所有预设均为可自由编辑的文本输入（含 SiliconFlow），
-// 默认值取预设 model，用户可改填任意模型名。
+// 模型名字段：文本输入 + 下拉拉取按钮（与 AI 平台行同一控件），默认值取预设
+// model，用户既可从下拉选也可改填任意模型名。
 function buildAsrModelField(_preset: ProviderRowPreset | null, model: string): string {
-  return `<input class="asr-provider-model" type="text" placeholder="模型名（如 FunAudioLLM/SenseVoiceSmall）" value="${escapeHtml(model)}" />`;
+  return buildModelPickerField({
+    inputClass: "asr-provider-model",
+    placeholder: "模型名（如 FunAudioLLM/SenseVoiceSmall）",
+    value: model
+  });
 }
 
 const asrProviderRow = createProviderRow({
@@ -55,7 +62,7 @@ const asrProviderRow = createProviderRow({
     (row.querySelector(".asr-provider-name") as HTMLInputElement).value = next.name || "";
     (row.querySelector(".asr-provider-apikey") as HTMLInputElement).value = "";
   },
-  wireRowExtras: (row, { listNode }) => {
+  wireRowExtras: (row, { listNode, showStatus }) => {
     // 选用：即时持久化 activeAsrProviderId
     row.querySelector(".asr-provider-active-radio")?.addEventListener("change", async () => {
       if (!(row.querySelector(".asr-provider-active-radio") as HTMLInputElement).checked) return;
@@ -64,6 +71,15 @@ const asrProviderRow = createProviderRow({
         await sendRuntimeMessage({ type: "save-settings", settings: { activeAsrProviderId: providerId } });
       } catch {}
       setActiveAsrProvider(listNode, providerId);
+    });
+    // 模型下拉：与连通性测试同样直调（asr/provider-models.js），不经 SW 消息
+    wireModelPicker(row, {
+      inputClass: "asr-provider-model",
+      baseUrlClass: "asr-provider-baseurl",
+      apiKeyClass: "asr-provider-apikey",
+      statusClass: "ai-provider-status",
+      showStatus,
+      fetchModels: listAsrModels
     });
   },
   // 连通性测试直调 asr/provider-test.js（不再走 asr-providers-test 消息往返）：
