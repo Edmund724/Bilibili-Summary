@@ -249,18 +249,6 @@ Bilibili Summary 没有账号系统、广告、分析统计或行为追踪。硅
 
 请检查硅基流动 API Key 是否有效，以及网络环境是否能访问 `api.siliconflow.cn`。如果仍失败，可以尝试切换为其他可用的语音识别平台，或在设置中关闭「无字幕自动语音识别」。
 
-## 给编程 Agent 的检查命令
-
-修改项目后，让你的编程 Agent 运行：
-
-```bash
-npm test
-npm run typecheck
-npm run build
-```
-
-Agent 还应该在 Chrome 中重新加载扩展，并测试多个真实 B 站视频。自动检查通过，不代表真实服务请求和 B 站交互一定正常。
-
 ## 项目结构
 
 ```
@@ -320,6 +308,18 @@ extension/
 请保持用户自行填写 API Key 的方式，不要将密钥硬编码到源码中。修改后请运行上方「给编程 Agent 的检查命令」，并在真实视频上测试。
 
 如需切换到其他 AI 平台或模型，先用编程 Agent 打开你在 Chrome 中加载的同一个项目文件夹。然后打开 Bilibili Summary 设置并点击 **Copy customization prompt**。发送前替换 `[PROVIDER]` 和 `[MODEL]`，但不要加入任何 API Key。Agent 修改完代码后，请自行在对应设置项填写 Key。
+
+## 给编程 Agent 的检查命令
+
+修改项目后，让你的编程 Agent 运行：
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+Agent 还应该在 Chrome 中重新加载扩展，并测试多个真实 B 站视频。自动检查通过，不代表真实服务请求和 B 站交互一定正常。
 
 ## 开源许可
 
