@@ -148,7 +148,10 @@ function dropOverviewProduct(): void {
 /**
  * 触发概览生成（fire-and-forget；返回编排 promise 供测试/去重方 await）。
  * 去重语义：
- *   - generating 中重复触发 → 复用本次编排 promise（管线内还会按 finalKey 二次去重）；
+ *   - generating 中重复触发且视频身份未变 → 复用本次编排 promise（管线内还会
+ *     按 finalKey 二次去重）；
+ *   - inflight 属于旧视频（换轨/切P/换片后触发）：旧编排退场换血——旧 promise
+ *     落定回执因 generatedFor 已换而按过期丢弃，不阻塞新视频的生成；
  *   - ready/partial 且身份未变 → 不重跑（部分结果重试必须显式 forceRefresh）；
  *   - error → 不自动重跑（错误条上的重试按钮走 forceRefresh）；
  *   - forceRefresh=true → 跳过以上短路重新生成（整份缓存不读，段缓存照常复用）。
@@ -157,7 +160,10 @@ function dropOverviewProduct(): void {
 export function triggerReaderOverviewGeneration(
   { forceRefresh = false }: { forceRefresh?: boolean } = {}
 ): Promise<void> {
-  if (overview.inflight) {
+  // inflight 身份守卫：复用仅限同一视频/字幕轨的重复触发。切到新视频后旧视频
+  // 的后台编排还在跑时，直接换血开新编排——若不判身份，新触发会复用旧 promise
+  // 且旧回执落定后（generatedFor 仍是旧 key）旧章节金句会串进新视频面板。
+  if (overview.inflight && overview.generatedFor === currentOverviewKey()) {
     return overview.inflight;
   }
   if (getClipBody().length === 0) {

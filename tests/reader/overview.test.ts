@@ -219,6 +219,55 @@ describe("概览状态机与触发", () => {  it("无字幕：不触发生成，
     expect(runOverviewMock).toHaveBeenCalledTimes(1);
   });
 
+  it("切到新视频后旧 inflight 不复用：新视频换血重跑，旧回执按过期丢弃", async () => {
+    seedClip();
+    let resolveOld!: (value: OverviewAnalysis) => void;
+    runOverviewMock.mockImplementation(
+      () => new Promise<OverviewAnalysis>((resolve) => {
+        resolveOld = resolve;
+      })
+    );
+
+    const oldRun = reader.triggerReaderOverviewGeneration();
+    await vi.waitFor(() => expect(runOverviewMock).toHaveBeenCalledTimes(1));
+
+    // 切到新视频：字幕与签名换血（seedClip 重写 bvid/cid/字幕体）
+    seedClip();
+    state.clip.bvid = "BV1newvideo000";
+    state.clip.cid = "2000";
+    state.clip.subtitleBody = [{ from: 0, to: 10, content: "新视频内容" }];
+    runOverviewMock.mockClear();
+    let resolveNew!: (value: OverviewAnalysis) => void;
+    runOverviewMock.mockImplementation(
+      () => new Promise<OverviewAnalysis>((resolve) => {
+        resolveNew = resolve;
+      })
+    );
+
+    // 新视频触发：不复用旧 inflight，重新发起管线调用
+    const newRun = reader.triggerReaderOverviewGeneration();
+    expect(newRun).not.toBe(oldRun);
+    await vi.waitFor(() => expect(runOverviewMock).toHaveBeenCalledTimes(1));
+    expect(overviewText()).toContain("正在生成概览");
+
+    // 旧编排落定：回执因 generatedFor 已换成新视频而按过期丢弃，不串片
+    resolveOld({
+      chapters: [{ from: 0, to: 120, title: "旧视频章节", summary: "" }],
+      quotes: []
+    });
+    await oldRun;
+    expect(overviewText()).toContain("正在生成概览");
+    expect(overviewText()).not.toContain("旧视频章节");
+
+    // 新编排落定：正常渲染新视频产物
+    resolveNew({
+      chapters: [{ from: 0, to: 120, title: "新视频章节", summary: "" }],
+      quotes: []
+    });
+    await newRun;
+    expect(overviewText()).toContain("新视频章节");
+  });
+
   it("分段进度文案（onProgress 注入）渲染进生成中状态条", async () => {
     seedClip();
     let resolveRun!: (value: OverviewAnalysis) => void;
