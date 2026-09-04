@@ -323,7 +323,7 @@ describe("openai-transcriptions 适配器", () => {
 });
 
 describe("pipeline 时间戳合成与偏移合并", () => {
-  it("25 分钟视频 20 分钟片 → 2 片，全局偏移正确且递增", async () => {
+  it("25 分钟视频分 2 片（自建 1200s/片，不依赖生产片长）→ 全局偏移正确且递增", async () => {
     const body = await pipeline.runAsrPipeline({
       bvid: "BV1test",
       cid: "101",

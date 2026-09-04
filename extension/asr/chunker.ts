@@ -70,11 +70,12 @@ export function decideChunks(totalDurationSec: number, plan: ChunkPlan): ChunkSp
 }
 
 // 按 provider 类型计算切片计划（分钟 → 秒）：
-//   openai-transcriptions：统一 20 分钟一片。
+//   openai-transcriptions：统一 5 分钟一片（并发 10 下的失败重试代价与
+//   拖尾方差更小；硅基流动 50MB 限内余量充足）。
 // 未知类型保守按不切处理。
 export function buildChunkPlan(providerType: string): ChunkPlan {
   if (providerType === "openai-transcriptions") {
-    return { chunkSeconds: 20 * 60 };
+    return { chunkSeconds: 5 * 60 };
   }
   return { chunkSeconds: 0 };
 }

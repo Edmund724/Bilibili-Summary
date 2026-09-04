@@ -20,7 +20,8 @@ import * as errorHelpers from "../../extension/shared/error-helpers.js";
 const realRetryAsync = errorHelpers.retryAsync;
 
 // makeChunk：合成切片，形状对齐 chunkHost 回传的 { index, startSec,
-// durationSec, wavBlob }（统一 20 分钟片 → startSec 间隔 600）。
+// durationSec, wavBlob }（自建 600s/片场景 → startSec 间隔 600，与生产
+// 片长无关）。
 function makeChunk(index, extra = {}) {
   return {
     index,

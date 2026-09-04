@@ -15,12 +15,12 @@
 2. **一份标准 PCM WAV 音频**，放到 `eval/audio/` 下（该目录已进 `.gitignore`）：
    - 任何工具导出都行，或用 ffmpeg 从 B 站视频音频导出：`ffmpeg -i video.mp4 -ac 1 -ar 16000 out.wav`；
    - 16k 单声道（mono）最佳，但任何标准 PCM WAV 都可以——脚本会按 WAV 头解析并内部统一转 16k mono 再切片上传；
-   - 硅基流动单文件限制约 1 小时 / 50MB，脚本按配置的段长（默认 1200 秒 = 20 分钟/片，与生产 ASR 分片一致）切片后不受此限制。
+   - 硅基流动单文件限制约 1 小时 / 50MB，脚本按配置的段长（默认 300 秒 = 5 分钟/片，与生产 ASR 分片一致）切片后不受此限制。
 3. **API key**：`export SILICONFLOW_API_KEY=sk-...`（key 只走环境变量，不会写进代码或 git）。
 4. **配置**：`cp eval/config.example.json eval/config.json`，然后按需修改：
    - `models`：要评测的模型名单；
    - `runsPerModel`：每模型重复次数（默认 3）；
-   - `chunkSeconds`：每片秒数（默认 1200 = 20 分钟/片，与生产 ASR 分片一致；20 分钟 ≈ 38MB，在硅基流动 50MB 限内）；
+   - `chunkSeconds`：每片秒数（默认 300 = 5 分钟/片，与生产 ASR 分片一致）；
    - `audioSeconds`：只评测音频前 N 秒；**省略此行 = 全量**（90 分钟示例配了 5400，等效全量）；
    - `audioPath`：音频路径（默认 `eval/audio/demo.wav`）;
    - `outDir`：报告输出目录（默认 `eval/out`）；

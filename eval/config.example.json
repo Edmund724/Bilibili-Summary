@@ -11,7 +11,7 @@
     "XingChenAGI/XingChenGSR-V1.0"
   ],
   "runsPerModel": 3,
-  "chunkSeconds": 1200,
+  "chunkSeconds": 300,
   "audioPath": "eval/audio/demo.wav",
   "audioSeconds": 5400,
   "outDir": "eval/out",
