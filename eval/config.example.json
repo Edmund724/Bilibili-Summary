@@ -19,5 +19,12 @@
     "\\[\\d{1,2}:\\d{2}(?::\\d{2})?\\]",
     "\\{\\d+(?:\\.\\d+)?\\}",
     "\\d{1,2}:\\d{2}(?::\\d{2})?"
-  ]
+  ],
+  "_注释_5": "sweep: 并发上限扫描（npm run eval:sweep，独立测试）。model 缺省取 models[0]；concurrencyLevels 逐档并发；runsPerLevel 每档次数；chunkSeconds 扫描切片秒数（切小片测得准）；audioSeconds 只取音频前 N 秒（测上限不需要全片）",
+  "sweep": {
+    "concurrencyLevels": [1, 2, 4, 8, 16, 32],
+    "runsPerLevel": 1,
+    "chunkSeconds": 120,
+    "audioSeconds": 1800
+  }
 }

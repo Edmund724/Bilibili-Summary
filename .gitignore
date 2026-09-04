@@ -40,3 +40,4 @@ docs/harness-compaction-context-excerpt.md
 /eval/audio/
 /eval/out/
 /eval/run.mjs
+/eval/sweep.mjs

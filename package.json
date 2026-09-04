@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "eval:run": "node_modules/.bin/esbuild eval/run.ts --bundle --platform=node --format=esm --outfile=eval/run.mjs && node eval/run.mjs"
+    "eval:run": "node_modules/.bin/esbuild eval/run.ts --bundle --platform=node --format=esm --outfile=eval/run.mjs && node eval/run.mjs",
+    "eval:sweep": "node_modules/.bin/esbuild eval/sweep.ts --bundle --platform=node --format=esm --outfile=eval/sweep.mjs && node eval/sweep.mjs"
   },
   "repository": {
     "type": "git",
