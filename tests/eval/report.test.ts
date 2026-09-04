@@ -80,13 +80,13 @@ describe("buildReport", () => {
     expect(built.aggregate.successCount).toBe(2);
   });
 
-  it("全 null 计时列 runs → aggregate 对应均值为 null（wallMs 恒有值）", () => {
+  it("全部失败 run → 聚合均值均为 null", () => {
     const model = makeModelReport({
       runs: [makeRun({ wallMs: 1000, segmentMeanMs: null, rtf: null, success: false })]
     });
     const [built] = buildReport({ models: [model], meta }).models;
     expect(built.aggregate.segmentMeanMean).toBeNull();
-    expect(built.aggregate.wallMean).toBe(1000);
+    expect(built.aggregate.wallMean).toBeNull();
     expect(built.aggregate.rtfMean).toBeNull();
     expect(built.aggregate.successCount).toBe(0);
   });

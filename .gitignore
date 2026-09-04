@@ -35,3 +35,8 @@ architecture-review-*.html
 /CONTEXT.md
 /docs/adr/
 docs/harness-compaction-context-excerpt.md
+
+# Eval harness artifacts (ASR speed comparison)
+/eval/audio/
+/eval/out/
+/eval/run.mjs

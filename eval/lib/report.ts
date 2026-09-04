@@ -54,15 +54,17 @@ export function buildReport(input: {
 }
 
 function aggregateRuns(runs: RunReport[]): PerModelReport["aggregate"] {
+  // 失败 run（success=false）不计入平均，只统计成功 run（Q8 口径）
+  const successful = runs.filter((run) => run.success);
   const nonNull = <T>(values: Array<T | null>): T[] => values.filter((v): v is T => v !== null);
   const mean = (values: number[]): number | null =>
     values.length > 0 ? values.reduce((sum, v) => sum + v, 0) / values.length : null;
 
   return {
-    segmentMeanMean: mean(nonNull(runs.map((run) => run.segmentMeanMs))),
-    wallMean: mean(nonNull(runs.map((run) => run.wallMs))),
-    rtfMean: mean(nonNull(runs.map((run) => run.rtf))),
-    successCount: runs.filter((run) => run.success).length
+    segmentMeanMean: mean(nonNull(successful.map((run) => run.segmentMeanMs))),
+    wallMean: mean(nonNull(successful.map((run) => run.wallMs))),
+    rtfMean: mean(nonNull(successful.map((run) => run.rtf))),
+    successCount: successful.length
   };
 }
 
@@ -101,7 +103,7 @@ export function renderMarkdown(report: EvalReport): string {
     lines.push("| --- | --- | --- | --- | --- |");
     for (const run of model.runs) {
       lines.push(
-        `| ${run.runIndex} | ${run.wallMs} | ${run.segmentMeanMs ?? "FAIL"} | ${run.rtf ?? "FAIL"} | ${run.success ? "✓" : "✗"} |`
+        `| ${run.runIndex} | ${Math.round(run.wallMs)} | ${run.segmentMeanMs ?? "FAIL"} | ${run.rtf ?? "FAIL"} | ${run.success ? "✓" : "✗"} |`
       );
     }
     lines.push(
