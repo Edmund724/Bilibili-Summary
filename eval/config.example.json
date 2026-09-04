@@ -1,0 +1,23 @@
+{
+  "_注释_1": "models: 要评测的模型名单（会被平台 /models 在线名单过滤，端点不支持的模型会被实测跳过）",
+  "_注释_2": "runsPerModel: 每模型重复运行次数（取均值）；chunkSeconds: 每片秒数；audioPath: 标准 PCM WAV 音频路径",
+  "_注释_3": "outDir: 报告输出目录；baseUrl: 平台 API 根路径；inlineTimestampPatterns: 文本内嵌时间戳的正则（JSON 里反斜杠要写成 \\\\）",
+  "_注释_4": "inlineTimestampPatterns 三条依次匹配 [mm:ss]/[hh:mm:ss]、{数字}、裸时间戳 mm:ss——最后一条可能误伤普通文本，不需要可删",
+  "models": [
+    "FunAudioLLM/SenseVoiceSmall",
+    "XingChenAGI/XingChenASR-V3.2",
+    "XingChenAGI/XingChenASR-V3.2-Ultra",
+    "XingChenAGI/XingChenASR-Diarize-V3.0",
+    "XingChenAGI/XingChenGSR-V1.0"
+  ],
+  "runsPerModel": 3,
+  "chunkSeconds": 120,
+  "audioPath": "eval/audio/demo.wav",
+  "outDir": "eval/out",
+  "baseUrl": "https://api.siliconflow.cn/v1",
+  "inlineTimestampPatterns": [
+    "\\[\\d{1,2}:\\d{2}(?::\\d{2})?\\]",
+    "\\{\\d+(?:\\.\\d+)?\\}",
+    "\\d{1,2}:\\d{2}(?::\\d{2})?"
+  ]
+}

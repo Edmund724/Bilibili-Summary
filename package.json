@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "eval:run": "node_modules/.bin/esbuild eval/run.ts --bundle --platform=node --format=esm --outfile=eval/run.mjs && node eval/run.mjs"
   },
   "repository": {
     "type": "git",
