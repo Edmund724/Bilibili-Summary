@@ -53,6 +53,7 @@ interface EvalConfig {
   baseUrl: string;
   inlineTimestampPatterns: string[];
   requestGapMs: number;
+  audioSeconds?: number; // 只用音频前 N 秒；省略 = 全量
 }
 
 // 读取并校验配置：models / audioPath 必填，其余给默认值；字段类型不对时
@@ -92,6 +93,15 @@ function loadConfig(configPath: string): EvalConfig {
     throw new Error("配置 chunkSeconds 必须是正数（单位秒）");
   }
 
+  // audioSeconds 可省略（全量）；给了就只用音频前 N 秒
+  let audioSeconds: number | undefined;
+  if (cfg.audioSeconds !== undefined && cfg.audioSeconds !== null && cfg.audioSeconds !== "") {
+    audioSeconds = Number(cfg.audioSeconds);
+    if (!Number.isFinite(audioSeconds) || audioSeconds <= 0) {
+      throw new Error("配置 audioSeconds 必须是正数（单位秒），或省略表示全量");
+    }
+  }
+
   const inlineTimestampPatterns = Array.isArray(cfg.inlineTimestampPatterns)
     ? cfg.inlineTimestampPatterns.map((p) => String(p))
     : DEFAULT_INLINE_TIMESTAMP_PATTERNS;
@@ -112,7 +122,8 @@ function loadConfig(configPath: string): EvalConfig {
     baseUrl: String(cfg.baseUrl || "https://api.siliconflow.cn/v1").trim().replace(/\/+$/, "") || "https://api.siliconflow.cn/v1",
     inlineTimestampPatterns,
     // 片间/run 间小间隔（毫秒），防限流
-    requestGapMs: Number.isFinite(Number(cfg.requestGapMs)) ? Number(cfg.requestGapMs) : RUN_GAP_MS
+    requestGapMs: Number.isFinite(Number(cfg.requestGapMs)) ? Number(cfg.requestGapMs) : RUN_GAP_MS,
+    audioSeconds
   };
 }
 
@@ -348,13 +359,15 @@ export async function main(): Promise<void> {
     console.error(`错误：无法读取音频文件 ${config.audioPath}：${(error as Error).message}`);
     process.exit(1);
   }
-  const chunks = sliceWavToChunks(audioBuffer, config.chunkSeconds);
+  const allChunks = sliceWavToChunks(audioBuffer, config.chunkSeconds);
+  const chunks = config.audioSeconds === undefined ? allChunks : allChunks.filter((c) => c.startSec < config.audioSeconds!);
   if (chunks.length === 0) {
     console.error(`错误：音频切片结果为空，请确认 ${config.audioPath} 是标准 PCM WAV 文件。`);
     process.exit(1);
   }
   const audioDurationSec = chunks.reduce((sum, c) => sum + c.durationSec, 0);
-  console.log(`音频：${config.audioPath}（约 ${audioDurationSec.toFixed(1)} 秒），切成 ${chunks.length} 片，每片 ${config.chunkSeconds} 秒。`);
+  const scopeText = config.audioSeconds === undefined ? "全量" : `前 ${audioDurationSec.toFixed(0)} 秒（audioSeconds=${config.audioSeconds}）`;
+  console.log(`音频：${config.audioPath}（${scopeText}，约 ${audioDurationSec.toFixed(1)} 秒），切成 ${chunks.length} 片，每片 ${config.chunkSeconds} 秒。`);
 
   // 安装计时 fetch：全评测期间 globalThis.fetch 被包装，records 全程累加，
   // 各 run 用 sliceStart 切分自己的区间；finally 里还原。

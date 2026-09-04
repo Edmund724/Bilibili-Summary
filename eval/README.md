@@ -21,6 +21,7 @@
    - `models`：要评测的模型名单；
    - `runsPerModel`：每模型重复次数（默认 3）；
    - `chunkSeconds`：每片秒数（默认 1200 = 20 分钟/片，与生产 ASR 分片一致；20 分钟 ≈ 38MB，在硅基流动 50MB 限内）；
+   - `audioSeconds`：只评测音频前 N 秒；**省略此行 = 全量**（90 分钟示例配了 5400，等效全量）；
    - `audioPath`：音频路径（默认 `eval/audio/demo.wav`）;
    - `outDir`：报告输出目录（默认 `eval/out`）；
    - `baseUrl`：API 根路径（默认硅基流动）；
