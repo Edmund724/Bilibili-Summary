@@ -99,11 +99,18 @@ Bilibili-Summary 需要两个 Key：
 3. 在控制台的 API Key 管理页创建一个新 Key。
 4. 复制 Key，粘贴到 Bilibili Summary 设置中的 **硅基流动 API Key**。
 5. 点模型名右侧的箭头拉取该平台全部可选模型，从列表中选择一个。常用转写模型的区别：
-   - `XingChenAGI/XingChenASR-V3.2-Ultra`：免费，返回句级时间戳，字幕可逐句点击跳播，推荐选用。
+   
+   - `XingChenAGI/XingChenASR-V3.2`：免费，返回句级时间戳，字幕可逐句点击跳播。**实测速度最快，首选推荐**。
+   - `XingChenAGI/XingChenASR-Diarize-V3.0`：免费，返回句级时间戳，速度次之，额外带说话人区分（转写文本按说话人分段）。
+   - `XingChenAGI/XingChenASR-V3.2-Ultra`：免费，返回句级时间戳，但实测耗时约为 V3.2 的 2.5 倍。
+   
    - `FunAudioLLM/SenseVoiceSmall`：免费，但不返回时间戳，字幕只能按音频分片粗略定位。
+   
    - `Qwen/Qwen3-ASR-1.7B`：收费模型，需要付费额度。
 
 如果页面流程有变化，请查看 [硅基流动官方文档](https://docs.siliconflow.cn/)。
+
+速度排名来自本仓库 `eval/` 速度评测的实测结果（2026-09-04，走扩展真实转写路径、生产同款配置：10 并发、5 分钟/片；同一段 60 分钟音频，每模型 3 次取平均）：V3.2 墙钟约 68 秒（RTF 0.019）最快；Diarize-V3.0 约 108 秒（RTF 0.030）次之；GSR-V1.0 约 136 秒（RTF 0.038）；V3.2-Ultra 约 169 秒（RTF 0.047）最慢。想复现或测其他模型，运行 `npm run eval:run`（详见 `eval/README.md`，报告见 `eval/out/`）。
 
 ### 获取 ModelScope API Key
 
@@ -144,7 +151,7 @@ Firefox、Safari、移动浏览器和其他 Chromium 浏览器没有测试过。
 
 ### 硅基流动
 
-硅基流动提供免费语音转写额度，用免费模型（如 `XingChenAGI/XingChenASR-V3.2-Ultra`、`FunAudioLLM/SenseVoiceSmall`）转写无字幕视频通常不收费。`Qwen/Qwen3-ASR-1.7B` 是收费模型，按量计费。使用前请查看 [硅基流动定价页面](https://siliconflow.cn/pricing) 确认最新规则。
+硅基流动提供免费语音转写额度，用免费模型（如`XingChenAGI/XingChenASR-V3.2`）转写无字幕视频通常不收费。`Qwen/Qwen3-ASR-1.7B` 是收费模型，按量计费。使用前请查看 [硅基流动定价页面](https://siliconflow.cn/pricing) 确认最新规则。
 
 ### ModelScope
 
@@ -236,7 +243,7 @@ Bilibili Summary 没有账号系统、广告、分析统计或行为追踪。硅
 
 ### 语音转写的并发是多少？能调大吗？
 
-扩展内置的转写并发是 **10**（音频切成 20 分钟/片后，最多 10 片同时请求转写接口）。这个值是用本仓库 `eval/` 的并发扫描工具对硅基流动实测得出的最优解：并发 10 相对更低档位提速约 26% 且单请求耗时基本不变；并发再高（12 以上）服务端开始排队，单请求耗时被拉长，20 并发时整体速度反而比 9 并发还慢。想自己验证或换平台重测，运行 `npm run eval:sweep`（见 `eval/README.md`）。
+扩展内置的转写并发是 **10**（音频切成 5 分钟/片后，最多 10 片同时请求转写接口）。这个值是用本仓库 `eval/` 的并发扫描工具对硅基流动实测得出的最优解：并发 10 相对更低档位提速约 26% 且单请求耗时基本不变；并发再高（12 以上）服务端开始排队，单请求耗时被拉长，20 并发时整体速度反而比 9 并发还慢。想自己验证或换平台重测，运行 `npm run eval:sweep`（见 `eval/README.md`）。
 
 ## 项目结构
 
