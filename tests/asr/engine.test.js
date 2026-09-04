@@ -113,7 +113,8 @@ describe("transcribeChunk 单片语义（镜像 pipeline transcribeChunk）", ()
     expect(transcribe).toHaveBeenCalledTimes(2);
     // 与 pipeline.js transcribeChunk 完全一致的重试参数
     expect(retryCalls).toEqual([{ retries: DEFAULT_RETRIES, delayMs: DEFAULT_RETRY_DELAY_MS }]);
-    expect(ASR_CONCURRENCY).toBe(5);
+    // 并发上限经 eval/ 并发扫描实测标定为 10（硅基流动最优解，见 offscreen-constants.ts 注释）
+    expect(ASR_CONCURRENCY).toBe(10);
   });
 
   it("不可重试错误直接上抛（一次尝试，不重试）", async () => {
@@ -129,7 +130,7 @@ describe("transcribeChunk 单片语义（镜像 pipeline transcribeChunk）", ()
 describe("createTranscriptionEngine 活队列调度", () => {
   it("并发上限 ≤5：12 片连续 push，峰值并发恰为 5，全部完成", async () => {
     const counting = makeCountingTranscribe(5);
-    const engine = createTranscriptionEngine({ transcribe: counting.transcribe });
+    const engine = createTranscriptionEngine({ transcribe: counting.transcribe, concurrency: 5 });
 
     for (let i = 0; i < 12; i += 1) {
       expect(engine.push(makeChunk(i))).toBe(true);
@@ -154,6 +155,7 @@ describe("createTranscriptionEngine 活队列调度", () => {
     const delivered = [];
     const engine = createTranscriptionEngine({
       transcribe,
+      concurrency: 5,
       onChunkResult: (chunk, result) => delivered.push({ index: chunk.index, text: result.text })
     });
 
@@ -326,6 +328,7 @@ describe("中止探针", () => {
     const delivered = [];
     const engine = createTranscriptionEngine({
       transcribe,
+      concurrency: 5,
       isAborted: () => aborted,
       onChunkResult: (chunk) => delivered.push(chunk.index)
     });
@@ -363,6 +366,7 @@ describe("中止探针", () => {
     });
     const engine = createTranscriptionEngine({
       transcribe,
+      concurrency: 5,
       isAborted: () => aborted
     });
 

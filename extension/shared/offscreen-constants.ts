@@ -18,4 +18,7 @@ export const OFFSCREEN_URL: string = "entry/offscreen.html";
 export const OFFSCREEN_CREATE_REASON: string = "BLOBS";
 
 // ASR 转写并发上限：offscreen ASR_ADAPTERS 与 asr/engine.js 调度默认共用。
-export const ASR_CONCURRENCY: number = 5;
+// 取值 10 来自 eval/ 并发扫描实测（XingChenASR-V3.2，120s 片）：并发 10 相对 9
+// 墙钟加速 1.26x 且单请求耗时基本不涨；12 以上段均被服务端排队拉长（+19%），
+// 20 并发墙钟反而恶化到比 9 并发更慢。10 是吞吐/稳定的最优档。
+export const ASR_CONCURRENCY: number = 10;
