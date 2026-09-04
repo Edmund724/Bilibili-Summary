@@ -11,7 +11,7 @@
     "XingChenAGI/XingChenGSR-V1.0"
   ],
   "runsPerModel": 3,
-  "chunkSeconds": 120,
+  "chunkSeconds": 1200,
   "audioPath": "eval/audio/demo.wav",
   "outDir": "eval/out",
   "baseUrl": "https://api.siliconflow.cn/v1",
