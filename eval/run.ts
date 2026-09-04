@@ -13,7 +13,7 @@
 // 在 eval/lib/ 各模块（见各文件注释），Node 端无法直接加载 TS，由 esbuild
 // bundle 成单文件后运行。
 
-import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { transcribe as adapterTranscribe } from "../extension/asr/adapters/openai-transcriptions.js";
@@ -29,7 +29,7 @@ import { detectTimestamps } from "./lib/timestamp-detect.js";
 import { filterAvailableModels } from "./lib/model-filter.js";
 import { sliceWavToChunks } from "./lib/wav-slice.js";
 import type { PcmChunk } from "./lib/wav-slice.js";
-import { buildReport, renderMarkdown } from "./lib/report.js";
+import { buildReport, nextReportPath, renderMarkdown } from "./lib/report.js";
 import type { PerModelReport, RunReport } from "./lib/report.js";
 
 // ===== 配置 =====
@@ -406,10 +406,11 @@ export async function main(): Promise<void> {
     });
 
     mkdirSync(config.outDir, { recursive: true });
-    writeFileSync(`${config.outDir}/report.json`, JSON.stringify(evalReport, null, 2), "utf8");
-    writeFileSync(`${config.outDir}/report.md`, renderMarkdown(evalReport), "utf8");
+    const reportBase = nextReportPath(config.outDir, "report", existsSync);
+    writeFileSync(`${reportBase}.json`, JSON.stringify(evalReport, null, 2), "utf8");
+    writeFileSync(`${reportBase}.md`, renderMarkdown(evalReport), "utf8");
     printSummaryTable(models);
-    console.log(`\n报告已写入：${config.outDir}/report.json 与 ${config.outDir}/report.md`);
+    console.log(`\n报告已写入：${reportBase}.json 与 ${reportBase}.md`);
   } finally {
     restoreFetch();
   }

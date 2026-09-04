@@ -65,7 +65,7 @@ node eval/run.mjs my.json    # 也可传自定义配置路径
 - **报"无法读取音频文件"或切片为空**：检查 `audioPath` 是否正确、文件是否为标准 PCM WAV（非 mp3/m4a/压缩格式；可用 ffmpeg 转换）。
 - **所有模型都被跳过**：可能是 key 无效/欠费（401）、`baseUrl` 配错、或这些模型端点确实不支持 `/audio/transcriptions`——看报告中各模型的 skipReason 与 report.json 里的请求状态码定位。
 - **某个模型不在平台在线名单**：启动时 `/models` 过滤会提示并跳过；确认模型名拼写与平台控制台一致。
-- **重复运行评测**：脚本结束时还原全局 fetch，可反复运行；报告目录每次覆盖写入。
+- **重复运行评测**：脚本结束时还原全局 fetch，可反复运行；**已存在报告不会被覆盖**——新报告自动加序号排在后面（`report-2.json/md`、`report-3…`，并发扫描的 `sweep-report` 同理）。
 
 ## 并发上限扫描（eval:sweep）
 

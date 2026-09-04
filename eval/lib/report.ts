@@ -7,6 +7,22 @@
 import type { RequestTiming } from "./timing-fetch.js";
 import type { TimestampDetection } from "./timestamp-detect.js";
 
+// 报告落盘路径：base 已存在时自动加序号（report → report-2 → report-3…），
+// 新报告不覆盖旧的。json/md 一次运行共用同一条 base，序号保持一致。
+// exists 由调用方注入（run.ts/sweep.ts 传 node:fs 的 existsSync），lib 保持纯逻辑。
+export function nextReportPath(outDir: string, base: string, exists: (p: string) => boolean): string {
+  const first = `${outDir}/${base}`;
+  if (!exists(`${first}.json`) && !exists(`${first}.md`)) {
+    return first;
+  }
+  for (let i = 2; ; i += 1) {
+    const p = `${outDir}/${base}-${i}`;
+    if (!exists(`${p}.json`) && !exists(`${p}.md`)) {
+      return p;
+    }
+  }
+}
+
 export interface RunReport {
   runIndex: number;
   wallMs: number;

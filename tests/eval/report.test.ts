@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildReport,
+  nextReportPath,
   renderMarkdown,
   type PerModelReport,
   type RunReport
@@ -89,6 +90,31 @@ describe("buildReport", () => {
     expect(built.aggregate.wallMean).toBeNull();
     expect(built.aggregate.rtfMean).toBeNull();
     expect(built.aggregate.successCount).toBe(0);
+  });
+});
+
+describe("nextReportPath", () => {
+  const noFile = () => false;
+
+  it("目录里没有同名报告 → 直接用 base", () => {
+    expect(nextReportPath("eval/out", "report", noFile)).toBe("eval/out/report");
+  });
+
+  it("base 已存在 → 加序号 -2", () => {
+    const exists = (p: string) => p === "eval/out/report.json" || p === "eval/out/report.md";
+    expect(nextReportPath("eval/out", "report", exists)).toBe("eval/out/report-2");
+  });
+
+  it("连号占用 → 取第一个空位", () => {
+    const exists = (p: string) =>
+      p === "eval/out/report.json" || p === "eval/out/report.md" ||
+      p.startsWith("eval/out/report-2") || p.startsWith("eval/out/report-3");
+    expect(nextReportPath("eval/out", "report", exists)).toBe("eval/out/report-4");
+  });
+
+  it("json 与 md 任一存在都算占用（同一次运行成对写盘）", () => {
+    const exists = (p: string) => p === "eval/out/report.md";
+    expect(nextReportPath("eval/out", "report", exists)).toBe("eval/out/report-2");
   });
 });
 

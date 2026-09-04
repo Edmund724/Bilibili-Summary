@@ -11,7 +11,7 @@
 // runsPerLevel / chunkSeconds / audioSeconds）。运行：npm run eval:sweep，
 // 报告写 eval/out/sweep-report.json / sweep-report.md。
 
-import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { transcribe as adapterTranscribe } from "../extension/asr/adapters/openai-transcriptions.js";
@@ -25,6 +25,7 @@ import { summarizeRun } from "./lib/stats.js";
 import { filterAvailableModels } from "./lib/model-filter.js";
 import { sliceWavToChunks } from "./lib/wav-slice.js";
 import type { PcmChunk } from "./lib/wav-slice.js";
+import { nextReportPath } from "./lib/report.js";
 
 // ===== 配置 =====
 
@@ -411,10 +412,11 @@ export async function main(): Promise<void> {
     });
 
     mkdirSync(config.outDir, { recursive: true });
-    writeFileSync(`${config.outDir}/sweep-report.json`, JSON.stringify(report, null, 2), "utf8");
-    writeFileSync(`${config.outDir}/sweep-report.md`, renderMarkdown(report), "utf8");
+    const reportBase = nextReportPath(config.outDir, "sweep-report", existsSync);
+    writeFileSync(`${reportBase}.json`, JSON.stringify(report, null, 2), "utf8");
+    writeFileSync(`${reportBase}.md`, renderMarkdown(report), "utf8");
     printSummaryTable(report);
-    console.log(`\n报告已写入：${config.outDir}/sweep-report.json 与 ${config.outDir}/sweep-report.md`);
+    console.log(`\n报告已写入：${reportBase}.json 与 ${reportBase}.md`);
   } finally {
     restoreFetch();
   }
