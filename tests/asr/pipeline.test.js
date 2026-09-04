@@ -518,3 +518,49 @@ describe("pipeline 空结果与诊断", () => {
     expect(onEmptyDiagnostic).not.toHaveBeenCalled();
   });
 });
+
+describe("pipeline onAttemptOutcome（整轮重试判定用失败面）", () => {
+  it("空结果：回调携带 totalChunks/failedChunks/elapsedMs", async () => {
+    const onAttemptOutcome = vi.fn();
+    const host = vi.fn(async () => ({
+      results: [],
+      totalChunks: 3,
+      skippedSegments: 1,
+      failedChunks: 2
+    }));
+
+    await pipeline.runAsrPipeline({
+      bvid: "BV1test",
+      cid: "101",
+      chunkHost: host,
+      onAttemptOutcome
+    });
+
+    expect(onAttemptOutcome).toHaveBeenCalledTimes(1);
+    const outcome = onAttemptOutcome.mock.calls[0][0];
+    expect(outcome.totalChunks).toBe(3);
+    expect(outcome.failedChunks).toBe(2);
+    expect(outcome.elapsedMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("非空结果：同样上报（failedChunks 反映部分片失败）", async () => {
+    const onAttemptOutcome = vi.fn();
+    const host = vi.fn(async () => ({
+      results: [{ index: 0, startSec: 0, durationSec: 60, result: { text: "有内容" } }],
+      totalChunks: 2,
+      skippedSegments: 0,
+      failedChunks: 1
+    }));
+
+    const body = await pipeline.runAsrPipeline({
+      bvid: "BV1test",
+      cid: "101",
+      chunkHost: host,
+      onAttemptOutcome
+    });
+
+    expect(body).toEqual([{ from: 0, to: 60, content: "有内容" }]);
+    expect(onAttemptOutcome).toHaveBeenCalledTimes(1);
+    expect(onAttemptOutcome.mock.calls[0][0].failedChunks).toBe(1);
+  });
+});

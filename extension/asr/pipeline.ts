@@ -76,12 +76,21 @@ function mergeChunkResults(chunkResults: AsrChunkRecord[]): SubtitleItem[] {
 // runAsrPipeline 的入参：bvid/cid 取音轨；onProgress 中继状态文案；
 // chunkHost 为可选注入的任务宿主（测试传合成宿主，生产默认走
 // createOffscreenChunkHost）；onEmptyDiagnostic 承接空结果诊断文案。
+// 单次转写尝试的失败面结果（整轮自动重试判定用）：totalChunks 为产出片数、
+// failedChunks 为转写失败跳过片数、elapsedMs 为本次尝试墙钟耗时。
+export interface AsrAttemptOutcome {
+  totalChunks: number;
+  failedChunks: number;
+  elapsedMs: number;
+}
+
 export interface RunAsrPipelineArgs {
   bvid: string;
   cid: string;
   onProgress?: (message: string) => void;
   chunkHost?: OffscreenChunkHost;
   onEmptyDiagnostic?: (diagText: string) => void;
+  onAttemptOutcome?: (outcome: AsrAttemptOutcome) => void;
 }
 
 // runAsrPipeline({ bvid, cid, onProgress, chunkHost, onEmptyDiagnostic })
@@ -90,8 +99,9 @@ export interface RunAsrPipelineArgs {
 // 决定 UI 应用时机，转写本身与视频切换解耦，跑完即返回。chunkHost 为可选
 // 注入的任务宿主（测试传合成宿主，生产默认走 createOffscreenChunkHost：
 // offscreen 文档内下载+解码+切片+逐片转写，每片完成即回传文本结果）。
-export async function runAsrPipeline({ bvid, cid, onProgress, chunkHost, onEmptyDiagnostic }: RunAsrPipelineArgs): Promise<SubtitleItem[]> {
+export async function runAsrPipeline({ bvid, cid, onProgress, chunkHost, onEmptyDiagnostic, onAttemptOutcome }: RunAsrPipelineArgs): Promise<SubtitleItem[]> {
   const host = chunkHost || createOffscreenChunkHost();
+  const startedAt = Date.now();
 
   // 取音轨（页面同域能力：playurl 依赖 B 站页面 cookie，走 contentFetchJson）
   onProgress?.("无字幕轨，正在获取音频流…");
@@ -136,6 +146,15 @@ export async function runAsrPipeline({ bvid, cid, onProgress, chunkHost, onEmpty
     } catch {
       // 诊断回调异常不影响主流程
     }
+  }
+  // 失败面结果上报（整轮自动重试判定用，fallback 空结果分支消费）：每次尝试
+  // 完成都会调用，非空结果同样上报（failedChunks 反映片失败计数）。
+  if (typeof onAttemptOutcome === "function") {
+    onAttemptOutcome({
+      totalChunks: Number(totalChunks) > 0 ? Number(totalChunks) : results.length,
+      failedChunks: Number(failedChunks) || 0,
+      elapsedMs: Date.now() - startedAt
+    });
   }
   return merged;
 }

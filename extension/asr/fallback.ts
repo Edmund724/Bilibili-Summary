@@ -5,7 +5,8 @@
 //
 // 依赖分层：
 //   - 直 import（传递 import 闭包不触及 subtitle/fetcher.js）：shared/
-//     error-helpers、shared/logging、core/state、subtitle/cache、subtitle/selection；
+//     error-helpers、shared/logging、shared/utils、core/state、subtitle/cache、
+//     subtitle/selection；
 //   - 注入 deps（传递闭包含 runtime.js→fetcher 或随 UI/上下文成环）：
 //     getSettings、loadProviders（provider 列表，asrProviders 已摘出 settings，
 //     fetcher 经 asr-providers-list 消息直读 provider-store）、setStatus、
@@ -28,6 +29,24 @@ import {
   clearStaleAsrSubtitleCache
 } from "../subtitle/cache.js";
 import { validateSubtitleByDuration } from "../subtitle/selection.js";
+import { sleep } from "../shared/utils.js";
+
+// 整轮转写失败自动重试：至多一次全量重跑、固定退避、仅快速失败才触发（见
+// maybeRunAsrFallback 空结果分支）。逐片重试（engine 每片 2 次）只吸收几秒内
+// 抖动，故障窗口超过单片重试总时长会让整轮必死——这里兜底一次。
+const ASR_RUN_RETRIES = 1;
+const ASR_RETRY_DELAY_MS = 2000;
+const ASR_RETRY_MAX_ELAPSED_MS = 60000;
+
+// 空结果终态文案：按片失败计数区分「真实无人声」与「转写服务层失败」。
+// failedChunks > 0（存在片失败）→ 定位为服务层失败（reason 归 asr-failed，
+// 引导重新抓取）；failedChunks = 0 → 未识别到语音内容（reason 归 asr-empty）。
+function buildAsrEmptyStatusText({ failedChunks, diag = "" }: { failedChunks: number; diag?: string }): string {
+  if (failedChunks > 0) {
+    return `语音识别失败，${failedChunks} 片转写未成功，未生成字幕。${diag ? `（诊断：${diag}）` : "请稍后点击重新抓取。"}`;
+  }
+  return `未识别到语音内容，该视频可能没有人声。${diag ? `（诊断：${diag}）` : ""}`;
+}
 
 // STALE_RUN 信号构造：在本模块里只表示"调用方让位、零 UI 写入"（fetcher 的
 // catch 对 STALE_RUN 静默返回），不再表示转写被中止——切视频不取消任务。
@@ -78,11 +97,25 @@ export interface CommitNoSubtitleArgs {
   asrResult: string;
 }
 
+export interface AsrRunAttemptOutcome {
+  totalChunks: number;
+  failedChunks: number;
+  elapsedMs: number;
+}
+
 export interface AsrPipelineArgs {
   bvid: string;
   cid: string;
   onProgress?: (message: string) => void;
   onEmptyDiagnostic?: (diagText: string) => void;
+  onAttemptOutcome?: (outcome: AsrRunAttemptOutcome) => void;
+}
+
+// 共享转写的结果契约：body 为最终字幕（空数组 = 未生成），outcome 为最终那次
+// 尝试的失败面（整轮自动重试后，并发等待者按它归类终态文案/原因）。
+export interface AsrSharedTranscribeResult {
+  body: SubtitleItem[];
+  outcome: AsrRunAttemptOutcome;
 }
 
 export interface CreateAsrFallbackDeps {
@@ -94,6 +127,8 @@ export interface CreateAsrFallbackDeps {
   commitNoSubtitle: (args: CommitNoSubtitleArgs) => Promise<unknown>;
   runAsrPipeline: (args: AsrPipelineArgs) => Promise<SubtitleItem[]>;
   broadcastSubtitleStatus: (status: string) => void;
+  // 整轮重试的退避注入（测试传零延迟；缺省用 shared/utils 的真实 sleep）
+  sleepFor?: (ms: number) => Promise<void>;
 }
 
 // 进行中的 ASR 转写共享单元（activeAsrTranscribes Map 的值类型）。字段语义与
@@ -105,7 +140,7 @@ export interface CreateAsrFallbackDeps {
 //     切视频不取消任务，fetcher 失败兜底按"当前视频"探针/等待
 //    （hasActiveAsrTranscribe / awaitActiveAsrTranscribe 只匹配 videoKey）。
 export interface ActiveAsrTranscribe {
-  promise: Promise<SubtitleItem[]>;
+  promise: Promise<AsrSharedTranscribeResult>;
   platformName: string;
   videoKey: string;
 }
@@ -125,7 +160,8 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
     acceptSubtitle,
     commitNoSubtitle,
     runAsrPipeline,
-    broadcastSubtitleStatus
+    broadcastSubtitleStatus,
+    sleepFor = sleep
   } = deps;
 
   // 进行中的 ASR 转写共享单元（Map<cacheKey, { promise, platformName, videoKey }>）：
@@ -242,61 +278,100 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
       // 作废且永不落缓存。命中即共享，缓存写入由发起者的 promise 链负责。
       const active = activeAsrTranscribes.get(cacheKey);
       if (active) {
-        const sharedBody = await active.promise;
+        const shared = await active.promise;
+        const sharedBody = shared.body;
         if (!Array.isArray(sharedBody) || sharedBody.length === 0) {
           if (isStale()) {
             // 切走后共享转写以空结果到站：终态广播由发起者负责，这里静默让位
             throwStaleRun();
           }
-          clipState.setNoSubtitleReason("asr-empty");
-          setStatus("未识别到语音内容，该视频可能没有人声。");
+          const failed = Number(shared.outcome?.failedChunks) || 0;
+          clipState.setNoSubtitleReason(failed > 0 ? "asr-failed" : "asr-empty");
+          setStatus(buildAsrEmptyStatusText({ failedChunks: failed }));
           return "empty";
         }
         return finishAsrFallback({ runId, body: sharedBody, platformName });
       }
 
       let emptyDiag = "";
-      const transcribePromise = runAsrPipeline({
-        bvid,
-        cid,
-        onProgress: (msg) => {
-          // 进度文案只服务当前视频的状态栏：切走后不再污染新视频 UI
-          if (!isStale()) {
-            setStatus(msg);
-          }
-        },
-        onEmptyDiagnostic: (diagText) => {
-          emptyDiag = diagText;
-        }
-      })
-        .then(async (body) => {
-          // 成果即刻落缓存：按 bvid/cid/provider 键控，与后续 UI 状态无关。
-          // 历史上写缓存在 ensureRunActive 之后，转写一旦被并发抓取顶掉，
-          // 几小时成果直接丢弃。写入带 LRU 淘汰（失败先清理旧视频再重试一次）。
-          if (Array.isArray(body) && body.length > 0) {
-            const saveResult = await saveSubtitleToCache(cacheKey, body);
-            if (saveResult && saveResult.ok === false) {
-              // 淘汰后重试仍失败：经既有消息栏一次性上浮，不阻断主流程。
-              setMessage("语音识别结果已生成，但本地缓存写入失败（已自动清理旧缓存仍失败），仅本次会话有效。");
-            } else {
-              // 孤儿清理：新 ASR 转写落盘后，移除同视频其它 provider/model/language
-              // 的过期 ASR 变体键；平台字幕轨不是孤儿，保留。清理只在写入成功后
-              // 执行——写失败时旧变体仍是唯一可用副本，不能删。
-              await clearStaleAsrSubtitleCache({ bvid, cid, keepKey: cacheKey });
+      // 单次转写尝试：发起管线 → 空结果才收诊断 → 非空成果即刻落缓存（按
+      // bvid/cid/provider 键控，与后续 UI 状态无关；写带 LRU 淘汰，失败先清理
+      // 旧视频再重试一次；孤儿清理只在写入成功后执行）。返回 body + 失败面
+      // outcome（供整轮重试判定）。首试与重试共用，重试期间不广播阶段终态。
+      const runAttempt = async (): Promise<{ body: SubtitleItem[]; outcome: AsrRunAttemptOutcome }> => {
+        emptyDiag = "";
+        let outcome: AsrRunAttemptOutcome = { totalChunks: 0, failedChunks: 0, elapsedMs: 0 };
+        const rawBody = await runAsrPipeline({
+          bvid,
+          cid,
+          onProgress: (msg) => {
+            // 进度文案只服务当前视频的状态栏：切走后不再污染新视频 UI
+            if (!isStale()) {
+              setStatus(msg);
             }
+          },
+          onEmptyDiagnostic: (diagText) => {
+            emptyDiag = diagText;
+          },
+          onAttemptOutcome: (o) => {
+            outcome = o;
           }
-          return body;
-        })
-        .finally(() => {
+        });
+        const body = Array.isArray(rawBody) ? rawBody : [];
+        if (body.length > 0) {
+          const saveResult = await saveSubtitleToCache(cacheKey, body);
+          if (saveResult && saveResult.ok === false) {
+            // 淘汰后重试仍失败：经既有消息栏一次性上浮，不阻断主流程。
+            setMessage("语音识别结果已生成，但本地缓存写入失败（已自动清理旧缓存仍失败），仅本次会话有效。");
+          } else {
+            // 孤儿清理：新 ASR 转写落盘后，移除同视频其它 provider/model/language
+            // 的过期 ASR 变体键；平台字幕轨不是孤儿，保留。清理只在写入成功后
+            // 执行——写失败时旧变体仍是唯一可用副本，不能删。
+            await clearStaleAsrSubtitleCache({ bvid, cid, keepKey: cacheKey });
+          }
+        }
+        return { body, outcome };
+      };
+
+      // 整轮自动重试：首试「空 + 存在片失败 + 快速失败」时重跑一次。故障窗口
+      // 超出单片重试总时长会让整轮空结果（逐片重试救不了），在服务层失败有实锤
+      //（failedChunks>0）且未耗时过长（长视频跑大半后失败整轮重跑花费翻倍）时
+      // 兜底重试一次。重试期间不广播终态相位，reader 横幅与 sidepanel 等待标志
+      // 持续到真正终态，避免「闪一下就没了」。结果契约 { body, outcome } 供
+      // activeAsrTranscribes 的并发等待者按最终失败面归类终态。
+      const transcribePromise = (async () => {
+        try {
+          let outcome: AsrRunAttemptOutcome = { totalChunks: 0, failedChunks: 0, elapsedMs: 0 };
+          let body: SubtitleItem[] = [];
+          for (let attemptNo = 0; attemptNo <= ASR_RUN_RETRIES; attemptNo += 1) {
+            const attempt = await runAttempt();
+            body = attempt.body;
+            outcome = attempt.outcome;
+            const canRetry =
+              body.length === 0 &&
+              Number(outcome.failedChunks) > 0 &&
+              Number(outcome.elapsedMs) < ASR_RETRY_MAX_ELAPSED_MS &&
+              !isStale() &&
+              attemptNo < ASR_RUN_RETRIES;
+            if (!canRetry) {
+              break;
+            }
+            setStatus("语音识别失败，正在自动重试…");
+            await sleepFor(ASR_RETRY_DELAY_MS);
+          }
+          return { body, outcome };
+        } finally {
           // 任务终态即除名：按自身 cacheKey 删除，不影响其它视频的并发转写
           activeAsrTranscribes.delete(cacheKey);
-        });
+        }
+      })();
       activeAsrTranscribes.set(cacheKey, { promise: transcribePromise, platformName, videoKey });
 
-      const body = await transcribePromise;
+      const { body, outcome } = await transcribePromise;
 
-      // 空结果：全部为空白 → 返回 "empty"，调用点呈现"未识别到语音内容"文案；
-      // 有诊断信息时直接拼进状态栏，用户转述即可定位问题层。
+      // 空结果（首试或重试后的最终态）：全部为空白 → 返回 "empty"。有诊断信息
+      // 时直接拼进状态栏；存在片失败（failedChunks>0）→ 定位为服务层失败而非
+      // 无人声，reason 归 asr-failed 供 sidepanel 按「语音识别未成功」引导。
       // 切走后到站的空结果：不写任何 UI（新视频的状态栏不能被旧视频的文案
       // 占用），但 asr-done 终态广播照发，让 sidepanel 的全局等待标志归位。
       if (!Array.isArray(body) || body.length === 0) {
@@ -309,10 +384,9 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
           broadcastSubtitleStatus("asr-done");
           throwStaleRun();
         }
-        clipState.setNoSubtitleReason("asr-empty");
-        setStatus(
-          `未识别到语音内容，该视频可能没有人声。${emptyDiag ? `（诊断：${emptyDiag}）` : ""}`
-        );
+        const failed = Number(outcome?.failedChunks) || 0;
+        clipState.setNoSubtitleReason(failed > 0 ? "asr-failed" : "asr-empty");
+        setStatus(buildAsrEmptyStatusText({ failedChunks: failed, diag: emptyDiag }));
         broadcastSubtitleStatus("asr-done");
         return "empty";
       }
@@ -392,9 +466,11 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
       return;
     }
     try {
-      const sharedBody = await active.promise;
+      const shared = await active.promise;
+      const sharedBody = shared.body;
       if (!Array.isArray(sharedBody) || sharedBody.length === 0) {
-        setStatus("未识别到语音内容，该视频可能没有人声。");
+        const failed = Number(shared.outcome?.failedChunks) || 0;
+        setStatus(buildAsrEmptyStatusText({ failedChunks: failed }));
         broadcastSubtitleStatus("asr-done");
         return;
       }

@@ -104,6 +104,8 @@ function buildDeps(overrides = {}) {
     commitNoSubtitle: vi.fn(realCommitNoSubtitle),
     runAsrPipeline: vi.fn(async () => []),
     broadcastSubtitleStatus: vi.fn(),
+    // 整轮重试退避注入（测试零延迟；生产走 shared/utils 的真实 sleep）
+    sleepFor: vi.fn(async () => {}),
     ...overrides
   };
 }
@@ -546,6 +548,125 @@ describe("maybeRunAsrFallback 空结果与失败", () => {
     });
     expect(deps.runAsrPipeline).not.toHaveBeenCalled();
     expect(deps.broadcastSubtitleStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("maybeRunAsrFallback 整轮自动重试", () => {
+  it("空 + 存在片失败（failedChunks>0）：自动重试一次，重试成功收尾 done", async () => {
+    let calls = 0;
+    deps.runAsrPipeline.mockImplementation(async ({ onAttemptOutcome }) => {
+      calls += 1;
+      if (calls === 1) {
+        onAttemptOutcome?.({ totalChunks: 3, failedChunks: 3, elapsedMs: 1200 });
+        return [];
+      }
+      onAttemptOutcome?.({ totalChunks: 3, failedChunks: 0, elapsedMs: 1800 });
+      return TRANSCRIBED_BODY;
+    });
+
+    const result = await fallback.maybeRunAsrFallback({ runId: RUN_ID });
+
+    expect(result).toBe("done");
+    expect(deps.runAsrPipeline).toHaveBeenCalledTimes(2);
+    expect(deps.sleepFor).toHaveBeenCalledTimes(1);
+    expect(deps.sleepFor).toHaveBeenCalledWith(2000);
+    // 重试成果落缓存 + 事务收尾
+    expect(memoryStorage.get(asrCacheKey())?.body).toEqual(TRANSCRIBED_BODY);
+    expect(state.clip.subtitleBody).toEqual(TRANSCRIBED_BODY);
+    expect(clipState.noSubtitleReason).toBe(null);
+    // 终态广播只在真正终态一次：首轮失败不提前 asr-done/failed（横幅/等待不闪断）
+    expect(deps.broadcastSubtitleStatus.mock.calls.map((c) => c[0])).toEqual([
+      "asr-transcribing",
+      "asr-done"
+    ]);
+    const statusCalls = deps.setStatus.mock.calls.map((c) => String(c[0]));
+    expect(statusCalls.some((s) => s.includes("正在自动重试"))).toBe(true);
+    expect(statusCalls.some((s) => s.includes("语音识别完成，已生成 3 条字幕。"))).toBe(true);
+  });
+
+  it("自动重试后仍空（failedChunks>0）：终态 empty、原因 asr-failed、asr-done 只广播一次", async () => {
+    deps.runAsrPipeline.mockImplementation(async ({ onAttemptOutcome }) => {
+      onAttemptOutcome?.({ totalChunks: 3, failedChunks: 3, elapsedMs: 1500 });
+      return [];
+    });
+
+    const result = await fallback.maybeRunAsrFallback({ runId: RUN_ID });
+
+    expect(result).toBe("empty");
+    expect(deps.runAsrPipeline).toHaveBeenCalledTimes(2);
+    expect(clipState.noSubtitleReason).toBe("asr-failed");
+    expect(deps.broadcastSubtitleStatus.mock.calls.map((c) => c[0])).toEqual([
+      "asr-transcribing",
+      "asr-done"
+    ]);
+    expect(deps.commitNoSubtitle).not.toHaveBeenCalled(); // empty 由调用点收尾
+    const statusCalls = deps.setStatus.mock.calls.map((c) => String(c[0]));
+    expect(statusCalls.some((s) => s.includes("正在自动重试"))).toBe(true);
+    expect(statusCalls.some((s) => s.includes("3 片转写未成功"))).toBe(true);
+    expect(memoryStorage.has(asrCacheKey())).toBe(false);
+  });
+
+  it("存在片失败但非快速失败（elapsed 超阈值）：不自动重试，原因 asr-failed", async () => {
+    deps.runAsrPipeline.mockImplementation(async ({ onAttemptOutcome }) => {
+      onAttemptOutcome?.({ totalChunks: 5, failedChunks: 5, elapsedMs: 61000 });
+      return [];
+    });
+
+    const result = await fallback.maybeRunAsrFallback({ runId: RUN_ID });
+
+    expect(result).toBe("empty");
+    expect(deps.runAsrPipeline).toHaveBeenCalledTimes(1);
+    expect(deps.sleepFor).not.toHaveBeenCalled();
+    expect(clipState.noSubtitleReason).toBe("asr-failed");
+  });
+
+  it("纯空结果（failedChunks=0，无人声）：不自动重试，原因 asr-empty、文案不变", async () => {
+    deps.runAsrPipeline.mockImplementation(async ({ onAttemptOutcome }) => {
+      onAttemptOutcome?.({ totalChunks: 3, failedChunks: 0, elapsedMs: 4000 });
+      return [];
+    });
+
+    const result = await fallback.maybeRunAsrFallback({ runId: RUN_ID });
+
+    expect(result).toBe("empty");
+    expect(deps.runAsrPipeline).toHaveBeenCalledTimes(1);
+    expect(deps.sleepFor).not.toHaveBeenCalled();
+    expect(clipState.noSubtitleReason).toBe("asr-empty");
+    const statusCalls = deps.setStatus.mock.calls.map((c) => String(c[0]));
+    expect(statusCalls.some((s) => s.includes("未识别到语音内容，该视频可能没有人声。"))).toBe(true);
+  });
+
+  it("重试窗口内切视频：重试照跑、终态静默让位（asr-done 广播 + 零 UI 写入）", async () => {
+    const deferred = [];
+    deps.runAsrPipeline.mockImplementation(({ onAttemptOutcome }) => {
+      onAttemptOutcome?.({ totalChunks: 3, failedChunks: 3, elapsedMs: 1000 });
+      return new Promise((resolve) => {
+        deferred.push(resolve);
+      });
+    });
+    const promise = fallback.maybeRunAsrFallback({ runId: RUN_ID });
+    await vi.waitFor(() => expect(deps.runAsrPipeline).toHaveBeenCalledTimes(1));
+
+    // 首轮完成（未切视频）→ 进入重试
+    deferred[0]([]);
+    await vi.waitFor(() => expect(deps.runAsrPipeline).toHaveBeenCalledTimes(2));
+    expect(deps.sleepFor).toHaveBeenCalledTimes(1);
+
+    // 重试进行中切视频
+    clipState.setBvid("BV1other");
+    clipState.setFetchRunId(2);
+    deferred[1]([]);
+
+    await expect(promise).rejects.toMatchObject({ code: "STALE_RUN" });
+    expect(deps.runAsrPipeline).toHaveBeenCalledTimes(2);
+    expect(deps.broadcastSubtitleStatus.mock.calls.map((c) => c[0])).toEqual([
+      "asr-transcribing",
+      "asr-done"
+    ]);
+    // 终态空结果文案不上新视频 UI
+    const statusCalls = deps.setStatus.mock.calls.map((c) => String(c[0]));
+    expect(statusCalls.some((s) => s.includes("3 片转写未成功"))).toBe(false);
+    expect(deps.commitNoSubtitle).not.toHaveBeenCalled();
   });
 });
 
