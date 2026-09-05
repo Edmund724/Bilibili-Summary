@@ -152,4 +152,40 @@ describe("reader 生命周期", () => {
   it("等待视频元数据：duration 就绪立即 resolve", async () => {
     await expect(shell.waitForVideoMetadata(50)).resolves.toBeUndefined();
   });
+
+  it("字幕缓存属上一个视频（bvid 与当前地址不符）：进入阅读模式触发后台重抓", async () => {
+    // 稍后再看列表内 SPA 换片逃逸 URL 监听时 state.clip 残留旧视频数据；
+    // 缓存命中判定带 bvid 校验，明确不符则按未抓取处理、走后台 refreshClip。
+    const readerBus = await import("../../extension/reader/reader-bus.js");
+    const refreshSpy = vi.fn(() => Promise.resolve());
+    readerBus.subscribeSubtitleRefresh(refreshSpy);
+    // waitForVideoMetadata 不等满超时：给 stub 视频一个有效 duration。
+    const video = document.querySelector("video") as HTMLVideoElement;
+    Object.defineProperty(video, "duration", { value: 120, configurable: true });
+
+    state.clip.bvid = "BV1oldVideoA";
+    state.clip.subtitleBody = [{ from: 0, to: 10, content: "旧视频字幕" }];
+
+    await shell.enterReaderMode();
+
+    await vi.waitFor(() => {
+      expect(refreshSpy).toHaveBeenCalled();
+    });
+    shell.closeReadingView();
+  });
+
+  it("字幕缓存与当前地址同 bvid：进入阅读模式不触发后台重抓", async () => {
+    const readerBus = await import("../../extension/reader/reader-bus.js");
+    const refreshSpy = vi.fn(() => Promise.resolve());
+    readerBus.subscribeSubtitleRefresh(refreshSpy);
+
+    state.clip.bvid = "BV1test000000";
+    state.clip.subtitleBody = [{ from: 0, to: 10, content: "当前视频字幕" }];
+
+    await shell.enterReaderMode();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    expect(refreshSpy).not.toHaveBeenCalled();
+    shell.closeReadingView();
+  });
 });

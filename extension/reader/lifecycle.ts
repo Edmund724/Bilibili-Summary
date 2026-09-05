@@ -20,6 +20,7 @@ import { sleep } from "../shared/utils.js";
 //（digest-only-ui：排版档位机制退役，validators 只剩主题归一化）。
 import { normalizeReaderTheme } from "../core/validators.js";
 import { getRuntimeVideoElement } from "../bilibili/video-probe.js";
+import { extractBvid } from "../bilibili/video-id-shared.js";
 import { getErrorMessage, isStaleRunError } from "../shared/error-helpers.js";
 import {
   getReadingSubtitleItems,
@@ -131,7 +132,14 @@ import {
 } from "./sync.js";
 
 function maybeRefreshReaderSubtitleInBackground() {
-  if (state.clip.subtitleBody.length > 0) {
+  // 缓存命中须带视频身份校验：稍后再看列表内 SPA 换片若逃逸了 URL 监听
+  // （如轮询兜底的一个节拍内点了 Digest），state.clip 可能还停在上一个
+  // 视频——subtitleBody 非空但 bvid 与当前地址不符时按未抓取处理，重抓。
+  const cacheMatchesCurrentVideo =
+    state.clip.subtitleBody.length > 0 &&
+    Boolean(state.clip.bvid) &&
+    state.clip.bvid === extractBvid(location.href);
+  if (cacheMatchesCurrentVideo) {
     return;
   }
   waitForVideoMetadata().then(() => {
