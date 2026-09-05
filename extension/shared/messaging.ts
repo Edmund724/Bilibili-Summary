@@ -8,7 +8,9 @@
 import type {
   BackgroundMessage,
   ContentScriptMessage,
-  OffloadTaskMessage
+  OffloadTaskMessage,
+  OffloadTaskResponse,
+  ResponseOf
 } from "./messaging-protocol.js";
 
 // 局部类型：不依赖 ambient chrome 声明，避免并行迁移中 chrome 类型文件冲突。
@@ -17,9 +19,14 @@ interface Runtime {
   lastError?: { message?: string };
 }
 
-export function sendRuntimeMessage(
-  message: BackgroundMessage | ContentScriptMessage
-): Promise<unknown> {
+// 泛型化（arch-slim-2/02）：返回类型由消息字面量经 ResponseOf<M> 静态推断，
+// 消费点不再手猜响应形状（响应形状断言已全仓清零，扫描断言见
+// tests/shared/messaging-response-scan.test.js）。唯一的 unknown cast 收在
+// 传输边界本处——线格式 resp 是 unknown，响应形状由服务端处理器实现为事实
+// 锚点、经调用点的消息类型静态承诺。
+export function sendRuntimeMessage<M extends BackgroundMessage | ContentScriptMessage>(
+  message: M
+): Promise<ResponseOf<M>> {
   return new Promise((resolve, reject) => {
     try {
       (chrome.runtime as Runtime).sendMessage(message, (resp) => {
@@ -27,7 +34,7 @@ export function sendRuntimeMessage(
           reject(new Error((chrome.runtime as Runtime).lastError?.message));
           return;
         }
-        resolve(resp);
+        resolve(resp as ResponseOf<M>);
       });
     } catch (error) {
       reject(error);
@@ -39,11 +46,12 @@ export function sendRuntimeMessage(
 // 分发给注册的任务执行器（现承载 asr-decode-prepare / asr-decode-cleanup，
 // 见 asr/offscreen-bridge.bg.js：前者建 offscreen 文档 + 为该任务分配独立 id 的
 // dnr 防盗链规则，后者按消息携带的 ruleId 只清自己的规则——多任务并发规则
-// 并存、互不影响）。消息结构随任务类型定，执行器异常原样透传。
-export function sendOffloadMessage<T extends Omit<OffloadTaskMessage, "type">>(
-  message: T
-): Promise<unknown> {
-  return sendRuntimeMessage({ type: "offload-task", ...message } as OffloadTaskMessage);
+// 并存、互不影响）。入参为完整线格式报文（含 type: "offload-task"，调用点
+// 字面量直写， arch-slim-2/02 起不再内部拼装+断言）；执行器异常原样透传。
+export function sendOffloadMessage<M extends OffloadTaskMessage>(
+  message: M
+): Promise<OffloadTaskResponse> {
+  return sendRuntimeMessage(message);
 }
 
 // 局部类型：port 只需要 postMessage 一个方法（chrome.runtime.Port 结构兼容）。

@@ -32,9 +32,10 @@ import { createSubtitleBodySlot } from "./offscreen-subtitle-slot.js";
 // 候选04：ASR / AI 两族任务链的懒加载器工厂（promise 缓存、失败可重试）。
 import { createLazyLoader } from "../shared/lazy-import.js";
 import type {
+  AiProvidersListResponse,
+  GetAiProviderKeyResponse,
   OffscreenAsrPortMessage,
-  OffscreenChatPortMessage,
-  OffscreenRuntimeRequest
+  OffscreenChatPortMessage
 } from "../shared/messaging-protocol.js";
 import type { ChatMsg } from "../ai/ladder.js";
 
@@ -291,19 +292,18 @@ function withCachedContextKey(port: PostMessagePort, contextKey: string) {
   };
 }
 
-interface AiProviderSummary {
-  id: string;
-  enabled: boolean;
-  requiresKey?: boolean;
-}
-
 // 取「选中的平台 + 其 API Key」：provider 来自 ai-providers-list，key 来自 get-ai-provider-key。
 // 任一缺失（平台不存在 / key 读取失败 / 需要 key 但未配置）返回带 error 的对象；成功返回 { provider, apiKey }。
+// 响应形状引用协议单源（arch-slim-2/02，原手猜形状断言移除）：本 context 保留
+// Promise 风格直发（MV3 无回调签名，见 tests/entry/offscreen-asr-skip.test.js
+// 的 stub 说明），await 的 unknown 回包在传输边界收窄为协议响应类型——与
+// shared/messaging.ts 内部的单点 cast 同性质。与 ai/active-provider.ts 的
+// resolveActiveProvider 同款消息链，回吐协议差异只在 port postMessage 与 throw。
 async function resolveProviderWithKey(port: PostMessagePort, providerId: string | undefined) {
   const providersResp = (await chrome.runtime.sendMessage({
     type: "ai-providers-list"
-  } as OffscreenRuntimeRequest)) as { providers?: unknown[] };
-  const list = ((providersResp?.providers || []) as AiProviderSummary[]).filter((p) => p.enabled);
+  })) as AiProvidersListResponse | null;
+  const list = (providersResp?.providers || []).filter((p) => p.enabled);
   const provider = list.find((p) => p.id === providerId) || null;
   if (!provider) {
     port.postMessage({ type: "error", error: "未找到选中的平台" });
@@ -313,7 +313,7 @@ async function resolveProviderWithKey(port: PostMessagePort, providerId: string 
   const keysResp = (await chrome.runtime.sendMessage({
     type: "get-ai-provider-key",
     providerId
-  } as OffscreenRuntimeRequest)) as { ok?: boolean; error?: string; apiKey?: string };
+  })) as GetAiProviderKeyResponse | null;
   if (!keysResp?.ok) {
     port.postMessage({ type: "error", error: keysResp?.error || "读取 API Key 失败" });
     return { error: true };

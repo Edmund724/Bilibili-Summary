@@ -29,6 +29,7 @@ import { getErrorMessage, withTimeout } from "../shared/error-helpers.js";
 import { safePostMessage } from "../shared/messaging.js";
 import { logWarn } from "../shared/logging.js";
 import type { AsrProvider } from "../asr/asr-provider-store.js";
+import type { GetAsrRuntimeConfigResponse } from "../shared/messaging-protocol.js";
 
 // ASR 解码任务中止哨兵：decodeSegment/onChunk 检查 aborted 后抛出，
 // 外层 catch 识别后静默退出（不 post error），与「断连视为取消」语义一致。
@@ -54,17 +55,20 @@ export interface AsrRuntimeConfig {
 // Key 只进本 context，不经过页面、也不放进 port 任务消息。5s 超时竞速镜像
 // 原 fetcher requestAsrRuntimeConfig 的 race 模式；超时原语走 shared/
 // error-helpers 的 withTimeout（arch-slim-2/03 单源），超时以 timeoutError
-// 拒绝、由调用方按配置缺失收口，与原手搓 race 拒绝语义一致。
+// 拒绝、由调用方按配置缺失收口，与原手搓 race 拒绝语义一致。响应形状引用
+// 协议单源（arch-slim-2/02，原手猜形状断言移除）：本 context 保留 Promise
+// 风格直发（MV3 无回调签名，见 tests/entry/offscreen-asr-skip.test.js 的
+// stub 说明），await 的 unknown 回包在传输边界收窄为协议响应类型。
 async function requestAsrRuntimeConfig(timeoutMs = 5000): Promise<AsrRuntimeConfig> {
-  const response = await withTimeout(
+  const response = (await withTimeout(
     chrome.runtime.sendMessage({ type: "get-asr-runtime-config" }),
     timeoutMs,
     new Error("get-asr-runtime-config timeout")
-  );
-  if (!response || typeof response !== "object" || !(response as { ok?: boolean }).ok) {
-    throw new Error((response as { error?: string })?.error || "get-asr-runtime-config failed");
+  )) as GetAsrRuntimeConfigResponse | null;
+  if (!response?.ok) {
+    throw new Error(response?.error || "get-asr-runtime-config failed");
   }
-  return response as AsrRuntimeConfig;
+  return response;
 }
 
 // 配置级缺失/关闭/无激活 provider → code "asr-skip"：页面 fallback catch 后

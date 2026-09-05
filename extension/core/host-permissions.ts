@@ -114,7 +114,8 @@ export async function requestProviderOriginsViaBackground(baseUrls: string[]): P
     const result = await requestProviderOrigins(baseUrls);
     return { ok: result.ok, error: result.error };
   }
-  const resp = (await sendRuntimeMessage({ type: "request-provider-origins", baseUrls })) as { ok?: boolean; error?: string } | null;
+  // 响应形状由消息类型经 ResponseOf 推断（arch-slim-2/02）
+  const resp = await sendRuntimeMessage({ type: "request-provider-origins", baseUrls });
   return { ok: Boolean(resp?.ok), error: resp?.error };
 }
 

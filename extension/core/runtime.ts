@@ -25,10 +25,10 @@ export async function getSettings(timeoutMs = 5000): Promise<Settings> {
       timeoutMs,
       new Error("getSettings timeout")
     );
-    if (!response || typeof response !== "object" || !(response as { ok?: unknown }).ok) {
+    if (!response?.ok) {
       return { ...DEFAULT_SETTINGS };
     }
-    return { ...DEFAULT_SETTINGS, ...((response as { settings?: Partial<Settings> }).settings || {}) };
+    return { ...DEFAULT_SETTINGS, ...(response.settings || {}) };
   } catch (error) {
     console.warn("[BOC] getSettings fallback to defaults", (error as Error | undefined)?.message);
     return { ...DEFAULT_SETTINGS };

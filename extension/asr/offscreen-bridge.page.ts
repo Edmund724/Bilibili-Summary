@@ -65,12 +65,8 @@ export interface OffscreenChunkHostResult {
 // 本任务这条，不碰并发任务的）。
 export type OffscreenChunkHost = (args: OffscreenChunkHostArgs) => Promise<OffscreenChunkHostResult>;
 
-// prepare 响应（background 回包：offscreen 文档就绪 + 本任务的防盗链规则 id）
-interface OffscreenPrepareResponse {
-  ok?: boolean;
-  ruleId?: number;
-  error?: string;
-}
+// prepare/cleanup 响应（background 回包）：OffloadTaskResponse（协议单源，
+// shared/messaging-protocol.ts）——prepare 成功带回本任务独立的防盗链规则 id。
 
 // port 消息读取形状直接复用 protocol 的消息类型（线格式一致）。progress 的
 // 文本字段是 text（entry/offscreen-asr.ts 的 postMessage 实发字段）。
@@ -83,8 +79,8 @@ type AsrPortMessageLike =
 export function createOffscreenChunkHost(): OffscreenChunkHost {
   return async function offscreenChunkHost({ audioUrl, backupUrls, onProgress }: OffscreenChunkHostArgs): Promise<OffscreenChunkHostResult> {
     // 先让 background 建 offscreen 文档 + 加防盗链规则（响应带回 ruleId），
-    // 再直连文档传任务
-    const prepared = (await sendOffloadMessage({ taskType: ASR_TASK_PREPARE })) as OffscreenPrepareResponse | null;
+    // 再直连文档传任务。响应形状由消息类型经 ResponseOf 推断（arch-slim-2/02）
+    const prepared = await sendOffloadMessage({ type: "offload-task", taskType: ASR_TASK_PREPARE });
     if (!prepared?.ok) {
       throw new Error(prepared?.error || "音频解码服务启动失败");
     }
@@ -98,7 +94,7 @@ export function createOffscreenChunkHost(): OffscreenChunkHost {
       let failedChunks = 0;
 
       const cleanup = (): void => {
-        sendOffloadMessage({ taskType: ASR_TASK_CLEANUP, ruleId: sessionRuleId }).catch(() => {
+        sendOffloadMessage({ type: "offload-task", taskType: ASR_TASK_CLEANUP, ruleId: sessionRuleId }).catch(() => {
           // 规则清理失败不影响主流程（会话规则随浏览器重启自动清空）
         });
       };

@@ -23,17 +23,16 @@
 import {
   DEFAULT_PRESET_PROMPTS
 } from "../core/defaults.js";
-import type { Settings } from "../core/defaults.js";
 import {
   normalizeAiInitialQuickPrompts,
   normalizeAiPresetPrompts,
   normalizeAiThinkingLevel
 } from "../core/validators.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
+import type { GetSettingsResponse } from "../shared/messaging-protocol.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { updateModelSelectWidth } from "../ui/model-select-width.js";
 import { chatSessionState } from "./chat-state.js";
-import type { ChatSessionProvider } from "./chat-state.js";
 import type { ModelSelectWidthEls } from "../ui/model-select-width.js";
 
 export const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
@@ -96,26 +95,36 @@ export function createProviderPrefs(deps: CreateProviderPrefsDeps): ProviderPref
   }
 
   // ai-providers-list 响应里的平台条目由 ChatSessionProvider（chat-state.ts）
-  // 描述：id 必填，name/model/enabled 宽松可选。
+  // 描述：id 必填，name/model/enabled 宽松可选。响应形状自 arch-slim-2/02 起
+  // 由消息类型经 ResponseOf 推断（原手猜元组断言移除）；线上条目
+  //（aiProviderStore 归一化，id 必填）经显式映射落型为 ChatSessionProvider。
   async function loadProvidersAndPrefs({ preferredProviderId = "" }: { preferredProviderId?: string } = {}): Promise<void> {
     const [providersResp, settingsResp, storedPrefs] = await Promise.all([
       sendRuntimeMessage({ type: "ai-providers-list" }),
-      sendRuntimeMessage({ type: "get-settings" }).catch(() => ({ ok: false })),
+      // get-settings 失败按「无设置」回落：显式标注回包类型，settings 读取单轨
+      sendRuntimeMessage({ type: "get-settings" }).catch(
+        (): GetSettingsResponse => ({ ok: false, error: "" })
+      ),
       loadStoredPrefs()
-    ]) as [
-      { providers?: ChatSessionProvider[] },
-      { ok?: boolean; settings?: Partial<Settings> },
-      Record<string, unknown>
-    ];
+    ]) ;
     storedSelectedProviderId = String(storedPrefs[SELECTED_PROVIDER_KEY] || "").trim();
-    chatSessionState.providers = Array.isArray(providersResp?.providers)
-      ? providersResp.providers.filter((p) => p.enabled)
-      : [];
+    // 与迁移前同语义：只看 providers 载荷，不查 ok（ok:false / 缺 key 一律空列表）
+    const providers = Array.isArray(providersResp?.providers) ? providersResp.providers : [];
+    chatSessionState.providers = providers
+      .filter((p) => p.enabled)
+      .map((p) => ({
+        id: String(p.id || ""),
+        // name 不在 AiProvider 显式字段里（走索引签名，unknown），按串收窄
+        name: typeof p.name === "string" ? p.name : undefined,
+        model: p.model,
+        enabled: p.enabled
+      }));
+    const settings = settingsResp?.ok ? settingsResp.settings : null;
     chatSessionState.aiPrefs = {
-      aiSystemPrompt: String(settingsResp?.settings?.aiSystemPrompt || "").trim(),
-      aiInitialQuickPrompts: normalizeAiInitialQuickPrompts(settingsResp?.settings?.aiInitialQuickPrompts),
-      aiPresetPrompts: normalizeAiPresetPrompts(settingsResp?.settings?.aiPresetPrompts),
-      defaultModel: String(settingsResp?.settings?.defaultModel || "").trim()
+      aiSystemPrompt: String(settings?.aiSystemPrompt || "").trim(),
+      aiInitialQuickPrompts: normalizeAiInitialQuickPrompts(settings?.aiInitialQuickPrompts),
+      aiPresetPrompts: normalizeAiPresetPrompts(settings?.aiPresetPrompts),
+      defaultModel: String(settings?.defaultModel || "").trim()
     };
     chatSessionState.aiThinkingLevel = normalizeAiThinkingLevel(
       settingsResp?.settings?.aiThinkingLevel ?? storedPrefs[THINKING_LEVEL_KEY]

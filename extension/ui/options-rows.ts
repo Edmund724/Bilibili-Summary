@@ -409,13 +409,14 @@ const aiProviderRow = createProviderRow({
     apiKeyClass: "ai-provider-apikey",
     statusClass: "ai-provider-status",
     showStatus,
-    // AI 侧模型列表仍走 SW 消息（core/ai-provider-store.js 直连拉取）
+    // AI 侧模型列表仍走 SW 消息（core/ai-provider-store.js 直连拉取）；响应形状
+    // 由消息类型经 ResponseOf 推断（arch-slim-2/02），不再手猜
     fetchModels: ({ baseUrl, apiKey, providerId }) => sendRuntimeMessage({
       type: "ai-providers-models",
       baseUrl,
       apiKey,
       providerId
-    }) as Promise<{ ok?: boolean; models?: string[]; error?: string } | null>
+    })
   }),
   // 连通性测试直调 ai/provider-test.js（不再走 ai-providers-test 消息往返）：
   // options 页同属扩展 context，host_permissions 生效，跨域 fetch 无需 SW 中转；

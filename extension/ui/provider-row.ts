@@ -283,13 +283,12 @@ export function createProviderRow({
       }
       showStatus(statusNode, "正在测试...");
       // 探针执行可注入：AI / ASR 平台行均直调对应 provider-test.js（options
-      // 页本地执行，免一次 SW 消息往返，见候选 04 拆链）；未注入时回退运行时消息。
-      const resp = (runTestProbe
+      // 页本地执行，免一次 SW 消息往返，见候选 04 拆链）；未注入时回退运行时
+      // 消息。回退分支的响应形状由消息类型经 ResponseOf 推断（arch-slim-2/02），
+      // 两条分支统一按探针契约（{ ok?, error? }）读——注释标注的类型是显式放宽。
+      const resp: { ok?: boolean; error?: string } | null = runTestProbe
         ? await runTestProbe({ row, presets, baseUrl, apiKey, model })
-        : await sendRuntimeMessage(buildTestPayload!({ row, presets, baseUrl, apiKey, model }))) as {
-        ok?: boolean;
-        error?: string;
-      } | null;
+        : await sendRuntimeMessage(buildTestPayload!({ row, presets, baseUrl, apiKey, model }));
       if (resp?.ok) {
         const providerId = row.dataset.providerId || "";
         try {

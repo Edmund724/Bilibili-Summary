@@ -85,8 +85,12 @@ interface SettingsFormPayload {
 }
 
 // validateSettings / validateFixedFrontmatterProperties / validateAiProviders 的
-// 校验失败载体。row 由 core/validators 以 unknown 返回（DOM 行节点），在
-// applyValidationError 收窄为 HTMLElement。
+// 校验失败载体。row 由 core/validators 以 unknown 返回——它是 options-rows
+// collectFixedPropertyRows / collectNoteSectionRows 以 { includeRow: true } 收集
+// 时的「行收集对象」（{key,type,value,row}），真实 DOM 行挂在其 .row 属性上，
+// 在 applyValidationError 收窄后定位行内输入元素（arch-slim-2/02 修复：旧代码
+// 把收集对象整体当 HTMLElement 调 querySelector → TypeError，行级校验失败时
+// 保存静默失败、无任何 UI 反馈——05 票发现）。
 interface SettingsValidationResult {
   ok: boolean;
   field?: HTMLElement;
@@ -277,7 +281,8 @@ export function renderReaderSettingsPanel(): void {
 
 async function loadAiPresets(): Promise<void> {
   try {
-    const resp = (await sendRuntimeMessage({ type: "ai-presets-list" })) as { ok?: boolean; presets?: AiProviderPreset[] };
+    // 响应形状由消息类型经 ResponseOf 推断（arch-slim-2/02），下同
+    const resp = await sendRuntimeMessage({ type: "ai-presets-list" });
     if (resp?.ok && Array.isArray(resp.presets)) {
       aiPresets = resp.presets;
       return;
@@ -290,7 +295,7 @@ async function loadAiPresets(): Promise<void> {
 
 async function loadAsrPresets(): Promise<void> {
   try {
-    const resp = (await sendRuntimeMessage({ type: "asr-presets-list" })) as { ok?: boolean; presets?: AsrProviderPreset[] };
+    const resp = await sendRuntimeMessage({ type: "asr-presets-list" });
     if (resp?.ok && Array.isArray(resp.presets)) {
       asrPresets = resp.presets;
       return;
@@ -318,7 +323,7 @@ function setStatus(elements: SettingsElements, text: unknown, isError = false): 
 
 async function getSettings(): Promise<typeof DEFAULT_SETTINGS> {
   try {
-    const resp = (await sendRuntimeMessage({ type: "get-settings" })) as { ok?: boolean; settings?: Partial<typeof DEFAULT_SETTINGS> };
+    const resp = await sendRuntimeMessage({ type: "get-settings" });
     if (!resp?.ok) {
       return { ...DEFAULT_SETTINGS };
     }
@@ -366,7 +371,7 @@ let savedAiPresetPrompts: string[] = [];
 
 async function loadAiProviders(): Promise<ProviderRowItem[]> {
   try {
-    const resp = (await sendRuntimeMessage({ type: "ai-providers-list" })) as { ok?: boolean; providers?: ProviderRowItem[] };
+    const resp = await sendRuntimeMessage({ type: "ai-providers-list" });
     if (!resp?.ok) return [];
     return Array.isArray(resp.providers) ? resp.providers : [];
   } catch {
@@ -376,7 +381,7 @@ async function loadAiProviders(): Promise<ProviderRowItem[]> {
 
 async function loadAsrProviders(): Promise<ProviderRowItem[]> {
   try {
-    const resp = (await sendRuntimeMessage({ type: "asr-providers-list" })) as { ok?: boolean; providers?: ProviderRowItem[] };
+    const resp = await sendRuntimeMessage({ type: "asr-providers-list" });
     if (!resp?.ok) return [];
     return Array.isArray(resp.providers) ? resp.providers : [];
   } catch {
@@ -445,49 +450,54 @@ function applyValidationError(elements: SettingsElements, validation: SettingsVa
     validation.field.focus();
   }
   if (validation?.row) {
-    const row = validation.row as HTMLElement;
-    const keyInput = row.querySelector<HTMLInputElement>(".fixed-property-key");
-    const valueInput = row.querySelector<HTMLInputElement>(".fixed-property-value");
-    const titleInput = row.querySelector<HTMLInputElement>(".note-section-title");
-    const contentInput = row.querySelector<HTMLInputElement>(".note-section-content");
-    const positionSelect = row.querySelector<HTMLSelectElement>(".note-section-position");
-    const noteSectionErrorNode = row.querySelector<HTMLElement>(".note-section-error");
-    if (titleInput || contentInput || positionSelect) {
-      if (titleInput && !String(titleInput.value || "").trim()) {
-        titleInput.classList.add("input-error");
-        titleInput.focus();
-      } else if (positionSelect && !NOTE_SECTION_POSITIONS.has(String(positionSelect.value || "").trim())) {
-        positionSelect.classList.add("input-error");
-        positionSelect.focus();
-      } else if (contentInput && validation.requireContent) {
-        contentInput.classList.add("input-error");
-        contentInput.focus();
-      } else if (titleInput) {
-        titleInput.classList.add("input-error");
-        titleInput.focus();
+    // validators 的 row 载体是「行收集对象」（{key,type,value,row}，见
+    // SettingsValidationResult 注），真实 DOM 行取其 .row 属性——修复前把
+    // 收集对象整体当 HTMLElement 用，row.querySelector 抛 TypeError（05 票）。
+    const row = (validation.row as { row?: HTMLElement }).row ?? null;
+    if (row) {
+      const keyInput = row.querySelector<HTMLInputElement>(".fixed-property-key");
+      const valueInput = row.querySelector<HTMLInputElement>(".fixed-property-value");
+      const titleInput = row.querySelector<HTMLInputElement>(".note-section-title");
+      const contentInput = row.querySelector<HTMLInputElement>(".note-section-content");
+      const positionSelect = row.querySelector<HTMLSelectElement>(".note-section-position");
+      const noteSectionErrorNode = row.querySelector<HTMLElement>(".note-section-error");
+      if (titleInput || contentInput || positionSelect) {
+        if (titleInput && !String(titleInput.value || "").trim()) {
+          titleInput.classList.add("input-error");
+          titleInput.focus();
+        } else if (positionSelect && !NOTE_SECTION_POSITIONS.has(String(positionSelect.value || "").trim())) {
+          positionSelect.classList.add("input-error");
+          positionSelect.focus();
+        } else if (contentInput && validation.requireContent) {
+          contentInput.classList.add("input-error");
+          contentInput.focus();
+        } else if (titleInput) {
+          titleInput.classList.add("input-error");
+          titleInput.focus();
+        }
+        if (noteSectionErrorNode) {
+          noteSectionErrorNode.hidden = false;
+          noteSectionErrorNode.textContent = validation.message || "正文附加段落校验失败";
+        }
+        setStatus(elements, validation?.message || "设置校验失败", true);
+        return;
       }
-      if (noteSectionErrorNode) {
-        noteSectionErrorNode.hidden = false;
-        noteSectionErrorNode.textContent = validation.message || "正文附加段落校验失败";
+      if (keyInput && !String(keyInput.value || "").trim()) {
+        keyInput.classList.add("input-error");
+        keyInput.focus();
+      } else if (valueInput && !String(valueInput.value || "").trim()) {
+        valueInput.classList.add("input-error");
+        valueInput.focus();
+      } else if (keyInput) {
+        keyInput.classList.add("input-error");
+        keyInput.focus();
       }
-      setStatus(elements, validation?.message || "设置校验失败", true);
-      return;
-    }
-    if (keyInput && !String(keyInput.value || "").trim()) {
-      keyInput.classList.add("input-error");
-      keyInput.focus();
-    } else if (valueInput && !String(valueInput.value || "").trim()) {
-      valueInput.classList.add("input-error");
-      valueInput.focus();
-    } else if (keyInput) {
-      keyInput.classList.add("input-error");
-      keyInput.focus();
-    }
 
-    const errorNode = row.querySelector<HTMLElement>(".fixed-property-error");
-    if (errorNode) {
-      errorNode.hidden = false;
-      errorNode.textContent = validation.message || "固定属性校验失败";
+      const errorNode = row.querySelector<HTMLElement>(".fixed-property-error");
+      if (errorNode) {
+        errorNode.hidden = false;
+        errorNode.textContent = validation.message || "固定属性校验失败";
+      }
     }
   }
   setStatus(elements, validation?.message || "设置校验失败", true);
@@ -544,7 +554,7 @@ async function saveSettings(elements: SettingsElements, { requestPermissions = t
 
   setBusy(elements, true);
   try {
-    const resp = (await sendRuntimeMessage({ type: "save-settings", settings: payload })) as { ok?: boolean; error?: string };
+    const resp = await sendRuntimeMessage({ type: "save-settings", settings: payload });
     if (!resp?.ok) {
       setStatus(elements, resp?.error || "保存失败", true);
       return;
@@ -553,7 +563,7 @@ async function saveSettings(elements: SettingsElements, { requestPermissions = t
     renderNoteSectionRows(elements.noteSectionsList, elements.noteSectionsEmpty, payload.notePlaceholderSections);
 
     // AI 平台：list 走 sync、apiKey 走 local
-    const aiResp = (await sendRuntimeMessage({ type: "ai-providers-save", providers: aiProvidersPayload })) as { ok?: boolean; error?: string; providers?: ProviderRowItem[] };
+    const aiResp = await sendRuntimeMessage({ type: "ai-providers-save", providers: aiProvidersPayload });
     if (!aiResp?.ok) {
       setStatus(elements, `已保存，但 AI 平台保存失败：${aiResp?.error || "未知错误"}`, true);
       return;
@@ -562,7 +572,7 @@ async function saveSettings(elements: SettingsElements, { requestPermissions = t
     renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, aiResp.providers || []);
 
     // ASR 平台：同样 list 走 sync、apiKey 走 local；空输入沿用已存 Key（后台处理）
-    const asrResp = (await sendRuntimeMessage({ type: "asr-providers-save", providers: asrProvidersPayload })) as { ok?: boolean; error?: string; providers?: ProviderRowItem[] };
+    const asrResp = await sendRuntimeMessage({ type: "asr-providers-save", providers: asrProvidersPayload });
     if (!asrResp?.ok) {
       setStatus(elements, `已保存，但语音转写平台保存失败：${asrResp?.error || "未知错误"}`, true);
       return;

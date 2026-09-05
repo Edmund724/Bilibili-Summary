@@ -416,9 +416,11 @@ async function handlePlayerAiQuickActionClick(event: MouseEvent): Promise<void> 
     // 进入阅读模式；阅读模式内点击 = 直接定位对话 tab。两条路径都由 background
     // 以 player-ai-quick-action-chat 直发快捷提示词，content 侧经对话 seam
     // （runQuickActionPrompt）消费：定位对话 tab + 新会话 + 填提示词 + 自动发送。
+    // 响应形状由消息类型经 ResponseOf 推断（arch-slim-2/02）；resp?. 保留对
+    // 「无监听器时回包为 undefined」的运行时防御。
     const resp = await sendRuntimeMessage({ type: "player-ai-quick-action" });
-    if (!resp || typeof resp !== "object" || !(resp as { ok?: unknown }).ok) {
-      throw new Error((resp as { error?: string })?.error || "打开 AI 对话失败");
+    if (!resp?.ok) {
+      throw new Error(resp?.error || "打开 AI 对话失败");
     }
     setMessage("已定位 AI 对话并发送快捷提示词。");
   } catch (error) {

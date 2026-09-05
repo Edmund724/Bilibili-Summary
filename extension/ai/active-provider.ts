@@ -19,14 +19,11 @@ export const NO_ACTIVE_PROVIDER_MESSAGE = "还没有配置 AI 平台，请先在
  * 优先设置里的 defaultModel，取不到则退到第一个启用平台；无平台或读 Key 失败抛错。
  */
 export async function resolveActiveProvider(): Promise<AiProvider> {
-  const settingsResp = (await sendRuntimeMessage({ type: "get-settings" }).catch(() => null)) as
-    | { ok?: boolean; settings?: { defaultModel?: unknown } }
-    | null;
+  // 响应形状由消息类型经 ResponseOf 推断（arch-slim-2/02），不再手猜
+  const settingsResp = await sendRuntimeMessage({ type: "get-settings" }).catch(() => null);
   const preferredId = String(settingsResp?.settings?.defaultModel || "").trim();
 
-  const listResp = (await sendRuntimeMessage({ type: "ai-providers-list" }).catch(() => null)) as
-    | { providers?: Array<{ id?: unknown; enabled?: unknown; baseUrl?: unknown; model?: unknown }> }
-    | null;
+  const listResp = await sendRuntimeMessage({ type: "ai-providers-list" }).catch(() => null);
   const enabled = (listResp?.providers || []).filter(
     (item) => item && item.enabled !== false && String(item?.id || "").trim()
   );
@@ -35,10 +32,10 @@ export async function resolveActiveProvider(): Promise<AiProvider> {
     throw new Error(NO_ACTIVE_PROVIDER_MESSAGE);
   }
 
-  const keyResp = (await sendRuntimeMessage({
+  const keyResp = await sendRuntimeMessage({
     type: "get-ai-provider-key",
     providerId: String(provider.id)
-  }).catch(() => null)) as { ok?: boolean; apiKey?: string; error?: string } | null;
+  }).catch(() => null);
   if (!keyResp?.ok) {
     throw new Error(String(keyResp?.error || "读取 API Key 失败"));
   }

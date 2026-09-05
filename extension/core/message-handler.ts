@@ -63,7 +63,6 @@ import {
 } from "../bilibili/video-id-shared.js";
 import type {
   ContentScriptMessage,
-  ReaderGetContextMessage,
   SendResponse
 } from "../shared/messaging-protocol.js";
 // 候选02 分层惰性：gateway（getCurrentAid/fetchHotComments）原被本模块与总结
@@ -168,7 +167,8 @@ export function dispatchContentScriptMessage(
     }
 
     if (message.type === "reader-get-context") {
-      const getContextMessage = message as ReaderGetContextMessage;
+      // union 收窄即得 ReaderGetContextMessage（arch-slim-2/02：去掉冗余断言）
+      const getContextMessage = message;
       const payload = buildReaderContextPayload();
       const signature = computeContextStateSignature(payload);
       // 候选5 签名短路：调用方（经 background 转发的对话上下文链）带着它上次收到的

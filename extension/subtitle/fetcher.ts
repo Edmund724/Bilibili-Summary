@@ -530,8 +530,9 @@ function broadcastSubtitleStatus(phase: string): void {
 // 消息失败按空列表降级：回退入口据此走 no-asr-config skip，与旧行为一致。
 async function loadAsrProviderList(): Promise<AsrProviderMeta[]> {
   try {
+    // 响应形状由消息类型经 ResponseOf 推断（arch-slim-2/02）
     const resp = await sendRuntimeMessage({ type: "asr-providers-list" });
-    return Array.isArray((resp as { providers?: unknown }).providers) ? (resp as { providers: AsrProviderMeta[] }).providers : [];
+    return Array.isArray(resp?.providers) ? resp.providers : [];
   } catch {
     return [];
   }

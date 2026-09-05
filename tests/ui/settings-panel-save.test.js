@@ -10,11 +10,13 @@
 // - 「测试连接成功后的自动保存复用本函数」：AI 平台行测试按钮 → mock 探针
 //   成功 → onTestSuccess → saveSettings({ requestPermissions: false })，
 //   断言该分支绝不发权限代申请；
-// - applyValidationError 直测：可达分支为 AI 平台校验的 message-only 分支与
-//   保存开头的 clearInputErrors 联动。field 分支（tags 换行）经 DOM 不可达——
-//   单行 input 的 value sanitizer 会剥掉换行（jsdom 与真实浏览器一致）；row
-//   分支现网是真 bug（实施期发现，见文末与票 Comments），不为它写会触发
-//   unhandled rejection 的用例。
+// - applyValidationError 直测：可达分支为 AI 平台校验的 message-only 分支、
+//   保存开头的 clearInputErrors 联动，以及（arch-slim-2/02 修复后）row 级分支
+//   的行内落位。field 分支（tags 换行）经 DOM 不可达——单行 input 的 value
+//   sanitizer 会剥掉换行（jsdom 与真实浏览器一致）；row 分支曾是真 bug
+//   （validators 返回的 row 是收集对象 {key,type,value,row}，产线把它当
+//   HTMLElement 调 querySelector → TypeError），已由 02 票修复并在此补
+//   行级落位断言（见文末与两票 Comments）。
 //
 // chrome.runtime.sendMessage 换装成按 type 分发的消息总线（sent 记录全部出站
 // 报文），loadSettings 是 fire-and-forget，mountPanel 用 vi.waitFor 等装载链
@@ -333,13 +335,90 @@ describe("applyValidationError：可达分支直测 + clearInputErrors 联动", 
     expect(sent.some((message) => message.type === "save-settings")).toBe(false);
   });
 
-  // 缺陷与不可达记录（arch-slim-2/05 实施期发现，详见票 Comments）：
-  // 1. row 级分支是真 bug——validate* 返回的 row 是收集对象 {key,type,value,row}，
+  // 行级落位断言（arch-slim-2/02 补）：05 票发现的 row 级真 bug（validators
+  // 返回的 row 是收集对象 {key,type,value,row}，applyValidationError 旧代码把
+  // 收集对象整体当 HTMLElement 调 row.querySelector → TypeError，保存静默失败、
+  // 无任何 UI 反馈）已由 02 票修复——按收集对象定位真实 DOM 行。以下三条用例
+  // 在修复前会以 unhandled rejection 形式炸掉，修复后逐分支断言错误落位。
+  it("固定属性行校验失败（key 缺失）：错误落位到真实 DOM 行的 key 输入框", async () => {
+    const sent = installMessageBus();
+    const host = await mountPanel();
+
+    fireClick(host.querySelector("#addFixedPropertyBtn"));
+    const row = host.querySelector("#fixedPropertiesList .fixed-property-row");
+    // 显式清空 key（新行的 value 属性是字面量 "undefined"，见 escapeHtml(undefined)），
+    // 只填值：validateFixedFrontmatterProperties 报「请填写固定属性的属性名」
+    row.querySelector(".fixed-property-key").value = "";
+    row.querySelector(".fixed-property-value").value = "some-value";
+
+    fireClick(host.querySelector("#bocSettingsSaveBtn"));
+
+    // 行内落位：key 输入框标错并聚焦，行内错误节点显示具体文案
+    const keyInput = row.querySelector(".fixed-property-key");
+    expect(keyInput.classList.contains("input-error")).toBe(true);
+    expect(document.activeElement).toBe(keyInput);
+    const errorNode = row.querySelector(".fixed-property-error");
+    expect(errorNode.hidden).toBe(false);
+    expect(errorNode.textContent).toBe("请填写固定属性的属性名");
+    expect(lastStatus(host).textContent).toBe("请填写固定属性的属性名");
+    expect(lastStatus(host).dataset.error).toBe("true");
+
+    // 校验失败在权限代申请之前中止：三路落盘零发送
+    expect(sent.some((message) => message.type === "request-provider-origins")).toBe(false);
+    expect(sent.some((message) => message.type === "save-settings")).toBe(false);
+  });
+
+  it("固定属性行校验失败（value 缺失）：错误落位到值输入框", async () => {
+    const sent = installMessageBus();
+    const host = await mountPanel();
+
+    fireClick(host.querySelector("#addFixedPropertyBtn"));
+    const row = host.querySelector("#fixedPropertiesList .fixed-property-row");
+    // 填属性名、清空值（text 类型）：报「请填写固定属性的属性值」
+    row.querySelector(".fixed-property-key").value = "favorite_quote";
+    row.querySelector(".fixed-property-value").value = "";
+
+    fireClick(host.querySelector("#bocSettingsSaveBtn"));
+
+    const valueInput = row.querySelector(".fixed-property-value");
+    expect(valueInput.classList.contains("input-error")).toBe(true);
+    expect(document.activeElement).toBe(valueInput);
+    expect(row.querySelector(".fixed-property-key").classList.contains("input-error")).toBe(false);
+    const errorNode = row.querySelector(".fixed-property-error");
+    expect(errorNode.hidden).toBe(false);
+    expect(errorNode.textContent).toBe("请填写固定属性的属性值");
+    expect(sent.some((message) => message.type === "save-settings")).toBe(false);
+  });
+
+  it("笔记段落行校验失败（标题缺失）：note-section-error 显示「请填写段落标题」", async () => {
+    const sent = installMessageBus();
+    const host = await mountPanel();
+
+    fireClick(host.querySelector("#addNoteSectionBtn"));
+    const row = host.querySelector("#noteSectionsList .note-section-row");
+    // 清空标题（新行的 value 属性是字面量 "undefined"）、内容非空：
+    // validateNotePlaceholderSections 报「请填写段落标题」
+    row.querySelector(".note-section-title").value = "";
+    row.querySelector(".note-section-content").value = "默认内容";
+
+    fireClick(host.querySelector("#bocSettingsSaveBtn"));
+
+    const titleInput = row.querySelector(".note-section-title");
+    expect(titleInput.classList.contains("input-error")).toBe(true);
+    expect(document.activeElement).toBe(titleInput);
+    const errorNode = row.querySelector(".note-section-error");
+    expect(errorNode.hidden).toBe(false);
+    expect(errorNode.textContent).toBe("请填写段落标题");
+    expect(lastStatus(host).textContent).toBe("请填写段落标题");
+    expect(lastStatus(host).dataset.error).toBe("true");
+    expect(sent.some((message) => message.type === "save-settings")).toBe(false);
+  });
+
+  // 缺陷与不可达记录（arch-slim-2/05 实施期发现，02 票修复，详见两票 Comments）：
+  // 1. row 级分支曾是真 bug——validate* 返回的 row 是收集对象 {key,type,value,row}，
   //    applyValidationError 把它当 HTMLElement 调 row.querySelector → TypeError
-  //    （未处理 rejection，保存静默失败、无任何 UI 反馈）。修复前不为该分支写
-  //    会触发 unhandled rejection 的用例；修复后应在此补行级落位断言（key 缺失
-  //    → keyInput 落位、value 缺失 → valueInput 落位、段落标题缺失 →
-  //    note-section-error 显示「请填写段落标题」）。
+  //    （未处理 rejection，保存静默失败、无任何 UI 反馈）。02 票改为按收集对象
+  //    的 .row 属性定位真实 DOM 行，上方三条行级落位断言已补齐。
   // 2. tags 换行的 field 分支经 DOM 不可达——单行 input 的 value sanitizer 剥离
   //    换行（"a\nb" 落到 value 是 "ab"，jsdom 与真实浏览器一致），
   //    /[\r\n]/.test(payload.tags) 恒为 false。该分支只能在注入 payload 层触达，
