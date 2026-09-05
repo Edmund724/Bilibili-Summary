@@ -72,6 +72,28 @@ describe("对话时间戳跳转（parseClock 归一 + nav 哨兵 0）", () => {
     });
   });
 
+  it("reader 伪 tab（id: 0）：点击后按进程内 seek 消费，不误报「找不到当前标签页」", async () => {
+    // reader/chat-tab.ts 的 getTimestampNavDeps 注入恒定伪 tab { id: 0, ... }
+    //（content script 无 chrome.tabs 消息链，seek 走进程内直调），守卫不得把
+    // id 0 当作「没有标签页」。
+    const deps = { ...makeDeps(), getActiveTab: vi.fn(async () => ({ id: 0, url: "https://www.bilibili.com/video/BV1test000000/" })) };
+    const container = document.createElement("div");
+    container.textContent = "1:02 这里";
+    document.body.append(container);
+    linkifyAssistantTimestamps(container, deps);
+    const button = container.querySelector<HTMLButtonElement>(".chat-timestamp-link");
+    expect(button).not.toBeNull();
+    button!.click();
+    container.remove();
+
+    await vi.waitFor(() => expect(deps.sendMessageToActiveTab).toHaveBeenCalledTimes(1));
+    expect(deps.sendMessageToActiveTab).toHaveBeenCalledWith(0, {
+      type: "reader-seek-video-time",
+      seconds: 62
+    });
+    expect(deps.notice).not.toHaveBeenCalledWith("找不到当前标签页。", 2200);
+  });
+
   it("TIMESTAMP_PATTERN 上游约束不变（正则单源 ui/markdown.ts）", () => {
     TIMESTAMP_PATTERN.lastIndex = 0;
     expect(TIMESTAMP_PATTERN.test("99:99")).toBe(true);

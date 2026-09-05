@@ -115,7 +115,11 @@ async function jumpToAssistantTimestamp(
   }
 
   const tab = await deps.getActiveTab?.().catch(() => null);
-  if (!tab?.id) {
+  // 守卫只拒「没有 tab 对象」与「没有数字 id 的 tab」（真实 tab 流程没 id 无法
+  // 导航）；id 0 是合法值——reader 对话 tab 的注入方（reader/chat-tab.ts
+  // getTimestampNavDeps）恒给伪 tab { id: 0, url }，seek 走进程内直调，旧检查
+  // !tab?.id 把 0 当假值，reader 内点击时间戳恒误报「找不到当前标签页」。
+  if (!tab || typeof tab.id !== "number") {
     deps.notice?.("找不到当前标签页。", 2200);
     return;
   }
