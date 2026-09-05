@@ -29,7 +29,12 @@ vi.mock("../../extension/bilibili/gateway.js", () => ({
   // 现代签名：fetchSubtitleBody(url) 返回 { body }（工单 04 起 context-resolver
   // 按现代契约调用，legacy 形状垫片已删）。
   fetchSubtitleBody: vi.fn(async () => ({ body: [{ from: 0, to: 5, content: "第一句" }] })),
-  fetchHotComments: vi.fn(async () => []),
+  fetchHotComments: vi.fn(async () => [])
+}));
+
+// gateway 拆叶（arch-slim-2/04）：bgFetchJson/isBiliUrl 已迁 gateway-core，
+// context-resolver 改从 gateway-core 消费，mock 路径随迁。
+vi.mock("../../extension/bilibili/gateway-core.js", () => ({
   bgFetchJson: vi.fn(),
   isBiliUrl: vi.fn(() => true)
 }));

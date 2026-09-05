@@ -26,19 +26,27 @@ import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
 import { mountPlayerChain } from "../helpers/reader-skeleton.js";
 import type { TestState } from "./reader-test-env.js";
 
-const { gatewayMock } = vi.hoisted(() => ({
+const { gatewayMock, gatewayCoreMock } = vi.hoisted(() => ({
   gatewayMock: {
     getCurrentAid: vi.fn(() => 0),
-    fetchHotComments: vi.fn(async () => []),
-    bgFetchJson: vi.fn()
+    fetchHotComments: vi.fn(async () => [])
+  },
+  gatewayCoreMock: {
+    bgFetchJson: vi.fn(),
+    isBiliUrl: vi.fn(() => true)
   }
 }));
 
 // 热评缺省实现（defaultFetchHotComments）动态 import gateway：mock 保持确定性。
+// gateway 拆叶（arch-slim-2/04）：getCurrentAid/fetchHotComments 仍属 gateway，
+// bgFetchJson 已迁 gateway-core（经 ai/context-resolver 被对话链消费）。
 vi.mock("../../extension/bilibili/gateway.js", () => ({
   getCurrentAid: gatewayMock.getCurrentAid,
-  fetchHotComments: gatewayMock.fetchHotComments,
-  bgFetchJson: gatewayMock.bgFetchJson
+  fetchHotComments: gatewayMock.fetchHotComments
+}));
+vi.mock("../../extension/bilibili/gateway-core.js", () => ({
+  bgFetchJson: gatewayCoreMock.bgFetchJson,
+  isBiliUrl: gatewayCoreMock.isBiliUrl
 }));
 
 let state: TestState;

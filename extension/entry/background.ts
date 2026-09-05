@@ -22,7 +22,9 @@ import {
   createAsrRuntimeConfigHandler,
   withOkResponse
 } from "../core/provider-handlers.js";
-import { bgFetchJson, isBiliUrl } from "../bilibili/gateway.js";
+// SW 静态图只进传输叶（arch-slim-2/04）：bgFetchJson/isBiliUrl 拆至 gateway-core，
+// 不经 gateway 拖入 state/video-probe/selection→cache 链。
+import { bgFetchJson, isBiliUrl } from "../bilibili/gateway-core.js";
 // digest-only-ui：侧边栏设置面板的 host 权限代申请（collectOrigins 纯函数）
 import { collectOrigins } from "../core/host-permissions.js";
 // PR5：对话 tab 的 offscreen 文档 ensure 通道（background 侧唯一合法创建点）
@@ -283,29 +285,38 @@ function handleOffloadTask(message: Msg<"offload-task">, _sender: MessageSender,
   return true;
 }
 
-const messageHandlers = new Map<BackgroundMessageType, BackgroundHandler>([
-  ["get-settings", handleGetSettings as BackgroundHandler],
-  ["save-settings", handleSaveSettings as BackgroundHandler],
-  // digest-only-ui：open-options 处理器已随 options 页删除（设置已全部并入
-  // 侧边栏面板，无独立设置页可开）。
-  ["request-provider-origins", handleRequestProviderOrigins as BackgroundHandler],
-  ["ensure-offscreen-chat", handleEnsureOffscreenChat as BackgroundHandler],
-  ["player-ai-quick-action", handlePlayerAiQuickAction as BackgroundHandler],
-  ["reader-enter-chat", handleReaderEnterChat as BackgroundHandler],
-  ["fetch-json", handleFetchJson as BackgroundHandler],
-  ["ai-providers-list", aiProviderHandlers.list as BackgroundHandler],
-  ["ai-presets-list", handleAiPresetsList as BackgroundHandler],
-  ["get-ai-provider-key", aiProviderHandlers.get as BackgroundHandler],
-  ["ai-providers-save", aiProviderHandlers.save as BackgroundHandler],
-  ["ai-providers-delete", aiProviderHandlers.remove as BackgroundHandler],
-  ["ai-providers-models", handleAiProvidersModels as BackgroundHandler],
-  ["asr-presets-list", handleAsrPresetsList as BackgroundHandler],
-  ["asr-providers-list", asrProviderHandlers.list as BackgroundHandler],
-  ["asr-providers-save", asrProviderHandlers.save as BackgroundHandler],
-  ["asr-providers-delete", asrProviderHandlers.remove as BackgroundHandler],
-  ["get-asr-runtime-config", handleGetAsrRuntimeConfig as BackgroundHandler],
-  ["offload-task", handleOffloadTask as BackgroundHandler]
-]);
+// 编译期穷尽路由表（arch-slim-2/02）：字面量表经 satisfies 对
+// { [K in BackgroundMessageType]: MessageHandler<Msg<K>> } 校验——
+// 消息名 typo / 漏注册 handler / 多注册未知名在 typecheck 即报错（此前 Map +
+// 逐条 `as BackgroundHandler` 断言对这一切零捕获）；每个条目的处理器同时按其
+// 具体消息形状 Msg<K> 校验，签名与消息类型不匹配同样报错。digest-only-ui：
+// open-options 处理器已随 options 页删除（设置已全部并入侧边栏面板，无独立
+// 设置页可开）。
+const messageHandlerTable = {
+  "get-settings": handleGetSettings,
+  "save-settings": handleSaveSettings,
+  "request-provider-origins": handleRequestProviderOrigins,
+  "ensure-offscreen-chat": handleEnsureOffscreenChat,
+  "player-ai-quick-action": handlePlayerAiQuickAction,
+  "reader-enter-chat": handleReaderEnterChat,
+  "fetch-json": handleFetchJson,
+  "ai-providers-list": aiProviderHandlers.list,
+  "ai-presets-list": handleAiPresetsList,
+  "get-ai-provider-key": aiProviderHandlers.get,
+  "ai-providers-save": aiProviderHandlers.save,
+  "ai-providers-delete": aiProviderHandlers.remove,
+  "ai-providers-models": handleAiProvidersModels,
+  "asr-presets-list": handleAsrPresetsList,
+  "asr-providers-list": asrProviderHandlers.list,
+  "asr-providers-save": asrProviderHandlers.save,
+  "asr-providers-delete": asrProviderHandlers.remove,
+  "get-asr-runtime-config": handleGetAsrRuntimeConfig,
+  "offload-task": handleOffloadTask
+} satisfies { [K in BackgroundMessageType]: MessageHandler<Msg<K>> };
+
+const messageHandlers = new Map<BackgroundMessageType, BackgroundHandler>(
+  Object.entries(messageHandlerTable) as Array<[BackgroundMessageType, BackgroundHandler]>
+);
 
 const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 

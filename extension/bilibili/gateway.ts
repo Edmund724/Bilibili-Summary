@@ -3,6 +3,8 @@ import { toReadableText, isExtensionContextInvalidated, getErrorMessage } from "
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { state } from "../core/state.js";
 import { getRuntimeVideoElement } from "./video-probe.js";
+import { isBiliUrl } from "./gateway-core.js";
+import type { JsonTransport } from "./gateway-core.js";
 import { logInfo, logWarn } from "../shared/logging.js";
 import {
   buildSubtitleInfoRequests,
@@ -22,51 +24,13 @@ declare global {
   }
 }
 
-export type JsonTransport = (url: string) => Promise<unknown>;
-
-// True for B站 request hosts (API + subtitle/CDN) that need the B站 request headers
-// and should be routed through the background fetch handler. Shared by the transports.
-export function isBiliUrl(url: unknown): boolean {
-  try {
-    const parsed = new URL(String(url || ""));
-    const host = parsed.hostname;
-    return host === "api.bilibili.com" || host.endsWith(".hdslb.com");
-  } catch {
-    return false;
-  }
-}
-
-// ===== transports =====
-
-export async function bgFetchJson<T = unknown>(url: string): Promise<T> {
-  const headers = new Headers();
-  const isBiliRequest = isBiliUrl(url);
-  if (isBiliRequest) {
-    headers.set("Accept", "application/json, text/plain, */*");
-    headers.set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
-    headers.set("Cache-Control", "no-cache");
-    headers.set("Pragma", "no-cache");
-  }
-
-  const options: RequestInit = {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store"
-  };
-  if ((headers as unknown as { size: number }).size > 0) {
-    options.headers = headers;
-  }
-  if (isBiliRequest) {
-    options.referrer = "https://www.bilibili.com/";
-    options.referrerPolicy = "strict-origin-when-cross-origin";
-  }
-
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.json() as Promise<T>;
-}
+// 传输叶拆出（arch-slim-2/04）：isBiliUrl / bgFetchJson / JsonTransport 迁至
+// gateway-core.ts（零 extension/ 内部依赖的叶子），SW 静态图不再经本模块拖入
+// state/video-probe/selection→cache→cache-lru 链。此处 re-export 保持既有
+// import 面兼容；本模块只剩页面侧编排（getCurrentAid / readRuntimeVideoDuration /
+// fetchVideoMeta / fetchSubtitleBundle / fetchHotComments / fetchSubtitleBody）。
+export { bgFetchJson, isBiliUrl } from "./gateway-core.js";
+export type { JsonTransport } from "./gateway-core.js";
 
 async function fetchJson<T = unknown>(url: string): Promise<T> {
   if (isBiliUrl(url)) {
@@ -91,12 +55,13 @@ export async function contentFetchJson<T = unknown>(url: string): Promise<T> {
 
 async function fetchJsonInBackground<T = unknown>(url: string): Promise<T> {
   try {
+    // 响应形状由消息类型经 ResponseOf 推断（arch-slim-2/02）；data 为目标 JSON
+    // 原文（unknown），由本函数的泛型参数 T 收口
     const resp = await sendRuntimeMessage({ type: "fetch-json", url });
-    const respLike = resp as { ok?: unknown; error?: unknown; data?: unknown };
-    if (!respLike?.ok) {
-      throw new Error(toReadableText(respLike?.error, "Background fetch failed"));
+    if (!resp?.ok) {
+      throw new Error(toReadableText(resp?.error, "Background fetch failed"));
     }
-    return respLike.data as T;
+    return resp.data as T;
   } catch (error) {
     if (isExtensionContextInvalidated(error)) {
       throw new Error("扩展刚刚更新，请刷新当前页面后重试。");

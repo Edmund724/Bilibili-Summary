@@ -11,19 +11,19 @@
 //   getAiContextState             扩展页消息链的 tab transport（无标签页世界经
 //                                  core/context-assembly 的
 //                                  createMessageChainContextFetch 调用）。
-// B站抓取统一走 bilibili/gateway.js 的 bgFetchJson 传输层。
+// B站抓取统一走 bilibili/gateway-core.js 的 bgFetchJson 传输叶（arch-slim-2/04 拆叶）。
 
 import { getSubtitleCacheKey, loadSubtitleFromCache } from "../subtitle/cache.js";
 import {
   fetchVideoMeta,
   fetchSubtitleBundle,
   fetchSubtitleBody,
-  bgFetchJson,
   type VideoMeta,
   type VideoPage,
   type SubtitleTrack,
   type Chapter
 } from "../bilibili/gateway.js";
+import { bgFetchJson } from "../bilibili/gateway-core.js";
 import {
   extractPageIndexFromUrl,
   buildCanonicalVideoUrl,
