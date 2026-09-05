@@ -1,22 +1,18 @@
 // extension/ui/options-asr-rows.ts
 // 设置页"语音转写平台"区块行构建器：与 AI 平台行（options-rows.js）共用
-// ui/provider-row.js 的 createProviderRow，本文件只提供 ASR 侧真实差异：
-// 名称输入、模型字段（ui/model-picker.js 的输入 + 下拉拉取控件，拉取直调
-// asr/provider-models.js）、选用 radio、asr-providers-* 报文（连通性测试已
-// 直调 asr/provider-test.js，不再发消息）。
-// 行内删除按钮与状态行复用 ai-provider-remove / ai-provider-status 类名
-// （既有耦合，DOM 契约保持不变）。行构建器只依赖参数与回调，不直接访问 DOM 全局。
+// ui/provider-row.js 的 createProviderRow（provider-master-detail/02 起为紧凑
+// 形态：行是纯展示 + 编辑/删除入口，编辑字段与连通性测试全部在
+// ui/provider-editor.js 的 Modal 里，保存走单平台 upsert）。本文件只提供 ASR
+// 侧真实差异：选用 radio（即时持久化 activeAsrProviderId）、显示名/模型名解析、
+// asr-providers-delete 报文。
+//
+// 历史耦合收口：平铺形态下 ASR 行复用 ai-provider-remove / ai-provider-status
+// 类名（DOM 契约），紧凑行的删除按钮统一 provider-row-remove、行内状态行随
+// Modal 迁移退役，耦合消除。行构建器只依赖参数与回调，不直接访问 DOM 全局。
 
 import { ASR_PROVIDER_PRESETS, type AsrProviderPreset } from "../core/presets.js";
-import { escapeHtml } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
-import { testAsrConnection } from "../asr/provider-test.js";
-import { listAsrModels } from "../asr/provider-models.js";
-import { createProviderRow, type ProviderRowElement, type ProviderRowItem, type ProviderRowPreset } from "./provider-row.js";
-import { buildModelPickerField, wireModelPicker } from "./model-picker.js";
-import { initCustomSelect } from "./custom-select.js";
-
-const ASR_STATUS_SUCCESS_MIN_MS = 2000;
+import { createProviderRow, type ProviderRowItem, type ProviderRowPreset } from "./provider-row.js";
 
 // 行「编辑」按钮回调（provider-master-detail/01）：由 settings-panel 注入
 // （打开 provider-editor Modal 并现查权威列表项），本模块只转发 providerId。
@@ -26,53 +22,21 @@ export function setAsrRowEditHandler(handler: (providerId: string) => void): voi
   onAsrRowEdit = handler;
 }
 
-// 模型名字段：文本输入 + 下拉拉取按钮（与 AI 平台行同一控件），默认值取预设
-// model，用户既可从下拉选也可改填任意模型名。
-function buildAsrModelField(_preset: ProviderRowPreset | null, model: string): string {
-  return buildModelPickerField({
-    inputClass: "asr-provider-model",
-    placeholder: "模型名（点右侧箭头拉取可选模型）",
-    value: model
-  });
-}
-
 const asrProviderRow = createProviderRow({
   rowClass: "asr-provider-row",
-  presetClass: "asr-provider-preset",
-  presetSelectTitle: "平台预设",
-  baseUrlClass: "asr-provider-baseurl",
-  baseUrlPlaceholder: "baseUrl（如 https://api.siliconflow.cn/v1）",
-  apikeyClass: "asr-provider-apikey",
-  modelClass: "asr-provider-model",
-  testClass: "asr-provider-test",
-  removeClass: "ai-provider-remove",
-  statusClass: "ai-provider-status",
+  editClass: "provider-row-edit",
+  removeClass: "provider-row-remove",
   idPrefix: "asr_",
-  statusSuccessMinMs: ASR_STATUS_SUCCESS_MIN_MS,
-  statusTimerKey: "_asrStatusTimer",
   resolvePreset: (presets, presetId) => presets.find((p) => p.id === presetId) || null,
-  resolveModel: (item, preset) => String(item.model ?? preset?.model ?? ""),
-  apiKeyPlaceholder: ({ hasSavedKey }) => (hasSavedKey ? "已保存" : "API Key"),
-  buildHeaderFields: ({ item, preset }) => {
-    const name = String(item.name || preset?.name || "自定义");
-    return `<input class="asr-provider-name" type="text" placeholder="平台名称" value="${escapeHtml(name)}" />`;
-  },
-  buildModelField: buildAsrModelField,
-  onRowEdit: (row) => onAsrRowEdit(row.dataset.providerId || ""),
+  displayName: (item, preset) => String(item.name || preset?.name || "自定义"),
+  displayModel: (item, preset) => String(item.model ?? preset?.model ?? ""),
+  // 选用 radio：上提到列表行（拍板 Q3），change 即时持久化（平铺形态同款语义）
   buildTailFields: ({ isActive }) => `
     <label class="asr-provider-active" title="选用该平台自动生成字幕">
       <input class="asr-provider-active-radio" type="radio" name="asrActiveProvider" ${isActive ? "checked" : ""} />
       选用
     </label>`,
-  onPresetChange: (row, _previousPreset, next) => {
-    // 模型名与名称无条件跟随——上一平台的模型对新平台无意义；
-    // API Key 输入框清空，避免旧平台的 Key 在测试/保存时误发给新平台。
-    (row.querySelector(".asr-provider-model") as HTMLInputElement).value = next.model || "";
-    (row.querySelector(".asr-provider-name") as HTMLInputElement).value = next.name || "";
-    (row.querySelector(".asr-provider-apikey") as HTMLInputElement).value = "";
-  },
-  wireRowExtras: (row, { listNode, showStatus }) => {
-    // 选用：即时持久化 activeAsrProviderId
+  wireTailExtras: (row, { listNode }) => {
     row.querySelector(".asr-provider-active-radio")?.addEventListener("change", async () => {
       if (!(row.querySelector(".asr-provider-active-radio") as HTMLInputElement).checked) return;
       const providerId = row.dataset.providerId || "";
@@ -81,50 +45,10 @@ const asrProviderRow = createProviderRow({
       } catch {}
       setActiveAsrProvider(listNode, providerId);
     });
-    // 模型下拉：与连通性测试同样直调（asr/provider-models.js），不经 SW 消息
-    wireModelPicker(row, {
-      inputClass: "asr-provider-model",
-      baseUrlClass: "asr-provider-baseurl",
-      apiKeyClass: "asr-provider-apikey",
-      statusClass: "ai-provider-status",
-      showStatus,
-      fetchModels: listAsrModels
-    });
   },
-  // 连通性测试直调 asr/provider-test.js（不再走 asr-providers-test 消息往返）：
-  // options 页同属扩展 context，host_permissions 生效，跨域 fetch 无需 SW 中转；
-  // Key 代查（重输优先、否则按 providerId 读已存 Key）收口在探针入口内。
-  runTestProbe: ({ row, presets, baseUrl, apiKey, model }) => {
-    const preset = presets.find((p) => p.id === row.dataset.currentPresetId) || null;
-    const provider: {
-      id: string;
-      name: string;
-      type: string;
-      baseUrl: string;
-      model: string;
-      apiKey?: string;
-    } = {
-      id: row.dataset.providerId || "",
-      name: (row.querySelector(".asr-provider-name") as HTMLInputElement).value.trim() || "自定义",
-      type: preset?.type || "openai-transcriptions",
-      baseUrl,
-      model
-    };
-    // 仅用户重输 Key 时携带，未重输则探针按 id 读已存 Key
-    if (apiKey) {
-      provider.apiKey = apiKey;
-    }
-    return testAsrConnection(provider);
-  },
+  onRowEdit: (row) => onAsrRowEdit(row.dataset.providerId || ""),
   buildDeleteMessage: (providerId) => ({ type: "asr-providers-delete", providerId })
 });
-
-function convertRowPresetToCustom(row: HTMLElement): void {
-  const select = row.querySelector(".asr-provider-preset") as HTMLSelectElement | null;
-  if (select && select.dataset.customSelectInitialized !== "1") {
-    initCustomSelect(select, "custom-select-wrapper asr-preset-wrapper");
-  }
-}
 
 export function renderAsrProviders(
   listNode: HTMLElement,
@@ -133,27 +57,12 @@ export function renderAsrProviders(
   { presets = ASR_PROVIDER_PRESETS, activeId = "" }: { presets?: readonly AsrProviderPreset[]; activeId?: string } = {}
 ): void {
   asrProviderRow.render(listNode, emptyNode, items, { presets, activeId });
-  listNode.querySelectorAll<HTMLElement>(".asr-provider-row").forEach((row) => {
-    convertRowPresetToCustom(row);
-  });
 }
 
-export function collectAsrProviders(listNode: HTMLElement, { presets = ASR_PROVIDER_PRESETS, generateId = asrProviderRow.generateId }: { presets?: readonly AsrProviderPreset[]; generateId?: () => string } = {}) {
-  return Array.from(listNode.querySelectorAll<HTMLElement>(".asr-provider-row")).map((row) => {
-    const presetSelect = row.querySelector(".asr-provider-preset") as HTMLSelectElement;
-    const preset = presets.find((p) => p.id === presetSelect.value) || null;
-    const apiKey = (row.querySelector(".asr-provider-apikey") as HTMLInputElement).value.trim();
-    return {
-      id: row.dataset.providerId || generateId(),
-      presetId: preset?.id || "custom",
-      name: (row.querySelector(".asr-provider-name") as HTMLInputElement).value.trim() || preset?.name || "自定义",
-      type: preset?.type || "openai-transcriptions",
-      baseUrl: (row.querySelector(".asr-provider-baseurl") as HTMLInputElement).value.trim().replace(/\/+$/, ""),
-      model: (row.querySelector(".asr-provider-model") as HTMLInputElement).value.trim(),
-      apiKey,
-      hasSavedKey: row.dataset.hasSavedKey === "1"
-    };
-  });
+// 新平台 id 生成（provider-master-detail/01：provider-editor Modal 保存新增时
+// 由 settings-panel.saveProviderSingle 调用，沿用平铺行的 id 格式 asr_*）
+export function generateAsrProviderId(): string {
+  return asrProviderRow.generateId();
 }
 
 // 把列表里 radio 选中态同步到指定平台 id（传空串则全部取消）
@@ -172,17 +81,7 @@ export function getActiveAsrProviderId(listNode: HTMLElement): string {
   return row?.dataset.providerId || "";
 }
 
-// 测试成功 / 删除后的回调，由 options.js 注入，避免行构建器耦合保存流程
-export function setAsrTestSuccessHandler(handler: Parameters<typeof asrProviderRow.setTestSuccessHandler>[0]): void {
-  asrProviderRow.setTestSuccessHandler(handler);
-}
-
-// 新平台 id 生成（provider-master-detail/01：provider-editor Modal 保存新增时
-// 由 settings-panel.saveProviderSingle 调用，沿用平铺行的 id 格式 asr_*）
-export function generateAsrProviderId(): string {
-  return asrProviderRow.generateId();
-}
-
+// 删除后的回调（删当前选用平台时清 activeAsrProviderId），由 options.js 注入
 export function setAsrDeleteHandler(handler: Parameters<typeof asrProviderRow.setDeleteHandler>[0]): void {
   asrProviderRow.setDeleteHandler(handler);
 }

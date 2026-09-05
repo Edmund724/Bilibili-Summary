@@ -1,15 +1,13 @@
-// ui/settings-panel.ts saveSettings 四段保存链与 applyValidationError 直测
-//（arch-slim-2/05 测试网；此前 669 行零直测）。
+// ui/settings-panel.ts saveSettings 保存链与 applyValidationError 直测
+//（arch-slim-2/05 测试网；provider-master-detail/02 起 saveSettings 只承载
+// 其余设置项——AI/ASR 平台的收集/校验/落盘/权限申请整体移交 provider-editor
+// Modal 的单平台链，见 provider-editor.test.js）。
 //
 // 走真实模块 + DOM 仿真（digest-button.test.js 同款）：saveSettings 未导出，
 // 经唯一公开入口 renderReaderSettingsPanel 挂载面板后驱动——
-// - 四段链：收集(collectFormPayload) → 校验(validateSettings) → host 权限代
-//   申请(request-provider-origins 消息，content 语境无 chrome.permissions，
-//   setup.js 的 chrome stub 恰好无 permissions 字段 → 走消息代申请分支) →
-//   三路落盘(save-settings / ai-providers-save / asr-providers-save)；
-// - 「测试连接成功后的自动保存复用本函数」：AI 平台行测试按钮 → mock 探针
-//   成功 → onTestSuccess → saveSettings({ requestPermissions: false })，
-//   断言该分支绝不发权限代申请；
+// - 保存链：收集(collectFormPayload) → 校验(validateSettings) → 单路落盘
+//   (save-settings)；平台相关的 request-provider-origins /
+//   ai-providers-save / asr-providers-save 消息不再出自本链；
 // - applyValidationError 直测：可达分支为 AI 平台校验的 message-only 分支、
 //   保存开头的 clearInputErrors 联动，以及（arch-slim-2/02 修复后）row 级分支
 //   的行内落位。field 分支（tags 换行）经 DOM 不可达——单行 input 的 value
@@ -88,8 +86,8 @@ beforeEach(() => {
   resetModuleState();
 });
 
-describe("saveSettings 四段保存链（保存按钮手势，requestPermissions=true）", () => {
-  it("全链成功：收集→校验→权限代申请→三路落盘有序完成，状态条成功、busy 复位", async () => {
+describe("saveSettings 保存链（保存按钮手势）", () => {
+  it("全链成功：收集→校验→单路落盘（平台消息不再出自本链），状态条成功、busy 复位", async () => {
     const sent = installMessageBus();
     const host = await mountPanel();
 
@@ -103,18 +101,16 @@ describe("saveSettings 四段保存链（保存按钮手势，requestPermissions
     fireClick(host.querySelector("#bocSettingsSaveBtn"));
 
     await vi.waitFor(() => {
-      expect(sent.some((message) => message.type === "asr-providers-save")).toBe(true);
+      expect(sent.some((message) => message.type === "save-settings")).toBe(true);
     });
 
-    // 第二段→第三段：权限代申请先于落盘（手势同步链），本用例无平台行 → 空集合
+    // provider-master-detail/02：平台收集/权限代申请/平台落盘段已整体退役，
+    // 保存设置按钮只发 save-settings 一路
     const types = messageTypes(sent);
-    expect(types).toContain("request-provider-origins");
-    expect(types.indexOf("request-provider-origins")).toBeLessThan(types.indexOf("save-settings"));
-    expect(sent.find((message) => message.type === "request-provider-origins").baseUrls).toEqual([]);
-
-    // 第四段三路落盘，顺序 save-settings → ai-providers-save → asr-providers-save
-    expect(types.indexOf("save-settings")).toBeLessThan(types.indexOf("ai-providers-save"));
-    expect(types.indexOf("ai-providers-save")).toBeLessThan(types.indexOf("asr-providers-save"));
+    expect(types).toContain("save-settings");
+    expect(types).not.toContain("request-provider-origins");
+    expect(types).not.toContain("ai-providers-save");
+    expect(types).not.toContain("asr-providers-save");
 
     const saveMessage = sent.find((message) => message.type === "save-settings");
     expect(saveMessage.settings).toMatchObject({
@@ -131,7 +127,6 @@ describe("saveSettings 四段保存链（保存按钮手势，requestPermissions
     expect(saveMessage.settings.aiPresetPrompts).toHaveLength(3);
     expect(saveMessage.settings.fixedFrontmatterProperties).toEqual([]);
     expect(saveMessage.settings.notePlaceholderSections).toEqual([]);
-    expect(sent.find((message) => message.type === "ai-providers-save").providers).toEqual([]);
 
     // 状态条与 busy 复位
     const status = lastStatus(host);
@@ -142,27 +137,7 @@ describe("saveSettings 四段保存链（保存按钮手势，requestPermissions
     expect(saveBtn.textContent).toBe("保存设置");
   });
 
-  it("权限代申请被拒：中止保存不落盘，状态条可操作提示，busy 未进入", async () => {
-    const sent = installMessageBus({
-      "request-provider-origins": () => ({ ok: false, error: "未授权 https://api.example.com/*，保存已中止" })
-    });
-    const host = await mountPanel();
-
-    fireClick(host.querySelector("#bocSettingsSaveBtn"));
-
-    await vi.waitFor(() => {
-      expect(sent.some((message) => message.type === "request-provider-origins")).toBe(true);
-    });
-    await vi.waitFor(() => {
-      expect(lastStatus(host).textContent).toContain("未授权");
-    });
-
-    expect(sent.some((message) => message.type === "save-settings")).toBe(false);
-    expect(lastStatus(host).dataset.error).toBe("true");
-    expect(host.querySelector("#bocSettingsSaveBtn").textContent).toBe("保存设置");
-  });
-
-  it("save-settings 失败：只走第一路，状态条报错，后两路不再发送，busy 复位", async () => {
+  it("save-settings 失败：状态条报错，busy 复位", async () => {
     const sent = installMessageBus({ "save-settings": () => ({ ok: false, error: "写入失败" }) });
     const host = await mountPanel();
 
@@ -172,93 +147,9 @@ describe("saveSettings 四段保存链（保存按钮手势，requestPermissions
       expect(lastStatus(host).textContent).toBe("写入失败");
     });
 
-    expect(sent.some((message) => message.type === "ai-providers-save")).toBe(false);
-    expect(sent.some((message) => message.type === "asr-providers-save")).toBe(false);
     expect(lastStatus(host).dataset.error).toBe("true");
     expect(host.querySelector("#bocSettingsSaveBtn").disabled).toBe(false);
     expect(host.querySelector("#bocSettingsSaveBtn").textContent).toBe("保存设置");
-  });
-
-  it("ai-providers-save 失败：主设置已保存，状态条给出部分失败文案", async () => {
-    const sent = installMessageBus({ "ai-providers-save": () => ({ ok: false, error: "sync 配额不足" }) });
-    const host = await mountPanel();
-
-    fireClick(host.querySelector("#bocSettingsSaveBtn"));
-
-    await vi.waitFor(() => {
-      expect(lastStatus(host).textContent).toBe("已保存，但 AI 平台保存失败：sync 配额不足");
-    });
-    expect(lastStatus(host).dataset.error).toBe("true");
-  });
-
-  it("ai-providers-save 抛异常（如扩展上下文失效）：被 try/catch 捕获，状态条报错、busy 复位", async () => {
-    const sent = installMessageBus();
-    const host = await mountPanel();
-    // 三路落盘段在 saveSettings 的 try/catch 内：sendMessage 同步抛错经
-    // sendRuntimeMessage 的 reject 传播到 catch（status 显示 error.message）
-    const rawSend = chrome.runtime.sendMessage;
-    chrome.runtime.sendMessage = vi.fn((message, callback) => {
-      if (message.type === "ai-providers-save") {
-        throw new Error("Extension context invalidated.");
-      }
-      return rawSend(message, callback);
-    });
-
-    fireClick(host.querySelector("#bocSettingsSaveBtn"));
-
-    await vi.waitFor(() => {
-      expect(lastStatus(host).textContent).toBe("Extension context invalidated.");
-    });
-    expect(lastStatus(host).dataset.error).toBe("true");
-    expect(sent.some((message) => message.type === "asr-providers-save")).toBe(false);
-    expect(host.querySelector("#bocSettingsSaveBtn").disabled).toBe(false);
-    expect(host.querySelector("#bocSettingsSaveBtn").textContent).toBe("保存设置");
-  });
-});
-
-describe("测试连接成功后的自动保存复用 saveSettings（requestPermissions=false）", () => {
-  // provider-master-detail/01 起「+ 添加平台」改开编辑 Modal（新增保存链归
-  // provider-editor.test.js），本组仍走平铺行行内测试按钮的整表链：用 bus 返回
-  // 存量 provider 渲染出行再触发。
-  const existingAiProvider = {
-    id: "p1",
-    presetId: "custom",
-    name: "自定义",
-    baseUrl: "https://api.example.com/v1",
-    model: "gpt-4o-mini",
-    requiresKey: true,
-    enabled: true
-  };
-
-  it("AI 平台探针成功：自动落盘三路报文齐全，但绝不发权限代申请", async () => {
-    const sent = installMessageBus({
-      "ai-providers-list": () => ({ ok: true, providers: [existingAiProvider] })
-    });
-    const host = await mountPanel();
-
-    const row = host.querySelector("#aiProvidersList .ai-provider-row");
-    row.querySelector(".ai-provider-apikey").value = "sk-test";
-
-    fireClick(row.querySelector(".ai-provider-test"));
-
-    await vi.waitFor(() => {
-      expect(sent.some((message) => message.type === "asr-providers-save")).toBe(true);
-    });
-
-    const types = messageTypes(sent);
-    expect(types).not.toContain("request-provider-origins");
-    expect(types.indexOf("save-settings")).toBeLessThan(types.indexOf("ai-providers-save"));
-    expect(types.indexOf("ai-providers-save")).toBeLessThan(types.indexOf("asr-providers-save"));
-    // 探针入参来自该行收集
-    const aiSave = sent.find((message) => message.type === "ai-providers-save");
-    expect(aiSave.providers).toHaveLength(1);
-    expect(aiSave.providers[0]).toMatchObject({
-      baseUrl: "https://api.example.com/v1",
-      model: "gpt-4o-mini",
-      apiKey: "sk-test"
-    });
-    expect(lastStatus(host).textContent).toBe("保存成功");
-    expect(lastStatus(host).dataset.error).toBe("false");
   });
 });
 
@@ -310,41 +201,6 @@ describe("applyValidationError：可达分支直测 + clearInputErrors 联动", 
     tags.dispatchEvent(new Event("input", { bubbles: true }));
 
     expect(tags.classList.contains("input-error")).toBe(false);
-  });
-
-  it("AI 平台校验失败（message-only 分支）：不落盘，状态条显示具体平台文案", async () => {
-    const sent = installMessageBus({
-      "ai-providers-list": () => ({ ok: true, providers: [{ id: "p1", presetId: "custom", name: "自定义", baseUrl: "https://api.example.com/v1", model: "gpt-4o-mini", requiresKey: true, enabled: true }] })
-    });
-    const host = await mountPanel();
-
-    const row = host.querySelector("#aiProvidersList .ai-provider-row");
-    // requiresKey 预设 + 未填 Key：validateAiProviders 报需要 API Key
-    row.querySelector(".ai-provider-apikey").value = "";
-
-    fireClick(host.querySelector("#bocSettingsSaveBtn"));
-
-    expect(lastStatus(host).textContent).toBe("平台「自定义」需要填写 API Key");
-    expect(lastStatus(host).dataset.error).toBe("true");
-    expect(sent.some((message) => message.type === "request-provider-origins")).toBe(false);
-    expect(sent.some((message) => message.type === "save-settings")).toBe(false);
-  });
-
-  it("baseUrl 非法（message-only 分支）：状态条报格式错误，不进入权限代申请", async () => {
-    const sent = installMessageBus({
-      "ai-providers-list": () => ({ ok: true, providers: [{ id: "p1", presetId: "custom", name: "自定义", baseUrl: "https://api.example.com/v1", model: "gpt-4o-mini", requiresKey: true, enabled: true }] })
-    });
-    const host = await mountPanel();
-
-    const row = host.querySelector("#aiProvidersList .ai-provider-row");
-    row.querySelector(".ai-provider-baseurl").value = "not-a-url";
-    row.querySelector(".ai-provider-apikey").value = "sk-test";
-
-    fireClick(host.querySelector("#bocSettingsSaveBtn"));
-
-    expect(lastStatus(host).textContent).toBe("baseUrl 格式不正确：not-a-url");
-    expect(sent.some((message) => message.type === "request-provider-origins")).toBe(false);
-    expect(sent.some((message) => message.type === "save-settings")).toBe(false);
   });
 
   // 行级落位断言（arch-slim-2/02 补）：05 票发现的 row 级真 bug（validators

@@ -23,8 +23,7 @@ import {
   normalizeFixedFrontmatterProperties,
   normalizeNotePlaceholderSections,
   validateFixedFrontmatterProperties,
-  validateNotePlaceholderSections,
-  validateAiProviders
+  validateNotePlaceholderSections
 } from "../core/validators.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { initCustomSelect } from "./custom-select.js";
@@ -38,20 +37,15 @@ import {
   collectNoteSectionRows,
   clearNoteSectionErrors,
   renderAiProviders,
-  collectAiProviders,
   generateAiProviderId,
-  setTestSuccessHandler,
   setAiBeforeDeleteHandler,
   setAiRowEditHandler
 } from "./options-rows.js";
 import type { ProviderRowItem } from "./provider-row.js";
 import {
   renderAsrProviders,
-  collectAsrProviders,
   generateAsrProviderId,
-  setActiveAsrProvider,
   getActiveAsrProviderId,
-  setAsrTestSuccessHandler,
   setAsrDeleteHandler,
   setAsrBeforeDeleteHandler,
   setAsrRowEditHandler
@@ -615,40 +609,18 @@ function setBusy(elements: SettingsElements, isBusy: boolean): void {
   elements.saveBtn.textContent = isBusy ? "处理中..." : "保存设置";
 }
 
-// 保存设置。requestPermissions 区分两条来路：只有「点击保存设置」这条同步链
-// 持有用户手势，host 权限申请能弹出授权弹窗（手势随一次 runtime 消息传导到
-// SW 的 chrome.permissions.request）；「测试连接」成功后的自动保存复用本函数
-// 落盘，那条路的手势已被探针的 await 用掉，传 false 跳过申请——能连通即说明
-// 该平台 origin 早已授权过；确实没授权的平台走探针/模型列表预检的提示。
-async function saveSettings(elements: SettingsElements, { requestPermissions = true }: { requestPermissions?: boolean } = {}): Promise<void> {
+// 保存设置（provider-master-detail/02 起：只承载其余设置项）。AI/ASR 平台的
+// 保存已整体移交 provider-editor Modal 的单平台 upsert（saveProviderSingle），
+// 本函数不再收集/校验/落盘平台列表，也不再申请平台 host 权限（平台域名的
+// 授权在 Modal 保存与探针/模型列表预检的链路上收口）。
+async function saveSettings(elements: SettingsElements): Promise<void> {
   clearInputErrors(elements);
-  const aiProvidersPayload = collectAiProviders(elements.aiProvidersList, { presets: aiPresets });
-  const asrProvidersPayload = collectAsrProviders(elements.asrProvidersList, { presets: asrPresets });
 
   const payload = collectFormPayload(elements);
   const validation = validateSettings(elements, payload);
   if (!validation.ok) {
     applyValidationError(elements, validation);
     return;
-  }
-  const aiProvidersValidation = validateAiProviders(aiProvidersPayload);
-  if (!aiProvidersValidation.ok) {
-    applyValidationError(elements, aiProvidersValidation);
-    return;
-  }
-
-  // 按需申请 AI/ASR 平台域名的 host 权限。收集与校验（上方）零 await，本段
-  // 仍在「点击保存」的手势同步链上。用户拒绝授权则中止保存并给出可操作提示
-  // ——未授权该平台无法连通测试/使用。
-  if (requestPermissions) {
-    const permission = await requestProviderOriginsViaBackground([
-      ...aiProvidersPayload.map((provider) => provider.baseUrl),
-      ...asrProvidersPayload.map((provider) => provider.baseUrl)
-    ]);
-    if (!permission.ok) {
-      setStatus(elements, permission.error, true);
-      return;
-    }
   }
 
   setBusy(elements, true);
@@ -660,27 +632,6 @@ async function saveSettings(elements: SettingsElements, { requestPermissions = t
     }
     renderFixedPropertyRows(elements.fixedPropertiesList, elements.fixedPropertiesEmpty, payload.fixedFrontmatterProperties);
     renderNoteSectionRows(elements.noteSectionsList, elements.noteSectionsEmpty, payload.notePlaceholderSections);
-
-    // AI 平台：list 走 sync、apiKey 走 local
-    const aiResp = await sendRuntimeMessage({ type: "ai-providers-save", providers: aiProvidersPayload });
-    if (!aiResp?.ok) {
-      setStatus(elements, `已保存，但 AI 平台保存失败：${aiResp?.error || "未知错误"}`, true);
-      return;
-    }
-    // 用最新列表（含 hasSavedKey）重新渲染，避免误以为 Key 丢了
-    renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, aiResp.providers || []);
-
-    // ASR 平台：同样 list 走 sync、apiKey 走 local；空输入沿用已存 Key（后台处理）
-    const asrResp = await sendRuntimeMessage({ type: "asr-providers-save", providers: asrProvidersPayload });
-    if (!asrResp?.ok) {
-      setStatus(elements, `已保存，但语音转写平台保存失败：${asrResp?.error || "未知错误"}`, true);
-      return;
-    }
-    // 用最新列表（含 hasSavedKey）重新渲染，保存后界面只见掩码占位不见明文
-    renderAsrProviders(elements.asrProvidersList, elements.asrProvidersEmpty, asrResp.providers || [], {
-      presets: asrPresets,
-      activeId: getActiveAsrProviderId(elements.asrProvidersList)
-    });
     setStatus(elements, "保存成功");
   } catch (error) {
     setStatus(elements, (error as Error).message || "保存失败", true);
@@ -698,24 +649,18 @@ function bindSettingsEvents(host: HTMLElement): void {
     initCustomSelect(elements.downloadFormat, "custom-select-wrapper boc-set-custom-select");
   }
 
-  setTestSuccessHandler(async () => {
-    await saveSettings(elements, { requestPermissions: false });
-  });
-  setAsrTestSuccessHandler(async () => {
-    await saveSettings(elements, { requestPermissions: false });
-  });
   setAsrDeleteHandler(async (providerId) => {
     if (providerId && String(getActiveAsrProviderId(elements.asrProvidersList) || "") === providerId) {
       await sendRuntimeMessage({ type: "save-settings", settings: { activeAsrProviderId: "" } });
     }
   });
   // 删除平台时回收 host 权限：AI 与 ASR 两组共用同一条判定——origin 不再被任何
-  // 存活平台使用（含另一组）才 remove。回收失败不阻断删除，状态条给出可操作文案。
+  // 存活平台使用（含另一组）才 remove。存活列表从后端现查（紧凑行不再承载
+  // baseUrl 输入框，被删行的 baseUrl 由行 dataset 传入钩子）。回收失败不阻断
+  // 删除，状态条给出可操作文案。
   const revokeOriginOnDelete = async (providerId: string, baseUrl: string): Promise<void> => {
-    const providers = [
-      ...collectAiProviders(elements.aiProvidersList, { presets: aiPresets }),
-      ...collectAsrProviders(elements.asrProvidersList, { presets: asrPresets })
-    ];
+    const [aiProviders, asrProviders] = await Promise.all([loadAiProviders(), loadAsrProviders()]);
+    const providers = [...aiProviders, ...asrProviders];
     const { origins, revoked } = await revokeOrphanOrigin({ id: providerId, baseUrl }, providers);
     if (origins.length > 0 && !revoked) {
       setStatus(elements, permissionRevokeErrorMessage(origins), true);

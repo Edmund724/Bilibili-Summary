@@ -2434,7 +2434,7 @@
 }
 
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-menu,
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-dropdown {
+#boc-reading-view .provider-editor-host .ai-provider-model-dropdown {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
@@ -2454,8 +2454,8 @@
 }
 
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-option,
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-option,
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-message {
+#boc-reading-view .provider-editor-host .ai-provider-model-option,
+#boc-reading-view .provider-editor-host .ai-provider-model-message {
   width: 100%;
   min-height: 30px;
   border: 0;
@@ -2476,34 +2476,34 @@
 }
 
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-option:hover,
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-option:hover {
+#boc-reading-view .provider-editor-host .ai-provider-model-option:hover {
   background: var(--boc-reader-surface-2, #f0e9df);
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-option[data-selected="true"] {
+#boc-reading-view .provider-editor-host .ai-provider-model-option[data-selected="true"] {
   background: var(--boc-reader-accent-soft, #fce0ea);
   color: var(--boc-reader-accent, #fb7299);
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-loading {
+#boc-reading-view .provider-editor-host .ai-provider-model-loading {
   color: var(--boc-reader-faint, #a39a8d);
   cursor: default;
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-loading:hover {
+#boc-reading-view .provider-editor-host .ai-provider-model-loading:hover {
   background: transparent;
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-message {
+#boc-reading-view .provider-editor-host .ai-provider-model-message {
   white-space: normal;
   cursor: default;
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-error {
+#boc-reading-view .provider-editor-host .ai-provider-model-error {
   color: var(--boc-reader-accent, #fb7299);
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-count {
+#boc-reading-view .provider-editor-host .ai-provider-model-count {
   padding: 8px 10px 2px;
   font-size: 13px;
   color: var(--boc-reader-faint, #a39a8d);
@@ -2532,8 +2532,9 @@
   display: none;
 }
 
-/* AI / ASR 平台行（原 options.css 行级栅格；侧边栏 340px 级宽度下所有字段
- * 折成单列行，preset 下拉 + 连接测试 + 删除按钮仍在一行） */
+/* AI / ASR 平台行（provider-master-detail/02 紧凑形态）：行是纯展示 + 编辑/
+ * 删除入口——主行（Key 状态点 + 名称 +（ASR）选用 radio + 动作）+ 模型名副行，
+ * 行内零输入字段；编辑/测试/模型目录全在 ui/provider-editor.js 的 Modal。 */
 #boc-reading-view .boc-reading-settings-host .ai-providers-list,
 #boc-reading-view .boc-reading-settings-host .asr-providers-list {
   display: flex;
@@ -2549,58 +2550,72 @@
 
 #boc-reading-view .boc-reading-settings-host .ai-provider-row,
 #boc-reading-view .boc-reading-settings-host .asr-provider-row {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   width: 100%;
-  grid-template-columns: 1fr;
-  gap: 6px;
-  align-items: center;
-  padding: 10px;
+  padding: 8px 10px;
   border: 1px solid var(--boc-reader-border, #e7dfd4);
   border-radius: 10px;
   background: var(--boc-reader-card, #ffffff);
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-row select,
-#boc-reading-view .boc-reading-settings-host .ai-provider-row input[type="text"],
-#boc-reading-view .boc-reading-settings-host .ai-provider-row input[type="password"],
-#boc-reading-view .boc-reading-settings-host .ai-provider-row input[type="number"],
-#boc-reading-view .boc-reading-settings-host .asr-provider-row select,
-#boc-reading-view .boc-reading-settings-host .asr-provider-row input[type="text"],
-#boc-reading-view .boc-reading-settings-host .asr-provider-row input[type="password"],
-#boc-reading-view .boc-reading-settings-host .asr-provider-row input[type="number"] {
-  width: 100%;
-  height: 32px;
-  padding: 4px 8px;
-  border: 1px solid var(--boc-reader-border, #e7dfd4);
-  border-radius: 8px;
-  font: inherit;
+#boc-reading-view .boc-reading-settings-host .provider-row-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Key 状态点：已存 Key 实心绿，未存弱化灰（数据源 hasSavedKey，拍板 Q3） */
+#boc-reading-view .boc-reading-settings-host .provider-row-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--boc-reader-faint, #a39a8d);
+}
+
+#boc-reading-view .boc-reading-settings-host .provider-row-dot[data-state="saved"] {
+  background: #3fb950;
+}
+
+#boc-reading-view .boc-reading-settings-host .provider-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 14.5px;
-  background: var(--boc-reader-card, #ffffff);
+  font-weight: 600;
   color: var(--boc-reader-text, #2b2620);
-  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#boc-reading-view .boc-reading-settings-host .provider-row-model {
   margin: 0;
+  padding-left: 16px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--boc-reader-faint, #a39a8d);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-row > *,
-#boc-reading-view .boc-reading-settings-host .asr-provider-row > * {
-  min-width: 0;
-}
-
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-wrapper {
+#boc-reading-view .provider-editor-host .ai-provider-model-wrapper {
   position: relative;
   display: flex;
   align-items: center;
   min-width: 0;
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-wrapper .ai-provider-model,
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-wrapper .asr-provider-model {
+#boc-reading-view .provider-editor-host .ai-provider-model-wrapper .provider-editor-model {
   flex: 1;
   min-width: 0;
   padding-right: 30px !important;
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-toggle {
+#boc-reading-view .provider-editor-host .ai-provider-model-toggle {
   position: absolute;
   right: 2px;
   top: 50%;
@@ -2618,12 +2633,12 @@
   justify-content: center;
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-toggle:hover {
+#boc-reading-view .provider-editor-host .ai-provider-model-toggle:hover {
   background: var(--boc-reader-surface-2, #f0e9df);
   color: var(--boc-reader-text, #2b2620);
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-toggle svg {
+#boc-reading-view .provider-editor-host .ai-provider-model-toggle svg {
   width: 12px;
   height: 12px;
   stroke: currentColor;
@@ -2633,55 +2648,17 @@
   stroke-linejoin: round;
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-toggle:disabled {
+#boc-reading-view .provider-editor-host .ai-provider-model-toggle:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-/* 操作行：测试按钮 + 行内状态 + 删除按钮同排（provider-row 模板的
- * .provider-row-actions 容器）。状态默认 hidden 不占位，出现时吃掉按钮
- * 之间的剩余宽度；删除按钮贴行尾。 */
-#boc-reading-view .boc-reading-settings-host .provider-row-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-#boc-reading-view .boc-reading-settings-host .ai-provider-row .ai-provider-test,
-#boc-reading-view .boc-reading-settings-host .asr-provider-row .asr-provider-test {
-  height: 30px;
-  width: 72px;
-  flex: 0 0 auto;
-  padding: 0;
-  font-size: 14px;
-  line-height: 1;
-  border: 0;
-  border-radius: 999px;
-  background: var(--boc-reader-accent-soft, #fce0ea);
-  color: var(--boc-reader-accent, #fb7299);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-/* 测试按钮在 provider-row 模板里带 .secondary-btn 类（原 options 页样式），
- * 面板内按行内按钮统一处理。 */
-#boc-reading-view .boc-reading-settings-host .secondary-btn {
-  background: transparent;
-  border: 0;
-}
-
-#boc-reading-view .boc-reading-settings-host .ai-provider-row .ai-provider-test:hover,
-#boc-reading-view .boc-reading-settings-host .asr-provider-row .asr-provider-test:hover {
-  background: var(--boc-reader-surface-3, #e7dfd4);
-}
-
-#boc-reading-view .boc-reading-settings-host .ai-provider-row .ai-provider-remove,
-#boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-remove {
+/* 删除按钮（AI/ASR 统一 provider-row-remove：此前 ASR 复用 ai-provider-remove
+ * 的既有耦合随行内状态行退役一并收口） */
+#boc-reading-view .boc-reading-settings-host .provider-row-remove {
   width: 24px;
-  height: 32px;
+  height: 30px;
   flex: 0 0 auto;
-  margin-left: auto;
   padding: 0;
   border: 0;
   border-radius: 8px;
@@ -2693,14 +2670,12 @@
   justify-content: center;
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-row .ai-provider-remove:hover,
-#boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-remove:hover {
+#boc-reading-view .boc-reading-settings-host .provider-row-remove:hover {
   color: var(--boc-reader-accent, #fb7299);
   background: var(--boc-reader-accent-soft, #fce0ea);
 }
 
-#boc-reading-view .boc-reading-settings-host .ai-provider-row .ai-provider-remove svg,
-#boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-remove svg {
+#boc-reading-view .boc-reading-settings-host .provider-row-remove svg {
   width: 16px;
   height: 16px;
   fill: none;
@@ -2708,21 +2683,6 @@
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
-}
-
-#boc-reading-view .boc-reading-settings-host .ai-provider-status,
-#boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-status {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.4;
-  color: var(--boc-reader-muted, #6f675c);
-}
-
-#boc-reading-view .boc-reading-settings-host .ai-provider-status[data-error="true"],
-#boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-status[data-error="true"] {
-  color: var(--boc-reader-accent, #fb7299);
 }
 
 #boc-reading-view .boc-reading-settings-host .asr-provider-active {
@@ -2740,28 +2700,6 @@
 #boc-reading-view .boc-reading-settings-host .asr-provider-active input[type="radio"] {
   margin: 0;
   accent-color: var(--boc-reader-accent, #fb7299);
-}
-
-/* ASR 平台行把「模型/平台名称」做成内联输入；模型字段是
- * ui/model-picker.js 的「输入 + 下拉拉取」组合控件（复用 AI 侧
- * ai-provider-model-* 类名），外壳占满所在栅格 */
-#boc-reading-view .boc-reading-settings-host .asr-provider-row .ai-provider-model-wrapper {
-  width: 100%;
-}
-
-#boc-reading-view .boc-reading-settings-host .asr-provider-row .asr-provider-model,
-#boc-reading-view .boc-reading-settings-host .asr-provider-row .asr-provider-name {
-  height: 32px;
-  padding: 4px 8px;
-  border: 1px solid var(--boc-reader-border, #e7dfd4);
-  border-radius: 8px;
-  background: var(--boc-reader-card, #ffffff);
-  color: var(--boc-reader-text, #2b2620);
-  font: inherit;
-  font-size: 14.5px;
-  width: 100%;
-  min-width: 0;
-  margin: 0;
 }
 
 #boc-reading-view .boc-reading-settings-host .asr-fallback-checkbox {
@@ -2788,7 +2726,7 @@
 /* 面板外部的 global document click 委托会关闭 type picker 菜单/模型下拉；
  * 弹出层需要盖过相邻卡片，堆叠上下文内 z-index 已够，此处补一个兜底。 */
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-menu[hidden],
-#boc-reading-view .boc-reading-settings-host .ai-provider-model-dropdown[hidden],
+#boc-reading-view .provider-editor-host .ai-provider-model-dropdown[hidden],
 #boc-reading-view .boc-reading-settings-host .custom-select-dropdown[hidden] {
   display: none;
 }
@@ -3085,8 +3023,8 @@
   filter: brightness(1.05);
 }
 
-/* 平铺行的「编辑」按钮（01 过渡态：与测试/删除同排；02 紧凑行落地后随
- * 行内编辑字段一起重整） */
+/* 行「编辑」按钮：打开 provider-editor Modal（01 引入，02 起为紧凑行主行内
+ * 的正式编辑入口，与状态点/名称/（ASR）选用 radio 同排） */
 #boc-reading-view .boc-reading-settings-host .provider-row-edit {
   height: 30px;
   flex: 0 0 auto;

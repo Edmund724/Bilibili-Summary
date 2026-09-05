@@ -1,24 +1,24 @@
 // extension/ui/provider-row.ts
-// AI 平台行与 ASR 平台行构建器的共享工厂 createProviderRow。
-// 两套行构建器此前互为平行克隆（options-rows.js 的 AI 平台部分 / options-asr-rows.js 全文），
-// 以下骨架完全一致，由工厂统一持有：
-// - 行骨架：预设下拉 / baseUrl / API Key / 操作行（测试 + 行内状态 <p> + 删除，
-//   三者同排一条 flex 行）/ 删除（确认 + 后台消息）；
-// - 预设切换的 baseUrl 跟随规则：未改过 baseUrl（空或仍是上一预设默认值）才跟随新预设；
-// - 测试连接流程：校验 → 探针（注入 runTestProbe 直调，或经运行时消息）→
-//   成功后回调保存 → 重查行显示"连接成功"；
-// - 成功状态：禁用行内 input/button 并在 successMinMs 后恢复（错误状态不自动恢复）；
-// - 空态切换与 id 生成（仅前缀不同）。
-// 真实差异通过参数注入：字段构成（headerFields / modelField / tailFields）、
-// 预设解析回退、模型值解析、Key 占位符、报文形状、预设切换附加行为、行级附加接线。
-// 行构建器只依赖参数与回调，不直接访问 DOM 全局。
+// AI 平台行与 ASR 平台行构建器的共享工厂 createProviderRow（紧凑形态，
+// provider-master-detail/02）：行是纯展示 + 入口——Key 状态点 + 名称 +
+// 模型名 +（ASR）选用 radio +「编辑 / 删除」两个动作，行内零输入字段。
+// 编辑（预设 / baseUrl / API Key / 模型 / 测试）全部在 ui/provider-editor.js
+// 的 Modal 里（01），保存走单平台 upsert（settings-panel.saveProviderSingle）。
+//
+// 与 01 前的平铺形态相比退役的职责：预设下拉 / 行内编辑字段收集
+//（collectAiProviders / collectAsrProviders 已删，列表真相在后端）/ 连通性
+// 测试与行内状态（探针随 Modal）/ 模型下拉（model-picker 随 Modal）。
+// 此前 ASR 行复用 ai-provider-remove / ai-provider-status 类名的既有耦合
+// 随行内状态行退役一并收口：删除按钮统一 provider-row-remove。
+//
+// 两行差异通过参数注入：显示名 / 模型名的解析、（ASR）选用 radio 及其
+// 即时持久化回调、删除报文。行构建器只依赖参数与回调，不直接访问 DOM 全局。
 
 import { escapeHtml } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import type { BackgroundMessage, ContentScriptMessage } from "../shared/messaging-protocol.js";
 
-// 垃圾桶图标路径：固定属性行 / 笔记段落行 / AI 平台行 / ASR 平台行共用同一份
-// path 定义（此前在 options-rows.js 与 options-asr-rows.js 各自内联了 4 份）。
+// 垃圾桶图标路径：固定属性行 / 笔记段落行 / 平台行共用同一份 path 定义。
 export const TRASH_ICON_PATHS: string = [
   '<path d="M4 7h16"></path>',
   '<path d="M9 3h6"></path>',
@@ -27,15 +27,14 @@ export const TRASH_ICON_PATHS: string = [
   '<path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"></path>'
 ].join("");
 
-// 行元素：HTMLElement 之上承载行级动态状态——dataset 三键
-//（providerId / hasSavedKey / currentPresetId，模板渲染时写入）与 statusTimerKey
-// 指定的恢复定时器槽位（showStatus 成功态写入、触发时清空）。索引签名仅
-// 为 statusTimerKey 的动态键读写服务。
+// 行元素：HTMLElement 之上承载行级 dataset——providerId / hasSavedKey /
+// currentPresetId / baseUrl（删除回收 host 权限时钩子要从行上拿到 baseUrl，
+// 紧凑行没有输入框，渲染时写入）。索引签名仅为将来的动态键读写兜底。
 export type ProviderRowElement = HTMLElement & Record<string, unknown>;
 
 // 平台行条目的宽松形状：AI / ASR 两条真实配置与测试注入的字面量对象都按
-// 此结构传入；行骨架只读列出的字段，其余字段（如 enabled/apiKey/type）随
-// 保存流程透传，不在骨架内消费。
+// 此结构传入；行骨架只读列出的字段，其余字段（如 enabled/apiKey/type）不在
+// 行内消费（编辑走 Modal 的权威现查）。
 export interface ProviderRowItem {
   id?: string;
   presetId?: string;
@@ -49,9 +48,8 @@ export interface ProviderRowItem {
   hasSavedKey?: boolean;
 }
 
-// 平台预设的结构子集（工厂骨架读取 id/name/baseUrl，注入回调按需读取
-// model/requiresKey/type）：AiProviderPreset（core/presets）与
-// AsrProviderPreset 均按结构兼容传入。
+// 平台预设的结构子集：AiProviderPreset（core/presets）与 AsrProviderPreset
+// 均按结构兼容传入。
 export interface ProviderRowPreset {
   id: string;
   name: string;
@@ -61,61 +59,38 @@ export interface ProviderRowPreset {
   requiresKey?: boolean;
 }
 
-// 行内状态 <p> 的写入口（wireRowExtras 注入用）：node 允许缺失（缺失即静默）。
+// 行内状态 <p> 的写入口（wireModelPicker 注入用）：行内状态行已随紧凑形态
+// 退役，但 ui/provider-editor.js 的 Modal 仍以此签名接入 model-picker。
 export type ProviderRowShowStatus = (
   node: HTMLElement | null | undefined,
   text: string,
   isError?: boolean
 ) => void;
 
-// 测试成功 / 删除后回调：由调用页注入，避免行构建器耦合保存流程。
-export type ProviderRowHandler = (providerId: string) => Promise<void> | void;
 // 删除动作前先执行的钩子（调用页注入 chrome.permissions.remove 回收 origin，
-// 需要在被删行摘出 DOM 之前拿到它的 baseUrl）。
+// 需要在被删行摘出 DOM 之前拿到它的 baseUrl——行 dataset 提供）。
 export type ProviderRowBeforeDeleteHandler = (
   providerId: string,
   baseUrl: string
 ) => Promise<void> | void;
 
+// 删除完成后的回调（ASR：删的是当前选用平台时清 activeAsrProviderId）。
+export type ProviderRowHandler = (providerId: string) => Promise<void> | void;
+
 export interface CreateProviderRowConfig {
   rowClass: string;
-  presetClass: string;
-  presetSelectTitle: string;
-  baseUrlClass: string;
-  baseUrlPlaceholder: string;
-  apikeyClass: string;
-  modelClass: string;
-  testClass: string;
+  editClass: string;
   removeClass: string;
-  statusClass: string;
   idPrefix: string;
-  statusSuccessMinMs: number;
-  statusTimerKey: string;
   resolvePreset: (presets: readonly ProviderRowPreset[], presetId: string) => ProviderRowPreset | null;
-  resolveModel: (item: ProviderRowItem, preset: ProviderRowPreset | null) => string;
-  apiKeyPlaceholder: (ctx: { item: ProviderRowItem; preset: ProviderRowPreset | null; hasSavedKey: boolean }) => string;
-  buildHeaderFields?: (ctx: { item: ProviderRowItem; preset: ProviderRowPreset | null }) => string;
-  buildModelField: (preset: ProviderRowPreset | null, model: string) => string;
+  // 显示名：AI=自定义名回落预设名（拍板 Q7）；ASR=名称回落预设名/自定义
+  displayName: (item: ProviderRowItem, preset: ProviderRowPreset | null) => string;
+  // 显示模型名：AI=item.model；ASR=item.model ?? preset.model。空串不渲染副行
+  displayModel: (item: ProviderRowItem, preset: ProviderRowPreset | null) => string;
+  // （仅 ASR）选用 radio：change 即时持久化 activeAsrProviderId（平铺形态同款语义）
   buildTailFields?: (ctx: { id: string; isActive: boolean }) => string;
-  onPresetChange?: (row: ProviderRowElement, previousPreset: ProviderRowPreset | null, next: ProviderRowPreset) => void;
-  wireRowExtras?: (row: ProviderRowElement, ctx: { listNode: HTMLElement; showStatus: ProviderRowShowStatus }) => void;
-  // 行「编辑」按钮回调（provider-master-detail/01 过渡态：行内编辑仍在，
-  // 编辑入口打开 provider-editor Modal；02 紧凑行落地后行编辑职责整体移交）
-  onRowEdit?: (row: ProviderRowElement) => void;
-  buildTestPayload?: (ctx: {
-    row: ProviderRowElement;
-    presets: readonly ProviderRowPreset[];
-    baseUrl: string;
-    apiKey: string;
-    model: string;
-  }) => BackgroundMessage | ContentScriptMessage;
-  runTestProbe?: (ctx: {
-    row: ProviderRowElement;
-    presets: readonly ProviderRowPreset[];
-    baseUrl: string;
-    apiKey: string;
-    model: string;
-  }) => Promise<{ ok?: boolean; error?: string }>;
+  wireTailExtras?: (row: ProviderRowElement, ctx: { listNode: HTMLElement }) => void;
+  onRowEdit: (row: ProviderRowElement) => void;
   buildDeleteMessage: (providerId: string) => BackgroundMessage | ContentScriptMessage;
 }
 
@@ -127,51 +102,26 @@ export interface ProviderRowController {
     items: unknown,
     addOptions?: { presets?: readonly ProviderRowPreset[]; activeId?: string }
   ) => ProviderRowItem[];
-  add: (
-    listNode: HTMLElement,
-    emptyNode: HTMLElement,
-    item?: ProviderRowItem,
-    addOptions?: { presets?: readonly ProviderRowPreset[]; activeId?: string }
-  ) => void;
-  showStatus: ProviderRowShowStatus;
   updateEmptyState: (listNode: HTMLElement, emptyNode: HTMLElement) => void;
-  setTestSuccessHandler: (handler: ProviderRowHandler) => void;
   setDeleteHandler: (handler: ProviderRowHandler) => void;
   setBeforeDeleteHandler: (handler: ProviderRowBeforeDeleteHandler) => void;
 }
 
 export function createProviderRow({
   rowClass,
-  presetClass,
-  presetSelectTitle,
-  baseUrlClass,
-  baseUrlPlaceholder,
-  apikeyClass,
-  modelClass,
-  testClass,
+  editClass,
   removeClass,
-  statusClass,
   idPrefix,
-  statusSuccessMinMs,
-  statusTimerKey,
   resolvePreset,
-  resolveModel,
-  apiKeyPlaceholder,
-  buildHeaderFields,
-  buildModelField,
+  displayName,
+  displayModel,
   buildTailFields,
+  wireTailExtras,
   onRowEdit,
-  onPresetChange,
-  wireRowExtras,
-  buildTestPayload,
-  runTestProbe,
   buildDeleteMessage
 }: CreateProviderRowConfig): ProviderRowController {
-  // 测试成功 / 删除后的回调，由调用页注入，避免行构建器耦合保存流程
-  let onTestSuccess: ProviderRowHandler = async () => {};
   let onDelete: ProviderRowHandler = async () => {};
-  // 删除动作前先执行的钩子（调用页注入 chrome.permissions.remove 回收 origin，
-  // 需要在被删行摘出 DOM 之前拿到它的 baseUrl）
+  // 删除动作前先执行的钩子（调用页注入回收 origin，需要被删行的 baseUrl）
   let onBeforeDelete: ProviderRowBeforeDeleteHandler = async () => {};
 
   function generateId(): string {
@@ -191,170 +141,74 @@ export function createProviderRow({
   ): ProviderRowItem[] {
     listNode.innerHTML = "";
     const list: ProviderRowItem[] = Array.isArray(items) ? (items as ProviderRowItem[]) : [];
-    list.forEach((item) => add(listNode, emptyNode, item, addOptions));
-    updateEmptyState(listNode, emptyNode);
-    return list;
-  }
+    list.forEach((item) => {
+      const id = String(item.id || generateId());
+      const presetId = String(item.presetId || "custom");
+      const preset = resolvePreset(addOptions.presets || [], presetId);
+      const baseUrl = String(item.baseUrl ?? preset?.baseUrl ?? "");
+      const hasSavedKey = Boolean(item.hasSavedKey);
+      const isActive = String(addOptions.activeId || "") === id;
 
-  function add(
-    listNode: HTMLElement,
-    emptyNode: HTMLElement,
-    item: ProviderRowItem = {},
-    { presets = [], activeId = "" }: { presets?: readonly ProviderRowPreset[]; activeId?: string } = {}
-  ): void {
-    const id = String(item.id || generateId());
-    const presetId = String(item.presetId || "custom");
-    const preset = resolvePreset(presets, presetId);
-    const baseUrl = String(item.baseUrl ?? preset?.baseUrl ?? "");
-    const model = resolveModel(item, preset);
-    const hasSavedKey = Boolean(item.hasSavedKey);
-    const isActive = String(activeId || "") === id;
+      const row = document.createElement("div") as unknown as ProviderRowElement;
+      row.className = rowClass;
+      row.dataset.providerId = id;
+      row.dataset.hasSavedKey = hasSavedKey ? "1" : "0";
+      row.dataset.currentPresetId = presetId;
+      row.dataset.baseUrl = baseUrl;
 
-    const row = document.createElement("div") as unknown as ProviderRowElement;
-    row.className = rowClass;
-    row.dataset.providerId = id;
-    row.dataset.hasSavedKey = hasSavedKey ? "1" : "0";
-    row.dataset.currentPresetId = presetId;
-    row.innerHTML = `
-    <select class="${presetClass}" title="${presetSelectTitle}">
-      ${presets.map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === presetId ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}
-    </select>
-    ${buildHeaderFields ? buildHeaderFields({ item, preset }) : ""}
-    <input class="${baseUrlClass}" type="text" placeholder="${baseUrlPlaceholder}" value="${escapeHtml(baseUrl)}" />
-    <input class="${apikeyClass}" type="password" placeholder="${apiKeyPlaceholder({ item, preset, hasSavedKey })}" autocomplete="off" />
-    ${buildModelField(preset, model)}
-    ${buildTailFields ? buildTailFields({ id, isActive }) : ""}
-    <div class="provider-row-actions">
-      <button type="button" class="secondary-btn provider-row-edit">编辑</button>
-      <button type="button" class="secondary-btn ${testClass}">测试</button>
-      <p class="${statusClass}" hidden></p>
-      <button type="button" class="${removeClass}" aria-label="删除" title="删除">
-        <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">${TRASH_ICON_PATHS}</svg>
-      </button>
-    </div>
-  `;
+      const model = displayModel(item, preset);
+      row.innerHTML = `
+        <div class="provider-row-line">
+          <span class="provider-row-dot" data-state="${hasSavedKey ? "saved" : "missing"}" title="${hasSavedKey ? "已保存 API Key" : "未保存 API Key"}"></span>
+          <span class="provider-row-name">${escapeHtml(displayName(item, preset))}</span>
+          ${buildTailFields ? buildTailFields({ id, isActive }) : ""}
+          <button type="button" class="${editClass}">编辑</button>
+          <button type="button" class="${removeClass}" aria-label="删除" title="删除">
+            <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">${TRASH_ICON_PATHS}</svg>
+          </button>
+        </div>
+        ${model ? `<div class="provider-row-model" title="${escapeHtml(model)}">${escapeHtml(model)}</div>` : ""}
+      `;
 
-    // 编辑：打开 provider-editor Modal（回调由配置注入，见 onRowEdit 注释）
-    row.querySelector(".provider-row-edit")?.addEventListener("click", () => {
-      onRowEdit?.(row);
-    });
+      // 编辑：打开 provider-editor Modal（回调由配置注入）
+      row.querySelector(`.${editClass}`)?.addEventListener("click", () => {
+        onRowEdit?.(row);
+      });
 
-    // 预设切换：baseUrl 未改过（空或仍是上一预设默认值）时跟随新预设；
-    // 其余字段行为（模型字段重建 / 名称跟随 / Key 清空或占位符更新）由配置注入。
-    (row.querySelector(`.${presetClass}`) as HTMLSelectElement).addEventListener("change", (e) => {
-      const previousPreset = presets.find((p) => p.id === row.dataset.currentPresetId) || null;
-      const next = presets.find((p) => p.id === (e.target as HTMLSelectElement).value);
-      if (!next) return;
-      const baseUrlInput = row.querySelector(`.${baseUrlClass}`) as HTMLInputElement;
-      const currentBaseUrl = baseUrlInput.value.trim();
-      if (!currentBaseUrl || (previousPreset && currentBaseUrl === previousPreset.baseUrl)) {
-        baseUrlInput.value = next.baseUrl;
-      }
-      onPresetChange?.(row, previousPreset, next);
-      row.dataset.currentPresetId = next.id;
-    });
-
-    // 删除：确认后调后台删除；若删的是当前选用平台，清空选用态（onDelete 注入处理）。
-    // onBeforeDelete 在被删行摘出 DOM 之前执行，注入方据此拿到该行当前的 baseUrl
-    // 并回收 host 权限（chrome.permissions.remove 不需要用户手势）；钩子报错不
-    // 阻断删除。
-    row.querySelector(`.${removeClass}`)?.addEventListener("click", async () => {
-      if (!confirm("确定要删除这个平台吗？")) return;
-      const providerId = row.dataset.providerId || "";
-      const baseUrl = (row.querySelector(`.${baseUrlClass}`) as HTMLInputElement | null)?.value.trim() || "";
-      try {
-        await onBeforeDelete(providerId, baseUrl);
-      } catch {}
-      if (providerId) {
-        try {
-          await sendRuntimeMessage(buildDeleteMessage(providerId));
-        } catch {}
-      }
-      row.remove();
-      updateEmptyState(listNode, emptyNode);
-      if (typeof onDelete === "function") {
-        onDelete(providerId);
-      }
-    });
-
-    // 测试连接：按预设 type 走探针；成功时回调保存（由调用页注入 onTestSuccess）
-    row.querySelector(`.${testClass}`)?.addEventListener("click", async () => {
-      const statusNode = row.querySelector(`.${statusClass}`) as HTMLElement | null;
-      const baseUrl = (row.querySelector(`.${baseUrlClass}`) as HTMLInputElement).value.trim();
-      const apiKey = (row.querySelector(`.${apikeyClass}`) as HTMLInputElement).value.trim();
-      const model = (row.querySelector(`.${modelClass}`) as HTMLInputElement).value.trim();
-      if (!baseUrl) {
-        showStatus(statusNode, "请填写 baseUrl", true);
-        return;
-      }
-      if (!model) {
-        showStatus(statusNode, "请填写模型名", true);
-        return;
-      }
-      showStatus(statusNode, "正在测试...");
-      // 探针执行可注入：AI / ASR 平台行均直调对应 provider-test.js（options
-      // 页本地执行，免一次 SW 消息往返，见候选 04 拆链）；未注入时回退运行时
-      // 消息。回退分支的响应形状由消息类型经 ResponseOf 推断（arch-slim-2/02），
-      // 两条分支统一按探针契约（{ ok?, error? }）读——注释标注的类型是显式放宽。
-      const resp: { ok?: boolean; error?: string } | null = runTestProbe
-        ? await runTestProbe({ row, presets, baseUrl, apiKey, model })
-        : await sendRuntimeMessage(buildTestPayload!({ row, presets, baseUrl, apiKey, model }));
-      if (resp?.ok) {
+      // 删除：确认后调后台删除；若删的是当前选用平台，清空选用态（onDelete 注入
+      // 处理）。onBeforeDelete 在被删行摘出 DOM 之前执行，注入方据此拿到该行的
+      // baseUrl 回收 host 权限（chrome.permissions.remove 不需要用户手势）；钩子
+      // 报错不阻断删除。
+      row.querySelector(`.${removeClass}`)?.addEventListener("click", async () => {
+        if (!confirm("确定要删除这个平台吗？")) return;
         const providerId = row.dataset.providerId || "";
         try {
-          await onTestSuccess(providerId);
-          const newRow = listNode.querySelector(`.${rowClass}[data-provider-id="${CSS.escape(providerId)}"]`) as HTMLElement | null;
-          const newStatusNode = newRow?.querySelector(`.${statusClass}`) as HTMLElement | null | undefined;
-          showStatus(newStatusNode, "连接成功");
-        } catch (error) {
-          showStatus(statusNode, `连接成功，但保存失败：${(error as Error).message || "未知错误"}`, true);
+          await onBeforeDelete(providerId, row.dataset.baseUrl || "");
+        } catch {}
+        if (providerId) {
+          try {
+            await sendRuntimeMessage(buildDeleteMessage(providerId));
+          } catch {}
         }
-      } else {
-        showStatus(statusNode, `失败：${resp?.error || "未知错误"}`, true);
-      }
+        row.remove();
+        updateEmptyState(listNode, emptyNode);
+        if (typeof onDelete === "function") {
+          onDelete(providerId);
+        }
+      });
+
+      wireTailExtras?.(row, { listNode });
+
+      listNode.appendChild(row);
     });
-
-    wireRowExtras?.(row, { listNode, showStatus });
-
-    listNode.appendChild(row);
     updateEmptyState(listNode, emptyNode);
-  }
-
-  // 成功状态：显示文本并在 successMinMs 后恢复被禁用的输入与按钮；错误状态不自动恢复
-  function showStatus(node: HTMLElement | null | undefined, text: string, isError = false): void {
-    if (!node) return;
-    node.hidden = false;
-    node.textContent = text;
-    node.dataset.error = isError ? "true" : "false";
-
-    if (!isError && statusSuccessMinMs > 0) {
-      const row = node.closest(`.${rowClass}`) as ProviderRowElement | null;
-      if (!row) return;
-
-      if (row[statusTimerKey]) clearTimeout(row[statusTimerKey] as number);
-
-      const inputs = row.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button");
-      const previouslyDisabled = Array.from(inputs).map((el) => el.disabled);
-      inputs.forEach((el) => (el.disabled = true));
-
-      row[statusTimerKey] = setTimeout(() => {
-        row[statusTimerKey] = null;
-        inputs.forEach((el, index) => {
-          if (previouslyDisabled[index] !== undefined) el.disabled = previouslyDisabled[index];
-        });
-      }, statusSuccessMinMs);
-    }
+    return list;
   }
 
   return {
     generateId,
     render,
-    add,
-    showStatus,
     updateEmptyState,
-    setTestSuccessHandler(handler) {
-      onTestSuccess = handler;
-    },
     setDeleteHandler(handler) {
       onDelete = handler;
     },

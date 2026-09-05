@@ -18,9 +18,10 @@
 //    chrome.permissions.request 之间零 await——手势经一次 runtime 消息传导，
 //    SW 侧垫任何 await 都会让弹窗被 Chrome 拒绝。
 //
-// 另锁两条设置面板侧的既有契约：保存按钮 click 直调 saveSettings（中间不垫
-// await）；非手势来路（AI/ASR 行「测试连接」成功后的自动保存）显式关闭权限
-// 申请——那条路的手势已被探针的 await 用掉。
+// 另锁一条设置面板侧的既有契约：保存按钮 click 直调 saveSettings（中间不垫
+// await）。provider-master-detail/02 起 saveSettings 不再申请平台权限（平台
+// 授权收口在 provider-editor Modal 的 saveProviderSingle / 探针与模型列表
+// 预检链路），平铺行「测试连接」自动保存与预设切换代申请随之退役。
 //
 // 断言刻意只认「await 的位置」而不认变量名/文案，改注释、换字段名都不该红。
 
@@ -83,36 +84,19 @@ describe("host 权限代申请：单一实现与调用方闭包", () => {
     }
   });
 
-  it("调用方闭包：恰好是设置面板保存链（settings-panel）与 AI 平台行预设切换链（options-rows）", () => {
+  it("调用方闭包：恰好是设置面板（settings-panel：整表链退役后只剩 saveProviderSingle 的单平台保存）", () => {
     const callers = listExtensionSources()
       .filter((file) => !file.endsWith("/core/host-permissions.ts") && !file.endsWith("/core/host-permissions.js"))
       .filter((file) => /requestProviderOriginsViaBackground\s*\(/.test(readFileSync(file, "utf8")))
       .map((file) => file.replace(/^.*\/extension\//, "extension/"))
       .sort();
     expect(callers).toEqual([
-      "extension/ui/options-rows.ts",
       "extension/ui/settings-panel.ts"
     ]);
   });
 });
 
 describe("调用方手势同步链（调用前零先行 await）", () => {
-  it("settings-panel saveSettings：函数体开头到权限申请调用之间没有先行 await", () => {
-    const source = readSource("../../extension/ui/settings-panel.js");
-    const start = source.indexOf("async function saveSettings(");
-    const request = source.indexOf("requestProviderOriginsViaBackground(", start);
-    expect(start).toBeGreaterThan(-1);
-    expect(request).toBeGreaterThan(start);
-
-    const prefix = source.slice(start, request);
-    // 紧贴调用自己的那个 await 不算先行 await（await f() 里 f 仍在同一同步任务里
-    // 被调用），但要求它确实直接附着在本次调用上；在此之前的任何 await 都会让
-    // chrome.permissions.request 丢手势，必须红。
-    expect(/(?:^|[\s(=])await\s*$/.test(prefix), "requestProviderOriginsViaBackground 应被直接 await").toBe(true);
-    const before = prefix.replace(/\s*await\s*$/, "");
-    expect(before.match(/\bawait\b/g) || [], "申请权限之前不得有先行 await").toEqual([]);
-  });
-
   it("settings-panel saveProviderSingle：函数体开头到权限申请调用之间没有先行 await", () => {
     const source = readSource("../../extension/ui/settings-panel.js");
     const start = source.indexOf("async function saveProviderSingle(");
@@ -126,19 +110,6 @@ describe("调用方手势同步链（调用前零先行 await）", () => {
     expect(/(?:^|[\s(=])await\s*$/.test(prefix), "requestProviderOriginsViaBackground 应被直接 await").toBe(true);
     const before = prefix.replace(/\s*await\s*$/, "");
     expect(before.match(/\bawait\b/g) || [], "申请权限之前不得有先行 await").toEqual([]);
-  });
-
-  it("options-rows onPresetChange：预设切换处理器到权限申请调用之间零 await", () => {
-    const source = readSource("../../extension/ui/options-rows.js");
-    const start = source.indexOf("onPresetChange:");
-    const request = source.indexOf("requestProviderOriginsViaBackground(", start);
-    expect(start).toBeGreaterThan(-1);
-    expect(request).toBeGreaterThan(start);
-
-    // change 事件即用户手势：处理器是同步箭头函数，任何先行 await 都会把
-    // runtime 消息发出前的手势链垫断（表现为切平台弹不出授权框）。
-    const prefix = source.slice(start, request);
-    expect(prefix.match(/\bawait\b/g) || [], "预设切换的申请之前不得有 await").toEqual([]);
   });
 });
 
@@ -164,13 +135,13 @@ describe("设置面板保存链的既有契约", () => {
     expect(/\bawait\b/.test(binding[1])).toBe(false);
   });
 
-  it("非手势来路（测试连接成功后的自动保存）显式关闭权限申请", () => {
+  it("saveSettings 不再申请平台权限（provider-master-detail/02：平台授权收口在 provider-editor 单平台链）", () => {
     const source = readSource("../../extension/ui/settings-panel.js");
-    for (const hook of ["setTestSuccessHandler(", "setAsrTestSuccessHandler("]) {
-      const start = source.indexOf(hook);
-      expect(start, `找不到 ${hook}`).toBeGreaterThan(-1);
-      const body = source.slice(start, start + 200);
-      expect(body).toContain("saveSettings(elements, { requestPermissions: false })");
-    }
+    const start = source.indexOf("async function saveSettings(");
+    const end = source.indexOf("\n}", start);
+    const body = source.slice(start, end);
+    expect(body).not.toContain("requestProviderOriginsViaBackground(");
+    expect(body).not.toContain("ai-providers-save");
+    expect(body).not.toContain("asr-providers-save");
   });
 });

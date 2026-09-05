@@ -1,9 +1,9 @@
 // extension/ui/options-rows.ts
 // 选项页三类行构建器（固定属性 / 笔记段落 / AI 平台）与纯验证逻辑。
-// AI 平台行的构建本体由 ui/provider-row.js 的 createProviderRow 承担（与 ASR 行共用），
-// 本文件只提供 AI 侧真实差异：模型字段（ui/model-picker.js 的输入 + 下拉拉取控件，
-// 拉取走 ai-providers-models 消息）、报文形状（连通性测试已改直调
-// ai/provider-test.js）与既有导出签名。
+// AI 平台行的构建本体由 ui/provider-row.js 的 createProviderRow 承担（与 ASR 行
+// 共用，provider-master-detail/02 起为紧凑形态：行是纯展示 + 编辑/删除入口，
+// 编辑字段与连通性测试全部在 ui/provider-editor.js 的 Modal 里，保存走单平台
+// upsert）。本文件只提供 AI 侧真实差异：显示名/模型名解析与既有导出签名。
 // 行构建器只依赖参数与回调，不直接访问 DOM 全局；验证函数不触碰 DOM。
 
 import { PRESETS, type AiProviderPreset } from "../core/presets.js";
@@ -19,10 +19,6 @@ import {
   type NotePlaceholderSection
 } from "../core/validators.js";
 import { escapeHtml } from "../shared/string-utils.js";
-import { sendRuntimeMessage } from "../shared/messaging.js";
-import { requestProviderOriginsViaBackground } from "../core/host-permissions.js";
-import { testAiProviderConnection } from "../ai/provider-test.js";
-import { buildModelPickerField, wireModelPicker } from "./model-picker.js";
 import {
   createProviderRow,
   TRASH_ICON_PATHS,
@@ -30,8 +26,6 @@ import {
 } from "./provider-row.js";
 
 const MAX_NOTE_PLACEHOLDER_SECTIONS = 5;
-
-const AI_PROVIDER_STATUS_SUCCESS_MIN_MS = 2000;
 
 // 行「编辑」按钮回调（provider-master-detail/01）：由 settings-panel 注入
 // （打开 provider-editor Modal 并现查权威列表项），本模块只转发 providerId。
@@ -366,78 +360,20 @@ function closeAllFixedPropertyMenus(listNode: HTMLElement): void {
   });
 }
 
-// ===== AI 模型平台 =====
+// ===== AI 模型平台（紧凑行，provider-master-detail/02） =====
 // 行构建本体由 ui/provider-row.js 的 createProviderRow 承担（与 ASR 行共用），
-// 此处只提供 AI 侧差异：模型字段固定为文本输入 + 下拉拉取按钮、Key 占位符
-// 随 requiresKey 变化、CRUD 报文走 ai-providers-*（连通性测试直调探针模块）。导出签名保持不变。
+// 此处只提供 AI 侧差异：显示名（自定义名回落预设名，拍板 Q7）/ 模型名解析 /
+// 删除报文。编辑、连通性测试、模型目录拉取全在 ui/provider-editor.js 的 Modal。
 
 const aiProviderRow = createProviderRow({
   rowClass: "ai-provider-row",
-  presetClass: "ai-provider-preset",
-  presetSelectTitle: "平台",
-  baseUrlClass: "ai-provider-baseurl",
-  baseUrlPlaceholder: "baseUrl（如 https://api.openai.com/v1）",
-  apikeyClass: "ai-provider-apikey",
-  modelClass: "ai-provider-model",
-  testClass: "ai-provider-test",
-  removeClass: "ai-provider-remove",
-  statusClass: "ai-provider-status",
+  editClass: "provider-row-edit",
+  removeClass: "provider-row-remove",
   idPrefix: "p_",
-  statusSuccessMinMs: AI_PROVIDER_STATUS_SUCCESS_MIN_MS,
-  statusTimerKey: "_aiProviderStatusTimer",
   resolvePreset: (presets, presetId) => presets.find((p) => p.id === presetId) || presets[presets.length - 1],
-  resolveModel: (item) => String(item.model || ""),
-  apiKeyPlaceholder: ({ item, preset, hasSavedKey }) => {
-    const requiresKey = item.requiresKey !== false && preset?.requiresKey !== false;
-    return hasSavedKey ? "已保存" : (requiresKey ? "API Key" : "API Key（可选）");
-  },
-  buildModelField: (preset, model) => buildModelPickerField({
-    inputClass: "ai-provider-model",
-    placeholder: "模型名（如 gpt-4o-mini）",
-    value: model
-  }),
+  displayName: (item, preset) => String(item.name || preset?.name || "自定义"),
+  displayModel: (item) => String(item.model || ""),
   onRowEdit: (row) => onAiRowEdit(row.dataset.providerId || ""),
-  onPresetChange: (row, _previousPreset, next) => {
-    // AI 行不清空已输 Key，只随新预设更新占位符（可选 Key 平台提示"（可选）"）
-    const apikeyInput = row.querySelector(".ai-provider-apikey") as HTMLInputElement;
-    apikeyInput.placeholder = row.dataset.hasSavedKey === "1"
-      ? "已保存"
-      : (next.requiresKey ? "API Key" : "API Key（可选）");
-    // 选择平台即代申请新 baseUrl 的 host 权限：change 事件持有用户手势，经一次
-    // runtime 消息传导到 SW 的 chrome.permissions.request（零先行 await）。已授权
-    // 的 origin Chrome 不会再弹窗，重复触发无害；baseUrl 为空（自定义）不申请。
-    // 失败静默——保存/探针/模型列表的权限预检仍有兜底提示。
-    const baseUrl = (row.querySelector(".ai-provider-baseurl") as HTMLInputElement).value.trim();
-    if (baseUrl) {
-      requestProviderOriginsViaBackground([baseUrl]).catch(() => {});
-    }
-  },
-  wireRowExtras: (row, { showStatus }) => wireModelPicker(row, {
-    inputClass: "ai-provider-model",
-    baseUrlClass: "ai-provider-baseurl",
-    apiKeyClass: "ai-provider-apikey",
-    statusClass: "ai-provider-status",
-    showStatus,
-    // AI 侧模型列表仍走 SW 消息（ai/provider-models.js 直连拉取，arch-slim-2/09
-    // 探针归 ai/）；响应形状
-    // 由消息类型经 ResponseOf 推断（arch-slim-2/02），不再手猜
-    fetchModels: ({ baseUrl, apiKey, providerId }) => sendRuntimeMessage({
-      type: "ai-providers-models",
-      baseUrl,
-      apiKey,
-      providerId
-    })
-  }),
-  // 连通性测试直调 ai/provider-test.js（不再走 ai-providers-test 消息往返）：
-  // options 页同属扩展 context，host_permissions 生效，跨域 fetch 无需 SW 中转；
-  // Key 代查（重输优先、否则按 providerId 读已存 Key）收口在探针入口内。
-  runTestProbe: ({ row, baseUrl, apiKey, model }) =>
-    testAiProviderConnection({
-      providerId: row.dataset.providerId || "",
-      baseUrl,
-      apiKey,
-      model
-    }),
   buildDeleteMessage: (providerId) => ({ type: "ai-providers-delete", providerId })
 });
 
@@ -450,31 +386,6 @@ export function renderAiProviders(
   } = {}
 ): void {
   aiProviderRow.render(listNode, emptyNode, items, { presets });
-}
-
-export function collectAiProviders(listNode: HTMLElement, { presets = PRESETS, generateId = aiProviderRow.generateId }: { presets?: readonly AiProviderPreset[]; generateId?: () => string } = {}) {
-  return Array.from(listNode.querySelectorAll<HTMLElement>(".ai-provider-row")).map((row) => {
-    const presetSelect = row.querySelector(".ai-provider-preset") as HTMLSelectElement;
-    const preset = presets.find((p) => p.id === presetSelect.value) || presets[presets.length - 1];
-    const apiKey = (row.querySelector(".ai-provider-apikey") as HTMLInputElement).value.trim();
-    const baseUrl = (row.querySelector(".ai-provider-baseurl") as HTMLInputElement).value.trim().replace(/\/+$/, "");
-    return {
-      id: row.dataset.providerId || generateId(),
-      presetId: preset.id,
-      name: preset.name,
-      baseUrl,
-      model: (row.querySelector(".ai-provider-model") as HTMLInputElement).value.trim(),
-      requiresKey: preset.requiresKey,
-      enabled: true,
-      apiKey,
-      hasSavedKey: row.dataset.hasSavedKey === "1"
-    };
-  });
-}
-
-// 测试成功后回调：重新保存设置并返回新渲染的行（由 options.js 注入，避免行构建器耦合保存流程）
-export function setTestSuccessHandler(handler: Parameters<typeof aiProviderRow.setTestSuccessHandler>[0]): void {
-  aiProviderRow.setTestSuccessHandler(handler);
 }
 
 // 新平台 id 生成（provider-master-detail/01：provider-editor Modal 保存新增时
