@@ -317,11 +317,9 @@ export async function refreshClip(): Promise<void> {
       });
     }
     // fetchState/reason 已由 tryLoadSubtitleCandidates → loadSubtitle 内的
-    // 字幕接受事务（commit.acceptSubtitle）落位（ready + 清原因），这里不再
-    // 重写；以下只做选中轨渲染与完成提示。
-    if (isReaderViewOpen()) {
-      notifyReaderPresenter("subtitle-ready");
-    }
+    // 字幕接受事务（commit.acceptSubtitle）落位（ready + 清原因），渲染也由
+    // 事务内的 subtitle-ready 通知驱动（唯一 emit 点，此处补发即双渲染），
+    // 这里只做完成提示。
     setStatus("抓取完成，可以复制或下载字幕。");
   } catch (error) {
     if (isStaleRunError(error)) {

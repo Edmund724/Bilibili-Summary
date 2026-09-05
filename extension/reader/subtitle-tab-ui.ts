@@ -23,7 +23,7 @@ import { byId } from "../shared/dom-utils.js";
 import { logWarn } from "../shared/logging.js";
 import { ensureSummarizeChain } from "../subtitle/lazy.js";
 import { isProgrammaticScrolling, ids } from "./state.js";
-import { whenReaderReady, withReader } from "../ui/reader-gate.js";
+import { withReader } from "../ui/reader-gate.js";
 
 export function buildSubtitleTabBodyHtml(): string {
   return `
@@ -80,9 +80,9 @@ export function buildSubtitleTabBodyHtml(): string {
 }
 
 export function bindSubtitleTabEvents(): void {
-  // ===== 字幕轨切换（候选02 分层接线：先装载字幕，再重渲与同步） =====
-  // loadSubtitle 属总结链、renderReadingView/sync 属 reader 域——按层各自
-  // ensure 后串联，顺序与收口前一致。
+  // ===== 字幕轨切换 =====
+  // loadSubtitle 属总结链；重渲/同步由 loadSubtitle 内字幕接受事务的
+  // subtitle-ready 通知驱动（唯一 emit 点，见 commit.ts），此处补调即双渲染。
   byId(ids.readingSubtitleSelect).addEventListener("change", (event) => {
     const selectTarget = event.target as HTMLSelectElement;
     const option = selectTarget.options[selectTarget.selectedIndex];
@@ -92,10 +92,6 @@ export function bindSubtitleTabEvents(): void {
       .then((chain) =>
         chain.loadSubtitle(url, String(option.dataset.lang || "unknown"), state.clip.fetchRunId, String(option.dataset.id || ""))
       )
-      .then(() => whenReaderReady((reader) => {
-        reader.renderReadingView();
-        reader.syncReadingViewPlayback(true);
-      }))
       .catch((error) => {
         logWarn("[BOC] failed to switch subtitle in reading view", error);
       });

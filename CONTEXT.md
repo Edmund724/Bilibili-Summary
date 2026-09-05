@@ -32,7 +32,7 @@ _Avoid_: 目录、分段、集
 _Avoid_: 补零/不补零双约定并存、各处手写 withHours 启发式、第三套解析器
 
 **字幕接受**:
-一段字幕成为当前视频生效字幕的唯一事务：稳定排序（from 升序，读路径二分依赖）→ 写 state → `fetchState="ready"` → 清 `noSubtitleReason` → 刷新派生内容（笔记/SRT/TXT）→ 通知 reader。四个写入点（CC 缓存命中/网络新抓/ASR 缓存命中/转写完成）与无字幕出口（逆事务：清空 + `empty` + 原因）都必须经此收口，禁止手抄序列。
+一段字幕成为当前视频生效字幕的唯一事务：稳定排序（from 升序，读路径二分依赖）→ 写 state → `fetchState="ready"` → 清 `noSubtitleReason` → 刷新派生内容（笔记/SRT/TXT）→ 通知 reader（`subtitle-ready`，emit 单点在事务内——调用方补发通知或直调渲染即双渲染）。四个写入点（CC 缓存命中/网络新抓/ASR 缓存命中/转写完成）与无字幕出口（逆事务：清空 + `empty` + 原因）都必须经此收口，禁止手抄序列。
 代码名：`subtitle/commit.js`（接受与无字幕出口的唯一入口；DOM 渲染回调由 fetcher 注入，保持静态图无环）
 _Avoid_: 落账、提交、写入字幕、手抄接受序列
 
