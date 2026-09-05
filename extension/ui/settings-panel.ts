@@ -38,22 +38,25 @@ import {
   collectNoteSectionRows,
   clearNoteSectionErrors,
   renderAiProviders,
-  addAiProviderRow,
   collectAiProviders,
+  generateAiProviderId,
   setTestSuccessHandler,
-  setAiBeforeDeleteHandler
+  setAiBeforeDeleteHandler,
+  setAiRowEditHandler
 } from "./options-rows.js";
 import type { ProviderRowItem } from "./provider-row.js";
 import {
   renderAsrProviders,
-  addAsrProviderRow,
   collectAsrProviders,
+  generateAsrProviderId,
   setActiveAsrProvider,
   getActiveAsrProviderId,
   setAsrTestSuccessHandler,
   setAsrDeleteHandler,
-  setAsrBeforeDeleteHandler
+  setAsrBeforeDeleteHandler,
+  setAsrRowEditHandler
 } from "./options-asr-rows.js";
+import { openProviderEditor, type ProviderEditorKind } from "./provider-editor.js";
 import {
   requestProviderOriginsViaBackground,
   revokeOrphanOrigin,
@@ -65,6 +68,10 @@ const NOTE_SECTION_POSITIONS = new Set(["before_intro", "before_chapters", "befo
 
 let aiPresets: AiProviderPreset[] = [];
 let asrPresets: AsrProviderPreset[] = [];
+
+// 设置抽屉宿主引用（provider-master-detail/01）：单平台保存后的列表重渲需要
+// 按 id 重取 elements——renderReaderSettingsPanel 挂载时赋值。
+let settingsHostRef: HTMLElement | null = null;
 
 // collectFormPayload 的产物形态（save-settings 报文的 settings 载荷）
 interface SettingsFormPayload {
@@ -269,6 +276,7 @@ export function renderReaderSettingsPanel(): void {
   if (!host) {
     return;
   }
+  settingsHostRef = host;
   if (!host.dataset.bocSettingsRendered) {
     host.innerHTML = buildSettingsHtml();
     bindSettingsEvents(host);
@@ -387,6 +395,97 @@ async function loadAsrProviders(): Promise<ProviderRowItem[]> {
   } catch {
     return [];
   }
+}
+
+// ===== 单平台保存与编辑 Modal（provider-master-detail/01） =====
+
+// 单平台 upsert 保存（provider-editor Modal 的保存回调）。与整表 saveSettings
+// 的区别：只保存这一个平台——列表从后端现查（权威数据），平铺行未保存的行内
+// 编辑不混入；upsert 按 id 替换 / 追加后发整列表消息（ai-providers-save /
+// asr-providers-save 本就是整列表替换语义，SW 协议零改动）。API Key 仍单独落
+// chrome.storage.local（saveProviders 后台语义：空输入沿用已存 Key 不清除）。
+// 手势不变式：requestPermissions 分支的权限申请前零先行 await——baseUrl 由
+// upsert 参数直供，无需先查列表（tests/ui/options-save-gesture.test.js 锁定）。
+async function saveProviderSingle(
+  kind: ProviderEditorKind,
+  upsert: ProviderRowItem,
+  { requestPermissions = true }: { requestPermissions?: boolean } = {}
+): Promise<{ ok: boolean; error?: string; providers?: ProviderRowItem[] }> {
+  if (requestPermissions && upsert.baseUrl) {
+    const permission = await requestProviderOriginsViaBackground([String(upsert.baseUrl)]);
+    if (!permission.ok) {
+      return { ok: false, error: permission.error };
+    }
+  }
+  try {
+    // 消息 type 用三元直发单字面量（联合 type 会让 ResponseOf 推断塌成 never）
+    const listResp = kind === "ai"
+      ? await sendRuntimeMessage({ type: "ai-providers-list" })
+      : await sendRuntimeMessage({ type: "asr-providers-list" });
+    const list: ProviderRowItem[] =
+      listResp?.ok && Array.isArray(listResp.providers) ? listResp.providers : [];
+    const providerId = String(upsert.id || "") || (kind === "ai" ? generateAiProviderId() : generateAsrProviderId());
+    const next = list.some((p) => String(p?.id || "") === providerId)
+      ? list.map((p) => (String(p?.id || "") === providerId ? { ...p, ...upsert, id: providerId } : p))
+      : [...list, { ...upsert, id: providerId }];
+    const saveResp = kind === "ai"
+      ? await sendRuntimeMessage({ type: "ai-providers-save", providers: next })
+      : await sendRuntimeMessage({ type: "asr-providers-save", providers: next });
+    if (!saveResp?.ok) {
+      return { ok: false, error: saveResp?.error || "保存失败" };
+    }
+    return { ok: true, providers: saveResp.providers || [] };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message || "保存失败" };
+  }
+}
+
+// 单平台保存后用响应最新列表（含 hasSavedKey）重渲对应列表（与整表保存后的
+// 重渲同源语义；ASR 选用态从当前 DOM radio 读取）。
+function rerenderProviderList(kind: ProviderEditorKind, providers: ProviderRowItem[]): void {
+  const host = settingsHostRef;
+  if (!host) {
+    return;
+  }
+  const elements = collectElements(host);
+  if (kind === "ai") {
+    renderAiProviders(elements.aiProvidersList, elements.aiProvidersEmpty, providers);
+  } else {
+    renderAsrProviders(elements.asrProvidersList, elements.asrProvidersEmpty, providers, {
+      presets: asrPresets,
+      activeId: getActiveAsrProviderId(elements.asrProvidersList)
+    });
+  }
+}
+
+// provider-editor 的 onSave：单平台落盘 + 成功后重渲列表。错误由 Modal 状态行
+// 显示（不走抽屉状态条——保存的是单个平台，Modal 自身就是错误语境）。
+async function saveFromEditor(
+  kind: ProviderEditorKind,
+  upsert: ProviderRowItem,
+  options: { requestPermissions: boolean }
+): Promise<{ ok: boolean; error?: string }> {
+  const result = await saveProviderSingle(kind, upsert, options);
+  if (result.ok && result.providers) {
+    rerenderProviderList(kind, result.providers);
+  }
+  return result;
+}
+
+// 打开编辑 Modal：编辑按 id 现查后端权威列表项（API Key 不在行 DOM 上，平铺行
+// dataset 只有占位信息）；找不到（已被并发删除等竞态）静默不打开。新增传空 id。
+async function openProviderEditorById(kind: ProviderEditorKind, providerId: string): Promise<void> {
+  const providers = kind === "ai" ? await loadAiProviders() : await loadAsrProviders();
+  const item = providerId ? providers.find((p) => String(p?.id || "") === providerId) || null : null;
+  if (providerId && !item) {
+    return;
+  }
+  openProviderEditor({
+    kind,
+    item,
+    presets: kind === "ai" ? aiPresets : asrPresets,
+    onSave: saveFromEditor
+  });
 }
 
 function collectFormPayload(elements: SettingsElements): SettingsFormPayload {
@@ -628,8 +727,12 @@ function bindSettingsEvents(host: HTMLElement): void {
   elements.saveBtn.addEventListener("click", () => saveSettings(elements));
   elements.addFixedPropertyBtn.addEventListener("click", () => addFixedPropertyRow(elements.fixedPropertiesList, elements.fixedPropertiesEmpty));
   elements.addNoteSectionBtn.addEventListener("click", () => addNoteSectionRow(elements.noteSectionsList, elements.noteSectionsEmpty));
-  elements.addAiProviderBtn.addEventListener("click", () => addAiProviderRow(elements.aiProvidersList, elements.aiProvidersEmpty, {}, { presets: aiPresets }));
-  elements.addAsrProviderBtn.addEventListener("click", () => addAsrProviderRow(elements.asrProvidersList, elements.asrProvidersEmpty, {}, { presets: asrPresets }));
+  // 添加平台：直接进空白编辑 Modal（拍板 Q4，预设下拉是编辑页第一项）；
+  // 平铺行「编辑」按钮：现查权威列表项后打开预填 Modal（拍板 Q3）
+  elements.addAiProviderBtn.addEventListener("click", () => void openProviderEditorById("ai", ""));
+  elements.addAsrProviderBtn.addEventListener("click", () => void openProviderEditorById("asr", ""));
+  setAiRowEditHandler((providerId) => void openProviderEditorById("ai", providerId));
+  setAsrRowEditHandler((providerId) => void openProviderEditorById("asr", providerId));
   document.addEventListener("click", (event) => {
     if (!(event.target instanceof Element) || !event.target.closest(".fixed-property-type-picker")) {
       elements.fixedPropertiesList.querySelectorAll<HTMLElement>(".fixed-property-type-picker").forEach((picker) => {

@@ -217,15 +217,27 @@ describe("saveSettings 四段保存链（保存按钮手势，requestPermissions
 });
 
 describe("测试连接成功后的自动保存复用 saveSettings（requestPermissions=false）", () => {
+  // provider-master-detail/01 起「+ 添加平台」改开编辑 Modal（新增保存链归
+  // provider-editor.test.js），本组仍走平铺行行内测试按钮的整表链：用 bus 返回
+  // 存量 provider 渲染出行再触发。
+  const existingAiProvider = {
+    id: "p1",
+    presetId: "custom",
+    name: "自定义",
+    baseUrl: "https://api.example.com/v1",
+    model: "gpt-4o-mini",
+    requiresKey: true,
+    enabled: true
+  };
+
   it("AI 平台探针成功：自动落盘三路报文齐全，但绝不发权限代申请", async () => {
-    const sent = installMessageBus();
+    const sent = installMessageBus({
+      "ai-providers-list": () => ({ ok: true, providers: [existingAiProvider] })
+    });
     const host = await mountPanel();
 
-    fireClick(host.querySelector("#addAiProviderBtn"));
     const row = host.querySelector("#aiProvidersList .ai-provider-row");
-    row.querySelector(".ai-provider-baseurl").value = "https://api.example.com/v1";
     row.querySelector(".ai-provider-apikey").value = "sk-test";
-    row.querySelector(".ai-provider-model").value = "gpt-4o-mini";
 
     fireClick(row.querySelector(".ai-provider-test"));
 
@@ -301,14 +313,14 @@ describe("applyValidationError：可达分支直测 + clearInputErrors 联动", 
   });
 
   it("AI 平台校验失败（message-only 分支）：不落盘，状态条显示具体平台文案", async () => {
-    const sent = installMessageBus();
+    const sent = installMessageBus({
+      "ai-providers-list": () => ({ ok: true, providers: [{ id: "p1", presetId: "custom", name: "自定义", baseUrl: "https://api.example.com/v1", model: "gpt-4o-mini", requiresKey: true, enabled: true }] })
+    });
     const host = await mountPanel();
 
-    fireClick(host.querySelector("#addAiProviderBtn"));
     const row = host.querySelector("#aiProvidersList .ai-provider-row");
-    row.querySelector(".ai-provider-baseurl").value = "https://api.example.com/v1";
     // requiresKey 预设 + 未填 Key：validateAiProviders 报需要 API Key
-    row.querySelector(".ai-provider-model").value = "gpt-4o-mini";
+    row.querySelector(".ai-provider-apikey").value = "";
 
     fireClick(host.querySelector("#bocSettingsSaveBtn"));
 
@@ -319,14 +331,14 @@ describe("applyValidationError：可达分支直测 + clearInputErrors 联动", 
   });
 
   it("baseUrl 非法（message-only 分支）：状态条报格式错误，不进入权限代申请", async () => {
-    const sent = installMessageBus();
+    const sent = installMessageBus({
+      "ai-providers-list": () => ({ ok: true, providers: [{ id: "p1", presetId: "custom", name: "自定义", baseUrl: "https://api.example.com/v1", model: "gpt-4o-mini", requiresKey: true, enabled: true }] })
+    });
     const host = await mountPanel();
 
-    fireClick(host.querySelector("#addAiProviderBtn"));
     const row = host.querySelector("#aiProvidersList .ai-provider-row");
     row.querySelector(".ai-provider-baseurl").value = "not-a-url";
     row.querySelector(".ai-provider-apikey").value = "sk-test";
-    row.querySelector(".ai-provider-model").value = "gpt-4o-mini";
 
     fireClick(host.querySelector("#bocSettingsSaveBtn"));
 

@@ -113,6 +113,21 @@ describe("调用方手势同步链（调用前零先行 await）", () => {
     expect(before.match(/\bawait\b/g) || [], "申请权限之前不得有先行 await").toEqual([]);
   });
 
+  it("settings-panel saveProviderSingle：函数体开头到权限申请调用之间没有先行 await", () => {
+    const source = readSource("../../extension/ui/settings-panel.js");
+    const start = source.indexOf("async function saveProviderSingle(");
+    const request = source.indexOf("requestProviderOriginsViaBackground(", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(request).toBeGreaterThan(start);
+
+    // 单平台保存（provider-master-detail/01）：baseUrl 由 upsert 参数直供，
+    // 无需先查列表——request 之前的任何 await 都会丢手势，必须红。
+    const prefix = source.slice(start, request);
+    expect(/(?:^|[\s(=])await\s*$/.test(prefix), "requestProviderOriginsViaBackground 应被直接 await").toBe(true);
+    const before = prefix.replace(/\s*await\s*$/, "");
+    expect(before.match(/\bawait\b/g) || [], "申请权限之前不得有先行 await").toEqual([]);
+  });
+
   it("options-rows onPresetChange：预设切换处理器到权限申请调用之间零 await", () => {
     const source = readSource("../../extension/ui/options-rows.js");
     const start = source.indexOf("onPresetChange:");

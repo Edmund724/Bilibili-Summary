@@ -18,6 +18,14 @@ import { initCustomSelect } from "./custom-select.js";
 
 const ASR_STATUS_SUCCESS_MIN_MS = 2000;
 
+// 行「编辑」按钮回调（provider-master-detail/01）：由 settings-panel 注入
+// （打开 provider-editor Modal 并现查权威列表项），本模块只转发 providerId。
+let onAsrRowEdit: (providerId: string) => void = () => {};
+
+export function setAsrRowEditHandler(handler: (providerId: string) => void): void {
+  onAsrRowEdit = handler;
+}
+
 // 模型名字段：文本输入 + 下拉拉取按钮（与 AI 平台行同一控件），默认值取预设
 // model，用户既可从下拉选也可改填任意模型名。
 function buildAsrModelField(_preset: ProviderRowPreset | null, model: string): string {
@@ -50,6 +58,7 @@ const asrProviderRow = createProviderRow({
     return `<input class="asr-provider-name" type="text" placeholder="平台名称" value="${escapeHtml(name)}" />`;
   },
   buildModelField: buildAsrModelField,
+  onRowEdit: (row) => onAsrRowEdit(row.dataset.providerId || ""),
   buildTailFields: ({ isActive }) => `
     <label class="asr-provider-active" title="选用该平台自动生成字幕">
       <input class="asr-provider-active-radio" type="radio" name="asrActiveProvider" ${isActive ? "checked" : ""} />
@@ -129,15 +138,6 @@ export function renderAsrProviders(
   });
 }
 
-export function addAsrProviderRow(listNode: HTMLElement, emptyNode: HTMLElement, item: ProviderRowItem = {}, { presets = ASR_PROVIDER_PRESETS, activeId = "" }: { presets?: readonly AsrProviderPreset[]; activeId?: string } = {}): void {
-  asrProviderRow.add(listNode, emptyNode, item, { presets, activeId });
-  const rows = listNode.querySelectorAll<HTMLElement>(".asr-provider-row");
-  const lastRow = rows[rows.length - 1];
-  if (lastRow) {
-    convertRowPresetToCustom(lastRow);
-  }
-}
-
 export function collectAsrProviders(listNode: HTMLElement, { presets = ASR_PROVIDER_PRESETS, generateId = asrProviderRow.generateId }: { presets?: readonly AsrProviderPreset[]; generateId?: () => string } = {}) {
   return Array.from(listNode.querySelectorAll<HTMLElement>(".asr-provider-row")).map((row) => {
     const presetSelect = row.querySelector(".asr-provider-preset") as HTMLSelectElement;
@@ -175,6 +175,12 @@ export function getActiveAsrProviderId(listNode: HTMLElement): string {
 // 测试成功 / 删除后的回调，由 options.js 注入，避免行构建器耦合保存流程
 export function setAsrTestSuccessHandler(handler: Parameters<typeof asrProviderRow.setTestSuccessHandler>[0]): void {
   asrProviderRow.setTestSuccessHandler(handler);
+}
+
+// 新平台 id 生成（provider-master-detail/01：provider-editor Modal 保存新增时
+// 由 settings-panel.saveProviderSingle 调用，沿用平铺行的 id 格式 asr_*）
+export function generateAsrProviderId(): string {
+  return asrProviderRow.generateId();
 }
 
 export function setAsrDeleteHandler(handler: Parameters<typeof asrProviderRow.setDeleteHandler>[0]): void {

@@ -99,6 +99,9 @@ export interface CreateProviderRowConfig {
   buildTailFields?: (ctx: { id: string; isActive: boolean }) => string;
   onPresetChange?: (row: ProviderRowElement, previousPreset: ProviderRowPreset | null, next: ProviderRowPreset) => void;
   wireRowExtras?: (row: ProviderRowElement, ctx: { listNode: HTMLElement; showStatus: ProviderRowShowStatus }) => void;
+  // 行「编辑」按钮回调（provider-master-detail/01 过渡态：行内编辑仍在，
+  // 编辑入口打开 provider-editor Modal；02 紧凑行落地后行编辑职责整体移交）
+  onRowEdit?: (row: ProviderRowElement) => void;
   buildTestPayload?: (ctx: {
     row: ProviderRowElement;
     presets: readonly ProviderRowPreset[];
@@ -157,6 +160,7 @@ export function createProviderRow({
   buildHeaderFields,
   buildModelField,
   buildTailFields,
+  onRowEdit,
   onPresetChange,
   wireRowExtras,
   buildTestPayload,
@@ -221,6 +225,7 @@ export function createProviderRow({
     ${buildModelField(preset, model)}
     ${buildTailFields ? buildTailFields({ id, isActive }) : ""}
     <div class="provider-row-actions">
+      <button type="button" class="secondary-btn provider-row-edit">编辑</button>
       <button type="button" class="secondary-btn ${testClass}">测试</button>
       <p class="${statusClass}" hidden></p>
       <button type="button" class="${removeClass}" aria-label="删除" title="删除">
@@ -228,6 +233,11 @@ export function createProviderRow({
       </button>
     </div>
   `;
+
+    // 编辑：打开 provider-editor Modal（回调由配置注入，见 onRowEdit 注释）
+    row.querySelector(".provider-row-edit")?.addEventListener("click", () => {
+      onRowEdit?.(row);
+    });
 
     // 预设切换：baseUrl 未改过（空或仍是上一预设默认值）时跟随新预设；
     // 其余字段行为（模型字段重建 / 名称跟随 / Key 清空或占位符更新）由配置注入。

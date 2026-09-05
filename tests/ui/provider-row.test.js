@@ -150,11 +150,13 @@ describe("createProviderRow：AI 平台行（options-rows.js 配置）", () => {
     expect(row.querySelector(".ai-provider-model-dropdown").hidden).toBe(true);
     expect(row.querySelector("button.secondary-btn.ai-provider-test").textContent).toBe("测试");
     expect(row.querySelector(".ai-provider-status").hidden).toBe(true);
-    // 操作行：测试 / 状态 / 删除包在同一 .provider-row-actions 容器内且按此顺序
-    //（同排一行呈现，删除按钮贴行尾由 CSS margin-left:auto 保证）
+    // 操作行：编辑 / 测试 / 状态 / 删除包在同一 .provider-row-actions 容器内且
+    // 按此顺序（provider-master-detail/01 起加「编辑」打开 provider-editor
+    // Modal；删除按钮贴行尾由 CSS margin-left:auto 保证）
     const actionsRow = row.querySelector(".provider-row-actions");
     expect(actionsRow).not.toBeNull();
     expect(Array.from(actionsRow.children).map((el) => el.className)).toEqual([
+      "secondary-btn provider-row-edit",
       "secondary-btn ai-provider-test",
       "ai-provider-status",
       "ai-provider-remove"

@@ -33,6 +33,14 @@ const MAX_NOTE_PLACEHOLDER_SECTIONS = 5;
 
 const AI_PROVIDER_STATUS_SUCCESS_MIN_MS = 2000;
 
+// 行「编辑」按钮回调（provider-master-detail/01）：由 settings-panel 注入
+// （打开 provider-editor Modal 并现查权威列表项），本模块只转发 providerId。
+let onAiRowEdit: (providerId: string) => void = () => {};
+
+export function setAiRowEditHandler(handler: (providerId: string) => void): void {
+  onAiRowEdit = handler;
+}
+
 export function renderFixedPropertyRows(listNode: HTMLElement, emptyNode: HTMLElement, items: FixedFrontmatterProperty[] | null | undefined): void {
   listNode.innerHTML = "";
   const rows = Array.isArray(items) ? items : [];
@@ -388,6 +396,7 @@ const aiProviderRow = createProviderRow({
     placeholder: "模型名（如 gpt-4o-mini）",
     value: model
   }),
+  onRowEdit: (row) => onAiRowEdit(row.dataset.providerId || ""),
   onPresetChange: (row, _previousPreset, next) => {
     // AI 行不清空已输 Key，只随新预设更新占位符（可选 Key 平台提示"（可选）"）
     const apikeyInput = row.querySelector(".ai-provider-apikey") as HTMLInputElement;
@@ -443,10 +452,6 @@ export function renderAiProviders(
   aiProviderRow.render(listNode, emptyNode, items, { presets });
 }
 
-export function addAiProviderRow(listNode: HTMLElement, emptyNode: HTMLElement, item: ProviderRowItem = {}, { presets = PRESETS }: { presets?: readonly AiProviderPreset[] } = {}): void {
-  aiProviderRow.add(listNode, emptyNode, item, { presets });
-}
-
 export function collectAiProviders(listNode: HTMLElement, { presets = PRESETS, generateId = aiProviderRow.generateId }: { presets?: readonly AiProviderPreset[]; generateId?: () => string } = {}) {
   return Array.from(listNode.querySelectorAll<HTMLElement>(".ai-provider-row")).map((row) => {
     const presetSelect = row.querySelector(".ai-provider-preset") as HTMLSelectElement;
@@ -470,6 +475,12 @@ export function collectAiProviders(listNode: HTMLElement, { presets = PRESETS, g
 // 测试成功后回调：重新保存设置并返回新渲染的行（由 options.js 注入，避免行构建器耦合保存流程）
 export function setTestSuccessHandler(handler: Parameters<typeof aiProviderRow.setTestSuccessHandler>[0]): void {
   aiProviderRow.setTestSuccessHandler(handler);
+}
+
+// 新平台 id 生成（provider-master-detail/01：provider-editor Modal 保存新增时
+// 由 settings-panel.saveProviderSingle 调用，沿用平铺行的 id 格式 p_*）
+export function generateAiProviderId(): string {
+  return aiProviderRow.generateId();
 }
 
 // 删除动作前先执行的钩子（回收 host 权限），由 options.js 注入
