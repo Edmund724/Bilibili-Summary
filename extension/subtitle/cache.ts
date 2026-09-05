@@ -1,6 +1,8 @@
 import { logWarn, logError } from "../shared/logging.js";
 import { parseBvidFromCacheKey, readLruIndex, writeWithEviction, type EvictionResult, type EvictionFailure } from "../core/cache-lru.js";
 import type { SubtitleTrack } from "../bilibili/gateway.js";
+// 类型专用导入（编译期擦除，无运行时 ai 边）：字幕条目形状归 ai/types 声明。
+import type { SubtitleBodyItem } from "../ai/types.js";
 
 interface LruIndexEntry {
   ts: number;
@@ -138,6 +140,85 @@ export function buildSubtitleSourceKey(subtitleId: unknown, subtitleUrl: unknown
   }
 
   return `lang_${String(lang || "").trim().toLowerCase() || "unknown"}`;
+}
+
+// ===== 字幕签名族（自 ai/analysis 迁入，arch-slim-3 #1）：签名是缓存键，
+// 与 source key 同居本叶子；ai/analysis 与 reader/overview 双向消费。=====
+
+// 条目归一：只留 content 非空的 {from,to,content}（ai/analysis 与签名共用同语义）。
+export function normalizeSubtitleItems(items: unknown): SubtitleBodyItem[] {
+  return (Array.isArray(items) ? items : []).filter(
+    (item): item is SubtitleBodyItem => Boolean(item) && String((item as { content?: unknown })?.content ?? "").trim().length > 0
+  );
+}
+
+// FNV-1a 32 位哈希：确定性轻量签名用（跨会话稳定、无依赖）。
+function fnv1a32(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+// 现成目录 → 签名用指纹文本：确定性的（时间戳, 标题）序列。
+function chapterOutlineText(chapterOutline: unknown): string {
+  return Array.isArray(chapterOutline)
+    ? chapterOutline.map((item) => `${Number(item?.seconds) || 0}|${String(item?.title ?? "")}`).join("\n")
+    : "";
+}
+
+// 「自带章节（模式位）」：非空切换只挑金句短路径，产物形态不同，签名须区分；
+// 「chapterOutline」：简介/评论现成目录（切进「照抄边界」提示词路径），同样改变产物形态。
+interface SubtitleSignatureInput {
+  lang?: unknown;
+  subtitleId?: unknown;
+  subtitleUrl?: unknown;
+  body?: unknown;
+  /** 自带章节（模式位）：非空切换只挑金句短路径，产物形态不同，签名须区分。 */
+  chapters?: unknown;
+  /** 简介/评论现成章节目录（OutlineChapter[]）：目录出现/消失改变分章来源，签名须区分。 */
+  chapterOutline?: unknown;
+}
+
+/**
+ * 字幕签名：按概览票决议定义的确定性轻量签名——构成 = 轨道来源 source key +
+ * lang + 有效条数 + 首末时间戳 + 总字符数（FNV-1a 32 位 → base36）。重抓字幕 /
+ * 换轨 / 切分P 后条数、时间戳或文本量变化即签名变化，概览缓存自然 miss，不做
+ * 主动失效（07 票决议）。模式位（有无自带章节）一并纳入：章节出现/消失会切换
+ * 短路径，产物形态不同。算法必须逐位稳定——历史概览缓存键依赖它。
+ */
+export function buildSubtitleSignature({ lang, subtitleId, subtitleUrl, body, chapters, chapterOutline }: SubtitleSignatureInput = {}): string {
+  const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
+  let count = 0;
+  let totalChars = 0;
+  let firstFrom = 0;
+  let lastTo = 0;
+  for (const item of normalizeSubtitleItems(body)) {
+    const content = String(item?.content ?? "").trim();
+    if (!content) continue;
+    if (count === 0) {
+      firstFrom = Math.max(0, Math.floor(Number(item?.from) || 0));
+    }
+    lastTo = Math.max(0, Math.floor(Number(item?.to) || Number(item?.from) || 0));
+    totalChars += content.length;
+    count += 1;
+  }
+  const basis = [
+    "v1",
+    sourceKey,
+    String(lang ?? ""),
+    String(count),
+    String(firstFrom),
+    String(lastTo),
+    String(totalChars),
+    // 模式位：自带章节非空（短路径）与空（AI 分章）产物不同构，签名必须区分
+    String(Array.isArray(chapters) && chapters.length > 0),
+    // 模式位：现成目录的 FNV 指纹（出现/消失/换目录 → 缓存 miss 重生成）
+    String(fnv1a32(chapterOutlineText(chapterOutline)))
+  ].join("|");
+  return `sig${fnv1a32(basis).toString(36)}`;
 }
 
 export function buildSubtitleCandidates(subtitles: SubtitleTrack[] | null | undefined, preferred: SubtitleTrack | null | undefined): SubtitleTrack[] {

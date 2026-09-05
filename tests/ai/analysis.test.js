@@ -9,6 +9,7 @@ import { resetModuleState, makeSubtitleBody } from "../setup.js";
 
 let mod;
 let jsonRepairMod;
+let cacheMod;
 let storage;
 
 // 内存 Map 实现的 chrome.storage.local（get/set/remove 均 vi.fn，便于断言与注入失败）。
@@ -49,6 +50,8 @@ async function importModules() {
   storage = createMemoryStorage();
   vi.stubGlobal("chrome", { storage: { local: storage.local } });
   mod = await import("../../extension/ai/analysis.js");
+  // 字幕签名族已迁 subtitle/cache.ts（arch-slim-3 #1，键族同居），测试面随迁。
+  cacheMod = await import("../../extension/subtitle/cache.js");
   // JSON 防线（repairTruncatedJson / parseLooseJson）已独立为 ai/json-repair.ts
   // （arch-slim-2/08），测试面随文件迁移。
   jsonRepairMod = await import("../../extension/ai/json-repair.js");
@@ -518,15 +521,15 @@ describe("缓存键与签名", () => {
 
   it("buildSubtitleSignature：确定性、随来源/条数/首末时间戳/文本量变化", () => {
     const base = { lang: "zh-CN", subtitleId: "sub-1", body: makeSubtitleBody(3000) };
-    const sig = mod.buildSubtitleSignature(base);
-    expect(sig).toBe(mod.buildSubtitleSignature({ ...base })); // 确定性
+    const sig = cacheMod.buildSubtitleSignature(base);
+    expect(sig).toBe(cacheMod.buildSubtitleSignature({ ...base })); // 确定性
     expect(sig).toMatch(/^sig[0-9a-z]+$/);
-    expect(mod.buildSubtitleSignature({ ...base, subtitleId: "sub-2" })).not.toBe(sig); // 换轨
-    expect(mod.buildSubtitleSignature({ ...base, body: makeSubtitleBody(3000, 500) })).not.toBe(sig); // 条数变
-    expect(mod.buildSubtitleSignature({ ...base, body: [...base.body, { from: 20, to: 25, content: "x" }] })).not.toBe(sig);
-    expect(mod.buildSubtitleSignature({ ...base, body: makeSubtitleBody(3001) })).not.toBe(sig); // 文本量变
+    expect(cacheMod.buildSubtitleSignature({ ...base, subtitleId: "sub-2" })).not.toBe(sig); // 换轨
+    expect(cacheMod.buildSubtitleSignature({ ...base, body: makeSubtitleBody(3000, 500) })).not.toBe(sig); // 条数变
+    expect(cacheMod.buildSubtitleSignature({ ...base, body: [...base.body, { from: 20, to: 25, content: "x" }] })).not.toBe(sig);
+    expect(cacheMod.buildSubtitleSignature({ ...base, body: makeSubtitleBody(3001) })).not.toBe(sig); // 文本量变
     // 空体也给出确定签名
-    expect(mod.buildSubtitleSignature({ body: [] })).toBe(mod.buildSubtitleSignature({ body: [] }));
+    expect(cacheMod.buildSubtitleSignature({ body: [] })).toBe(cacheMod.buildSubtitleSignature({ body: [] }));
   });
 
   it("分段缓存键复用 segment-cache 键位形状：boc_lvs_analysis_ 前缀 + _b50 预算代继承", async () => {
@@ -831,12 +834,12 @@ describe("buildSubtitleSignature 现成目录模式位", () => {
   ];
 
   it("目录出现/消失/换内容 → 签名变化；同目录确定性一致", () => {
-    const sig = mod.buildSubtitleSignature(base);
-    const withOutline = mod.buildSubtitleSignature({ ...base, chapterOutline: outline });
+    const sig = cacheMod.buildSubtitleSignature(base);
+    const withOutline = cacheMod.buildSubtitleSignature({ ...base, chapterOutline: outline });
     expect(withOutline).not.toBe(sig);
-    expect(mod.buildSubtitleSignature({ ...base, chapterOutline: outline })).toBe(withOutline); // 确定性
+    expect(cacheMod.buildSubtitleSignature({ ...base, chapterOutline: outline })).toBe(withOutline); // 确定性
     expect(
-      mod.buildSubtitleSignature({ ...base, chapterOutline: [...outline, { seconds: 200, title: "结尾" }] })
+      cacheMod.buildSubtitleSignature({ ...base, chapterOutline: [...outline, { seconds: 200, title: "结尾" }] })
     ).not.toBe(withOutline); // 换目录
   });
 });

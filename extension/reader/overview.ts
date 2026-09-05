@@ -31,13 +31,11 @@ import { getErrorMessage } from "../shared/error-helpers.js";
 import { setMessage } from "../shared/ui-status.js";
 // 「选中平台 + 其 API Key」解析（与选区解释共用）。
 import { resolveActiveProvider } from "../ai/active-provider.js";
-import {
-  runOverviewAnalysis,
-  buildSubtitleSignature,
-  type AnalysisChapter,
-  type AnalysisQuote,
-  type OverviewAnalysis
-} from "../ai/analysis.js";
+// 签名族已迁 subtitle/cache.ts（arch-slim-3 #1，键族同居）；概览管线本体只留
+// type-only 引用（编译期擦除），运行时在 startOverviewRun 内动态 import 按需
+// 装载——reader 装载图不拖整条 AI 管线（build-content 守卫钉住）。
+import { buildSubtitleSignature } from "../subtitle/cache.js";
+import type { AnalysisChapter, AnalysisQuote, OverviewAnalysis } from "../ai/analysis.js";
 import { shouldShowHoursInNote } from "../notes/render.js";
 import { ids } from "./state.js";
 import { isReaderTranscribing } from "./transcribe-banner.js";
@@ -203,6 +201,10 @@ export function triggerReaderOverviewGeneration(
 
 async function startOverviewRun(clipKey: string, forceRefresh: boolean): Promise<void> {
   try {
+    // 动态 import：AI 管线（analysis → map-reduce/pool/budgeter…）只在生成触发
+    // 时装载，reader chunk 保持轻（守卫见 scripts/build-content.js）。并发首触
+    // 由 analysis 模块内的 inflightOverviews 去重，装载本身经 ESM 缓存单次。
+    const { runOverviewAnalysis } = await import("../ai/analysis.js");
     const provider = await resolveActiveProvider();
     const analysis = await runOverviewAnalysis(
       // digest-only-ui：思考档位显式钉死 off（对齐 ai/explain.ts 的钉法）——

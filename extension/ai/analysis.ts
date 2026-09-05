@@ -16,7 +16,7 @@
 // 让已成功段免重付费）；单次路径失败 → 抛错由调用方处理。
 // 不接 UI / reader / sidepanel；消费接线由后续集成步骤负责。
 
-import { buildSubtitleSourceKey } from "../subtitle/cache.js";
+import { buildSubtitleSourceKey, buildSubtitleSignature, normalizeSubtitleItems } from "../subtitle/cache.js";
 import { formatClock, parseClock } from "../shared/clock-text.js";
 import { logError } from "../shared/logging.js";
 import { makeAbortedError } from "../shared/error-helpers.js";
@@ -251,14 +251,8 @@ UP 主：{ownerName}
 {transcriptText}`;
 
 // ============================================================
-// 小工具（渲染 / 签名 / 模板填充）
+// 小工具（渲染 / 模板填充；签名族已迁 subtitle/cache.ts）
 // ============================================================
-
-function normalizeItems(items: unknown): SubtitleBodyItem[] {
-  return (Array.isArray(items) ? items : []).filter(
-    (item): item is SubtitleBodyItem => Boolean(item) && String((item as { content?: unknown })?.content ?? "").trim().length > 0
-  );
-}
 
 /**
  * 字幕正文 → 模型可读文本：每行 `[M:SS] 内容`（对齐系统提示词的字幕格式教学）。
@@ -266,7 +260,7 @@ function normalizeItems(items: unknown): SubtitleBodyItem[] {
  * 发送物由这里从同一份 body（段 items）现场渲染，预算量与实际消耗同源。
  */
 function renderAnalysisTranscript(items: unknown): string {
-  return normalizeItems(items)
+  return normalizeSubtitleItems(items)
     .map((item) => `[${formatClock(item?.from)}] ${String(item?.content ?? "").trim()}`)
     .join("\n");
 }
@@ -274,7 +268,7 @@ function renderAnalysisTranscript(items: unknown): string {
 // 取一组字幕项末尾约 minChars 个字（至少一条），用作下一段的前情回顾；
 // 至少给一条，否则正好卡在切点的那句话反而是最缺上下文的一句。
 function tailItems(items: unknown, minChars: number): SubtitleBodyItem[] {
-  const list = normalizeItems(items);
+  const list = normalizeSubtitleItems(items);
   if (!list.length || minChars <= 0) return [];
   const tail: SubtitleBodyItem[] = [];
   let total = 0;
@@ -296,74 +290,8 @@ function fillTemplate(template: string, vars: Record<string, unknown>): string {
   return out;
 }
 
-// FNV-1a 32 位哈希：确定性轻量签名用（跨会话稳定、无依赖）。
-function fnv1a32(text: string): number {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i += 1) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash >>> 0;
-}
-
-// 现成目录 → 签名用指纹文本：确定性的（时间戳, 标题）序列。
-function chapterOutlineText(chapterOutline: unknown): string {
-  return Array.isArray(chapterOutline)
-    ? chapterOutline.map((item) => `${Number(item?.seconds) || 0}|${String(item?.title ?? "")}`).join("\n")
-    : "";
-}
-
-// 「自带章节（模式位）」：非空切换只挑金句短路径，产物形态不同，签名须区分；
-// 「chapterOutline」：简介/评论现成目录（切进「照抄边界」提示词路径），同样改变产物形态。
-interface SubtitleSignatureInput {
-  lang?: unknown;
-  subtitleId?: unknown;
-  subtitleUrl?: unknown;
-  body?: unknown;
-  /** 自带章节（模式位）：非空切换只挑金句短路径，产物形态不同，签名须区分。 */
-  chapters?: unknown;
-  /** 简介/评论现成章节目录（OutlineChapter[]）：目录出现/消失改变分章来源，签名须区分。 */
-  chapterOutline?: unknown;
-}
-
-/**
- * 字幕签名：现仓库无现成的字幕内容签名实现（grep 核实），按概览票决议定义
- * 确定性轻量签名——构成 = 轨道来源 source key + lang + 有效条数 + 首末时间戳 +
- * 总字符数（FNV-1a 32 位 → base36）。重抓字幕 / 换轨 / 切分P 后条数、时间戳或
- * 文本量变化即签名变化，概览缓存自然 miss，不做主动失效（07 票决议）。
- * 模式位（有无自带章节）一并纳入：章节出现/消失会切换短路径，产物形态不同。
- */
-export function buildSubtitleSignature({ lang, subtitleId, subtitleUrl, body, chapters, chapterOutline }: SubtitleSignatureInput = {}): string {
-  const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
-  let count = 0;
-  let totalChars = 0;
-  let firstFrom = 0;
-  let lastTo = 0;
-  for (const item of normalizeItems(body)) {
-    const content = String(item?.content ?? "").trim();
-    if (!content) continue;
-    if (count === 0) {
-      firstFrom = Math.max(0, Math.floor(Number(item?.from) || 0));
-    }
-    lastTo = Math.max(0, Math.floor(Number(item?.to) || Number(item?.from) || 0));
-    totalChars += content.length;
-    count += 1;
-  }
-  const basis = [
-    "v1",
-    sourceKey,
-    String(lang ?? ""),
-    String(count),
-    String(firstFrom),
-    String(lastTo),
-    String(totalChars),
-    // 模式位：自带章节非空（短路径）与空（AI 分章）产物不同构，签名必须区分
-    String(Array.isArray(chapters) && chapters.length > 0),
-    // 模式位：现成目录的 FNV 指纹（出现/消失/换目录 → 缓存 miss 重生成）
-    String(fnv1a32(chapterOutlineText(chapterOutline)))
-  ].join("|");
-  return `sig${fnv1a32(basis).toString(36)}`;
-}
+// FNV-1a 32 位哈希与字幕签名族已迁 subtitle/cache.ts（arch-slim-3 #1，键族同居）；
+// 本模块经下方 import 消费同一实现。
 
 // ============================================================
 // 适配纯函数（整搬自参考仓库 lib/ai.js，产出字段名归一化为本仓库形状）。
@@ -381,7 +309,7 @@ function analysisTimingVariables(
   items: unknown,
   durationSeconds: unknown
 ): { maxTimestampSeconds: number; durationFormatted: string; lateThreshold: string } {
-  const list = normalizeItems(items);
+  const list = normalizeSubtitleItems(items);
   const last = list.length ? list[list.length - 1] : null;
   const lastStampSeconds = last ? Math.max(0, Math.floor(Number(last?.to) || Number(last?.from) || 0)) : 0;
   const effectiveSeconds = Math.max(Math.floor(Number(durationSeconds) || 0), lastStampSeconds);
@@ -682,7 +610,7 @@ function buildContextNote(mode: "full" | "quotes", contextItems: unknown): strin
  * 区间算（videoDuration 传段尾秒或视频时长），让模型只覆盖这一段。
  */
 function buildAnalysisUserPrompt(mode: "full" | "quotes", input: BuildAnalysisPromptInput = {}): BuiltAnalysisPrompt {
-  const items = normalizeItems(input.items);
+  const items = normalizeSubtitleItems(input.items);
   const timing = analysisTimingVariables(items, input.videoDuration);
   const startSeconds = Math.max(0, Math.floor(Number(input.startSeconds) || (items.length ? Number(items[0]?.from) || 0 : 0)));
   const lastItem = items.length ? items[items.length - 1] : null;
@@ -1045,7 +973,7 @@ async function executeOverviewRun({
   askCostGuard,
   onProgress
 }: ExecuteOverviewRunArgs): Promise<OverviewAnalysis> {
-  if (normalizeItems(body).length === 0) {
+  if (normalizeSubtitleItems(body).length === 0) {
     throw new Error("没有可用的字幕");
   }
   const systemPrompt = shortPath ? QUOTES_SYSTEM_PROMPT : ANALYSIS_SYSTEM_PROMPT;
@@ -1090,7 +1018,7 @@ async function executeOverviewRun({
 
   if (!segmented) {
     // —— 单次路径：预算内一次调用，失败整体抛错由调用方处理（07 票决议）——
-    const items = normalizeItems(body);
+    const items = normalizeSubtitleItems(body);
     const startSeconds = Math.max(0, Math.floor(Number(items[0]?.from) || 0));
     const built = buildPrompt({
       ...promptVars,

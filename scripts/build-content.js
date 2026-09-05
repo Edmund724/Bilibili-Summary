@@ -125,6 +125,7 @@ const mainPackageOptions = {
   platform: "browser",
   minify: true,
   sourcemap: true,
+  metafile: true,
   target: "chrome120",
   plugins: [localImportGuard],
 };
@@ -161,11 +162,12 @@ const watchRebuildLog = {
 async function main() {
   cleanPreviousOutput();
   if (!watchMode) {
-    await Promise.all([build(mainPackageOptions), build(bootstrapOptions)]);
+    const mainResult = await build(mainPackageOptions);
+    await build(bootstrapOptions);
     if (!selfCheck()) {
       return;
     }
-    report();
+    report(mainResult.metafile);
     return;
   }
   const mainCtx = await context({
@@ -176,11 +178,12 @@ async function main() {
     ...bootstrapOptions,
     plugins: [...bootstrapOptions.plugins, watchRebuildLog],
   });
-  await Promise.all([mainCtx.rebuild(), bootstrapCtx.rebuild()]);
+  const mainRebuild = await mainCtx.rebuild();
+  await bootstrapCtx.rebuild();
   if (!selfCheck()) {
     process.exit(1);
   }
-  report();
+  report(mainRebuild.metafile);
   await Promise.all([mainCtx.watch(), bootstrapCtx.watch()]);
   console.log("[watch] build-content watching for changes...");
 }
@@ -239,7 +242,26 @@ function collectStaticChunkNames() {
   return names;
 }
 
-function report() {
+// 体积守卫（评审 #1）：reader 域装载图（含 reader/lifecycle 的 chunk）不得含
+// ai/analysis 概览管线——管线只能经 overview 的 startOverviewRun 动态 import
+// 按需装载。防止未来有人把静态 import 加回去，把 reader chunk 的拆分悄悄焊回。
+function assertAnalysisNotInReaderGraph(meta) {
+  for (const [file, out] of Object.entries(meta.outputs)) {
+    if (!file.endsWith(".mjs")) continue;
+    const inputs = Object.keys(out.inputs);
+    if (!inputs.some((input) => input.includes("reader/lifecycle.ts"))) continue;
+    if (inputs.some((input) => input.includes("ai/analysis.ts"))) {
+      console.error(
+        `build-content.js: reader 装载图 ${file} 含 ai/analysis.ts——` +
+          `概览管线必须经 startOverviewRun 动态 import 按需装载`
+      );
+      process.exit(1);
+    }
+  }
+}
+
+function report(mainMeta) {
+  assertAnalysisNotInReaderGraph(mainMeta);
   const bootstrapSize = sizeInBytes(bootstrapOutfile);
   const mainSize = sizeInBytes(mainOutfile);
   const chunkFiles = fs.existsSync(chunksDir)
