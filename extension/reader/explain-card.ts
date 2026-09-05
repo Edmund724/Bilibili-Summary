@@ -1,7 +1,8 @@
 // extension/reader/explain-card.ts — 字幕 tab 内的「解释」卡片（选区解释的落点）。
 //
-// 交互链：在字幕句里选中词/句 → 选区下方浮出「解释」按钮（DOM 与选区监听在
-// ui/ui-renderer.js，它是壳层唯一构建方）→ 点按钮调本模块 openReaderExplainCard
+// 交互链：在字幕句里选中词/句 → 选区下方浮出「解释」按钮（浮层 DOM 与选区
+// 监听/定位/快照在 reader/explain-pop-ui.ts，arch-slim-2/06 随本域下放；壳层
+// 只组装模板叶子）→ 点按钮调本模块 openReaderExplainCard
 // → 面板内弹卡片（遮罩 + 对话框），就地展示模型给出的解释。
 //
 // 为什么不发到对话 tab：解释是「读完这句马上要懂」的即时动作，跳到对话 tab 会
@@ -221,7 +222,7 @@ export function closeReaderExplainCard(): void {
 }
 
 /**
- * 卡片内点击委托（ui-renderer 挂在卡片容器上转发）：
+ * 卡片内点击委托（reader/explain-pop-ui.ts 挂在卡片容器上转发）：
  * close（遮罩 / ×）→ 关卡片；retry → 重发；ask-chat → 写待解释意图并切到对话 tab。
  */
 export function onReaderExplainCardClick(event: MouseEvent): void {

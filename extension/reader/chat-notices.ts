@@ -53,6 +53,11 @@ export function createReaderChatFeedback({ messages, setTimer, clearTimer, scrol
       link.textContent = "前往设置";
       link.addEventListener("click", (e) => {
         e.preventDefault();
+        // stopPropagation 必须有：打开抽屉的点击若继续冒泡到 ui-renderer 的文档
+        // 级 click 委托，会被「settingsExpanded 已开 + 点在面板外」判定当成外点
+        // 立即关闭（与壳内 readingSettingsToggleBtn 的 stopPropagation 同一先例；
+        // arch-slim-2/06 死绑定修复时同步补上，见 chat-tab.ts 容器委托同款）。
+        e.stopPropagation();
         onOpenSettings();
       });
       notice.appendChild(document.createTextNode(" "));

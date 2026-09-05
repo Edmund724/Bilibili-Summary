@@ -211,6 +211,9 @@ describe("字幕句内搜索", () => {
     expect(hit?.textContent).toBe("目标词");
   });
 
+  // 显式 20s 超时（arch-slim-2/06）：800 条 rAF 逐帧追加 + 逐条高亮是全量套件
+  // 里最重的 CPU 用例，默认 10s 线在全量并发下被挤过（单文件实测 ~5s，断言与
+  // 执行路径无关并发）。超时放宽不放宽断言。
   it("搜索激活期间后续批次渲染的条目自动带高亮", () => {
     const body = [];
     for (let i = 0; i < 800; i += 1) {
@@ -227,7 +230,7 @@ describe("字幕句内搜索", () => {
     expect(renderedItemCount()).toBe(800);
     expect(searchMarks().length).toBe(800);
     expect(subtitleList().querySelector('[data-index="700"] mark.boc-reading-search-hit')).not.toBe(null);
-  });
+  }, 20000);
 
   it("清除搜索恢复原文本：无 mark 残留，textContent 逐字还原", () => {
     shell.renderReadingView();

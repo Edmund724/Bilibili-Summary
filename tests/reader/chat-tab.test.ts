@@ -402,3 +402,37 @@ describe("player-ai 快捷动作 seam（PR4b 概览笔记按钮同款）", () =>
     expect(posted.prompt).toBe("总结提示词");
   });
 });
+
+describe("无平台空态「前往设置」（arch-slim-2/06 死绑定回归）", () => {
+  it("后建链接经 #readingChatRoot 容器委托打开设置抽屉", async () => {
+    // 无平台：ai-providers-list 返回空列表 → renderInitialState 走「还没有配置
+    // AI 平台」分支，「前往设置」链接由 resetConversationView 用 innerHTML 后建。
+    // 历史缺陷：ui-renderer 曾在壳构建时 getElementById 直绑——绑定时点早于
+    // 元素诞生，监听器永远挂不上，无平台空态点「前往设置」无任何效果。
+    const chromeStub = window.chrome as unknown as { runtime: { sendMessage: Sendstub } };
+    chromeStub.runtime.sendMessage = vi.fn((message: { type?: string }, callback?: (resp: unknown) => void) => {
+      if (String(message?.type || "") === "ai-providers-list") {
+        callback?.({ ok: true, providers: [] });
+      } else {
+        callback?.({ ok: true });
+      }
+      return undefined;
+    });
+
+    const chat = await lazyChat.ensureReaderChatTab();
+    await chat.ensureChatTabActivated();
+
+    // 无平台空态已渲染：链接存在（后建于消息区），设置抽屉此前关闭
+    const link = document.getElementById(ids.readingChatOpenSettings) as HTMLAnchorElement | null;
+    expect(link).not.toBe(null);
+    const settingsPanel = document.getElementById(ids.readingSettingsPanel) as HTMLElement;
+    expect(settingsPanel.hidden).toBe(true);
+    expect(state.reader.readingSettingsExpanded).toBe(false);
+
+    // 容器委托命中（冒泡到 #readingChatRoot）：展开设置并渲染面板
+    link!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(state.reader.readingSettingsExpanded).toBe(true);
+    // renderReaderPanels 经 ui/reader-gate 异步装载 reader 域后写 hidden
+    await waitFor(() => !settingsPanel.hidden);
+  });
+});

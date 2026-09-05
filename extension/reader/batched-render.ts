@@ -4,7 +4,7 @@
 // innerHTML，主线程被 DOM 解析卡死数百毫秒（且随后立即读 scrollHeight /
 // clientHeight 强制布局）。现改为首屏只渲染前 SUBTITLE_FIRST_BATCH 条，其余
 // 经 rAF 每帧追加 TRANSCRIPT_APPEND_BATCH 条：
-//   - 事件委托在容器层（ui-renderer 绑定 + sync.js closest 委托），追加的节点
+//   - 事件委托在容器层（reader/subtitle-tab-ui.ts 绑定 + sync.js closest 委托），追加的节点
 //     天然可交互，无需逐条重绑；
 //   - 跳转/跟随目标未上屏时经 ensureReadingSubtitleRenderedUpTo 同步补渲染
 //     （由 lifecycle.js 的 registerReaderPorts 单点注册进显式端口，供 sync.js

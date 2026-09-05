@@ -706,15 +706,30 @@ function bindEvents(): void {
     });
   });
   window.addEventListener("resize", onWindowResize);
-  // 引用卡取消（容器层委托：对话 tab 根节点上的 [data-chat-intent-action] 点击，
-  // 对齐 batched-render 头注的容器委托先例）。
+  // 容器层委托（对话 tab 根节点 #readingChatRoot，元素随态重建而容器不换，
+  // 对齐 batched-render 头注的容器委托先例）：
+  //   1. 引用卡取消：[data-chat-intent-action="cancel"] 点击；
+  //   2. 无平台空态「前往设置」：[id=readingChatOpenSettings] 点击 → 打开侧边栏
+  //      设置抽屉（arch-slim-2/06 死绑定修复——该链接由 renderInitialState →
+  //      resetConversationView 用 innerHTML 后建，原先 ui-renderer 在壳构建时
+  //      getElementById 直绑，绑定时点早于元素诞生、监听器永远挂不上；容器
+  //      委托对每次重建的链接都生效。href="#" 的默认跳转一并 preventDefault）。
   els.root.addEventListener("click", (event) => {
-    const target = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-chat-intent-action]");
-    if (!target || target.dataset.chatIntentAction !== "cancel") {
+    const target = event.target as HTMLElement | null;
+    const intentBtn = target?.closest<HTMLElement>("[data-chat-intent-action]");
+    if (intentBtn && intentBtn.dataset.chatIntentAction === "cancel") {
+      clearPendingExplainIntent();
+      hideExplainIntentCard();
       return;
     }
-    clearPendingExplainIntent();
-    hideExplainIntentCard();
+    if (target?.closest<HTMLElement>(`[id="${ids.readingChatOpenSettings}"]`)) {
+      // stopPropagation 必须有：打开抽屉的点击若继续冒泡到 ui-renderer 的文档级
+      // click 委托，会被「settingsExpanded 已开 + 点在面板外」判定当成外点立即
+      // 关闭（与壳内 readingSettingsToggleBtn 的 stopPropagation 同一先例）。
+      event.preventDefault();
+      event.stopPropagation();
+      openReaderSettingsPanel();
+    }
   });
 }
 
@@ -791,7 +806,8 @@ async function syncLiveContextState(forceRefresh = false): Promise<void> {
 
 // 【整段迁移自 sidepanel.ts】初始态渲染：无上下文 / 无平台 / 会话回放 / 非视频
 // 四态分支逐字保持；无平台分支的「前往设置」换 readingChatOpenSettings id——
-// 点击绑定上收在 ui-renderer（打开侧边栏设置抽屉；open-options 消息已删除）。
+// 点击经本文件 bindEvents 的 #readingChatRoot 容器委托打开侧边栏设置抽屉
+//（arch-slim-2/06 死绑定修复；open-options 消息已删除）。
 function renderInitialState(): void {
   updateChatLayoutState();
   if (!chatSessionState.contextData) {
