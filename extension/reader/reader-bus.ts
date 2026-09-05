@@ -1,13 +1,16 @@
-// Reader presenter seam.
+// Reader reader-bus（reader 域的双向消息总线 seam；arch-slim-2/03 自
+// presenter.ts 改名——它不呈现任何东西，"presenter" 会被误归入 presentation
+// 家族。导出符号名（subscribeReaderPresenter/notifyReaderPresenter 等历史
+// API 名）保持不变，改名只动文件与导航口径）。
 //
 // Two-way decoupling channel between the reader domain and the subtitle
 // fetching orchestration (subtitle/fetcher.js), plus the reader-side sink for
-// runtime capabilities that must not be imported by reader-impl.js (which
+// runtime capabilities that must not be imported by the reader domain (which
 // would create a static import cycle back through core/runtime.js).
 //
 //   fetcher → reader (data-change notifications):
 //     fetcher publishes data-change notifications here instead of calling
-//     reader render functions directly; the reader side (reader-impl.js)
+//     reader render functions directly; the reader side (reader/lifecycle.js)
 //     registers callbacks via subscribeReaderPresenter to render on them.
 //   reader → fetcher (refresh requests):
 //     the reader side asks the fetcher to re-fetch via
@@ -15,14 +18,14 @@
 //     module load via subscribeSubtitleRefresh. This reverses the former
 //     reader-impl.js → subtitle/fetcher.js import, breaking the cycle.
 //   reader → runtime (capability callbacks):
-//     reader-impl.js delegates capabilities that live outside the reader
-//     domain (sendRuntimeMessage for settings persistence, from
+//     the reader domain delegates capabilities that live outside it
+//     (sendRuntimeMessage for settings persistence, from
 //     shared/messaging.js; getSettings for the settings-change watcher, from
 //     core/runtime.js) to callbacks registered by content.js, which imports
-//     them itself. This keeps reader-impl.js free of any
+//     them itself. This keeps the reader domain free of any
 //     static import back into core/runtime.js.
 //   reader → player-ai (sync callbacks):
-//     reader-impl.js delegates player-ai quick-action sync to a callback
+//     the reader domain delegates player-ai quick-action sync to a callback
 //     registered by content.js, because importing ai/player-ai.js would pull
 //     core/runtime.js (and thus an import cycle) into the reader graph.
 //
@@ -30,11 +33,6 @@
 // callbacks need no arguments.
 
 import { logWarn } from "../shared/logging.js";
-// 候选02 分层惰性：总结链改为按需装载后，seam 里可能暂无 refreshClip handler
-// （注册时机与链装载绑定，见 subtitle/fetcher.js initSummarizeChain）。无
-// handler 时先经加载器装载总结链再重读 seam。本模块只 import 加载器本身
-//（常驻轻文件，动态边在其内部），不会把链拖回常驻。
-import { ensureSummarizeChain } from "../subtitle/lazy.js";
 
 type ReaderPresenterHandler = (kind: string, ...payload: unknown[]) => void;
 type SubtitleRefreshHandler = () => unknown;
@@ -96,29 +94,15 @@ export function subscribeSubtitleRefresh(handler: SubtitleRefreshHandler) {
 // Asks the subtitle fetcher to re-fetch the current clip. Resolves with the
 // handler's return value (a Promise), or with undefined when no handler is
 // registered yet — must never throw.
+//
+// 纯转发（arch-slim-2/03）：原内嵌的 ensureSummarizeChain() 懒装载触达已移到
+// 调用方（reader/lifecycle.js 的 maybeRefreshReaderSubtitleInBackground 先
+// ensure 总结链再调本函数）——本 seam 恢复「只传话」的窄形状，与其他三个
+// 能力槽（settings persist/load、player-ai sync）同形。
 export function requestSubtitleRefresh(): Promise<unknown> {
   const handler = subtitleRefreshHandlers[0];
   if (!handler) {
-    // 候选02 分层惰性：链未装载 ⇒ refreshClip 未注册。先装载总结链（其
-    // initSummarizeChain 会把 refreshClip 注册进 seam），再重读 handler 转发；
-    // 装载失败保持「must never throw」约定，静默 resolve(undefined)。
-    return ensureSummarizeChain()
-      .then(() => {
-        const loadedHandler = subtitleRefreshHandlers[0];
-        if (!loadedHandler) {
-          return undefined;
-        }
-        try {
-          return Promise.resolve(loadedHandler());
-        } catch (error) {
-          logWarn("[BOC] subtitle refresh handler failed", { error });
-          return undefined;
-        }
-      })
-      .catch((error) => {
-        logWarn("[BOC] subtitle refresh (summarize chain load) failed", { error });
-        return undefined;
-      });
+    return Promise.resolve(undefined);
   }
   try {
     return Promise.resolve(handler());

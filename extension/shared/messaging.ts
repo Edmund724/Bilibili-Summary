@@ -45,3 +45,21 @@ export function sendOffloadMessage<T extends Omit<OffloadTaskMessage, "type">>(
 ): Promise<unknown> {
   return sendRuntimeMessage({ type: "offload-task", ...message } as OffloadTaskMessage);
 }
+
+// 局部类型：port 只需要 postMessage 一个方法（chrome.runtime.Port 结构兼容）。
+interface PostMessageLikePort {
+  postMessage(message: unknown): void;
+}
+
+// 「port 已断开则吞掉 postMessage 异常」的收口单源（arch-slim-2/03，原 5 处
+// 手抄 try/catch：entry/offscreen-asr.ts ×2、entry/offscreen.ts ×3）。断连后的
+// 迟到回执（聊天中途关面板 / SPA 换页 / 刷新 / 任务完成前断连）在 async 消息
+// 监听器里会抛 "Attempting to use a disconnected port object" 成 unhandled
+// rejection——回执已无接收方，这里统一吞掉，不区分消息类型。
+export function safePostMessage(port: PostMessageLikePort, message: unknown): void {
+  try {
+    port.postMessage(message);
+  } catch {
+    // port 已断开，回执无接收方，忽略
+  }
+}

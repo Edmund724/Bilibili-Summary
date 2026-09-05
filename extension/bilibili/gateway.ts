@@ -1,9 +1,9 @@
 import { formatLocalDate } from "../shared/utils.js";
-import { toReadableText, isExtensionContextInvalidated } from "../shared/error-helpers.js";
+import { toReadableText, isExtensionContextInvalidated, getErrorMessage } from "../shared/error-helpers.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { state } from "../core/state.js";
 import { getRuntimeVideoElement } from "./video-probe.js";
-import { logInfo } from "../shared/logging.js";
+import { logInfo, logWarn } from "../shared/logging.js";
 import {
   buildSubtitleInfoRequests,
   buildBiliApiError,
@@ -166,8 +166,12 @@ export interface VideoMeta {
   pages: VideoPage[];
 }
 
+// 日志下沉（arch-slim-2/03）：原 subtitle/fetcher.ts 的纯直通包装删除，其
+// logInfo/logWarn 随之下沉到本模块（debug 级差异：日志 emitted 点从 fetcher
+// 包装层移到 gateway 本体，字段与文案逐字一致）。
 export async function fetchVideoMeta(transport: JsonTransport, bvid: string): Promise<VideoMeta> {
   const url = `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`;
+  logInfo("[BOC] fetch video meta", { url, bvid });
   const payload = await transport(url);
   if ((payload as { code?: unknown })?.code !== 0) {
     throw new Error(toReadableText((payload as { message?: unknown })?.message, "无法获取视频信息"));
@@ -214,6 +218,26 @@ export async function fetchSubtitleBundle(
   transport: JsonTransport,
   { bvid, cid, aid }: { bvid?: string | number; cid?: string | number; aid?: string | number }
 ): Promise<{ tracks: SubtitleTrack[]; chapters: Chapter[] }> {
+  // 日志下沉（arch-slim-2/03）：原 fetcher 包装层在整次调用失败时 logWarn 后
+  // 原样重抛，这里在兜底 catch 收口，字段与文案逐字一致。
+  try {
+    return await fetchSubtitleBundleInner(transport, { bvid, cid, aid });
+  } catch (error) {
+    logWarn("[BOC] subtitles API request failed", {
+      bvid,
+      cid,
+      aid,
+      message: getErrorMessage(error)
+    });
+    throw error;
+  }
+}
+
+async function fetchSubtitleBundleInner(
+  transport: JsonTransport,
+  { bvid, cid, aid }: { bvid?: string | number; cid?: string | number; aid?: string | number }
+): Promise<{ tracks: SubtitleTrack[]; chapters: Chapter[] }> {
+  logInfo("[BOC] fetch subtitles list", { bvid, cid, aid });
   const requests: SubtitleInfoRequest[] = buildSubtitleInfoRequests({ bvid, cid, aid });
 
   const fetchByRequest = async (request: SubtitleInfoRequest) => {

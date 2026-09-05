@@ -1,12 +1,9 @@
 // reader/chat-lists.ts — 对话 tab 三列表渲染 + 预设提示词插入（PR5 自
-// extension/pages/sidepanel-lists.ts 重建：逻辑照抄（renderSuggestions /
-// renderPresetPrompts / renderHistoryList / insertPresetPrompt 的每个分支与
-// 事件语义逐字一致），DOM 壳换新——元素经 deps 注入 reader 的 readingChat* id
-// 节点，class 名沿用 .chat-*（样式段随对话区并入 reader.css，token 化三主题）。
-//
-// 与 sidepanel 孪生模块的取舍：过渡期并存（工单 08 决议），sidepanel 摘除时
-// 本文件成为唯一实现，届时把 tests/reader/chat-lists.test.ts 的断言接回即可。
-// 逻辑改动零容忍：任何行为差异先改 sidepanel 孪生并同步到这里。
+// extension/pages/sidepanel-lists.ts 重建；原 sidepanel 孪生模块已随侧边栏
+// 形态删除，本文件是对话 tab 三列表的唯一实现，逻辑改动不再需要与孪生同步，
+// 行为契约由 tests/reader/chat-lists.test.js 钉住。DOM 壳：元素经 deps 注入
+// reader 的 readingChat* id 节点，class 名沿用 .chat-*（样式段随对话区并入
+// reader.css，token 化三主题））。
 //
 // 依赖方向（无环）：共享可变状态（../chat/chat-state）与 ai/conversation 纯辅助
 // 直接 import；DOM 元素、会话动作、预设 CRUD、布局回调、建议点击发送、

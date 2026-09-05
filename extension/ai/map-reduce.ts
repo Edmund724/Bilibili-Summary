@@ -13,6 +13,7 @@
 
 import { formatCompactTimestamp } from "../shared/string-utils.js";
 import { makeAbortedError } from "../shared/error-helpers.js";
+import { formatSegmentHeading } from "./subtitle-prompt.js";
 import { buildBudgetPlan, FINAL_OUTPUT_CHARS, SEGMENT_SUMMARY_CHARS, SEGMENT_INPUT_CHARS, REDUCE_GROUP_INPUT_CHARS } from "./budgeter.js";
 import { chatCompletion } from "./completion.js";
 import { runMapBounded, DEFAULT_MAP_CONCURRENCY } from "./pool.js";
@@ -28,6 +29,12 @@ import type { BudgetPlan, BudgetPlanSegment, StreamChatEvent } from "./types.js"
 
 // 单条字幕项渲染上限（防御性截断，避免个别超长项撑爆小结请求）。
 const MAX_ITEM_CHARS = 4000;
+
+// 笔记编辑系统提示词单源（arch-slim-2/03，原两处逐字手抄）：分段小结与成稿
+// 两次模型调用共用。字节冻结（spec 拍板「静态提示词字节不动」），改前先过
+// tests/ai 蓝本对齐断言。
+const NOTE_EDITOR_SYSTEM_PROMPT =
+  "你是视频笔记编辑。忠实理解语境与作者意图，允许结合上下文保守修正明显的口误、笔误和语音转写错误。";
 
 // 溢出放宽预算重跑：收紧比例与用户可见文案（重跑发起 / 重跑仍溢出）。
 const OVERFLOW_RETRY_BUDGET_SCALE = 0.5;
@@ -112,7 +119,7 @@ ${material}`;
 function buildMaterial(summaries: unknown[]): string {
   const list = Array.isArray(summaries) ? summaries : [];
   return list
-    .map((summary, i) => `### 片段 ${i + 1}\n${String(summary || "")}`)
+    .map((summary, i) => `${formatSegmentHeading(i)}\n${String(summary || "")}`)
     .join("\n\n");
 }
 
@@ -179,7 +186,7 @@ async function summarizeSegment({
   const summary = await chatCompletionImpl({
     provider,
     messages: [
-      { role: "system", content: "你是视频笔记编辑。忠实理解语境与作者意图，允许结合上下文保守修正明显的口误、笔误和语音转写错误。" },
+      { role: "system", content: NOTE_EDITOR_SYSTEM_PROMPT },
       { role: "user", content: prompt }
     ],
     thinkingLevel,
@@ -384,7 +391,7 @@ export async function orchestrateMapReduce({
         await chatCompletionImpl({
           provider,
           messages: [
-            { role: "system", content: "你是视频笔记编辑。忠实理解语境与作者意图，允许结合上下文保守修正明显的口误、笔误和语音转写错误。" },
+            { role: "system", content: NOTE_EDITOR_SYSTEM_PROMPT },
             { role: "user", content: notePrompt }
           ],
           thinkingLevel,

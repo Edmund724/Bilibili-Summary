@@ -19,7 +19,8 @@ import {
 import { asrProviderStore } from "../asr/asr-provider-store.js";
 import {
   createProviderMessageHandlers,
-  createAsrRuntimeConfigHandler
+  createAsrRuntimeConfigHandler,
+  withOkResponse
 } from "../core/provider-handlers.js";
 import { bgFetchJson, isBiliUrl } from "../bilibili/gateway.js";
 // digest-only-ui：侧边栏设置面板的 host 权限代申请（collectOrigins 纯函数）
@@ -42,16 +43,20 @@ type BackgroundHandler = MessageHandler<BackgroundMessage>;
 type Msg<T extends BackgroundMessageType> = Extract<BackgroundMessage, { type: T }>;
 
 function handleGetSettings(_message: Msg<"get-settings">, _sender: MessageSender, sendResponse: SendResponse): boolean {
-  getMergedSettings()
-    .then((settings) => sendResponse({ ok: true, settings }))
-    .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
+  // 异步错误回包统一走 withOkResponse（arch-slim-2/03 单源）；同步错误回包
+  // （缺参/拒绝处理等）保持处理器内直写。
+  withOkResponse(
+    getMergedSettings().then((settings) => ({ ok: true, settings })),
+    sendResponse
+  );
   return true;
 }
 
 function handleSaveSettings(message: Msg<"save-settings">, _sender: MessageSender, sendResponse: SendResponse): boolean {
-  saveSettings(message.settings || {})
-    .then(() => sendResponse({ ok: true }))
-    .catch((error) => sendResponse({ ok: false, error: (error as Error).message }));
+  withOkResponse(
+    saveSettings(message.settings || {}).then(() => ({ ok: true })),
+    sendResponse
+  );
   return true;
 }
 
@@ -70,19 +75,20 @@ function handleRequestProviderOrigins(message: Msg<"request-provider-origins">, 
     sendResponse({ ok: false, error: "当前环境不支持申请权限" });
     return false;
   }
-  chrome.permissions
-    .request({ origins })
-    .then((granted) => {
-      if (!granted) {
-        sendResponse({
-          ok: false,
-          error: `未授权 ${origins.join("、")}，保存已中止：请重新点击「保存设置」并在弹窗中选择允许`
-        });
-        return;
-      }
-      sendResponse({ ok: true });
-    })
-    .catch((error: Error) => sendResponse({ ok: false, error: `申请域名权限失败：${error.message}` }));
+  // chrome.permissions.request 仍是处理器内的第一个动作（手势不变式，见上方
+  // 注释）；拒绝文案带固定前缀，经 withOkResponse 的 toError 保持逐字一致。
+  withOkResponse(
+    chrome.permissions.request({ origins }).then((granted) =>
+      granted
+        ? { ok: true }
+        : {
+            ok: false,
+            error: `未授权 ${origins.join("、")}，保存已中止：请重新点击「保存设置」并在弹窗中选择允许`
+          }
+    ),
+    sendResponse,
+    (error) => `申请域名权限失败：${(error as Error).message}`
+  );
   return true;
 }
 
@@ -92,9 +98,10 @@ function handleRequestProviderOrigins(message: Msg<"request-provider-origins">, 
 // 等价通道）。ensure 失败不阻断发送——connect 由连接结果兜底（与 sidepanel 的
 // connectPort 自愈设计一致）。
 function handleEnsureOffscreenChat(_message: Msg<"ensure-offscreen-chat">, _sender: MessageSender, sendResponse: SendResponse): boolean {
-  ensureChatOffscreenDocument()
-    .then((ensured) => sendResponse({ ok: true, ensured }))
-    .catch((error: Error) => sendResponse({ ok: false, error: error.message }));
+  withOkResponse(
+    ensureChatOffscreenDocument().then((ensured) => ({ ok: true, ensured })),
+    sendResponse
+  );
   return true;
 }
 
@@ -111,8 +118,8 @@ function handlePlayerAiQuickAction(message: Msg<"player-ai-quick-action">, sende
     return false;
   }
 
-  getMergedSettings()
-    .then(async (settings) => {
+  withOkResponse(
+    getMergedSettings().then(async (settings) => {
       if (!settings.enablePlayerAiQuickAction) {
         throw new Error("AI 按钮未开启");
       }
@@ -122,9 +129,11 @@ function handlePlayerAiQuickAction(message: Msg<"player-ai-quick-action">, sende
         throw new Error("阅读模式触发失败，请刷新浏览器网页重试");
       }
       await sendMessageToTab(tabId, { type: "player-ai-quick-action-chat", prompt });
-      sendResponse({ ok: true });
-    })
-    .catch((error: Error) => sendResponse({ ok: false, error: error.message || "打开 AI 对话失败" }));
+      return { ok: true };
+    }),
+    sendResponse,
+    (error) => (error as Error).message || "打开 AI 对话失败"
+  );
   return true;
 }
 
@@ -138,8 +147,8 @@ function handleReaderEnterChat(message: Msg<"reader-enter-chat">, _sender: Messa
     return false;
   }
 
-  getMergedSettings()
-    .then(async (settings) => {
+  withOkResponse(
+    getMergedSettings().then(async (settings) => {
       const prompt = normalizePlayerAiQuickPrompt(settings.playerAiQuickPrompt || DEFAULT_PLAYER_AI_QUICK_PROMPT);
       const readerUrl = String(message.readerUrl || "").trim();
       let url = readerUrl;
@@ -160,9 +169,11 @@ function handleReaderEnterChat(message: Msg<"reader-enter-chat">, _sender: Messa
         throw new Error("阅读视图触发失败，请刷新浏览器网页重试");
       }
       await sendMessageToTab(tabId, { type: "reader-enter-chat", prompt });
-      sendResponse({ ok: true });
-    })
-    .catch((error: Error) => sendResponse({ ok: false, error: error.message || "打开 AI 对话失败" }));
+      return { ok: true };
+    }),
+    sendResponse,
+    (error) => (error as Error).message || "打开 AI 对话失败"
+  );
   return true;
 }
 
@@ -180,13 +191,13 @@ function handleFetchJson(message: Msg<"fetch-json">, _sender: MessageSender, sen
     return false;
   }
 
-  bgFetchJson(url)
-    .then((data) => sendResponse({ ok: true, data }))
-    .catch((error) => {
-      // JSON 解析失败（200 但非 JSON 响应）时给用户稳定的可读文案，而非引擎原生 SyntaxError。
-      const message = error instanceof SyntaxError ? "Invalid JSON response" : (error as Error).message;
-      sendResponse({ ok: false, error: message });
-    });
+  // withOkResponse 收口（arch-slim-2/03）：JSON 解析失败（200 但非 JSON 响应）
+  // 时给用户稳定的可读文案，而非引擎原生 SyntaxError。
+  withOkResponse(
+    bgFetchJson(url).then((data) => ({ ok: true, data })),
+    sendResponse,
+    (error) => (error instanceof SyntaxError ? "Invalid JSON response" : (error as Error).message)
+  );
   return true;
 }
 
@@ -214,13 +225,15 @@ function handleAiProvidersModels(message: Msg<"ai-providers-models">, _sender: M
     sendResponse({ ok: false, error: "请填写 baseUrl" });
     return true;
   }
-  fetchAiProviderModels({
-    baseUrl,
-    apiKey: String(message.apiKey || "").trim(),
-    providerId: String(message.providerId || "").trim()
-  })
-    .then((payload) => sendResponse(payload))
-    .catch((error) => sendResponse({ ok: false, error: (error as Error | undefined)?.message || String(error) }));
+  withOkResponse(
+    fetchAiProviderModels({
+      baseUrl,
+      apiKey: String(message.apiKey || "").trim(),
+      providerId: String(message.providerId || "").trim()
+    }),
+    sendResponse,
+    (error) => (error as Error | undefined)?.message || String(error)
+  );
   return true;
 }
 

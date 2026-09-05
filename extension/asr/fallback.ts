@@ -18,7 +18,7 @@
 //     broadcastSubtitleStatus（fetcher 内部函数）。
 // 模块不 import extension/entry/ 与 extension/pages/ 的任何内容。
 
-import { ensureRunActive, isStaleRunError, getErrorMessage } from "../shared/error-helpers.js";
+import { ensureRunActive, isStaleRunError, getErrorMessage, makeStaleRunError } from "../shared/error-helpers.js";
 import { logInfo, logWarn } from "../shared/logging.js";
 import { state, clipState } from "../core/state.js";
 import {
@@ -48,13 +48,9 @@ function buildAsrEmptyStatusText({ failedChunks, diag = "" }: { failedChunks: nu
   return `未识别到语音内容，该视频可能没有人声。${diag ? `（诊断：${diag}）` : ""}`;
 }
 
-// STALE_RUN 信号构造：在本模块里只表示"调用方让位、零 UI 写入"（fetcher 的
+// STALE_RUN 信号（构造单源在 shared/error-helpers.ts 的 makeStaleRunError，
+// arch-slim-2/03 收口）：在本模块里只表示"调用方让位、零 UI 写入"（fetcher 的
 // catch 对 STALE_RUN 静默返回），不再表示转写被中止——切视频不取消任务。
-function throwStaleRun(): never {
-  const error = new Error("Stale refresh run") as Error & { code: string };
-  error.code = "STALE_RUN";
-  throw error;
-}
 
 // offscreen asr-skip 错误的结构化原因 → clipState.noSubtitleReason 取值。
 // 仅认识 offscreen 显式标注的两类配置级原因；消息失败/超时的 asr-skip 不带
@@ -283,7 +279,7 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
         if (!Array.isArray(sharedBody) || sharedBody.length === 0) {
           if (isStale()) {
             // 切走后共享转写以空结果到站：终态广播由发起者负责，这里静默让位
-            throwStaleRun();
+            throw makeStaleRunError();
           }
           const failed = Number(shared.outcome?.failedChunks) || 0;
           clipState.setNoSubtitleReason(failed > 0 ? "asr-failed" : "asr-empty");
@@ -382,7 +378,7 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
             ...(emptyDiag ? { diagnostic: emptyDiag } : {})
           });
           broadcastSubtitleStatus("asr-done");
-          throwStaleRun();
+          throw makeStaleRunError();
         }
         const failed = Number(outcome?.failedChunks) || 0;
         clipState.setNoSubtitleReason(failed > 0 ? "asr-failed" : "asr-empty");
@@ -425,7 +421,7 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
           message: getErrorMessage(error)
         });
         broadcastSubtitleStatus(phase);
-        throwStaleRun();
+        throw makeStaleRunError();
       }
       // offscreen 配置级缺失/关闭/无激活平台 → asr-skip：静默跳过本轮回退，
       // 返回 "skip" 走原有无字幕提示（与设置闸门 skip 同语义，零用户可见

@@ -19,8 +19,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NORMAL_PAGE_URL, setupEnvironment } from "../setup.js";
 import { clipState } from "../../extension/core/state.js";
 
-// 顶层副作用 subscribeSubtitleRefresh(refreshClip) 需要 presenter 提供该函数。
-vi.mock("../../extension/reader/presenter.js", () => ({
+// 顶层副作用 subscribeSubtitleRefresh(refreshClip) 需要 reader-bus 提供该函数。
+vi.mock("../../extension/reader/reader-bus.js", () => ({
   subscribeSubtitleRefresh: vi.fn(),
   notifyReaderPresenter: vi.fn()
 }));
@@ -29,12 +29,16 @@ vi.mock("../../extension/shared/ui-status.js", () => ({
   setStatus: vi.fn(),
   setMessage: vi.fn()
 }));
-vi.mock("../../extension/subtitle/fetcher.js", async (importOriginal) => {
+// arch-slim-2/03：fetcher 的 fetchVideoMeta/fetchSubtitleBundle 纯直通包装已删
+// （日志下沉 gateway），refreshClip 的抓取打桩改挂 gateway 的同名函数。
+vi.mock("../../extension/bilibili/gateway.js", async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
     fetchVideoMeta: vi.fn(),
-    fetchSubtitleBundle: vi.fn()
+    fetchSubtitleBundle: vi.fn(),
+    fetchSubtitleBody: vi.fn(),
+    readRuntimeVideoDuration: vi.fn(() => 300)
   };
 });
 // 字幕接受事务：fetcher 静态引用的真实实现用 vi.fn 包一层（真实落 state +
@@ -48,14 +52,7 @@ vi.mock("../../extension/subtitle/commit.js", async (importOriginal) => {
     commitNoSubtitle: vi.fn(actual.commitNoSubtitle)
   };
 });
-vi.mock("../../extension/bilibili/gateway.js", async (importOriginal) => {
-  const actual = await importOriginal();
-  return {
-    ...actual,
-    fetchSubtitleBody: vi.fn(),
-    readRuntimeVideoDuration: vi.fn(() => 300)
-  };
-});
+
 vi.mock("../../extension/reader/page-context.js", () => ({
   resolvePageContext: vi.fn(() => ({ pageIndex: 1, cid: "101", cidSource: "test", pageTitle: "P1", duration: 300 }))
 }));
@@ -63,15 +60,9 @@ vi.mock("../../extension/subtitle/core.js", () => ({
   readVideoTitle: vi.fn(() => "测试标题"),
   readVideoAuthor: vi.fn(() => "测试作者"),
   readUploadDate: vi.fn(() => "2026-01-01"),
-  refreshDerivedContent: vi.fn(async () => {})
-}));
-// fetcher 对 subtitle/ui.js 的消费只剩 readVideoDescription。renderMeta/
-// renderSubtitleSelect 是候选02 分层惰性后的历史 mock（现无调用方）；
-// setBusyState 死 mock 已随工单 arch-slim/03 退役。
-vi.mock("../../extension/subtitle/ui.js", () => ({
+  // arch-slim-2/03：readVideoDescription 自 subtitle/ui.js 归位 core.js
   readVideoDescription: vi.fn(() => ""),
-  renderMeta: vi.fn(),
-  renderSubtitleSelect: vi.fn()
+  refreshDerivedContent: vi.fn(async () => {})
 }));
 vi.mock("../../extension/subtitle/cache.js", () => ({
   buildSubtitleCandidates: vi.fn((tracks, preferred) => {
@@ -89,10 +80,14 @@ vi.mock("../../extension/subtitle/cache.js", () => ({
   getSubtitleCacheKey: vi.fn(() => "boc_subtitle_cache_test")
 }));
 
-// 被测对象（mocked fetcher 命名空间展开自 actual，resetClipState/loadSubtitle
-// 均为真实实现）与被 mock 的 gateway.fetchSubtitleBody、commit.acceptSubtitle
+// 被测对象（真实 fetcher 模块；原部分 mock 的 fetchVideoMeta/fetchSubtitleBundle
+// 直通包装已随 arch-slim-2/03 删除，打桩改挂 gateway）与被 mock 的
+// gateway.fetchSubtitleBody、commit.acceptSubtitle
 import * as fetcher from "../../extension/subtitle/fetcher.js";
-import { fetchSubtitleBody as fetchBodyMock } from "../../extension/bilibili/gateway.js";
+import {
+  fetchSubtitleBody as fetchBodyMock,
+  fetchVideoMeta as fetchMetaMock
+} from "../../extension/bilibili/gateway.js";
 import {
   loadSubtitleFromCache,
   saveSubtitleToCache,
@@ -245,7 +240,8 @@ describe("586c61b 回归：refreshClip 错误路径的 fetchState 保持 error",
     // reset + 一次写 error。若 reset 把状态洗回 idle，等待转写的 sidepanel
     // 轮询会误判"非转写中"提前放行空字幕（586c61b 原始 bug）。
     clipState.setSubtitleFetchState("loading");
-    fetcher.fetchVideoMeta.mockRejectedValue(new Error("meta down"));
+    // arch-slim-2/03：直通包装删除后，refreshClip 经 gateway.fetchVideoMeta 抓取。
+    fetchMetaMock.mockRejectedValue(new Error("meta down"));
 
     await expect(fetcher.refreshClip()).resolves.toBeUndefined();
 

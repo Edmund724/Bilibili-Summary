@@ -29,9 +29,3 @@ const loader = createLazyLoader<DigestButtonDomain>(() => import("../ui/digest-b
 export function loadDigestButton(): Promise<DigestButtonDomain> {
   return loader.load();
 }
-
-// 模块是否已存在加载请求（含仍在加载中）。消费方用它区分「未加载可跳过」
-// 与「已加载/加载中需继续走异步路径」。
-export function isDigestButtonLoaded(): boolean {
-  return loader.isLoaded();
-}

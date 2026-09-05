@@ -7,7 +7,7 @@
 // state 级锁死这些不变量；无字幕出口（逆事务）与接受互为逆，同样锁清空完整性。
 //
 // mock 结构：refreshDerivedContent mock（派生刷新的调用/时序断言是本套件职责，
-// 笔记构建本体归 core.test.js）、presenter mock（notifyReaderPresenter 可观察）。
+// 笔记构建本体归 core.test.js）、reader-bus mock（notifyReaderPresenter 可观察）。
 // 渲染/状态栏回调（renderMeta/renderSubtitleSelect/setStatus）不静态可达，经
 // configureCommitUi 注入 vi.fn——与生产由 fetcher 注入同一条接线。
 // view-state / dom-utils / reader-ids / selection / state 保持真实：纯叶子。
@@ -22,12 +22,12 @@ import {
   buildNoSubtitleStatusMessage
 } from "../../extension/subtitle/commit.js";
 import { refreshDerivedContent } from "../../extension/subtitle/core.js";
-import { notifyReaderPresenter } from "../../extension/reader/presenter.js";
+import { notifyReaderPresenter } from "../../extension/reader/reader-bus.js";
 
 vi.mock("../../extension/subtitle/core.js", () => ({
   refreshDerivedContent: vi.fn(async () => {})
 }));
-vi.mock("../../extension/reader/presenter.js", () => ({
+vi.mock("../../extension/reader/reader-bus.js", () => ({
   notifyReaderPresenter: vi.fn(),
   subscribeSubtitleRefresh: vi.fn(() => () => {}),
   subscribeReaderPresenter: vi.fn(() => () => {})

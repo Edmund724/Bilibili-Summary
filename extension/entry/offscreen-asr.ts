@@ -21,92 +21,14 @@ import {
 } from "../asr/protocol.js";
 import { buildChunkPlan, buildWavChunks, makeDecodedBuffer } from "../asr/chunker.js";
 import { streamWavChunks } from "../asr/stream-chunker.js";
-import { createTranscriptionEngine as _createTranscriptionEngine } from "../asr/engine.js";
+import { createTranscriptionEngine } from "../asr/engine.js";
 import { transcribe as transcribeOpenAi } from "../asr/adapters/openai-transcriptions.js";
 import { isFragmentedMp4, createAdtsExtractor, parseAudioSpecificConfig } from "../asr/adts.js";
 import { ASR_CONCURRENCY } from "../shared/offscreen-constants.js";
 import { getErrorMessage, withTimeout } from "../shared/error-helpers.js";
+import { safePostMessage } from "../shared/messaging.js";
 import { logWarn } from "../shared/logging.js";
 import type { AsrProvider } from "../asr/asr-provider-store.js";
-
-// 本地接口描述 offscreen-asr 实际消费的 asr/* 契约子集（如 Summary 只看
-// accepted/failed 两个字段），导入函数经断言收窄到该形状，运行时零变化。
-// TODO: 与 engine.ts/chunker.ts 导出的完整类型对账后可收拢（chunk 形状
-// WavChunk vs TranscribeChunk 需先统一）。
-
-interface AsrChunk {
-  index: number;
-  startSec: number;
-  durationSec: number;
-  wavBlob: Blob;
-}
-
-interface TranscriptionEngineOptions {
-  transcribe: (chunk: AsrChunk, ctx: { onProgress: (text: string) => void }) => Promise<Record<string, unknown>>;
-  isAborted: () => boolean;
-  concurrency: number;
-  onChunkResult: (chunk: AsrChunk, result: Record<string, unknown>) => void;
-  onProgress: (text: string) => void;
-}
-
-interface TranscriptionEngineSummary {
-  acceptedChunks: number;
-  failedChunks: number;
-}
-
-interface TranscriptionEngine {
-  push: (chunk: AsrChunk) => void;
-  close: () => Promise<TranscriptionEngineSummary>;
-}
-
-const createTranscriptionEngine = _createTranscriptionEngine as unknown as (
-  opts: TranscriptionEngineOptions
-) => TranscriptionEngine;
-
-interface WavChunk {
-  index: number;
-  startSec: number;
-  durationSec: number;
-  wavBlob: Blob;
-}
-
-interface BuildWavChunksResult {
-  chunks: WavChunk[];
-}
-
-const _buildWavChunks = buildWavChunks as unknown as (
-  buffer: AudioBuffer,
-  opts: { chunkSeconds: number }
-) => WavChunk[];
-
-interface DecodedBufferResult {
-  data: Float32Array;
-  diagnostic: { durationSec: number; peak: number };
-}
-
-const _makeDecodedBuffer = makeDecodedBuffer as unknown as (
-  data: Float32Array,
-  meta: { diagnostic: { durationSec: number; peak: number } }
-) => AudioBuffer;
-
-interface StreamWavChunksResult {
-  totalChunks: number;
-  skippedSegments: number;
-}
-
-interface StreamWavChunksOptions {
-  chunkSeconds: number;
-  decodeSegment: (segment: Uint8Array) => Promise<Float32Array>;
-  onChunk: (chunk: WavChunk) => void;
-  decodeRetries: number;
-  skipFailedSegments: boolean;
-  isAbortError: (error: unknown) => boolean;
-}
-
-const _streamWavChunks = streamWavChunks as unknown as (
-  source: AsyncIterable<Uint8Array>,
-  opts: StreamWavChunksOptions
-) => Promise<StreamWavChunksResult>;
 
 // ASR 解码任务中止哨兵：decodeSegment/onChunk 检查 aborted 后抛出，
 // 外层 catch 识别后静默退出（不 post error），与「断连视为取消」语义一致。
@@ -130,15 +52,15 @@ export interface AsrRuntimeConfig {
 // ASR 运行时配置：offscreen 直调 background 的 get-asr-runtime-config 取
 // provider + Key + 语言（与 AI 聊天 resolveProviderWithKey 走同一通道）。
 // Key 只进本 context，不经过页面、也不放进 port 任务消息。5s 超时竞速镜像
-// 原 fetcher requestAsrRuntimeConfig 的 race 模式。
+// 原 fetcher requestAsrRuntimeConfig 的 race 模式；超时原语走 shared/
+// error-helpers 的 withTimeout（arch-slim-2/03 单源），超时以 timeoutError
+// 拒绝、由调用方按配置缺失收口，与原手搓 race 拒绝语义一致。
 async function requestAsrRuntimeConfig(timeoutMs = 5000): Promise<AsrRuntimeConfig> {
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error("get-asr-runtime-config timeout")), timeoutMs);
-  });
-  const response = await Promise.race([
+  const response = await withTimeout(
     chrome.runtime.sendMessage({ type: "get-asr-runtime-config" }),
-    timeoutPromise
-  ]);
+    timeoutMs,
+    new Error("get-asr-runtime-config timeout")
+  );
   if (!response || typeof response !== "object" || !(response as { ok?: boolean }).ok) {
     throw new Error((response as { error?: string })?.error || "get-asr-runtime-config failed");
   }
@@ -249,9 +171,10 @@ export function createAsrDecodeHandler({ onTaskTerminal }: CreateAsrDecodeHandle
         isAborted: () => aborted,
         concurrency: adapterEntry.concurrency,
         onChunkResult: (chunk, result) => {
-          // engine 交付的单片形状 { ...adapterResult, durationSec }；拆开回传，
-          // result 只含适配器结果（text/segments?/…），durationSec 为兄弟字段。
-          const { durationSec, ...adapterResult } = result as { durationSec: number } & Record<string, unknown>;
+          // engine 交付的单片形状 AsrTranscribeResult & { durationSec }；拆开
+          // 回传，result 只含适配器结果（text/segments?/…），durationSec 为
+          // 兄弟字段。
+          const { durationSec, ...adapterResult } = result;
           port.postMessage({
             type: ASR_MSG_CHUNK_RESULT,
             index: chunk.index,
@@ -262,11 +185,7 @@ export function createAsrDecodeHandler({ onTaskTerminal }: CreateAsrDecodeHandle
         },
         // 引擎产出的进度文本（语音识别中 N 片…）原样中继给页面
         onProgress: (text) => {
-          try {
-            port.postMessage({ type: ASR_MSG_PROGRESS, text });
-          } catch {
-            // port 已断开，忽略
-          }
+          safePostMessage(port, { type: ASR_MSG_PROGRESS, text });
         }
       });
 
@@ -290,7 +209,7 @@ export function createAsrDecodeHandler({ onTaskTerminal }: CreateAsrDecodeHandle
         // chunker 契约的 AudioBuffer 鸭子类型（sampleRate 16k + diagnostic），
         // 否则会被误报「时长为零」。
         const { data, diagnostic } = await decodeTo16kMono(first.value.raw, 0);
-        const chunks = _buildWavChunks(_makeDecodedBuffer(data, { diagnostic }), { chunkSeconds });
+        const chunks = buildWavChunks(makeDecodedBuffer(data, { diagnostic }), { chunkSeconds });
         for (const chunk of chunks) {
           if (aborted) return;
           engine.push(chunk);
@@ -321,11 +240,13 @@ export function createAsrDecodeHandler({ onTaskTerminal }: CreateAsrDecodeHandle
               yield (item as StreamAudioYield).segment!;
             }
           }
-          const stream = await _streamWavChunks(segmentSource(), {
+          const stream = await streamWavChunks(segmentSource(), {
             chunkSeconds,
             decodeSegment: (seg) => {
               stop();
-              return resampleTo16kMono(audioCtx, seg);
+              // streamWavChunks 契约把段声明为 unknown（解码器输入）；本链路的
+              // 段恒为 ADTS 提取的 Uint8Array，此处唯一收窄点。
+              return resampleTo16kMono(audioCtx, seg as Uint8Array);
             },
             onChunk: (chunk) => {
               stop();
@@ -363,20 +284,17 @@ export function createAsrDecodeHandler({ onTaskTerminal }: CreateAsrDecodeHandle
       if (aborted) {
         return;
       }
-      try {
-        const payload: Record<string, unknown> = { type: ASR_MSG_ERROR, error: String((e as Error | undefined)?.message || e) };
-        if ((e as { code?: string }).code) {
-          payload.code = (e as { code: string }).code;
-        }
-        if ((e as { reason?: string }).reason) {
-          payload.reason = (e as { reason: string }).reason;
-        }
-        port.postMessage(payload);
-      } catch {
-        // port 已断开，忽略
+      // error 终态消息经 safePostMessage 收口（port 已断开则吞掉异常），发完
+      // 再通知入口层自关判定（断连取消已在上方 aborted 早退 + 断连监听处覆盖，
+      // 走不到这里）
+      const payload: Record<string, unknown> = { type: ASR_MSG_ERROR, error: String((e as Error | undefined)?.message || e) };
+      if ((e as { code?: string }).code) {
+        payload.code = (e as { code: string }).code;
       }
-      // error 终态消息发完再通知入口层自关判定（断连取消已在上方 aborted 早退 +
-      // 断连监听处覆盖，走不到这里）
+      if ((e as { reason?: string }).reason) {
+        payload.reason = (e as { reason: string }).reason;
+      }
+      safePostMessage(port, payload);
       onTaskTerminal(port);
     }
   };

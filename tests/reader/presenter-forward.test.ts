@@ -1,4 +1,4 @@
-// reader/presenter.js 的 notifyReaderPresenter 参数透传测试。
+// reader/reader-bus.ts（presenter seam，arch-slim-2/03 改名）的 notifyReaderPresenter 参数透传测试。
 //
 // 回归背景（q5a）：notifyReaderPresenter 原先只转发 kind，fetcher 传的
 // "subtitle-ready, 当前视频无字幕。" 第二参被丢弃、阅读视图永远显示默认文案
@@ -10,14 +10,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 
-let presenter: typeof import("../../extension/reader/presenter.js");
+let presenter: typeof import("../../extension/reader/reader-bus.js");
 let received: unknown[][];
 
 beforeEach(async () => {
   resetModuleState();
   // resetModules 后动态导入：每个用例拿到全新的 presenter 模块（readers
   // 注册表清空），避免跨用例的 handler 累积污染断言。
-  presenter = await import("../../extension/reader/presenter.js");
+  presenter = await import("../../extension/reader/reader-bus.js");
   received = [];
   presenter.subscribeReaderPresenter((...args: unknown[]) => {
     received.push(args);

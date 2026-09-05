@@ -26,7 +26,7 @@ vi.mock("../../extension/asr/audio-source.js", () => ({
 // resetModuleState 的 vi.resetModules 不会重跑 mock 工厂，工厂里
 // importOriginal 捕获的真实导出会闭包到过期的 state 实例（ensureRunActive 因此
 // 看不到用例内 setFetchRunId 的变更）。保持直 import 真实模块，逐用例新鲜。
-vi.mock("../../extension/reader/presenter.js", () => ({
+vi.mock("../../extension/reader/reader-bus.js", () => ({
   subscribeSubtitleRefresh: vi.fn(),
   notifyReaderPresenter: vi.fn()
 }));

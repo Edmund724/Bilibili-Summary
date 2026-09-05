@@ -86,6 +86,15 @@ export const ids = {
   readingChatStopBtn: "boc-reading-chat-stop-btn"
 };
 
+// ===== 类选择器契约表（arch-slim-2/03）=====
+//
+// 模板（ui/ui-renderer.js buildUiHtml）与查询方（reader/lifecycle.js
+// renderReadingView）共享、但不是 id 的节点定位，入此表避免字面量双抄。
+// 样式消费段在 reader.css（.boc-reading-title）。
+export const classes = {
+  readingTitle: "boc-reading-title"
+} as const;
+
 // ===== view-state.js：阅读视图开关状态访问器 =====
 //
 // isReaderViewOpen 是纯 state 读取（state.reader.readingViewOpen），被

@@ -301,20 +301,6 @@ function pickDurationFromPages(pages: PageItem[], pageIndex: number, fallbackDur
 //
 // Pure: returns a plain object and never writes `state`.
 
-// Issue 06: the reader implementation keeps the page state guard's
-// MutationObserver in module scope (now reader state/lifecycle modules, formerly
-// reader-impl.js); the guard holds it here so the implementation can reuse it
-// across lifecycle phases.
-let normalPageStateObserver: MutationObserver | null = null;
-
-export function setNormalPageStateObserver(observer: MutationObserver | null) {
-  normalPageStateObserver = observer;
-}
-
-function getNormalPageStateObserver() {
-  return normalPageStateObserver;
-}
-
 export function resolvePageContext(
   url: string,
   meta: PageContextMeta = {},

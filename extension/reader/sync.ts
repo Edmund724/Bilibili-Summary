@@ -186,9 +186,11 @@ function setActiveReadingItems(subtitleIndex: number, chapterIndex: number, shou
   state.reader.setActiveChapterIndex(chapterIndex);
 }
 
-// 章节列表 DOM 退役后的兜底滚动：退化为与旧 rail 相同的 scrollIntoView 语义
-//（隐藏容器/节点不可滚时对隐藏节点无操作）。
-function scrollReadingRailItemIntoView(node: HTMLElement) {
+// 列表容器或条目不可见（其他标签页激活/条目尚未上屏等）时的兜底滚动：
+// 对隐藏节点 scrollIntoView 无操作，不产生程序化滚动窗口之外的效果。
+//（名字溯源：原 scrollReadingRailItemIntoView，rail 章节列表随整页接管退役后
+// 仅剩本兜底一处调用，arch-slim-2/03 去掉漂移的 rail 名。）
+function scrollReadingItemIntoViewFallback(node: HTMLElement) {
   setProgrammaticScrollUntil(Date.now() + 600);
   node.scrollIntoView({
     behavior: "smooth",
@@ -211,7 +213,7 @@ function scrollReadingSubtitleItemIntoView(node: HTMLElement) {
   const listRect = subtitleList.getBoundingClientRect();
   const itemRect = node.getBoundingClientRect();
   if (!(listRect.height > 0) || !(itemRect.height > 0)) {
-    scrollReadingRailItemIntoView(node);
+    scrollReadingItemIntoViewFallback(node);
     return;
   }
 
@@ -278,14 +280,6 @@ export function seekReadingTarget(seconds: number | string, { resumePlayback = f
 // 阅读视图内点击跳转：自动播放策略（resumePlayback:true）委托给 seek 深入口。
 export function jumpReadingTarget(seconds: number | string) {
   seekReadingTarget(seconds, { resumePlayback: true });
-}
-
-export function onReadingChapterClick(event: MouseEvent) {
-  const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(".boc-reading-chapter");
-  if (!target) {
-    return;
-  }
-  jumpReadingTarget(target.dataset.seconds ?? 0);
 }
 
 export function onReadingSubtitleClick(event: MouseEvent) {

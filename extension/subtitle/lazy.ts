@@ -22,9 +22,10 @@
 // 消费约定：链内函数（refreshClip/loadSubtitle/resetClipState/buildClipSnapshotPayload/
 // onSubtitleChange/copyMarkdown/downloadSubtitle）不静态 import fetcher/ui，
 // 一律 `ensureSummarizeChain().then((chain) => chain.xxx())`；promise 缓存天然
-// 去重并发调用。reader 侧的 requestSubtitleRefresh（presenter seam）在无
-// handler 时也会先 ensure 本链再转发——链装载成功路径上的 initSummarizeChain
-// 会把 refreshClip 注册进 seam，闭环成立。
+// 去重并发调用。reader 侧的 requestSubtitleRefresh（reader-bus seam）只转发：
+// 调用方（reader/lifecycle.js）先 ensure 本链再调 seam，链装载成功路径上的
+// initSummarizeChain 会把 refreshClip 注册进 seam，闭环成立（arch-slim-2/03
+// 把懒装载触达从 seam 移到调用方）。
 
 import { createLazyLoader } from "../shared/lazy-import.js";
 
@@ -44,7 +45,6 @@ export interface SummarizeChain {
   copySubtitleTranscript(): Promise<void>;
   downloadSubtitle(): Promise<void>;
   buildClipSnapshotPayload(): Record<string, unknown>;
-  readVideoDescription(): string;
 }
 
 async function loadSummarizeChain(): Promise<SummarizeChain> {

@@ -9,6 +9,7 @@
 
 import { createProviderStore } from "./provider-store.js";
 import { HOST_PERMISSION_HINT, hasHostPermission } from "./host-permissions.js";
+import { withTimeout } from "../shared/error-helpers.js";
 
 export interface AiProvider {
   id: string;
@@ -81,16 +82,9 @@ export async function handleAiProvidersModels({
     return { ok: false, error: HOST_PERMISSION_HINT };
   }
   const headers: Record<string, string> = { Accept: "application/json" };
-  let controller: AbortController | null = null;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-
-  const cleanup = () => {
-    if (timer) {
-      clearTimeout(timer);
-      timer = null;
-    }
-  };
-
+  // 超时原语单源（arch-slim-2/03）：原手写 AbortController + setTimeout 改走
+  // withTimeout 硬超时（timeoutError 拒绝，文案逐字不变）。差异仅在于到点后
+  // 底层 fetch 不再被 abort——竞速已出局、响应无人消费，用户可见行为不变。
   try {
     if (!apiKey) {
       const keys = providerId ? await aiProviderStore.loadKeys() : {};
@@ -100,14 +94,11 @@ export async function handleAiProvidersModels({
       headers.Authorization = `Bearer ${apiKey}`;
     }
 
-    controller = new AbortController();
-    timer = setTimeout(() => controller!.abort(), 15000);
-    const resp = await fetch(`${normalizedBaseUrl}/v1/models`, {
-      headers,
-      method: "GET",
-      signal: controller.signal
-    });
-    cleanup();
+    const resp = await withTimeout(
+      fetch(`${normalizedBaseUrl}/v1/models`, { headers, method: "GET" }),
+      15000,
+      new Error("请求超时，请检查 baseUrl 或稍后重试")
+    );
     if (!resp.ok) {
       const text = await resp.text();
       return { ok: false, error: `HTTP ${resp.status}: ${text.slice(0, 200)}` };
@@ -121,10 +112,6 @@ export async function handleAiProvidersModels({
     }
     return { ok: true, models };
   } catch (error) {
-    cleanup();
-    if ((error as Error | undefined)?.name === "AbortError") {
-      return { ok: false, error: "请求超时，请检查 baseUrl 或稍后重试" };
-    }
     if (error instanceof SyntaxError) {
       return { ok: false, error: "无法解析模型列表" };
     }

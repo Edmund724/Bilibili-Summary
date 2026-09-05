@@ -6,7 +6,7 @@
 // reader 域重活（debug 快照、presenter 通知处理）改成回调触发时经
 // ensureReaderDomain() 动态装载。
 //
-// 依赖全部为常驻叶子（core/state、shared/logging、./presenter、
+// 依赖全部为常驻叶子（core/state、shared/logging、./reader-bus、
 // ./presentation、./view-state、core/lazy-reader、./presentation-fields 纯常量），
 // 不 import lifecycle/sync 等 reader 域重实现。
 import { state, uiState } from "../core/state.js";
@@ -15,7 +15,7 @@ import {
   loadReaderSettingsThroughSeam,
   requestPlayerAiSync,
   subscribeReaderPresenter
-} from "./presenter.js";
+} from "./reader-bus.js";
 // 候选03 常驻瘦身：hydrate / apply 已惰性化，只在阅读视图打开时才需要应用。
 import {
   applyReadingViewPresentation,
@@ -98,7 +98,7 @@ export function bindSettingsWatcher() {
   });
 }
 
-// presenter seam 的 reader 侧注册：fetcher（总结链层）发布数据变更通知时，
+// reader-bus seam（presenter.ts 改名，arch-slim-2/03）的 reader 侧注册：fetcher（总结链层）发布数据变更通知时，
 // reader 域按需装载后处理。注册本身常驻；转发路径带两级门控——
 //   1. reader 域未装载且阅读视图未打开 ⇒ 跳过：视图未打开 ⇒ 旧处理器在本域内
 //      的动作（reset: 停同步/观察器/重试定时器——均未启动；subtitle-ready/

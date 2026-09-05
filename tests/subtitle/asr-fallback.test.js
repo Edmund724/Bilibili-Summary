@@ -5,7 +5,7 @@
 // （setStatus / setMessage / broadcastSubtitleStatus）全部为测试内构造的假依赖。
 // 字幕接受事务（acceptSubtitle / commitNoSubtitle，subtitle/commit.js）注入
 // vi.fn 包装的真实实现：端到端 state 断言不变（事务真实落 state），同时锁
-// 「调用了 commit」；reader 通知职责在事务内（经真实 presenter 订阅观察）。
+// 「调用了 commit」；reader 通知职责在事务内（经真实 reader-bus 订阅观察）。
 // 不经 vi.mock 间接测 fetcher 内部。
 // provider 元数据（name/model）经注入的 loadProviders 取（asrProviders 已摘出
 // settings——列表归 provider-store，Key 不再进页面——组装移到 offscreen）；
@@ -24,7 +24,7 @@ import {
   commitNoSubtitle as realCommitNoSubtitle,
   configureCommitUi
 } from "../../extension/subtitle/commit.js";
-import { subscribeReaderPresenter } from "../../extension/reader/presenter.js";
+import { subscribeReaderPresenter } from "../../extension/reader/reader-bus.js";
 
 const BVID = "BV1test000000";
 const CID = "101";
@@ -310,9 +310,9 @@ describe("maybeRunAsrFallback 成功与缓存", () => {
     expect(statusCalls.some((s) => s.includes("语音识别完成，已生成 3 条字幕。"))).toBe(true);
   });
 
-  it("阅读视图打开时收尾通知 presenter：subtitle-ready（通知职责在字幕接受事务内）", async () => {
+  it("阅读视图打开时收尾通知 reader-bus：subtitle-ready（通知职责在字幕接受事务内）", async () => {
     // reader 通知由 commit.acceptSubtitle 负责（本文件不经 vi.mock）：经真实
-    // presenter seam 订阅观察端到端通知。
+    // reader-bus seam 订阅观察端到端通知。
     const handler = vi.fn();
     const unsubscribe = subscribeReaderPresenter(handler);
     state.reader.setViewOpen(true);

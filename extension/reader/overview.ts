@@ -7,7 +7,7 @@
 //      error（带错误信息）/ empty（无字幕诚实空态），产物引用存模块内闭包。
 //   2. 触发时机（基线决议「打开即自动生成并缓存」）：
 //        - enterReaderMode 打开视图（lifecycle 调用，字幕已在则直接生成）；
-//        - subtitle-ready presenter 通知（lifecycle 调用，转写/抓取完成后兜住）；
+//        - subtitle-ready reader-bus 通知（lifecycle 调用，转写/抓取完成后兜住）；
 //        - 用户切到概览 tab（ui-renderer → ensureReaderOverviewTab，idle 才触发）。
 //      重复触发去重两层：本模块 inflight promise 复用 + 管线 finalKey promise
 //      复用（runOverviewAnalysis 内建）；已生成（ready/partial）不自动重跑，

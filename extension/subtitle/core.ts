@@ -67,6 +67,16 @@ export function readUploadDate(): string {
   return formatLocalDate();
 }
 
+// 视频简介读取：与 readVideoTitle/readVideoAuthor/readUploadDate 同址
+//（arch-slim-2/03 自 subtitle/ui.js 归位——它与其他 DOM 读取同族，原放在链层
+// 交互文件里纯属错位；唯一消费方是 fetcher 的 refreshClip）。
+export function readVideoDescription(): string {
+  const descNode = document.querySelector(
+    ".desc-info-text, .video-desc .desc-info-text, .video-info-detail .text, .basic-desc-info"
+  );
+  return descNode?.textContent?.trim() || "";
+}
+
 export function getReadingSubtitleItems(body: SubtitleBodyItemLike[] = state.clip.subtitleBody): ReadingSubtitleItem[] {
   return (Array.isArray(body) ? body : [])
     .map((item, index) => ({

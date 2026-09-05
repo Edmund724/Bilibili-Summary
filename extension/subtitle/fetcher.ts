@@ -1,7 +1,6 @@
 // 候选03 常驻瘦身：setMessage / setStatus 迁入 shared/ui-status.js。
 import { setMessage, setStatus } from "../shared/ui-status.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
-import { normalizeDownloadFormat } from "../core/validators.js";
 import { state, clipState } from "../core/state.js";
 import type { SubtitleOption } from "../core/state.js";
 import { extractBvid, computeCurrentClipSignature } from "../bilibili/video-id-shared.js";
@@ -23,7 +22,7 @@ import { isReaderViewOpen } from "../reader/state.js";
 // PR3：boc-subtitle-status 广播的进程内镜像（零依赖叶子）——reader 同进程的
 // 转写中间态呈现经它读取/订阅（content script 收不到自己的 runtime 广播）。
 import { publishSubtitleStatusPhase } from "../shared/subtitle-status-bus.js";
-import { readVideoTitle, readVideoAuthor, readUploadDate } from "./core.js";
+import { readVideoTitle, readVideoAuthor, readUploadDate, readVideoDescription } from "./core.js";
 import {
   normalizeChapters,
   normalizeSubtitleTracks,
@@ -41,13 +40,7 @@ import {
   getSubtitleCacheKey
 } from "./cache.js";
 import { resolvePageContext } from "../reader/page-context.js";
-import { notifyReaderPresenter, subscribeSubtitleRefresh } from "../reader/presenter.js";
-import {
-  // 候选02 分层惰性：链层交互（复制/下载/弹出快照等）自 ui-renderer 移入
-  // ./ui.js（见该文件头注）。setStatus/setMessage 仍在 shared/ui-status——
-  // URL 变化编排等常驻侧路径也在用，不能随链下放。
-  readVideoDescription
-} from "./ui.js";
+import { notifyReaderPresenter, subscribeSubtitleRefresh } from "../reader/reader-bus.js";
 // 字幕接受事务（CONTEXT.md 域词条）：接受/无字幕出口的唯一入口。渲染与状态栏
 // 回调在模块求值期注入（下方 configureCommitUi），保持 commit → 本模块/UI 层
 // 无静态边。
@@ -59,7 +52,7 @@ import {
   readRuntimeVideoDuration,
   contentFetchJson
 } from "../bilibili/gateway.js";
-import type { SubtitleTrack, Chapter, VideoMeta } from "../bilibili/gateway.js";
+import type { SubtitleTrack } from "../bilibili/gateway.js";
 import type { AsrFallback, AsrProviderMeta, CreateAsrFallbackDeps } from "../asr/fallback.js";
 
 interface SubtitleDurationMismatchError extends Error {
@@ -76,13 +69,13 @@ interface SubtitleDurationMismatchError extends Error {
 // 实例缓存与失败重试语义见 loadAsrFallback()。
 
 // The fetcher is lazily loaded as part of the summarize chain (候选02 分层惰性
-// ，见 subtitle/lazy.js): the presenter-seam registration below used to be a
-// module-level side effect, which relied on "fetcher is always loaded at
+// ，见 subtitle/lazy.js): the reader-bus (presenter seam) registration below used
+// to be a module-level side effect, which relied on "fetcher is always loaded at
 // startup" — no longer true once the chain is on-demand. Registration now
 // binds to chain loading: initSummarizeChain() runs once on the
 // ensureSummarizeChain() success path (subscribeSubtitleRefresh 自带去重，
-// 重复调用安全), so the reader side can trigger a re-fetch through the
-// presenter seam's requestSubtitleRefresh() as soon as the chain is loaded.
+// 重复调用安全), and the reader side triggers a re-fetch by ensuring the chain
+// first (call site in reader/lifecycle.js) and then calling requestSubtitleRefresh().
 export function initSummarizeChain(): void {
   subscribeSubtitleRefresh(refreshClip);
 }
@@ -94,32 +87,9 @@ configureCommitUi({
   setStatus
 });
 
-export async function fetchVideoMeta(bvid: string): Promise<VideoMeta> {
-  logInfo("[BOC] fetch video meta", {
-    url: `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`,
-    bvid
-  });
-  return gatewayFetchVideoMeta(contentFetchJson, bvid);
-}
-
-export async function fetchSubtitleBundle(
-  bvid: string,
-  cid: string,
-  aid = ""
-): Promise<{ tracks: SubtitleTrack[]; chapters: Chapter[] }> {
-  logInfo("[BOC] fetch subtitles list", { bvid, cid, aid });
-  try {
-    return await gatewayFetchSubtitleBundle(contentFetchJson, { bvid, cid, aid });
-  } catch (error) {
-    logWarn("[BOC] subtitles API request failed", {
-      bvid,
-      cid,
-      aid,
-      message: getErrorMessage(error)
-    });
-    throw error;
-  }
-}
+// fetchVideoMeta / fetchSubtitleBundle 纯直通包装已删除（arch-slim-2/03）：原
+// 26 行只加 logInfo/logWarn，日志下沉到 gateway 对应函数（debug 级差异），本
+// 模块与 ai/context-resolver 一致直用 bilibili/gateway 的函数 + contentFetchJson。
 
 export async function tryLoadSubtitleCandidates(
   candidates: SubtitleTrack[],
@@ -232,7 +202,7 @@ export async function refreshClip(): Promise<void> {
       throw new Error("当前页面不是标准 BV 视频地址，无法抓取字幕。");
     }
 
-    const meta = await retryAsync(() => fetchVideoMeta(state.clip.bvid), 2, 250);
+    const meta = await retryAsync(() => gatewayFetchVideoMeta(contentFetchJson, state.clip.bvid), 2, 250);
     ensureRunActive(runId);
 
     // 调试：打印 API 返回的原始数据
@@ -277,7 +247,11 @@ export async function refreshClip(): Promise<void> {
 
     setStatus("正在获取可用字幕...");
     const subtitleBundle = await retryAsync(
-      () => fetchSubtitleBundle(state.clip.bvid, state.clip.cid, state.clip.aid),
+      () => gatewayFetchSubtitleBundle(contentFetchJson, {
+        bvid: state.clip.bvid,
+        cid: state.clip.cid,
+        aid: state.clip.aid
+      }),
       3,
       500
     );
@@ -420,7 +394,12 @@ async function retryWithFreshBundle({
   forceRefresh: boolean;
 }): Promise<SubtitleTrack> {
   const bundle = await retryAsync(
-    () => fetchSubtitleBundle(state.clip.bvid, state.clip.cid, state.clip.aid),
+    () =>
+      gatewayFetchSubtitleBundle(contentFetchJson, {
+        bvid: state.clip.bvid,
+        cid: state.clip.cid,
+        aid: state.clip.aid
+      }),
     2,
     500
   );

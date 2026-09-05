@@ -16,7 +16,8 @@
 // commit 静态引用会把渲染闭包拖进事务层并成环。renderMeta /
 // renderSubtitleSelect / setStatus 由 fetcher 在模块求值期经 configureCommitUi
 // 注入一次。其余依赖全部是叶子或常驻轻模块：core/state、subtitle/selection、
-// subtitle/core、reader/presenter（常驻轻 seam）、reader/view-state（常驻微
+// subtitle/core、reader/reader-bus（常驻轻 seam，arch-slim-2/03 自 presenter.ts
+// 改名）、reader/view-state（常驻微
 // 模块，纯 state 读取）、shared/logging。
 //（digest-only-ui：经典侧栏面板的预览 textarea 已删除，commit 不再清空它。）
 
@@ -24,7 +25,7 @@ import { clipState } from "../core/state.js";
 import type { NoSubtitleReason, SubtitleBodyItem } from "../core/state.js";
 import { sortSubtitleBodyByFrom } from "./selection.js";
 import { refreshDerivedContent } from "./core.js";
-import { notifyReaderPresenter } from "../reader/presenter.js";
+import { notifyReaderPresenter } from "../reader/reader-bus.js";
 import { isReaderViewOpen } from "../reader/state.js";
 
 export interface CommitUiCallbacks {
@@ -36,7 +37,7 @@ export interface CommitUiCallbacks {
 // 无字幕出口只回 reader 的 subtitle-ready 通知（renderReadingView 落空态）与
 // setStatus（skip 分支的引导文案）。
 //（digest-only-ui：经典侧栏面板的 renderMeta/renderSubtitleSelect 已随旧壳
-// 删除——无字幕出口对面板的元信息/下拉渲染改由 presenter 通知驱动。）
+// 删除——无字幕出口对面板的元信息/下拉渲染改由 reader-bus 通知驱动。）
 let commitUi: CommitUiCallbacks | null = null;
 
 // 由 fetcher 在模块求值期注入一次（取自 subtitle/ui.js 的 setStatus 与

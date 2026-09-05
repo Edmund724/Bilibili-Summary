@@ -27,9 +27,8 @@
 // 一致），并把「进入前播报」「失败口径」作为编排侧参数注入。
 
 import { suppressUntil } from "../ai/player-ai-state.js";
-import { replaceReaderModeUrl } from "../bilibili/reader-url.js";
+import { buildReaderModeUrl, replaceReaderModeUrl } from "../bilibili/reader-url.js";
 import {
-  cleanVideoUrl,
   isReaderMode,
   stripReaderModeUrl
 } from "../bilibili/video-id-shared.js";
@@ -54,20 +53,13 @@ export interface EnterReaderShellOptions {
 // player-ai / reading-chat 链在视图未开时也传空串（triggerReaderModeInTab 的
 // 空 readerUrl 参数）——此时必须用当前地址兜底构造阅读 URL，否则 URL 改写、
 // 阅读表与 data-boc-reader-mode 门控全被跳过，enterReaderMode 落在无样式的
-// 半进入态（页面布局微变但阅读模式不出现）。拼法与 ui/digest-button.ts
-// buildReaderUrl 一致（cleanVideoUrl 清成规范 URL 再加 boc_reader=1）。
+// 半进入态（页面布局微变但阅读模式不出现）。拼法单源在 bilibili/reader-url.ts
+// 的 buildReaderModeUrl（arch-slim-2/03，原与 ui/digest-button.ts 各抄一份）。
 function resolveReaderEntryUrl(readerUrl: string): string {
   if (readerUrl || isReaderViewOpen()) {
     return readerUrl;
   }
-  const base = cleanVideoUrl(location.href);
-  try {
-    const parsed = new URL(base);
-    parsed.searchParams.set("boc_reader", "1");
-    return parsed.toString();
-  } catch {
-    return base;
-  }
+  return buildReaderModeUrl(location.href);
 }
 
 // 壳完好性自查（唯一判定，restore 自愈与 digest 按钮守卫共用的同一 predicate）：

@@ -1,8 +1,10 @@
 // reader/chat-notices.ts — 对话 tab 消息区提示 / 居中态 / 建议区清理 / 近底判定
-//（PR5 自 extension/pages/sidepanel-notices.ts 重建：逻辑照抄（通知条去重、
-// textContent 防注入、自动消失定时器、居中错误块、suggestionsNode 同步置空、
-// 近底阈值），DOM 壳换新——容器经 deps 注入 reader 的 readingChatMessages，
-// class 名沿用 .chat-context-notice / .chat-center-error / .chat-suggestions）。
+//（PR5 自 extension/pages/sidepanel-notices.ts 重建；原 sidepanel 孪生模块已
+// 随侧边栏形态删除，本文件是唯一实现，判定逻辑（通知条去重、textContent 防注入、
+// 自动消失定时器、居中错误块、suggestionsNode 同步置空、近底阈值）不再与孪生
+// 同步，行为契约由 tests/reader/chat-notices.test.js 钉住。DOM 壳：容器经 deps
+// 注入 reader 的 readingChatMessages，class 名沿用 .chat-context-notice /
+// .chat-center-error / .chat-suggestions）。
 //
 // 唯一语义改造（盘点报告 §1.1 notices 判定行）：「前往设置」链接在 reader
 //（content script）语境下没有 chrome.runtime.openOptionsPage；digest-only-ui

@@ -17,10 +17,10 @@
 // Import-cycle note (issue 08): the reader implementation modules deliberately
 // import nothing from core/runtime.js — they read reader DOM ids through local
 // helpers and delegate settings persistence/loading to content.js through the
-// presenter seam. This keeps the reader domain free of any static import path
-// back through subtitle/fetcher.js.
+// reader-bus seam (presenter.ts 的改名，arch-slim-2/03). This keeps the reader
+// domain free of any static import path back through subtitle/fetcher.js.
 
-// ===== lifecycle.js（reader shell）：生命周期 + 渲染 + presenter 处理体 =====
+// ===== lifecycle.js（reader shell）：生命周期 + 渲染 + reader-bus 通知处理体 =====
 
 // 进入阅读模式
 export { enterReaderMode } from "./lifecycle.js";
@@ -35,7 +35,7 @@ export {
   updateReaderPreferences,
   renderReaderPanels
 } from "./lifecycle.js";
-// presenter seam 通知的 reader 侧处理体
+// reader-bus seam 通知的 reader 侧处理体
 export { handleReaderPresenterNotification } from "./lifecycle.js";
 // 阅读模式调试快照真身
 export { createReaderDebugSnapshot } from "./debug-snapshot.js";
@@ -55,7 +55,6 @@ export { syncReadingViewPlayback } from "./sync.js";
 export { jumpReadingTarget } from "./sync.js";
 // seek 深入口（候选06）：阅读视图内点击与侧栏时间戳 seek 的唯一规范序入口
 export { seekReadingTarget } from "./sync.js";
-export { onReadingChapterClick } from "./sync.js";
 export { onReadingSubtitleClick } from "./sync.js";
 export { noteManualReaderInteraction } from "./sync.js";
 export { updateReaderFollowState } from "./sync.js";

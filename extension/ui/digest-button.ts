@@ -16,14 +16,16 @@
 //
 // 点击行为：不发 background 消息。直接构造 reader-enter 消息交给
 // content 侧处理器（core/message-handler.ts 已实现的阅读模式进入路径），
-// readerUrl 用 cleanVideoUrl 清成规范视频 URL 再加 boc_reader=1，与 background
-// triggerReaderModeInTab 的拼法一致。经 dispatchContentScriptMessage 分发而非
-// chrome.runtime.sendMessage：content script 的 sendMessage 不会回环到本文档
-// 自己的 onMessage 监听器，分发主体抽出后监听器与按钮共用同一条处理器路径。
-// 失同步自愈同理：自查派发 reader-restore（阅读壳 restore 档先按 DOM 实况
-// 收敛失同步状态，再走与点击完全相同的进入链）。
+// readerUrl 拼法单源在 bilibili/reader-url.ts 的 buildReaderModeUrl
+//（cleanVideoUrl 清成规范视频 URL 再加 boc_reader=1；arch-slim-2/03 收口，
+// 原本地 buildReaderUrl 与 shell.ts 各抄一份）。经 dispatchContentScriptMessage
+// 分发而非 chrome.runtime.sendMessage：content script 的 sendMessage 不会回环到
+// 本文档自己的 onMessage 监听器，分发主体抽出后监听器与按钮共用同一条处理器
+// 路径。失同步自愈同理：自查派发 reader-restore（阅读壳 restore 档先按 DOM
+// 实况收敛失同步状态，再走与点击完全相同的进入链）。
 
-import { cleanVideoUrl, isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
+import { isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
+import { buildReaderModeUrl } from "../bilibili/reader-url.js";
 import { dispatchContentScriptMessage } from "../core/message-handler.js";
 import { isReaderViewOpen } from "../reader/state.js";
 // 阅读壳（工单 arch-slim/02）：失同步判定收口为壳的唯一完好性自查
@@ -140,7 +142,7 @@ function syncDigestButton(): void {
       brokenTicks = 0;
       lastRestoreAt = now;
       dispatchContentScriptMessage(
-        { type: "reader-restore", readerUrl: buildReaderUrl() },
+        { type: "reader-restore", readerUrl: buildReaderModeUrl(location.href) },
         () => {}
       );
     }
@@ -287,18 +289,7 @@ function handleDigestButtonClick(event: MouseEvent): void {
     return;
   }
   dispatchContentScriptMessage(
-    { type: "reader-enter", readerUrl: buildReaderUrl() },
+    { type: "reader-enter", readerUrl: buildReaderModeUrl(location.href) },
     () => {}
   );
-}
-
-function buildReaderUrl(): string {
-  const base = cleanVideoUrl(location.href);
-  try {
-    const parsed = new URL(base);
-    parsed.searchParams.set("boc_reader", "1");
-    return parsed.toString();
-  } catch {
-    return base;
-  }
 }

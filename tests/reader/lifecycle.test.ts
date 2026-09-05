@@ -19,8 +19,7 @@ vi.mock("../../extension/reader/digest-host.js", async (importActual) => {
   const actual = await importActual() as typeof import("../../extension/reader/digest-host.js");
   return {
     openDigestHost: vi.fn(actual.openDigestHost),
-    closeDigestHost: vi.fn(actual.closeDigestHost),
-    refreshDigestHostRect: vi.fn(actual.refreshDigestHostRect)
+    closeDigestHost: vi.fn(actual.closeDigestHost)
   };
 });
 

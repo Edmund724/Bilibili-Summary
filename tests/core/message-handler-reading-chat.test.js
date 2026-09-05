@@ -25,9 +25,15 @@ vi.mock("../../extension/core/url-watcher.js", () => ({
   startUrlWatcher: vi.fn(),
   BOC_URL_CHANGE_EVENT: "boc:urlchange"
 }));
-vi.mock("../../extension/bilibili/reader-url.js", () => ({
-  replaceReaderModeUrl: vi.fn()
-}));
+// arch-slim-2/03：reader-url 单源后 shell 的兜底 URL 也经 buildReaderModeUrl——
+// 只 mock 掉带副作用的 replaceState（replaceReaderModeUrl），URL 拼法走真身。
+vi.mock("../../extension/bilibili/reader-url.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    replaceReaderModeUrl: vi.fn()
+  };
+});
 vi.mock("../../extension/subtitle/lazy.js", () => ({
   ensureSummarizeChain: vi.fn()
 }));

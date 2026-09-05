@@ -246,10 +246,15 @@ export const READER_SETTINGS_WATCH_KEYS = [
   )
 ];
 
-// 有意不入主表的同前缀局部标志：它们是各子体系内部单点自洽的临时/局部标记
-// （写入方与清除方在同一处），不存在跨文件清单漂移面，不参与呈现属性契约。
+// 有意不入主表的同前缀局部标志：不参与呈现属性契约的临时/局部标记，由本清单
+// 统一登记防漂移。注意 data-boc-reader-ready 的写读点跨多文件（非「写入方与
+// 清除方在同一处」的局部标志语义，arch-slim-2/03 订正），登记在此是防手抄清单
+// 复活的权宜——它按语义本该进主表。
 // 源码扫描测试据此放行；新增 data-boc-* 属性字面量必须要么进主表、要么进本清单。
 export const LOCAL_FLAG_ATTRIBUTES = new Set([
-  "data-boc-reader-ready",            // 视图就绪态（ui-renderer 模板初值 / close 复位 "0"）
-  "data-boc-reader-hide-sending-bar"  // close 时瞬时隐藏 B 站发送条
+  // 视图就绪态。写：ui-renderer 模板初值 "0" + lifecycle.ts（进入置 "0"、
+  // setReadingViewReady 写 "1"/"0"）；读：shell.ts 的壳完好性判定 +
+  // reader.css / reader-gate.css 的门控选择器。
+  "data-boc-reader-ready",
+  "data-boc-reader-hide-sending-bar"  // close 时瞬时隐藏 B 站发送条（写入/清除同在 lifecycle）
 ]);

@@ -1,8 +1,9 @@
 // reader/chat-popovers.ts — 对话 tab 预设/历史两个 popover 的开合与文档级外点
-// 关闭（PR5 自 extension/pages/sidepanel-popovers.ts 重建：toggle/hide 与
-// handleDocumentClick 的判定分支逐字一致）。
+// 关闭（PR5 自 extension/pages/sidepanel-popovers.ts 重建；原 sidepanel 孪生
+// 模块已随侧边栏形态删除，本文件是唯一实现，toggle/hide 与 handleDocumentClick
+// 的判定逻辑不再与孪生同步，行为契约由 tests/reader/chat-popovers.test.js 钉住）。
 //
-// 两处换壳（盘点报告 §1.1 popovers 判定行 + 风险 6 决议）：
+// 两处换壳（盘点报告 §1.1 popovers 判定行 + 风险 6 决议，历史定案）：
 //   1. 外点关闭的 id 选择器换 reader 的 readingChat* id（原 #sp* 硬编码）；
 //   2. handleDocumentClick 不再自挂 document 监听——经 reader/chat-tab-bridge.ts
 //      的注册槽并入 ui-renderer 的单一文档级委托（防双监听互踩）。本模块只暴露

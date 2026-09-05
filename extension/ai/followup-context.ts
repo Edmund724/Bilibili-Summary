@@ -4,7 +4,7 @@
 // 原始字幕段按需检索注入由 06 负责，此处通过注入函数 retrieveRaw 解耦（缺省不注入）。
 // 纯函数、无 side effect，不碰 chrome/DOM。
 
-import { buildSubtitlePrompt } from "./subtitle-prompt.js";
+import { buildSubtitlePrompt, formatSegmentHeading } from "./subtitle-prompt.js";
 
 // 近 N 轮 verbatim（N = 最近对话轮数）：由外部 buildMessages(history, userPrompt) 取近 N 轮
 // 拼进消息历史，本模块只负责「字幕体」这一栏的取舍与压缩。
@@ -77,7 +77,9 @@ export function buildCompressedSummary({
 
   let summariesSection = "";
   if (summaries.length > 0) {
-    const lines = summaries.map((summary, i) => `### 片段 ${i + 1}\n${summary == null ? "" : String(summary)}`);
+    // 分段标注与成稿材料（ai/map-reduce 的 buildMaterial）共用 formatSegmentHeading
+    // 单源（arch-slim-2/03）——两条管线对同一份小结数组的分段语义必须逐字一致。
+    const lines = summaries.map((summary, i) => `${formatSegmentHeading(i)}\n${summary == null ? "" : String(summary)}`);
     summariesSection = "## 分段小结\n\n" + truncateTail(lines.join("\n\n"), SEGMENT_SUMMARIES_MAX_CHARS);
   }
 

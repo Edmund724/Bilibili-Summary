@@ -1,7 +1,7 @@
 // reader 域（reader/index.ts facade 及其 LAYOUT/SYNC/LIFECYCLE 闭包）的按需
 // 加载器（候选02 分层惰性）。
 //
-// 为什么惰性：reader 域（~50KB）只在进入阅读模式 / reader 交互 / presenter
+// 为什么惰性：reader 域（~50KB）只在进入阅读模式 / reader 交互 / reader-bus
 // 通知到达且阅读视图打开时才有职责。候选02 之前它被 message-handler 与
 // player-ai 的静态 import（reader/index barrel）拖进常驻闭包，经 esbuild 提升
 // 为 93KB 共享静态 chunk。分层后这里成为动态 import 边：esbuild 会把 facade
@@ -20,7 +20,7 @@
 // 旧 chunk 404 的过渡窗口内先失败、刷新后可恢复）。
 //
 // 「未装载」的语义约定（消费方依赖它做等价性跳过）：模块未加载 ⇒ 阅读视图
-// 从未打开 ⇒ presenter 通知的 reader 侧处理（停止同步/重渲染）在本域内的
+// 从未打开 ⇒ reader-bus 通知的 reader 侧处理（停止同步/重渲染）在本域内的
 // 效果都是 no-op，消费方据此跳过装载（isReaderDomainLoaded）。
 
 interface ReaderDomain {

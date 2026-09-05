@@ -42,6 +42,7 @@
 // 靠 vi.resetModules 换纪元重置。
 
 import { state } from "../core/state.js";
+import { buildReaderModeUrl } from "../bilibili/reader-url.js";
 import { buildContextKey, doesTabMatchContextUrl } from "../ai/conversation.js";
 import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
@@ -724,6 +725,7 @@ function onWindowResize(): void {
 // chip 点击的 reader 适配（sidepanel 版为 openCurrentContextUrl：chrome.tabs.update
 // 跳转活动标签页）。content script 无 chrome.tabs：同视频只做静默强刷；绑定会话
 // 指向别的视频时页内导航到目标 URL（保留 boc_reader=1，阅读模式随 URL 恢复）。
+// URL 拼法单源在 bilibili/reader-url.ts 的 buildReaderModeUrl（arch-slim-2/03）。
 async function openCurrentContextInReader(): Promise<void> {
   const targetUrl = String(chatSessionState.contextData?.url || chatSessionState.currentConversationMeta?.contextUrl || "").trim();
   if (!targetUrl) {
@@ -734,13 +736,7 @@ async function openCurrentContextInReader(): Promise<void> {
       await loadContextState({ forceRefresh: true, silent: true });
       return;
     }
-    let next = targetUrl;
-    try {
-      const parsed = new URL(targetUrl);
-      parsed.searchParams.set("boc_reader", "1");
-      next = parsed.toString();
-    } catch {}
-    location.href = next;
+    location.href = buildReaderModeUrl(targetUrl);
   } catch {}
 }
 
@@ -1002,10 +998,13 @@ function getTimestampNavDeps() {
 // 【整段迁移自 sidepanel.ts】重启对话：清流状态 + 清会话状态 + 重置消息区
 //（编排入口，被新对话/上下文切换复用）。
 function restartChat({ keepContext = false }: { keepContext?: boolean } = {}): void {
-  chatRuntime.resetStreamState();
-  chatSessionState.chatHistory = [];
-  chatSessionState.currentConversationId = "";
-  chatSessionState.currentConversationMeta = null;
+  // 「拆除会话」出口四（CONTEXT.md 词条；工单 arch-slim-2/07 D 半场）：断流
+  // 双轨统一——经 conversationStore.detachForRestart 发出 onStreamInterrupted，
+  // 本函数不再直调 chatRuntime.resetStreamState。断流仍先于会话身份清空（订阅
+  // 回调同步先执行，时序与直调时代一致）；订阅处是 resetStreamState 的唯一接线
+  // 点，runtime 直调仅剩该订阅处与会话关闭 closeChatSession（非拆除事务，不属
+  // 本收口）——store 事件管断流通知，防再造第三轨。
+  conversationStore.detachForRestart();
   if (!keepContext) {
     chatSessionState.currentContextKey = buildContextKey(chatSessionState.contextData);
   }

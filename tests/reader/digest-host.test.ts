@@ -419,30 +419,15 @@ describe("digest-host close", () => {
     document.body.innerHTML = "";
     expect(() => digestHost.openDigestHost()).not.toThrow();
 
-    // 元素后来出现（ui 渲染完成），下一次重算能写上变量。
+    // 元素后来出现（ui 渲染完成），下一次重算能写上变量（经 resize 事件走
+    // 事件路径合帧；原「手动重算」死槽位导出已随 arch-slim-2/03 删除）。
     const view = document.createElement("div");
     view.id = "boc-reading-view";
     document.body.appendChild(view);
     mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
-    digestHost.refreshDigestHostRect();
+    runRafSynchronously();
+    window.dispatchEvent(new Event("resize"));
     expect(vars(view).width).toBe("400px");
-  });
-
-  it("refreshDigestHostRect：手动重算一次，同步写变量", async () => {
-    await loadModules();
-    const anchor = mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
-    digestHost.openDigestHost();
-    anchor.getBoundingClientRect = () => makeRect(1500, 40, 360, 1600) as DOMRect;
-
-    digestHost.refreshDigestHostRect();
-
-    // 锚点左缘 1500 → 视口右界 1920：宽 420；top 40，height = 768 - 40。
-    expect(vars(readingView())).toEqual({
-      left: "1500px",
-      top: "40px",
-      width: "420px",
-      height: "728px"
-    });
   });
 
   it("窄窗浮层 → 贴栏切换：重算后清浮层属性并写变量", async () => {
@@ -459,7 +444,8 @@ describe("digest-host close", () => {
     // 视口变宽后重算：恢复贴栏。锚点 rect 不随 innerWidth 变（左缘 1640），
     // 可填宽 1920-1640=280 < 下限 380 → 左缘左移到 1540，宽 380。
     window.innerWidth = 1920;
-    digestHost.refreshDigestHostRect();
+    runRafSynchronously();
+    window.dispatchEvent(new Event("resize"));
     expect(el.getAttribute("data-boc-digest-float")).toBe(null);
     expect(vars(el)).toEqual({
       left: "1540px",

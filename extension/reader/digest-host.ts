@@ -21,6 +21,9 @@
 // 覆盖，口径对齐 digest-button 的 REINJECT_INTERVAL_MS。
 
 import { findReaderPlayerHost } from "../bilibili/video-probe.js";
+// #boc-reading-view 的 id 单源（arch-slim-2/03）：reader/state.js 的 id 表就是
+// 为此存在，本模块四处手抄字面量收口到 ids.readingView。
+import { ids } from "./state.js";
 
 // 右栏锚点候选（按优先级）。判定规则与覆盖页面见 closeDigestHost 上方注释；
 // 全部只读 getBoundingClientRect，绝不往锚点里插节点。
@@ -100,7 +103,7 @@ export function closeDigestHost(): void {
   window.removeEventListener("resize", scheduleDigestLayout);
   window.removeEventListener("scroll", scheduleDigestLayout);
   lastSnapshot = null;
-  const readingView = document.getElementById("boc-reading-view");
+  const readingView = document.getElementById(ids.readingView);
   if (!readingView) {
     return;
   }
@@ -108,11 +111,6 @@ export function closeDigestHost(): void {
     readingView.style.removeProperty(DIGEST_VAR_PREFIX + name);
   }
   readingView.removeAttribute(FLOAT_ATTR);
-}
-
-// 手动重算一次（供未来消费方调用）：不走合帧，同步应用当前 rect。
-export function refreshDigestHostRect(): void {
-  applyDigestRect();
 }
 
 // ===== 重算机制 =====
@@ -135,7 +133,7 @@ function runDigestLayout(): void {
   layoutRafId = 0;
   // 阅读视图节点已被移除（扩展根被清理/测试 teardown）时静默丢弃本帧：
   // 没有可写变量/属性的对象。
-  if (!document.getElementById("boc-reading-view")) {
+  if (!document.getElementById(ids.readingView)) {
     return;
   }
   applyDigestRect();
@@ -185,9 +183,9 @@ function observeDigestAnchor(anchor: Element | null): void {
   }
 }
 
-// 读→算→写一拍。所有路径（open/事件合帧/自查/手动）最终都到这里。
+// 读→算→写一拍。所有路径（open/事件合帧/自查）最终都到这里。
 function applyDigestRect(): void {
-  const readingView = document.getElementById("boc-reading-view");
+  const readingView = document.getElementById(ids.readingView);
   if (!readingView) {
     return;
   }
@@ -298,7 +296,7 @@ function applyFloating(): void {
     return;
   }
   lastSnapshot = { floating: true, values: [] };
-  const readingView = document.getElementById("boc-reading-view");
+  const readingView = document.getElementById(ids.readingView);
   if (!readingView) {
     return;
   }

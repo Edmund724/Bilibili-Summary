@@ -55,11 +55,17 @@ export function getErrorMessage(error: unknown, fallback = "未知错误"): stri
   return toReadableText(error, fallback);
 }
 
+// STALE_RUN 哨兵构造单源（arch-slim-2/03）：本模块的 ensureRunActive 与
+// asr/fallback（原 throwStaleRun 逐字双份）共用同一形状，构造点唯一。
+export function makeStaleRunError(): Error & { code: string } {
+  const error = new Error("Stale refresh run") as Error & { code: string };
+  error.code = "STALE_RUN";
+  return error;
+}
+
 export function ensureRunActive(runId: string | number): void {
   if (runId !== state.clip.fetchRunId) {
-    const error = new Error("Stale refresh run") as Error & { code: string };
-    error.code = "STALE_RUN";
-    throw error;
+    throw makeStaleRunError();
   }
 }
 

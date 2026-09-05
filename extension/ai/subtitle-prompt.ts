@@ -14,6 +14,14 @@ import { formatCompactTimestamp } from "../shared/string-utils.js";
 import { buildSubtitleSectionLines, shouldShowHoursInNote } from "../notes/render.js";
 import type { ChapterItem, SubtitleBodyItem } from "./types.js";
 
+// 分段小结标注（承重协议，字面量勿改）：成稿材料（ai/map-reduce.ts 的
+// buildMaterial）与追问压缩摘要（ai/followup-context.ts 的 buildCompressedSummary）
+// 都以 `### 片段 i` 标注每条小结——两条管线消费的是同一份分段小结数组，标注
+// 必须逐字一致，漂移即成稿与追问的分段语义分叉。单源于此（arch-slim-2/03）。
+export function formatSegmentHeading(index: number): string {
+  return `### 片段 ${index + 1}`;
+}
+
 interface AiConversationMeta {
   chapters?: ChapterItem[] | unknown[];
   videoDuration?: number | unknown;

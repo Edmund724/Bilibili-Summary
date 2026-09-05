@@ -13,17 +13,18 @@
 // 形成 core↔subtitle 循环。
 import { DEFAULT_SETTINGS, type Settings } from "./defaults.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
+import { withTimeout } from "../shared/error-helpers.js";
 
 // 归一化责任在 background(get-settings 处理器统一走 normalizeSettings),本函数只透传。
+// 超时原语走 shared/error-helpers 的 withTimeout（arch-slim-2/03 单源）：超时
+// 以 timeoutError 拒绝，被外层 catch 回落默认值——软超时语义与原手搓 race 一致。
 export async function getSettings(timeoutMs = 5000): Promise<Settings> {
   try {
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      window.setTimeout(() => reject(new Error("getSettings timeout")), timeoutMs);
-    });
-    const response = await Promise.race([
+    const response = await withTimeout(
       sendRuntimeMessage({ type: "get-settings" }),
-      timeoutPromise
-    ]);
+      timeoutMs,
+      new Error("getSettings timeout")
+    );
     if (!response || typeof response !== "object" || !(response as { ok?: unknown }).ok) {
       return { ...DEFAULT_SETTINGS };
     }

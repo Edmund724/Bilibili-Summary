@@ -23,9 +23,16 @@ vi.mock("../../extension/core/lazy-player-ai.js", () => ({
 vi.mock("../../extension/core/lazy-reader.js", () => ({
   ensureReaderDomain: vi.fn(async () => ({ enterReaderMode: vi.fn(async () => {}) }))
 }));
-vi.mock("../../extension/bilibili/reader-url.js", () => ({
-  replaceReaderModeUrl: vi.fn()
-}));
+// arch-slim-2/03：reader-url 单源后 digest-button 也消费 buildReaderModeUrl——
+// 只 mock 掉带副作用的 replaceState（replaceReaderModeUrl），URL 拼法走真身，
+// 本用例因此同时钉住 buildReaderModeUrl 的规范拼法。
+vi.mock("../../extension/bilibili/reader-url.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    replaceReaderModeUrl: vi.fn()
+  };
+});
 
 import { replaceReaderModeUrl } from "../../extension/bilibili/reader-url.js";
 

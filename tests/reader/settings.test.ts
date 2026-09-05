@@ -15,19 +15,19 @@ let presentation: typeof import("../../extension/reader/presentation.js");
 let lifecycle: typeof import("../../extension/reader/index.js");
 let initEssentials: typeof import("../../extension/reader/init-essentials.js");
 let ids: typeof import("../../extension/reader/state.js").ids;
-let presenter: typeof import("../../extension/reader/presenter.js");
+let presenter: typeof import("../../extension/reader/reader-bus.js");
 let chromeStub: ChromeRuntimeStub;
 
 async function loadReaderModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state as TestState;
-  presenter = await import("../../extension/reader/presenter.js");
+  presenter = await import("../../extension/reader/reader-bus.js");
   presentation = await import("../../extension/reader/presentation.js");
   initEssentials = await import("../../extension/reader/init-essentials.js");
   lifecycle = await import("../../extension/reader/index.js");
   ids = (await import("../../extension/reader/state.js")).ids;
   chromeStub = globalThis.chrome as unknown as ChromeRuntimeStub;
-  // 模拟 content.js 的接线：reader-impl 经 presenter seam 持久化/读取设置，
+  // 模拟 content.js 的接线：reader 域经 reader-bus seam 持久化/读取设置，
   // 底层仍是 chrome.runtime.sendMessage（tests/setup.js 的 stub）。
   presenter.subscribeReaderSettingsPersist(() => {
     chromeStub.runtime.sendMessage(

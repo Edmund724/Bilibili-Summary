@@ -12,7 +12,7 @@
 //   LIFECYCLE       lifecycle.js（本文件）            → SYNC + LAYOUT + ports
 //
 // B 形态（右栏 Digest 面板）：进入链只开壳、渲染并 openDigestHost（播放器
-// 不动），close 拆 digest-host 并清理会话态；presenter reset 只停同步。
+// 不动），close 拆 digest-host 并清理会话态；reader-bus reset 通知只停同步。
 import { state } from "../core/state.js";
 import { getReaderElement } from "../shared/dom-utils.js";
 import { sleep } from "../shared/utils.js";
@@ -32,7 +32,11 @@ import {
 } from "../shared/string-utils.js";
 import { isAiSubtitle } from "../subtitle/selection.js";
 import { shouldShowHoursInNote } from "../notes/render.js";
-import { requestSubtitleRefresh, persistReaderSettingsThroughSeam } from "./presenter.js";
+import { requestSubtitleRefresh, persistReaderSettingsThroughSeam } from "./reader-bus.js";
+import { logWarn } from "../shared/logging.js";
+// 候选02 分层惰性：链未装载 ⇒ refreshClip 未注册进 reader-bus seam。懒装载
+// 触达自 seam 移到调用方（arch-slim-2/03），见 maybeRefreshReaderSubtitleInBackground。
+import { ensureSummarizeChain } from "../subtitle/lazy.js";
 
 // 候选02 分层惰性：启动接线（bindReaderPresenter / installReaderDebugHelpers /
 // bindSettingsWatcher）与启动期呈现（hydrate/apply/renderReadingStatus）在常驻
@@ -40,7 +44,7 @@ import { requestSubtitleRefresh, persistReaderSettingsThroughSeam } from "./pres
 //（updateReaderPreferences/renderReaderPanels）属本域重活，
 // 自 presentation.js 移回此处（原 lifecycle.js 分节回归；renderReadingInfoPanel
 // 已随「视频摘要/简介」区块删除）。本文件只保留 reader 域
-// 的重活：进入/退出生命周期、阅读视图渲染、偏好/面板呈现与 presenter 通知
+// 的重活：进入/退出生命周期、阅读视图渲染、偏好/面板呈现与 reader-bus 通知
 // 处理体（候选09 迁出：字幕分批渲染状态机 → ./batched-render.js，调试快照 →
 // ./debug-snapshot.js）。
 import {
@@ -51,7 +55,7 @@ import {
 import { READER_CLOSE_ATTRS } from "./presentation-fields.js";
 
 // LAYOUT (state) functions this module drives:
-import { ids } from "./state.js";
+import { classes, ids } from "./state.js";
 // B 形态右栏 Digest 面板定位器：进入时开始贴栏定位，关闭时拆除。LAYOUT 层
 // 只剩 video-bind + digest-host。
 import { openDigestHost, closeDigestHost } from "./digest-host.js";
@@ -134,11 +138,20 @@ function maybeRefreshReaderSubtitleInBackground() {
     return;
   }
   waitForVideoMetadata().then(() => {
-    requestSubtitleRefresh().catch((error) => {
-      if (!isStaleRunError(error)) {
-        renderReadingStatus(`字幕加载失败：${getErrorMessage(error)}`);
-      }
-    });
+    // arch-slim-2/03：ensureSummarizeChain 触达自 reader-bus seam 移到本调用方
+    // （seam 恢复「只传话」）。装载失败保持原 seam 内的静默口径（仅 logWarn，
+    // 不进错误状态栏）；refresh 本身的失败仍走下方既有 catch。
+    ensureSummarizeChain()
+      .catch((error) => {
+        logWarn("[BOC] subtitle refresh (summarize chain load) failed", { error });
+        return undefined;
+      })
+      .then(() => requestSubtitleRefresh())
+      .catch((error) => {
+        if (!isStaleRunError(error)) {
+          renderReadingStatus(`字幕加载失败：${getErrorMessage(error)}`);
+        }
+      });
   });
 }
 
@@ -317,7 +330,7 @@ export function renderReadingView() {
   // 候选10 批2：渲染期间再次触发（切轨/重进阅读模式/状态重渲）时，先取消上一轮
   // 未完成的追加任务，按新数据从头分批，避免旧任务把过期条目追加进新列表。
   cancelReadingSubtitleAppend();
-  const titleNode = document.querySelector(".boc-reading-title");
+  const titleNode = document.querySelector(`.${classes.readingTitle}`);
   const metaNode = getReaderElement(ids.readingMeta);
   // 章节渲染由概览 tab 接管（rail 章节列表 DOM 已随整页接管退役）；
   // hasChapters 属性链保留（presentation 属性表与 CSS 消费方仍读它）。

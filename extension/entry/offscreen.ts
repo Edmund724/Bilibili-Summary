@@ -24,6 +24,7 @@
 // 判定都会因 size>0 / currentChatCount>0 保留文档，不会被提前关闭。
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { logWarn } from "../shared/logging.js";
+import { safePostMessage } from "../shared/messaging.js";
 import { shouldCloseAfterAsrTask } from "./offscreen-lifecycle.js";
 import { ASR_DECODE_PORT_NAME, ASR_DECODE_ACTION, ASR_MSG_ERROR } from "../asr/protocol.js";
 // 候选5：聊天字幕体单槽缓存（纯逻辑在 ./offscreen-subtitle-slot.js，可测）。
@@ -136,11 +137,7 @@ chrome.runtime.onConnect.addListener((port) => {
     // 全文（本条不自动重发，避免失败风暴）。
     const settled = subtitleSlot.settle(msg);
     if (!settled.ok) {
-      try {
-        port.postMessage({ type: "error", error: settled.error, code: settled.code });
-      } catch {
-        // port 已断开，回执无接收方，忽略（同 withCachedContextKey 的口径）
-      }
+      safePostMessage(port, { type: "error", error: settled.error, code: settled.code });
       return;
     }
     // 自此所有 chat 回执都附带 cachedContextKey（槽内已确认的 key）：SP 读它
@@ -217,14 +214,10 @@ async function dispatchAsrDecodeTask(task: unknown, port: chrome.runtime.Port) {
     handleAsrDecodeTask = await asrHandlerLoader.load();
   } catch (error) {
     logWarn("[BOC] offscreen-asr.js load failed", { error: getErrorMessage(error) });
-    try {
-      port.postMessage({
-        type: ASR_MSG_ERROR,
-        error: "ASR 模块加载失败：" + getErrorMessage(error)
-      });
-    } catch {
-      // port 已断开，忽略
-    }
+    safePostMessage(port, {
+      type: ASR_MSG_ERROR,
+      error: "ASR 模块加载失败：" + getErrorMessage(error)
+    });
     maybeCloseSelfAfterAsr(port);
     return;
   }
@@ -291,14 +284,9 @@ function askCostGuard(port: PostMessagePort, message: string) {
 function withCachedContextKey(port: PostMessagePort, contextKey: string) {
   return {
     postMessage: (data: Record<string, unknown>) => {
-      try {
-        port.postMessage({ ...data, cachedContextKey: contextKey });
-      } catch {
-        // port 已断开（聊天中途关面板/SPA 换页/刷新），回执无接收方，忽略——
-        // 否则断连后的迟到回执会在 async 消息监听器里抛
-        // "Attempting to use a disconnected port object" 成 unhandled rejection。
-        // 口径与 dispatchAsrDecodeTask 的断连吞错一致。
-      }
+      // 断连后的迟到回执由 safePostMessage 统一吞掉（口径单源，见
+      // shared/messaging.js），否则会在 async 消息监听器里抛成 unhandled rejection。
+      safePostMessage(port, { ...data, cachedContextKey: contextKey });
     }
   };
 }

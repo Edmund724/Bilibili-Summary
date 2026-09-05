@@ -43,9 +43,15 @@ vi.mock("../../extension/core/lazy-chat-tab.js", () => ({
   ensureReaderChatTab: mocks.ensureReaderChatTab,
   isReaderChatTabLoaded: vi.fn(() => false)
 }));
-vi.mock("../../extension/bilibili/reader-url.js", () => ({
-  replaceReaderModeUrl: mocks.replaceReaderModeUrl
-}));
+// arch-slim-2/03：reader-url 单源后 shell.ts 也消费 buildReaderModeUrl——
+// 只 mock 掉带副作用的 replaceState（replaceReaderModeUrl），URL 拼法走真身。
+vi.mock("../../extension/bilibili/reader-url.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../extension/bilibili/reader-url.js")>();
+  return {
+    ...actual,
+    replaceReaderModeUrl: mocks.replaceReaderModeUrl
+  };
+});
 
 import {
   enterReaderShell,

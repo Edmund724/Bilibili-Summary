@@ -18,6 +18,7 @@ import { dispatchChatTabOutsideClick } from "../reader/chat-tab-bridge.js";
 //（../shared/ui-status.js）。reader 重域（sync/lifecycle 的交互处理）与总结链
 //（fetcher/subtitle-ui）一律在回调内经 ensure 动态装载后调用。
 import {
+  classes,
   ids,
   isReaderViewOpen,
   isProgrammaticScrolling
@@ -72,7 +73,7 @@ export function buildUiHtml(): string {
       <aside id="${ids.readingDigestPanel}" class="boc-reading-digest-panel" aria-label="Digest 面板">
             <header class="boc-reading-header">
               <div class="boc-reading-header-copy">
-                <strong class="boc-reading-title">${escapeHtml(state.clip.title || "B站字幕阅读")}</strong>
+                <strong class="${classes.readingTitle}">${escapeHtml(state.clip.title || "B站字幕阅读")}</strong>
                 <div id="${ids.readingMeta}" class="boc-reading-meta">bilibili.com</div>
               </div>
               <div class="boc-reading-actions">

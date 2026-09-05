@@ -150,10 +150,7 @@ export function buildClipSnapshotPayload(): Record<string, unknown> {
 // 逆事务的唯一实现，CONTEXT.md「字幕接受」词条）——清空选中态/body/派生内容
 // 与预览 DOM 属该事务，调用点（fetcher 的 finishNoSubtitle、asr/fallback 的
 // 失败出口）一律改走 commit。
-
-export function readVideoDescription(): string {
-  const descNode = document.querySelector(
-    ".desc-info-text, .video-desc .desc-info-text, .video-info-detail .text, .basic-desc-info"
-  );
-  return descNode?.textContent?.trim() || "";
-}
+//
+// readVideoDescription 已归位 subtitle/core.js（arch-slim-2/03，与
+// readVideoTitle/readVideoAuthor/readUploadDate 同址；fetcher 直接从 core 取，
+// 本模块不再承载 DOM 读取）。

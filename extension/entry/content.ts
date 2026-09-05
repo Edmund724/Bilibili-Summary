@@ -40,7 +40,7 @@ import {
   subscribeReaderSettingsPersist,
   subscribeReaderSettingsLoad,
   subscribePlayerAiSync
-} from "../reader/presenter.js";
+} from "../reader/reader-bus.js";
 
 import { bindRuntimeEvents, bindUrlChangeHandler } from "../core/message-handler.js";
 // S3 分层：阅读表随阅读模式挂载（进入/退出事务的挂摘在 reader/shell.ts 阅读壳
@@ -56,7 +56,7 @@ interface PlayerAiApi {
   schedulePlayerAiQuickActionSync(delayMs?: number): void;
 }
 
-// reader/presenter.js 仍是 .js，无导出类型；本文件精确描述 seam 回调签名。
+// reader/reader-bus.js（presenter seam，arch-slim-2/03 改名）无导出类型；本文件精确描述 seam 回调签名。
 // delayMs 透传给 schedulePlayerAiQuickActionSync；options.resetRetry 重置重试计数。
 type PlayerAiSyncHandler = (delayMs?: number, options?: { resetRetry?: boolean }) => void;
 

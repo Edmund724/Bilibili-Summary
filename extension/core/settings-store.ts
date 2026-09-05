@@ -9,6 +9,10 @@
 
 import { DEFAULT_SETTINGS, type Settings } from "./defaults.js";
 import { normalizeAsrLanguage } from "./presets.js";
+// 超时原语单源（arch-slim-2/03）：原手搓 Promise.race + setTimeout 改走
+// withTimeout 的硬超时（timeoutError 拒绝），reject 仍被 .catch 回落空对象——
+// 软超时语义与原实现一致。
+import { withTimeout } from "../shared/error-helpers.js";
 import {
   normalizeDownloadFormat,
   normalizeIncludeHotCommentsInNote,
@@ -67,13 +71,11 @@ export function normalizeSettings(merged: Record<string, unknown>): Settings {
 }
 
 export async function getMergedSettings(timeoutMs = 5000): Promise<Settings> {
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error("storage timeout")), timeoutMs);
-  });
-  const syncSettings = await Promise.race([
+  const syncSettings = await withTimeout(
     chrome.storage.sync.get(DEFAULT_SETTINGS),
-    timeoutPromise
-  ]).catch(() => ({}));
+    timeoutMs,
+    new Error("storage timeout")
+  ).catch(() => ({}));
 
   return normalizeSettings({ ...DEFAULT_SETTINGS, ...(syncSettings as Record<string, unknown>) });
 }
