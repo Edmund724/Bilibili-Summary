@@ -420,13 +420,25 @@ function wireDialog(options: ProviderEditorOpenOptions): void {
   const host = state.host;
   if (!dialog || !host) return;
 
-  // close 动作委托挂 host（mask 与 dialog 的共同父级）：遮罩是 dialog 的兄弟，
-  // 挂 dialog 上收不到遮罩点击（explain-card 同款：委托在容器上）。
+  // 委托挂 host（mask 与 dialog 的共同父级）：遮罩是 dialog 的兄弟，挂 dialog
+  // 上收不到遮罩点击（explain-card 同款：委托在容器上）。
+  // 无条件 stopPropagation：Modal 宿主挂 #boc-reading-view 直下，在设置抽屉
+  // （settingsPanel）之外——点击外传会被 ui-renderer 的抽屉外点关闭委托（判定
+  // 域 settingsPanel+齿轮，document bubble）当成外点把抽屉一起收掉，随即触发
+  // hidden 联动的强制关闭，保存/关闭动作被吞（一次点击只关一层）。下拉的外点
+  // 收起语义（常态由 settings-panel 的文档级委托负责）在此自持。
   host.addEventListener("click", (event) => {
-    const target = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-provider-editor-action]");
-    if (!target) return;
     event.stopPropagation();
-    requestClose();
+    const target = event.target as HTMLElement;
+    // 点在下拉组件（模型 picker / ASR 自定义预设）之外才收起——组件的
+    // toggle/trigger/option 自带开关逻辑，点在组件内不干扰
+    if (!target.closest(".ai-provider-model-wrapper") && !target.closest(".custom-select-wrapper")) {
+      host.querySelectorAll<HTMLElement>(".ai-provider-model-dropdown").forEach((d) => (d.hidden = true));
+      host.querySelectorAll<HTMLElement>(".custom-select-dropdown").forEach((d) => (d.hidden = true));
+    }
+    if (target.closest("[data-provider-editor-action]")) {
+      requestClose();
+    }
   });
 
   dialog.querySelector(".provider-editor-save")?.addEventListener("click", () => {

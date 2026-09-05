@@ -446,12 +446,34 @@ describe("provider-editor：与设置抽屉的层级联动", () => {
     }
   });
 
-  it("Modal 内点击正常冒泡（不关 Modal 不关抽屉路径）", async () => {
+  it("Modal 内点击不外传：document bubble 委托（抽屉外点关闭）收不到，Modal 不关", async () => {
     const { host } = await mountPanel();
     const { dialog } = await openEditor(host, "#addAiProviderBtn");
 
-    dialog.querySelector(".provider-editor-body").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    expect(editorGone()).toBe(false);
+    const bubbleSpy = vi.fn();
+    document.addEventListener("click", bubbleSpy);
+    try {
+      // 模拟 ui-renderer 的抽屉外点关闭委托（document bubble）：Modal 宿主在
+      // settingsPanel 判定域之外，放行会把抽屉一起收掉（回归：实施首版正败于此）
+      dialog.querySelector(".provider-editor-body").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      expect(bubbleSpy).not.toHaveBeenCalled();
+      expect(editorGone()).toBe(false);
+    } finally {
+      document.removeEventListener("click", bubbleSpy);
+    }
+  });
+
+  it("Modal 内点下拉组件外收起模型下拉（settings-panel 文档级委托收不到不外传的点击，语义在 Modal 内自持）", async () => {
+    const { host } = await mountPanel();
+    const { dialog } = await openEditor(host, "#addAiProviderBtn");
+
+    dialog.querySelector(".provider-editor-baseurl").value = "https://api.example.com/v1";
+    // 模型下拉已在 DOM（hidden），置开再点组件外空白验证收起
+    const dropdown = dialog.querySelector(".ai-provider-model-dropdown");
+    dropdown.hidden = false;
+
+    dialog.querySelector(".provider-editor-name").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(dropdown.hidden).toBe(true);
   });
 
   it("设置抽屉收起（hidden）时 Modal 强制关闭：dirty 也不 confirm", async () => {
