@@ -154,3 +154,75 @@ export function createAsrRuntimeConfigHandler({
     return true;
   };
 }
+
+// ===== 「激活平台」单趟解析处理器（arch-slim-3/09，CONTEXT.md 域词条）=====
+
+// 无可用平台的可读文案单源（原 ai/active-provider.ts 定义，随解析链收口搬入
+// 处理器——错误在解析期产生，文案与产生点同居）。
+export const NO_ACTIVE_PROVIDER_MESSAGE = "还没有配置 AI 平台，请先在插件设置中添加并启用。";
+
+export interface AiResolvedProviderHandlerDeps {
+  getMergedSettings: () => Promise<{ defaultModel?: unknown }>;
+  loadProviders: () => Promise<unknown[]>;
+  loadKeys: () => Promise<Record<string, string>>;
+}
+
+// 解析策略双档：providerId 给定 = 精确匹配（offscreen 聊天链，找不到即报错）；
+// 缺省 = 设置 defaultModel → 首个启用平台回落（content 概览/选区解释）。
+// requiresKey !== false 且密钥缺失在解析期即拒绝——content 侧此前不校验、会
+// 拖到 HTTP 期才失败，两调用方统一收紧（arch-slim-3/09 行为裁决）。回包
+// provider 为平台记录（含 hasSavedKey、不含明文 Key），apiKey 单列。
+export function createAiResolvedProviderHandler({
+  getMergedSettings,
+  loadProviders,
+  loadKeys
+}: AiResolvedProviderHandlerDeps) {
+  return function handleResolveAiProvider(
+    message: unknown,
+    _sender: unknown,
+    sendResponse: SendResponse
+  ): boolean {
+    withOkResponse(
+      (async () => {
+        const requestedId = String((message as { providerId?: unknown })?.providerId || "").trim();
+        const providers = (await loadProviders()) || [];
+        const enabled = providers.filter(
+          (item) =>
+            item &&
+            (item as { enabled?: unknown }).enabled !== false &&
+            String((item as { id?: unknown })?.id || "").trim()
+        );
+        let provider: Record<string, unknown> | null = null;
+        if (requestedId) {
+          provider =
+            (enabled.find(
+              (item) => String((item as { id?: unknown }).id) === requestedId
+            ) as Record<string, unknown>) || null;
+          if (!provider) {
+            throw new Error("未找到选中的平台");
+          }
+        } else {
+          const settings = await getMergedSettings();
+          const preferredId = String(settings?.defaultModel || "").trim();
+          provider =
+            (enabled.find((item) => String((item as { id?: unknown }).id) === preferredId) ||
+              enabled[0] ||
+              null) as Record<string, unknown> | null;
+          if (!provider) {
+            throw new Error(NO_ACTIVE_PROVIDER_MESSAGE);
+          }
+        }
+        const providerId = String(provider.id);
+        const keys = (await loadKeys()) || {};
+        const apiKey = String(keys[providerId] || "").trim();
+        if (provider.requiresKey !== false && !apiKey) {
+          throw new Error("该平台 API Key 未配置");
+        }
+        return { ok: true, provider, apiKey };
+      })(),
+      sendResponse,
+      (error) => (error as Error)?.message || String(error)
+    );
+    return true;
+  };
+}

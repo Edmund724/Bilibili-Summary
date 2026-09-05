@@ -8,7 +8,7 @@
 import { buildMessages, clipSubtitleForContext } from "./context.js";
 import { buildBudgetPlan, estimateTokens, MATERIAL_BUDGET_CHARS } from "./budgeter.js";
 import { buildSubtitlePrompt } from "./subtitle-prompt.js";
-import { chatCompletion, makeOverflowError } from "./completion.js";
+import { chatCompletion, makeOverflowError, validateProviderBasics } from "./completion.js";
 import type { AiContext, AiProvider, ChatPort, StreamChatEvent } from "./types.js";
 
 // 超预算回落时的提示文案：如实描述——本次单次调用不发，ladder 收到
@@ -86,13 +86,12 @@ interface StreamChatInput {
 export async function streamChat({ provider, context, userPrompt, history, port, signal, onActivity, thinkingLevel }: StreamChatInput): Promise<{ done: true } | undefined> {
   if (!port) return;
 
-  const baseUrl = String(provider?.baseUrl || "").trim().replace(/\/+$/, "");
-  if (!baseUrl) {
-    port.postMessage({ type: "error", error: "baseUrl 未配置" });
-    return;
-  }
-  if (!provider.model) {
-    port.postMessage({ type: "error", error: "模型未配置" });
+  // 基础校验单点下沉 completion（arch-slim-3/09）：port 适配层 catch 后转回吐，
+  // 两条错误文案与 chatCompletion 同源，不再双抄。
+  try {
+    validateProviderBasics(provider);
+  } catch (error) {
+    port.postMessage({ type: "error", error: (error as Error).message });
     return;
   }
 

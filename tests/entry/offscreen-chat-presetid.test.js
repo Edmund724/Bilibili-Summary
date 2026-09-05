@@ -25,21 +25,21 @@ function stubChromeRuntime() {
         addListener: (fn) => onConnectListeners.push(fn)
       },
       sendMessage: vi.fn(async (message) => {
-        if (message?.type === "ai-providers-list") {
+        if (message?.type === "resolve-ai-provider") {
           return {
-            providers: [{
+            ok: true,
+            provider: {
               id: "p1",
               presetId: "ollama",
               name: "本地 Ollama",
               baseUrl: PROXY_BASE_URL,
               model: "llama3.2",
               enabled: true,
-              requiresKey: false
-            }]
+              requiresKey: false,
+              hasSavedKey: true
+            },
+            apiKey: "test-key"
           };
-        }
-        if (message?.type === "get-ai-provider-key") {
-          return { ok: true, apiKey: "test-key" };
         }
         return { ok: true };
       })

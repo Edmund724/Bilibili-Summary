@@ -24,6 +24,7 @@ import { handleAiProvidersModels as fetchAiProviderModels } from "../ai/provider
 import {
   createProviderMessageHandlers,
   createAsrRuntimeConfigHandler,
+  createAiResolvedProviderHandler,
   withOkResponse
 } from "../core/provider-handlers.js";
 // SW 静态图只进传输叶（arch-slim-2/04）：bgFetchJson/isBiliUrl 拆至 gateway-core，
@@ -240,6 +241,14 @@ const aiProviderHandlers = createProviderMessageHandlers({
   loadKeys: aiProviderStore.loadKeys
 });
 
+// 「激活平台」单趟解析（arch-slim-3/09）：offscreen 聊天链与 content 侧
+// 概览/选区解释共用，解析策略与密钥校验单源在处理器内。
+const aiResolvedProviderHandler = createAiResolvedProviderHandler({
+  getMergedSettings,
+  loadProviders: aiProviderStore.loadProviders,
+  loadKeys: aiProviderStore.loadKeys
+});
+
 function handleAiPresetsList(_message: Msg<"ai-presets-list">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   sendResponse({ ok: true, presets: PRESETS.slice() });
   return false;
@@ -330,6 +339,7 @@ const messageHandlerTable = {
   "ai-providers-save": aiProviderHandlers.save,
   "ai-providers-delete": aiProviderHandlers.remove,
   "ai-providers-models": handleAiProvidersModels,
+  "resolve-ai-provider": aiResolvedProviderHandler,
   "asr-presets-list": handleAsrPresetsList,
   "asr-providers-list": asrProviderHandlers.list,
   "asr-providers-save": asrProviderHandlers.save,

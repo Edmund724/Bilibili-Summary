@@ -32,10 +32,9 @@ import { createSubtitleBodySlot } from "./offscreen-subtitle-slot.js";
 // 候选04：ASR / AI 两族任务链的懒加载器工厂（promise 缓存、失败可重试）。
 import { createLazyLoader } from "../shared/lazy-import.js";
 import type {
-  AiProvidersListResponse,
-  GetAiProviderKeyResponse,
   OffscreenAsrPortMessage,
-  OffscreenChatPortMessage
+  OffscreenChatPortMessage,
+  ResolveAiProviderResponse
 } from "../shared/messaging-protocol.js";
 import type { ChatMsg } from "../ai/ladder.js";
 // 调试日志门三宿主接线（shared/logging 的 registerDebugGate 消费方）
@@ -298,36 +297,24 @@ function withCachedContextKey(port: PostMessagePort, contextKey: string) {
   };
 }
 
-// 取「选中的平台 + 其 API Key」：provider 来自 ai-providers-list，key 来自 get-ai-provider-key。
-// 任一缺失（平台不存在 / key 读取失败 / 需要 key 但未配置）返回带 error 的对象；成功返回 { provider, apiKey }。
-// 响应形状引用协议单源（arch-slim-2/02，原手猜形状断言移除）：本 context 保留
-// Promise 风格直发（MV3 无回调签名，见 tests/entry/offscreen-asr-skip.test.js
-// 的 stub 说明），await 的 unknown 回包在传输边界收窄为协议响应类型——与
-// shared/messaging.ts 内部的单点 cast 同性质。与 ai/active-provider.ts 的
-// resolveActiveProvider 同款消息链，回吐协议差异只在 port postMessage 与 throw。
+// 取「选中的平台 + 其 API Key」：走 resolve-ai-provider 合成消息单趟往返
+//（arch-slim-3/09，解析策略与密钥校验单源在 core/provider-handlers.ts 处理器，
+// 与 content 侧 ai/active-provider.ts 同走此消息；providerId 给定 = 精确匹配档）。
+// 任一缺失（平台不存在 / key 读取失败 / 需要 key 但未配置）返回带 error 的对象；
+// 成功返回 { provider, apiKey }（apiKey 合并进 provider 副本，沿用下游消费形状）。
+// 响应形状引用协议单源（arch-slim-2/02）：本 context 保留 Promise 风格直发
+//（MV3 无回调签名，见 tests/entry/offscreen-asr-skip.test.js 的 stub 说明），
+// await 的 unknown 回包在传输边界收窄为协议响应类型——与 shared/messaging.ts
+// 内部的单点 cast 同性质。
 async function resolveProviderWithKey(port: PostMessagePort, providerId: string | undefined) {
-  const providersResp = (await chrome.runtime.sendMessage({
-    type: "ai-providers-list"
-  })) as AiProvidersListResponse | null;
-  const list = (providersResp?.providers || []).filter((p) => p.enabled);
-  const provider = list.find((p) => p.id === providerId) || null;
-  if (!provider) {
-    port.postMessage({ type: "error", error: "未找到选中的平台" });
-    return { error: true };
-  }
-
-  const keysResp = (await chrome.runtime.sendMessage({
-    type: "get-ai-provider-key",
+  const resp = (await chrome.runtime.sendMessage({
+    type: "resolve-ai-provider",
     providerId
-  })) as GetAiProviderKeyResponse | null;
-  if (!keysResp?.ok) {
-    port.postMessage({ type: "error", error: keysResp?.error || "读取 API Key 失败" });
+  })) as ResolveAiProviderResponse | null;
+  if (!resp?.ok || !resp.provider) {
+    port.postMessage({ type: "error", error: resp?.error || "解析 AI 平台配置失败" });
     return { error: true };
   }
-  const apiKey = String(keysResp.apiKey || "").trim();
-  if (provider.requiresKey !== false && !apiKey) {
-    port.postMessage({ type: "error", error: "该平台 API Key 未配置" });
-    return { error: true };
-  }
-  return { provider: { ...provider, apiKey }, apiKey };
+  const apiKey = String(resp.apiKey || "").trim();
+  return { provider: { ...resp.provider, apiKey }, apiKey };
 }

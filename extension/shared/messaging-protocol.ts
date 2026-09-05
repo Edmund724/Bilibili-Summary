@@ -263,6 +263,23 @@ export type AiProvidersModelsResponse = {
   models?: string[];
   error?: string;
 };
+// arch-slim-3/09：「激活平台」单趟解析——offscreen 聊天链与 content 侧概览/
+// 选区解释共用（CONTEXT.md 域词条「激活平台」）。providerId 给定 = 精确匹配
+//（offscreen 语义）；缺省 = 设置 defaultModel → 首个启用平台回落（content
+// 语义）。requiresKey 平台密钥缺失在解析期即报可读错误（此前 content 侧会
+// 拖到 HTTP 期才失败）。
+export type ResolveAiProviderMessage = {
+  type: "resolve-ai-provider";
+  providerId?: string;
+};
+// 响应锚点：core/provider-handlers.ts createAiResolvedProviderHandler——
+// provider 为平台记录（不含明文 Key，与列表条目同形），apiKey 单列回传。
+export type ResolveAiProviderResponse = {
+  ok: boolean;
+  provider?: ProviderListEntry;
+  apiKey?: string;
+  error?: string;
+};
 
 export type AsrPresetsListMessage = { type: "asr-presets-list" };
 // 响应锚点：entry/background.ts handleAsrPresetsList。
@@ -336,6 +353,7 @@ export type BackgroundMessage =
   | AiProvidersSaveMessage
   | AiProvidersDeleteMessage
   | AiProvidersModelsMessage
+  | ResolveAiProviderMessage
   | AsrPresetsListMessage
   | AsrProvidersListMessage
   | AsrProvidersSaveMessage
@@ -348,8 +366,7 @@ export type BackgroundMessageType = BackgroundMessage["type"];
 // ===== offscreen document 发出的 runtime 请求 =====
 
 export type OffscreenRuntimeRequest =
-  | AiProvidersListMessage
-  | GetAiProviderKeyMessage
+  | ResolveAiProviderMessage
   | GetAsrRuntimeConfigMessage;
 
 // ===== offscreen document 接收的 port 消息 =====
@@ -417,6 +434,7 @@ export type ResponseOf<M> = M extends ClipRefreshMessage ? ClipRefreshResponse
   : M extends AiProvidersSaveMessage ? AiProvidersSaveResponse
   : M extends AiProvidersDeleteMessage ? AiProvidersDeleteResponse
   : M extends AiProvidersModelsMessage ? AiProvidersModelsResponse
+  : M extends ResolveAiProviderMessage ? ResolveAiProviderResponse
   : M extends AsrPresetsListMessage ? AsrPresetsListResponse
   : M extends AsrProvidersListMessage ? AsrProvidersListResponse
   : M extends AsrProvidersSaveMessage ? AsrProvidersSaveResponse

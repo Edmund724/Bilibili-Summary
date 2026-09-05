@@ -33,13 +33,12 @@ function stubChromeRuntime() {
         addListener: (fn) => onConnectListeners.push(fn)
       },
       sendMessage: vi.fn(async (message) => {
-        if (message?.type === "ai-providers-list") {
+        if (message?.type === "resolve-ai-provider") {
           return {
-            providers: [{ id: "p1", name: "测试平台", model: "m1", enabled: true, requiresKey: false }]
+            ok: true,
+            provider: { id: "p1", name: "测试平台", model: "m1", enabled: true, requiresKey: false, hasSavedKey: true },
+            apiKey: "test-key"
           };
-        }
-        if (message?.type === "get-ai-provider-key") {
-          return { ok: true, apiKey: "test-key" };
         }
         return { ok: true };
       })

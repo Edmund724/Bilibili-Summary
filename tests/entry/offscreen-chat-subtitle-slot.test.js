@@ -26,7 +26,7 @@ const BODY = [{ from: 0, to: 5, content: "第一句" }];
 
 let onConnectListeners = [];
 
-// 提供能通过 resolveProviderWithKey 的 provider/key 响应
+// 提供能通过 resolveProviderWithKey 的 provider/key 响应（resolve-ai-provider 单趟）
 function stubChromeRuntime() {
   vi.stubGlobal("chrome", {
     runtime: {
@@ -34,13 +34,12 @@ function stubChromeRuntime() {
         addListener: (fn) => onConnectListeners.push(fn)
       },
       sendMessage: vi.fn(async (message) => {
-        if (message?.type === "ai-providers-list") {
+        if (message?.type === "resolve-ai-provider") {
           return {
-            providers: [{ id: "p1", name: "测试平台", model: "m1", enabled: true, requiresKey: false }]
+            ok: true,
+            provider: { id: "p1", name: "测试平台", model: "m1", enabled: true, requiresKey: false, hasSavedKey: true },
+            apiKey: "test-key"
           };
-        }
-        if (message?.type === "get-ai-provider-key") {
-          return { ok: true, apiKey: "test-key" };
         }
         return { ok: true };
       })

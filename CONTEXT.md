@@ -102,6 +102,13 @@ _Avoid_: 名句、摘抄
 代码名：`compressedSummaryMarkdown` / `buildCompressedSummary` / `ai/followup-context.js`
 _Avoid_: 缓存摘要、记忆、上下文摘要
 
+### 平台与密钥
+
+**激活平台**:
+「当前选中的 AI 平台 + 其 API Key」的唯一解析：providerId 给定 = 精确匹配（AI 对话链），缺省 = 设置 defaultModel → 首个启用平台回落（概览/选区解释链）。requiresKey 平台密钥缺失在解析期即报可读错误。概览、选区解释、AI 对话三条链共用一条 `resolve-ai-provider` 单趟消息，禁止再手抄 providers-list + provider-key 的多趟解析链。
+代码名：`resolveActiveProvider`（content 侧消费壳）/ `resolveProviderWithKey`（offscreen 消费壳）/ `createAiResolvedProviderHandler`（SW 处理器，策略单源）
+_Avoid_: 手抄多趟解析链、第二份解析实现
+
 ### AI 对话
 
 **拆除会话**:

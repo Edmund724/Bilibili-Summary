@@ -196,3 +196,120 @@ describe("get-asr-runtime-config（createAsrRuntimeConfigHandler）", () => {
     expect(deps.getAsrProviderKey).not.toHaveBeenCalled();
   });
 });
+
+// ===== 「激活平台」单趟解析处理器（arch-slim-3/09）=====
+
+import { createAiResolvedProviderHandler } from "../../extension/core/provider-handlers.js";
+
+function makeResolvedDeps(overrides = {}) {
+  return {
+    getMergedSettings: vi.fn(async () => ({ defaultModel: "p1" })),
+    loadProviders: vi.fn(async () => [
+      { id: "p1", name: "P1", model: "m1", enabled: true, hasSavedKey: true },
+      { id: "p2", name: "P2", model: "m2", enabled: true, hasSavedKey: true }
+    ]),
+    loadKeys: vi.fn(async () => ({ p1: "key-p1", p2: "key-p2" })),
+    ...overrides
+  };
+}
+
+describe("createAiResolvedProviderHandler（resolve-ai-provider 单趟解析）", () => {
+  it("providerId 精确匹配档：带 id 查找并回 provider 记录 + apiKey，不读 settings", async () => {
+    const deps = makeResolvedDeps();
+    const handler = createAiResolvedProviderHandler(deps);
+    const { sendResponse, response } = makeChannel();
+
+    expect(handler({ providerId: "p2" }, {}, sendResponse)).toBe(true);
+    expect(await response).toEqual({
+      ok: true,
+      provider: { id: "p2", name: "P2", model: "m2", enabled: true, hasSavedKey: true },
+      apiKey: "key-p2"
+    });
+    expect(deps.getMergedSettings).not.toHaveBeenCalled();
+  });
+
+  it("providerId 精确匹配落空 → { ok: false, error: 未找到选中的平台 }", async () => {
+    const deps = makeResolvedDeps();
+    const handler = createAiResolvedProviderHandler(deps);
+    const { sendResponse, response } = makeChannel();
+
+    handler({ providerId: "nope" }, {}, sendResponse);
+    expect(await response).toEqual({ ok: false, error: "未找到选中的平台" });
+  });
+
+  it("缺省档：defaultModel 优先，无命中回落首个启用平台", async () => {
+    const deps = makeResolvedDeps({
+      getMergedSettings: vi.fn(async () => ({ defaultModel: "p2" }))
+    });
+    const handler = createAiResolvedProviderHandler(deps);
+    const { sendResponse, response } = makeChannel();
+
+    handler({}, {}, sendResponse);
+    expect((await response).provider.id).toBe("p2");
+
+    const fallbackDeps = makeResolvedDeps({
+      getMergedSettings: vi.fn(async () => ({ defaultModel: "ghost" }))
+    });
+    const fallbackHandler = createAiResolvedProviderHandler(fallbackDeps);
+    const fallbackChannel = makeChannel();
+    fallbackHandler({}, {}, fallbackChannel.sendResponse);
+    expect((await fallbackChannel.response).provider.id).toBe("p1");
+  });
+
+  it("无启用平台 → { ok: false, error: NO_ACTIVE_PROVIDER_MESSAGE }", async () => {
+    const deps = makeResolvedDeps({ loadProviders: vi.fn(async () => []) });
+    const handler = createAiResolvedProviderHandler(deps);
+    const { sendResponse, response } = makeChannel();
+
+    handler({}, {}, sendResponse);
+    expect(await response).toEqual({
+      ok: false,
+      error: "还没有配置 AI 平台，请先在插件设置中添加并启用。"
+    });
+  });
+
+  it("requiresKey !== false 且密钥缺失 → 解析期拒绝（content 侧统一收紧）", async () => {
+    const deps = makeResolvedDeps({ loadKeys: vi.fn(async () => ({ p2: "key-p2" })) });
+    const handler = createAiResolvedProviderHandler(deps);
+    const { sendResponse, response } = makeChannel();
+
+    handler({ providerId: "p1" }, {}, sendResponse);
+    expect(await response).toEqual({ ok: false, error: "该平台 API Key 未配置" });
+  });
+
+  it("requiresKey === false 平台密钥缺失照常放行（本地端点）", async () => {
+    const deps = makeResolvedDeps({
+      loadProviders: vi.fn(async () => [
+        { id: "local", name: "Ollama", model: "llama3.2", enabled: true, requiresKey: false, hasSavedKey: false }
+      ]),
+      loadKeys: vi.fn(async () => ({}))
+    });
+    const handler = createAiResolvedProviderHandler(deps);
+    const { sendResponse, response } = makeChannel();
+
+    handler({ providerId: "local" }, {}, sendResponse);
+    const payload = await response;
+    expect(payload.ok).toBe(true);
+    expect(payload.apiKey).toBe("");
+  });
+
+  it("disabled 平台不参与解析（精确匹配与回落均跳过）", async () => {
+    const deps = makeResolvedDeps({
+      loadProviders: vi.fn(async () => [
+        { id: "p1", name: "P1", model: "m1", enabled: false, hasSavedKey: true }
+      ])
+    });
+    const handler = createAiResolvedProviderHandler(deps);
+
+    const exact = makeChannel();
+    handler({ providerId: "p1" }, {}, exact.sendResponse);
+    expect(await exact.response).toEqual({ ok: false, error: "未找到选中的平台" });
+
+    const fallback = makeChannel();
+    handler({}, {}, fallback.sendResponse);
+    expect(await fallback.response).toEqual({
+      ok: false,
+      error: "还没有配置 AI 平台，请先在插件设置中添加并启用。"
+    });
+  });
+});

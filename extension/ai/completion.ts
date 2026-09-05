@@ -270,6 +270,26 @@ interface ChatCompletionInput {
  *   provider.baseUrl host 推断兜底，02 号票穿线）。
  * 错误模型见文件头注释。
  */
+/**
+ * 请求构造校验单点（arch-slim-3/09）：baseUrl 归一（去空白/去尾斜杠）+ 基础
+ * 字段校验的唯一实现，同两条错误文案（"baseUrl 未配置"/"模型未配置"）单点
+ * 维护。chatCompletion 直接消费返回值；client 的 port 适配层 catch 后转
+ * port 回吐。
+ */
+export function validateProviderBasics(
+  provider?: { baseUrl?: unknown; model?: unknown } | null
+): { baseUrl: string; model: string } {
+  const baseUrl = String(provider?.baseUrl || "").trim().replace(/\/+$/, "");
+  if (!baseUrl) {
+    throw new Error("baseUrl 未配置");
+  }
+  const model = provider?.model;
+  if (!model) {
+    throw new Error("模型未配置");
+  }
+  return { baseUrl, model: String(model) };
+}
+
 export async function chatCompletion({
   provider,
   messages,
@@ -286,14 +306,7 @@ export async function chatCompletion({
   retryDelayMs = 800,
   fetchImpl = globalThis.fetch
 }: ChatCompletionInput): Promise<string | { done: true }> {
-  const baseUrl = String(provider?.baseUrl || "").trim().replace(/\/+$/, "");
-  if (!baseUrl) {
-    throw new Error("baseUrl 未配置");
-  }
-  const model = provider?.model;
-  if (!model) {
-    throw new Error("模型未配置");
-  }
+  const { baseUrl, model } = validateProviderBasics(provider);
 
   const maxRetries = retries ?? defaultRetries(stream);
 

@@ -6,8 +6,8 @@
 //   - vi.mock 掉 ai/analysis.js 的 runOverviewAnalysis（数据管线 PR4a 本体，
 //     已有独立测试；这里只测接线与状态机迁移），其余导出（buildSubtitleSignature
 //     等签名守卫用）保留真实实现；
-//   - provider 解析链（get-settings / ai-providers-list / get-ai-provider-key）
-//     经 chrome stub 的 sendMessage 注入。
+//   - provider 解析（resolve-ai-provider 单趟，arch-slim-3/09）经 chrome stub
+//     的 sendMessage 注入。
 
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
@@ -50,8 +50,9 @@ async function loadModules() {
   runOverviewMock = vi.mocked(analysis.runOverviewAnalysis);
 }
 
-// provider 解析链与笔记生成引导消息的统一响应 stub（默认全通；extra 可对
-// 特定消息类型给出覆盖响应，返回 undefined 则落回默认分支）。
+// provider 解析（resolve-ai-provider 单趟，arch-slim-3/09）与笔记生成引导消息
+// 的统一响应 stub（默认全通；extra 可对特定消息类型给出覆盖响应，返回 undefined
+// 则落回默认分支）。
 function stubRuntimeMessages(extra?: (message: Record<string, unknown>) => unknown | undefined) {
   chromeStub().runtime.sendMessage.mockImplementation((message: Record<string, unknown>, callback?: (resp: unknown) => void) => {
     const respond = (resp: unknown) => {
@@ -65,16 +66,13 @@ function stubRuntimeMessages(extra?: (message: Record<string, unknown>) => unkno
       }
     }
     switch (message?.type) {
-      case "get-settings":
-        return respond({ ok: true, settings: { defaultModel: "prov-1" } });
-      case "ai-providers-list":
+      case "resolve-ai-provider":
         // presetId 为真实记录形状：core/ai-provider-store normalize 后恒有（缺省 "custom"）
         return respond({
           ok: true,
-          providers: [{ id: "prov-1", presetId: "custom", name: "测试平台", baseUrl: "https://api.test/v1", model: "test-model", enabled: true }]
+          provider: [{ id: "prov-1", presetId: "custom", name: "测试平台", baseUrl: "https://api.test/v1", model: "test-model", enabled: true, hasSavedKey: true }][0],
+          apiKey: "sk-test"
         });
-      case "get-ai-provider-key":
-        return respond({ ok: true, apiKey: "sk-test" });
       default:
         return respond({ ok: true });
     }
@@ -197,10 +195,11 @@ describe("概览状态机与触发", () => {  it("无字幕：不触发生成，
     runOverviewMock.mockResolvedValue(SAMPLE_ANALYSIS);
     // 反代 baseUrl：host 推断无规则，presetId 是概览链唯一的平台识别线索
     stubRuntimeMessages((message) => {
-      if (message?.type === "ai-providers-list") {
+      if (message?.type === "resolve-ai-provider") {
         return {
           ok: true,
-          providers: [{ id: "prov-1", presetId: "qwen", name: "反代百炼", baseUrl: "https://thinking-proxy.example.com/v1", model: "qwen3-max", enabled: true }]
+          provider: [{ id: "prov-1", presetId: "qwen", name: "反代百炼", baseUrl: "https://thinking-proxy.example.com/v1", model: "qwen3-max", enabled: true, hasSavedKey: true }][0],
+          apiKey: "sk-test"
         };
       }
       return undefined;
@@ -381,7 +380,11 @@ describe("概览状态机与触发", () => {  it("无字幕：不触发生成，
 
   it("provider 解析失败（未配置 AI 平台）落入 error 态并如实展示", async () => {
     seedClip();
-    chromeStub().runtime.sendMessage.mockImplementation((_message: Record<string, unknown>, callback?: (resp: unknown) => void) => {
+    chromeStub().runtime.sendMessage.mockImplementation((message: Record<string, unknown>, callback?: (resp: unknown) => void) => {
+      if (message?.type === "resolve-ai-provider") {
+        callback?.({ ok: false, error: "还没有配置 AI 平台，请先在插件设置中添加并启用。" });
+        return undefined;
+      }
       callback?.({ ok: true });
       return undefined;
     });
