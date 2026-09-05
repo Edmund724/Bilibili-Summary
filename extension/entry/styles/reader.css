@@ -158,6 +158,9 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* content-box 下 width:100% + 1px 边框两侧各溢 1px，贴栏态固定定位的
+   * 溢出会顶出页面级横向滚动条（Modal 出现前的既有 2px 残留，一并收口） */
+  box-sizing: border-box;
   border-radius: 18px;
   background: var(--boc-reader-surface, #fdfbf7);
   border: 1px solid var(--boc-reader-border, #e7dfd4);
@@ -2861,6 +2864,14 @@
   outline: none;
 }
 
+/* settings-host 的 box-sizing 通配保护不在本宿主作用域内——缺了它
+ * content-box 下 width:100% 的输入控件加 padding+border 恰好横向溢出
+ * 18px，dialog 出现多此一举的横向滚动条 */
+#boc-reading-view .provider-editor-host,
+#boc-reading-view .provider-editor-host * {
+  box-sizing: border-box;
+}
+
 #boc-reading-view .provider-editor-head {
   flex: 0 0 auto;
   display: flex;
@@ -2901,8 +2912,8 @@
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 16px;
+  gap: 12px;
+  padding: 14px 18px;
 }
 
 #boc-reading-view .provider-editor-field {
