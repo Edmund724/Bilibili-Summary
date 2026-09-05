@@ -18,7 +18,7 @@
 //   - linkifyAssistantTimestamps(root, deps)    DOM walker; swaps timestamp text nodes for seek buttons
 //   - jumpToAssistantTimestamp(seconds, label, deps)  async seek; deps injected at call time
 
-import { formatCompactTimestamp } from "../shared/string-utils.js";
+import { formatClock, parseClock } from "../shared/clock-text.js";
 import { waitForTabComplete } from "../shared/tab-utils.js";
 import { isTimestampOnlyInlineCode, TIMESTAMP_PATTERN } from "./markdown.js";
 
@@ -30,21 +30,13 @@ export interface TimestampNavDeps {
   sendMessageToActiveTab?: (tabId: number, message: unknown) => Promise<{ ok?: boolean; error?: string } | null>;
 }
 
+// 对话时间戳解析（arch-slim-2/08 归一）：容错规则单源 shared/clock-text.ts 的
+// parseClock（2 段分钟位不封顶、拒 ss≥60/3 段 mm≥60/hh≥24——原实现不拒，
+// 「99:99」会换算成非法秒数）；
+// 哨兵语义保留在本模块：解不出返回 0（与章节目录的 -1 哨兵不同），跳转调用方
+// 以 0 为「不跳转」。上游 TIMESTAMP_PATTERN 已约束 2/3 段形状。
 function parseTimestampToSeconds(value: unknown): number {
-  const parts = String(value || "")
-    .trim()
-    .split(":")
-    .map((item) => Number(item));
-  if (!parts.length || parts.some((item) => !Number.isFinite(item) || item < 0)) {
-    return 0;
-  }
-  if (parts.length === 3) {
-    return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  }
-  if (parts.length === 2) {
-    return parts[0] * 60 + parts[1];
-  }
-  return 0;
+  return parseClock(value) ?? 0;
 }
 
 export function unwrapTimestampInlineCode(text: unknown): string {
@@ -128,7 +120,7 @@ async function jumpToAssistantTimestamp(
     return;
   }
 
-  deps.notice?.(`正在跳转到 ${label || formatCompactTimestamp(safeSeconds, safeSeconds >= 3600)}...`, 1800);
+  deps.notice?.(`正在跳转到 ${label || formatClock(safeSeconds, { hours: "auto" })}...`, 1800);
 
   try {
     const sameVideo = deps.matchContextUrl?.(tab.url || "", targetUrl);

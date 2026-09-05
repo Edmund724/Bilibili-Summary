@@ -5,6 +5,7 @@
 // 纯函数、无 side effect、不碰 chrome/DOM、不发请求；加载原始段是集成步骤的职责，
 // 本模块只做「给定原始段后的匹配」，故不依赖 segment-cache.ts。
 
+import { parseClock } from "../shared/clock-text.js";
 import { STOP_WORDS } from "./stop-words.js";
 import type { ChapterItem, SubtitleBodyItem } from "./types.js";
 
@@ -33,27 +34,21 @@ function normalizeForMatch(text: unknown): string {
 
 /**
  * 把用户文本里出现的 `MM:SS` / `HH:MM:SS` / `H:MM:SS` 解析成秒。
- * 格式对齐 formatCompactTimestamp（<1h 用 MM:SS，≥1h 用 HH:MM:SS）；
- * 拒绝明显非时间：MM/SS < 60、HH < 24（比分「2:0」因秒段必须两位也不匹配）。
- * 返回升序去重的 number[]；无命中 → []。永不抛错。
+ * 格式对齐时刻文本单源（shared/clock-text.ts，<1h 用 M:SS，≥1h 用 H:MM:SS）；
+ * 数值容错（2 段分钟位不封顶、拒 SS ≥60 / 3 段 MM ≥60 / HH ≥24）单源 parseClock；
+ * 「比分 2:0」因秒段必须两位不匹配上游正则。返回升序去重的 number[]；无命中 → []。永不抛错。
  */
 export function parseTimestampSeconds(text: unknown): number[] {
   try {
     const s = String(text == null ? "" : text);
     const out: number[] = [];
     const seen = new Set<number>();
+    // 上游正则约束形状（段数/位数），数值容错交给 parseClock（arch-slim-2/08 归一）。
     for (const match of s.matchAll(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g)) {
-      const parts = match[0].split(":").map(Number);
-      const three = parts.length === 3;
-      const hh = three ? parts[0] : 0;
-      const mm = three ? parts[1] : parts[0];
-      const ss = three ? parts[2] : parts[1];
-      if (hh >= 24 || mm >= 60 || ss >= 60) continue;
-      const seconds = hh * 3600 + mm * 60 + ss;
-      if (!seen.has(seconds)) {
-        seen.add(seconds);
-        out.push(seconds);
-      }
+      const seconds = parseClock(match[0]);
+      if (seconds === null || seen.has(seconds)) continue;
+      seen.add(seconds);
+      out.push(seconds);
     }
     return out.sort((a, b) => a - b);
   } catch {

@@ -25,7 +25,8 @@
 // 走短路径不标。
 
 import { state } from "../core/state.js";
-import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
+import { escapeHtml } from "../shared/string-utils.js";
+import { formatClock } from "../shared/clock-text.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { setMessage } from "../shared/ui-status.js";
 // 「选中平台 + 其 API Key」解析（与选区解释共用）。
@@ -431,7 +432,7 @@ function chapterCardHtml(item: AnalysisChapter, withHours: boolean): string {
   const desc = String(item.summary || "").trim();
   return `
     <button type="button" class="boc-reading-ov-chapter" data-seconds="${from}">
-      <span class="boc-reading-time">${escapeHtml(formatCompactTimestamp(from, withHours))}</span>
+      <span class="boc-reading-time">${escapeHtml(formatClock(from, { hours: withHours }))}</span>
       <span class="boc-reading-ov-chapter-copy">
         <span class="boc-reading-ov-chapter-title">${escapeHtml(String(item.title))}</span>
         ${desc ? `<span class="boc-reading-ov-chapter-desc">${escapeHtml(desc)}</span>` : ""}
@@ -452,7 +453,7 @@ function quoteCardHtml(item: AnalysisQuote, withHours: boolean): string {
     <button type="button" class="boc-reading-ov-quote" data-seconds="${from}">
       <span class="boc-reading-ov-quote-text">「${escapeHtml(content)}」</span>
       <span class="boc-reading-ov-quote-foot">
-        <span class="boc-reading-time">${escapeHtml(formatCompactTimestamp(from, withHours))}</span>
+        <span class="boc-reading-time">${escapeHtml(formatClock(from, { hours: withHours }))}</span>
         <span class="boc-reading-ov-quote-copy" role="button" data-overview-action="copy-quote" data-quote="${escapeHtml(content)}" data-seconds="${from}">Copy</span>
       </span>
     </button>
@@ -502,7 +503,7 @@ async function copyQuoteToClipboard(quoteEl: HTMLElement): Promise<void> {
   const seconds = Number(quoteEl.dataset.seconds) || 0;
   const content = quoteEl.dataset.quote || "";
   const withHours = shouldShowHoursInNote(state, getClipBody());
-  const text = `${formatCompactTimestamp(seconds, withHours)} 「${content}」`;
+  const text = `${formatClock(seconds, { hours: withHours })} 「${content}」`;
   if (!content) {
     setMessage("没有可复制的金句。");
     return;

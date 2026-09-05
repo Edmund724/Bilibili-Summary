@@ -8,7 +8,8 @@ import {
   isFixedPropertyRowEffectivelyEmpty,
   normalizeNotePlaceholderSections
 } from "../core/validators.js";
-import { escapeYaml, formatCompactTimestamp, formatTimestamp, resolveFrontmatterTemplateValue, parseFrontmatterArrayItems, pushOptionalLines } from "../shared/string-utils.js";
+import { escapeYaml, formatTimestamp, resolveFrontmatterTemplateValue, parseFrontmatterArrayItems, pushOptionalLines } from "../shared/string-utils.js";
+import { formatClock, shouldUseHours } from "../shared/clock-text.js";
 import { normalizeChapters } from "../subtitle/selection.js";
 import { normalizeHotComments } from "../bilibili/bili-api-shared.js";
 import { extractPageIndex, cleanVideoUrl } from "../bilibili/video-id-shared.js";
@@ -63,7 +64,7 @@ function buildChapterLines(chapters: unknown[] | null | undefined, withHours = f
   }
 
   return chapterItems.map((item) => {
-    const fromText = formatCompactTimestamp(item.from, withHours);
+    const fromText = formatClock(item.from, { hours: withHours });
     return `- \`${fromText}\` ${item.title}`;
   });
 }
@@ -228,7 +229,7 @@ export function buildSubtitlePreview(body: SubtitleBodyItemLike[] | null | undef
         return "";
       }
       if (settings.includeTimestampInBody) {
-        return `\`${formatCompactTimestamp(item.from as number, compactWithHours)}\` ${text}`;
+        return `\`${formatClock(item.from as number, { hours: compactWithHours })}\` ${text}`;
       }
       return text;
     })
@@ -296,7 +297,7 @@ export function buildSubtitleSectionLines(body: unknown[] | null | undefined, ch
     }
 
     const chapterStamp = settings.includeTimestampInBody
-      ? ` \`${formatCompactTimestamp(start, withHours)}\``
+      ? ` \`${formatClock(start, { hours: withHours })}\``
       : "";
     lines.push(`### ${chapter.title}${chapterStamp}`, "");
     sectionItems.forEach((item) => {
@@ -335,7 +336,7 @@ export function buildTxt(body: SubtitleBodyItemLike[] | null | undefined, settin
       if (!settings?.includeTimestampInBody) {
         return text;
       }
-      return `${formatCompactTimestamp(item.from as number, withHours)} ${text}`;
+      return `${formatClock(item.from as number, { hours: withHours })} ${text}`;
     })
     .filter(Boolean)
     .join("\n");
@@ -388,7 +389,7 @@ function formatSubtitleLine(item: SubtitleBodyItemLike, settings: NoteRenderSett
   if (!settings.includeTimestampInBody) {
     return text;
   }
-  return `\`${formatCompactTimestamp(item.from as number, withHours)}\` ${text}`;
+  return `\`${formatClock(item.from as number, { hours: withHours })}\` ${text}`;
 }
 
 function getEnabledFrontmatterFields(settings: Settings): string[] {
@@ -464,12 +465,15 @@ function isYamlDateValue(value: unknown): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
 }
 
+// withHours 元数据级判定（arch-slim-2/08）：聚合（字幕末尾 / 章节边界 / 视频时长
+// 取 max）留在本模块——normalizeChapters 与 meta 形状是 notes 域知识，不拖入
+// 共享叶子；「≥3600 才带小时位」的阈值判定单源 shared/clock-text.ts。
 function shouldShowHoursInSubtitle(body: SubtitleBodyItemLike[] | null | undefined): boolean {
   const maxTo = (body || []).reduce((max, item) => {
     const to = Number(item?.to || 0);
     return Number.isFinite(to) && to > max ? to : max;
   }, 0);
-  return maxTo >= 3600;
+  return shouldUseHours(maxTo);
 }
 
 export function shouldShowHoursInNote(meta: NoteRenderMeta | State | null | undefined, body: unknown[] | null | undefined): boolean {
@@ -485,5 +489,5 @@ export function shouldShowHoursInNote(meta: NoteRenderMeta | State | null | unde
     return Math.max(max, from, to);
   }, 0);
   const duration = Number(m?.videoDuration || 0) || 0;
-  return Math.max(subtitleMaxTo, chapterMaxTo, duration) >= 3600;
+  return shouldUseHours(Math.max(subtitleMaxTo, chapterMaxTo, duration));
 }

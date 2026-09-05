@@ -31,9 +31,9 @@ describe("buildExplainContext", () => {
     const context = explain.buildExplainContext(BODY, 2);
     const lines = context.split("\n");
     expect(lines).toHaveLength(4);
-    expect(lines[0]).toMatch(/^ {2}\[00:00\] 我们习惯把语言视为空气$/);
-    expect(lines[2]).toMatch(/^→ \[00:20\] 但语言同时也是权力的载体$/);
-    expect(lines[3]).toMatch(/^ {2}\[00:30\] 这一点很少被讨论$/);
+    expect(lines[0]).toMatch(/^ {2}\[0:00\] 我们习惯把语言视为空气$/);
+    expect(lines[2]).toMatch(/^→ \[0:20\] 但语言同时也是权力的载体$/);
+    expect(lines[3]).toMatch(/^ {2}\[0:30\] 这一点很少被讨论$/);
   });
 
   it("锚点在首/尾时窗口收敛不越界", () => {
@@ -69,7 +69,7 @@ describe("buildExplainMessages", () => {
     const user = messages[1].content;
     expect(user).toContain("视频标题：语言与权力");
     expect(user).toContain("选中内容：「传递信息的工具」");
-    expect(user).toContain("所在字幕句（00:10）：「我们习惯将其视为传递信息的工具」");
+    expect(user).toContain("所在字幕句（0:10）：「我们习惯将其视为传递信息的工具」"); // arch-slim-2/08 拍板 Q1：不补零
     expect(user).toContain("字幕上下文");
     expect(user).toContain("我们习惯把语言视为空气");
   });

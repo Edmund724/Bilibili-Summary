@@ -27,7 +27,7 @@
 // queueEnsureReaderPlayerMounted 均已删除——video 重绑由 bindReadingViewVideo
 // 兜底（readingVideoEl 变化即重绑）。
 import { state } from "../core/state.js";
-import { formatCompactTimestamp } from "../shared/string-utils.js";
+import { formatClock } from "../shared/clock-text.js";
 import { getReaderElement } from "../shared/dom-utils.js";
 import { findActiveSubtitleIndex, findActiveChapterIndex } from "../subtitle/core.js";
 import { getRuntimeVideoElement } from "../bilibili/video-probe.js";
@@ -98,7 +98,7 @@ export function syncReadingViewPlayback(forceScroll = false) {
 
   setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll);
   updateReaderFollowState();
-  renderReadingStatus(`当前进度 ${formatCompactTimestamp(currentTime, currentTime >= 3600)}`);
+  renderReadingStatus(`当前进度 ${formatClock(currentTime, { hours: "auto" })}`);
   // PR3：转写横幅随 tick 收敛（转写期间 onProgress 持续改写状态栏文本，进度行
   // 需要跟着刷新；显隐脏检查在 updateReadingTranscribeBanner 内部）。
   updateReadingTranscribeBanner();

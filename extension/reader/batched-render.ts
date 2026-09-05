@@ -17,7 +17,8 @@
 // startReadingSubtitleAppendTask / cancelReadingSubtitleAppend /
 // ensureReadingSubtitleRenderedUpTo / SUBTITLE_FIRST_BATCH）由 lifecycle.js
 // 的 renderReadingView/closeReadingView/端口注册调用；本模块不 import lifecycle。
-import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
+import { escapeHtml } from "../shared/string-utils.js";
+import { formatClock } from "../shared/clock-text.js";
 import type { ReadingSubtitleItem } from "../subtitle/core.js";
 
 const SUBTITLE_FIRST_BATCH = 120;
@@ -45,7 +46,7 @@ export function buildReadingSubtitleItemHtml(item: ReadingSubtitleItem, withHour
       data-seconds="${item.from}"
     >
       <span class="boc-reading-time">${escapeHtml(
-        formatCompactTimestamp(item.from, withHours)
+        formatClock(item.from, { hours: withHours })
       )}</span>
       <span class="boc-reading-text">${escapeHtml(item.content)}</span>
     </button>

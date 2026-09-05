@@ -11,7 +11,7 @@
 // prompt 措辞对齐蓝本 .scratch/video-to-note/backend/llm_summarizer.py：
 // 分段小结忠实压缩保留时间点与事实，成稿面向收藏/复习、不补外部知识。
 
-import { formatCompactTimestamp } from "../shared/string-utils.js";
+import { formatClock, shouldUseHoursForRange } from "../shared/clock-text.js";
 import { makeAbortedError } from "../shared/error-helpers.js";
 import { formatSegmentHeading } from "./subtitle-prompt.js";
 import { buildBudgetPlan, FINAL_OUTPUT_CHARS, SEGMENT_SUMMARY_CHARS, SEGMENT_INPUT_CHARS, REDUCE_GROUP_INPUT_CHARS } from "./budgeter.js";
@@ -71,8 +71,8 @@ export function formatSegmentItem(item: unknown): string {
   const content = String(item && (item as { content?: unknown }).content != null ? (item as { content?: unknown }).content : "").trim();
   const from = Number(item && (item as { from?: unknown }).from) || 0;
   const to = Number(item && (item as { to?: unknown }).to) || from;
-  const withHours = from >= 3600 || to >= 3600;
-  return `[${formatCompactTimestamp(from, withHours)}-${formatCompactTimestamp(to, withHours)}] ${content}`;
+  const withHours = shouldUseHoursForRange(from, to);
+  return `[${formatClock(from, { hours: withHours })}-${formatClock(to, { hours: withHours })}] ${content}`;
 }
 
 /**

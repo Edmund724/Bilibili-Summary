@@ -85,11 +85,12 @@ describe("字幕 tab 复制 / 导出（真实绑定，经 ensureSummarizeChain�
 
     await vi.waitFor(() => expect(clipboardWriteText).toHaveBeenCalledTimes(1));
     const copied = String(clipboardWriteText.mock.calls[0][0]);
-    // transcript 语义：含每句文本；includeTimestampInBody 默认 true → 带紧凑时间戳
+    // transcript 语义：含每句文本；includeTimestampInBody 默认 true → 带时间戳
+    // （arch-slim-2/08 拍板：时刻文本统一不补零，0:00 形态）
     expect(copied).toContain("第一句话");
     expect(copied).toContain("第二句话");
-    expect(copied).toContain("00:00");
-    expect(copied).toContain("00:10");
+    expect(copied).toContain("0:00");
+    expect(copied).toContain("0:10");
 
     await vi.waitFor(() => expect(messageText()).toBe("字幕已复制到剪贴板。"));
   });

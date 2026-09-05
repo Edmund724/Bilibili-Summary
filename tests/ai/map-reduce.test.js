@@ -148,7 +148,7 @@ describe("orchestrateMapReduce 切片→小结→成稿编排", () => {
     expect(segmentPrompt).toContain("保留重要事实、例子、论证关系和原有时间点");
     expect(segmentPrompt).toContain("不做评价，不补充外部知识");
     // 时间戳以 [起点-终点] 拼入
-    expect(segmentPrompt).toMatch(/\[00:00-00:05\]/);
+    expect(segmentPrompt).toMatch(/\[0:00-0:05\]/);
   });
 
   it("成稿 prompt 对齐蓝本 _note_prompt：材料带「### 片段 i」标注，标题 # 视频笔记", async () => {

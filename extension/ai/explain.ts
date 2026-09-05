@@ -10,7 +10,7 @@
 // 还是一句观点，而不必回读整片字幕。整片字幕既贵又没必要（解释只需要局部语境）。
 
 import { chatCompletion } from "./completion.js";
-import { formatCompactTimestamp } from "../shared/string-utils.js";
+import { formatClock, shouldUseHours, shouldUseHoursForRange } from "../shared/clock-text.js";
 import type { AiProvider, ChatMessage } from "./types.js";
 
 interface ExplainSubtitleItem {
@@ -67,7 +67,9 @@ export function buildExplainContext(
   }
   const from = Math.max(0, Math.floor(anchor) - CONTEXT_WINDOW_SENTENCES);
   const to = Math.min(list.length - 1, Math.floor(anchor) + CONTEXT_WINDOW_SENTENCES);
-  const withHours = list.some((item) => Number(item?.from) >= 3600);
+  // 窗口级小时位判定走条目级谓词（两端任一 ≥3600）。字幕体经「字幕接受」事务
+  // 保证 from 升序，与逐条 some(...) 扫描等价，省掉窗口中间项的重复判定。
+  const withHours = shouldUseHoursForRange(list[from]?.from, list[to]?.from);
   const lines: string[] = [];
   for (let i = from; i <= to; i += 1) {
     const item = list[i];
@@ -76,7 +78,7 @@ export function buildExplainContext(
       continue;
     }
     const mark = i === Math.floor(anchor) ? "→ " : "  ";
-    lines.push(`${mark}[${formatCompactTimestamp(Number(item?.from) || 0, withHours)}] ${content}`);
+    lines.push(`${mark}[${formatClock(Number(item?.from) || 0, { hours: withHours })}] ${content}`);
   }
   return lines.join("\n");
 }
@@ -90,7 +92,7 @@ export function buildExplainMessages({
   body,
   index
 }: Omit<ExplainSelectionInput, "provider" | "signal">): ChatMessage[] {
-  const stamp = formatCompactTimestamp(Number(from) || 0, Number(from) >= 3600);
+  const stamp = formatClock(Number(from) || 0, { hours: shouldUseHours(from) });
   const context = buildExplainContext(body, index);
   const sections = [
     `视频标题：${String(videoTitle || "未知").trim() || "未知"}`,

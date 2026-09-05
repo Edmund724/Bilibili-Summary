@@ -17,13 +17,14 @@
 // 不接 UI / reader / sidepanel；消费接线由后续集成步骤负责。
 
 import { buildSubtitleSourceKey } from "../subtitle/cache.js";
+import { formatClock, parseClock } from "../shared/clock-text.js";
 import { logError } from "../shared/logging.js";
 import { makeAbortedError } from "../shared/error-helpers.js";
-import { parseBvidFromCacheKey, writeWithEviction, CACHE_FAMILIES } from "../core/cache-lru.js";
-import type { EvictionResult, EvictionFailure } from "../core/cache-lru.js";
+import { createCacheFamily } from "../core/cache-lru.js";
 import { buildBudgetPlan as _buildBudgetPlan } from "./budgeter.js";
 import { buildCostGuardNotice as _buildCostGuardNotice } from "./cost-guard.js";
 import { chatCompletion as _chatCompletion } from "./completion.js";
+import { parseLooseJson } from "./json-repair.js";
 import { buildProgressNotice } from "./map-reduce.js";
 import { runMapBounded, DEFAULT_MAP_CONCURRENCY } from "./pool.js";
 import { budgetScaleSuffix, segmentCacheKeyFields } from "./segment-cache.js";
@@ -55,7 +56,7 @@ export interface AnalysisQuote {
   content: string;
 }
 
-export interface AnalysisFailureRange {
+interface AnalysisFailureRange {
   from: number;
   to: number;
 }
@@ -68,21 +69,23 @@ export interface OverviewAnalysis {
 }
 
 // 整份概览结果缓存键前缀（键形：前缀 + bvid + cid + 字幕轨 source key + 字幕签名）。
-export const ANALYSIS_FINAL_PREFIX = "boc_lvs_analysis_final_";
+const ANALYSIS_FINAL_PREFIX = "boc_lvs_analysis_final_";
 // 概览分段产物缓存键前缀（键形与 boc_lvs_summary_ 同族：…+ 段序号 [+ 预算代]）。
-export const ANALYSIS_SEGMENT_PREFIX = "boc_lvs_analysis_";
+// 注意它是 ANALYSIS_FINAL_PREFIX 的父前缀——两族都已注册进 core/cache-lru.ts 的
+// CACHE_FAMILIES（前缀撞车语义见该处注释），本模块不再自行扩展淘汰名单。
+const ANALYSIS_SEGMENT_PREFIX = "boc_lvs_analysis_";
 // 前情回顾字数：每段开头附带的上一段结尾字数（对齐参考仓库 ANALYSIS_OVERLAP_CHARS）。
-export const ANALYSIS_CONTEXT_CHARS = 400;
+const ANALYSIS_CONTEXT_CHARS = 400;
 // 「最后一章必须晚于 75%」硬门槛比例（对齐参考仓库 ai.js:193-194，逼模型覆盖全片）。
-export const ANALYSIS_LATE_THRESHOLD_RATIO = 0.75;
+const ANALYSIS_LATE_THRESHOLD_RATIO = 0.75;
 // 校验上限：章节数 / 金句数（对齐参考仓库 validateAnalysis 的裁剪量级）。
-export const MAX_ANALYSIS_CHAPTERS = 100;
-export const MAX_ANALYSIS_QUOTES = 50;
+const MAX_ANALYSIS_CHAPTERS = 100;
+const MAX_ANALYSIS_QUOTES = 50;
 // 空正文重试的输出预算上限：思考型模型（如 step-3.7-flash）会无视关思考字段族
 // 强制思考，思考把 max_tokens 耗尽（finish_reason=length）后 content 空串返回，
 // parseLooseJson 只会抛出难懂的「Unexpected end of JSON input」。首次调用空正文
 // 时按原估算加倍（封顶此处）重试一次，给思考之后的正文留出落出空间。
-export const EMPTY_TEXT_RETRY_MAX_TOKENS_CEILING = 16384;
+const EMPTY_TEXT_RETRY_MAX_TOKENS_CEILING = 16384;
 
 // ============================================================
 // 系统提示词（全静态，逐字节可前缀缓存；变量全部在用户提示词侧）
@@ -251,15 +254,6 @@ UP 主：{ownerName}
 // 小工具（渲染 / 签名 / 模板填充）
 // ============================================================
 
-/**
- * 显示用时刻格式 [M:SS]（分不补零、秒补零，对齐参考仓库 transcript.formatTimestamp）。
- * 与系统提示词里的字幕格式教学一致；显示时间戳一律从校验过的秒数反推，不信模型字符串。
- */
-export function formatAnalysisClock(seconds: unknown): string {
-  const total = Math.max(0, Math.floor(Number(seconds) || 0));
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
-}
-
 function normalizeItems(items: unknown): SubtitleBodyItem[] {
   return (Array.isArray(items) ? items : []).filter(
     (item): item is SubtitleBodyItem => Boolean(item) && String((item as { content?: unknown })?.content ?? "").trim().length > 0
@@ -271,9 +265,9 @@ function normalizeItems(items: unknown): SubtitleBodyItem[] {
  * 本模块是概览管线的单一渲染收口：预算按 body 判定（buildBudgetPlan），
  * 发送物由这里从同一份 body（段 items）现场渲染，预算量与实际消耗同源。
  */
-export function renderAnalysisTranscript(items: unknown): string {
+function renderAnalysisTranscript(items: unknown): string {
   return normalizeItems(items)
-    .map((item) => `[${formatAnalysisClock(item?.from)}] ${String(item?.content ?? "").trim()}`)
+    .map((item) => `[${formatClock(item?.from)}] ${String(item?.content ?? "").trim()}`)
     .join("\n");
 }
 
@@ -321,7 +315,7 @@ function chapterOutlineText(chapterOutline: unknown): string {
 
 // 「自带章节（模式位）」：非空切换只挑金句短路径，产物形态不同，签名须区分；
 // 「chapterOutline」：简介/评论现成目录（切进「照抄边界」提示词路径），同样改变产物形态。
-export interface SubtitleSignatureInput {
+interface SubtitleSignatureInput {
   lang?: unknown;
   subtitleId?: unknown;
   subtitleUrl?: unknown;
@@ -372,91 +366,10 @@ export function buildSubtitleSignature({ lang, subtitleId, subtitleUrl, body, ch
 }
 
 // ============================================================
-// 适配纯函数（整搬自参考仓库 lib/ai.js，产出字段名归一化为本仓库形状）
+// 适配纯函数（整搬自参考仓库 lib/ai.js，产出字段名归一化为本仓库形状）。
+// 通用 JSON 防线（repairTruncatedJson / parseLooseJson）已独立为 ./json-repair.ts
+// （arch-slim-2/08），本模块只保留概览 shape 专属的校验/合并/估算。
 // ============================================================
-
-/**
- * 截断修复：输出撞到 max_tokens 或传输中断时，JSON 会停在字符串或括号中间。
- * 扫描出未闭合的部分原样补齐，保住已生成的内容（整搬 lib/ai.js:45-79）。
- */
-export function repairTruncatedJson(text: unknown): string {
-  const source = String(text ?? "");
-  let inString = false;
-  let danglingEscape = false;
-  const stack: string[] = [];
-  for (let i = 0; i < source.length; i += 1) {
-    const ch = source[i];
-    if (inString) {
-      if (ch === "\\") {
-        if (i + 1 >= source.length) {
-          danglingEscape = true;
-          break;
-        }
-        i += 1;
-      } else if (ch === '"') {
-        inString = false;
-      }
-    } else if (ch === '"') {
-      inString = true;
-    } else if (ch === "[" || ch === "{") {
-      stack.push(ch);
-    } else if (ch === "]" || ch === "}") {
-      stack.pop();
-    }
-  }
-  let repaired = source;
-  if (danglingEscape) repaired = repaired.slice(0, -1);
-  if (inString) repaired += '"';
-  // 截断恰好停在逗号后（长数组最常见的截断点）时，悬尾逗号必须先剥掉，
-  // 否则补完括号的 ",]}" 依然是非法 JSON，修复等于白修。
-  repaired = repaired.replace(/,\s*$/, "");
-  while (stack.length) {
-    repaired += stack.pop() === "[" ? "]" : "}";
-  }
-  return repaired;
-}
-
-/**
- * 解析模型返回的 JSON，容忍它常犯的小错：包了 markdown 围栏、在 JSON 前后
- * 加了一句话、结尾多一个逗号、输出中途被截断（整搬 lib/ai.js:86-110，一处
- * 顺序适配：原文以 { 开头时先按整段原文升级修复，再退到 firstBrace..lastBrace
- * 切割——截断最常发生在长数组中间，先切到「最后一个 }」会把切点之前嵌套对象
- * 后面的已生成内容整段丢掉，修复反而失效）。
- */
-export function parseLooseJson(text: unknown): unknown {
-  let cleaned = String(text ?? "").trim();
-
-  if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
-  }
-
-  const firstBrace = cleaned.indexOf("{");
-  const lastBrace = cleaned.lastIndexOf("}");
-  // 候选按修复力度升序尝试：原文（无前缀赘语时）→ 切掉前后赘语的 JSON 体；
-  // 每个候选依次 试解析 → 剥尾逗号 → 截断补齐。
-  const candidates: string[] = [];
-  if (firstBrace === 0) {
-    candidates.push(cleaned);
-  }
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    candidates.push(cleaned.slice(firstBrace, lastBrace + 1));
-  }
-  for (const candidate of candidates) {
-    try {
-      return JSON.parse(candidate);
-    } catch {}
-    // 依次升级修复力度：尾逗号 → 截断补齐。
-    const noTrailingComma = candidate.replace(/,(\s*[}\]])/g, "$1");
-    try {
-      return JSON.parse(noTrailingComma);
-    } catch {}
-    try {
-      return JSON.parse(repairTruncatedJson(noTrailingComma));
-    } catch {}
-  }
-  // 全部候选失败：抛最后一次的解析错误（由调用方处理）。
-  return JSON.parse(candidates[candidates.length - 1] ?? cleaned);
-}
 
 /**
  * 时长变量：元数据时长有时缺失或不准，取「传入时长」与「字幕末条时间戳」的
@@ -464,7 +377,7 @@ export function parseLooseJson(text: unknown): unknown {
  * 「最后一章必须晚于 75%」这条硬门槛，是逼模型覆盖全片而不是把章节全堆在
  * 开头最有效的一招（整搬 analysisTimingVariables 思路，结构化入参免正则反解析）。
  */
-export function analysisTimingVariables(
+function analysisTimingVariables(
   items: unknown,
   durationSeconds: unknown
 ): { maxTimestampSeconds: number; durationFormatted: string; lateThreshold: string } {
@@ -474,15 +387,15 @@ export function analysisTimingVariables(
   const effectiveSeconds = Math.max(Math.floor(Number(durationSeconds) || 0), lastStampSeconds);
   return {
     maxTimestampSeconds: effectiveSeconds,
-    durationFormatted: formatAnalysisClock(effectiveSeconds),
-    lateThreshold: formatAnalysisClock(Math.floor(effectiveSeconds * ANALYSIS_LATE_THRESHOLD_RATIO))
+    durationFormatted: formatClock(effectiveSeconds),
+    lateThreshold: formatClock(Math.floor(effectiveSeconds * ANALYSIS_LATE_THRESHOLD_RATIO))
   };
 }
 
 /**
  * 把模型输出当作不可信数据重建一遍（整搬 lib/ai.js:116-172，字段名归一化）：
  * - 模型编造超出视频时长的时间戳是常态，越界条目直接丢掉；
- * - 显示用的时间戳从校验过的秒数反推（formatAnalysisClock），模型给的
+ * - 显示用的时间戳从校验过的秒数反推（formatClock），模型给的
  *   timestamp 字符串一律不采信；
  * - 分段路径下段边界 = validateAnalysis 的 minSeconds：模型偶尔会为「前情回顾」
  *   里的内容也开章节/挑金句，那不归本段管，越下界的直接丢掉。
@@ -628,7 +541,7 @@ export function groupQuotesIntoChapters(
  * 概览是摘要，产出远小于原文：调用方按 ratio 0.5、floor 2048 传入（对齐
  * 参考仓库 analyzeChunk），前情回顾只进输入不进输出。
  */
-export function estimateOutputTokens(
+function estimateOutputTokens(
   inputChars: unknown,
   { ratio = 1, floor = 1024, ceiling = 8192 }: { ratio?: number; floor?: number; ceiling?: number } = {}
 ): number {
@@ -643,21 +556,22 @@ export function estimateOutputTokens(
 // ============================================================
 
 /** 简介/评论时间戳目录里的单条章节：秒数 + 标题（原样保留，不让模型改写）。 */
-export interface OutlineChapter {
+interface OutlineChapter {
   seconds: number;
   title: string;
 }
 
 // 时间戳行识别：行首（可带列表符号/引用符号）后跟 M:SS / MM:SS / H:MM:SS，
 // 后接标题文字（标题与时间戳之间也可用「・」「·」等间隔符）。纯时间戳行（无标题）
-// 不算章节条目。
+// 不算章节条目。上游正则约束形状，数值容错（2 段分钟位不封顶、拒 ss≥60/
+// 3 段 mm≥60/hh≥24）单源到 shared/clock-text.ts 的 parseClock。
 const OUTLINE_LINE_RE = /^(?:[-*•>#\s]|\d+[.、)])*\s*(\d{1,2}:\d{2}(?::\d{2})?)[\s・·]+(.{1,120}?)\s*$/;
 
+// 目录时间戳解析：容错规则单源（parseClock），哨兵语义保留——解不出
+// 返回 -1，parseChapterOutline 丢弃该条（原 parseOutlineClock 无范围校验，
+// 「99:99」这类非法时刻归一后按拍板拒绝）。
 function parseOutlineClock(text: string): number {
-  const parts = text.split(":").map(Number);
-  if (parts.length === 2) return parts[0] * 60 + parts[1];
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  return -1;
+  return parseClock(text) ?? -1;
 }
 
 /**
@@ -691,12 +605,12 @@ export function parseChapterOutline(text: unknown): OutlineChapter[] {
  * 有目录时给出「边界照抄、只补大意」的硬约束（措辞与系统提示词的
  * 「现成章节目录」节呼应）。
  */
-export function buildChapterOutlineNote(outline: OutlineChapter[] | undefined): string {
+function buildChapterOutlineNote(outline: OutlineChapter[] | undefined): string {
   if (!Array.isArray(outline) || outline.length === 0) {
     return "";
   }
   const lines = outline.map(
-    (item) => `${formatAnalysisClock(item.seconds)} ${item.title}`
+    (item) => `${formatClock(item.seconds)} ${item.title}`
   );
   return (
     `\n现成章节目录（来自视频简介/评论，共 ${outline.length} 章）：\n` +
@@ -705,7 +619,7 @@ export function buildChapterOutlineNote(outline: OutlineChapter[] | undefined): 
   );
 }
 
-export interface BuildAnalysisPromptInput {
+interface BuildAnalysisPromptInput {
   title?: unknown;
   ownerName?: unknown;
   videoDescription?: unknown;
@@ -724,7 +638,7 @@ export interface BuildAnalysisPromptInput {
   chapterOutline?: OutlineChapter[];
 }
 
-export interface BuiltAnalysisPrompt {
+interface BuiltAnalysisPrompt {
   prompt: string;
   timing: ReturnType<typeof analysisTimingVariables>;
   /** 字幕正文渲染产物长度（输出 token 估算的输入，前情回顾不计入）。 */
@@ -748,7 +662,7 @@ function buildRangeNote(
   const scope = mode === "full" ? "只为这一段产出章节与金句" : "只为这一段挑选金句";
   return (
     `注意：这是长视频切分后的第 ${index} / ${total} 段，` +
-    `覆盖 ${formatAnalysisClock(startSeconds)} 到 ${formatAnalysisClock(endSeconds)}。` +
+    `覆盖 ${formatClock(startSeconds)} 到 ${formatClock(endSeconds)}。` +
     `${scope}，不要涉及其它时间段。`
   );
 }
@@ -781,7 +695,7 @@ function buildAnalysisUserPrompt(mode: "full" | "quotes", input: BuildAnalysisPr
     videoTitle: String(input.title ?? "").trim() || "未知",
     ownerName: String(input.ownerName ?? "").trim() || "未知",
     rangeNote: buildRangeNote(mode, input.segmentIndex, input.totalSegments, startSeconds, endSeconds),
-    startFormatted: formatAnalysisClock(startSeconds),
+    startFormatted: formatClock(startSeconds),
     minTimestampSeconds: startSeconds,
     durationFormatted: timing.durationFormatted,
     maxTimestampSeconds: timing.maxTimestampSeconds,
@@ -800,7 +714,7 @@ export function buildAnalysisPrompt(input: BuildAnalysisPromptInput = {}): Built
 }
 
 /** 自带章节短路径「只挑金句」的用户提示词（与 buildAnalysisPrompt 同一套变量装配）。 */
-export function buildQuotesPrompt(input: BuildAnalysisPromptInput = {}): BuiltAnalysisPrompt {
+function buildQuotesPrompt(input: BuildAnalysisPromptInput = {}): BuiltAnalysisPrompt {
   return buildAnalysisUserPrompt("quotes", input);
 }
 
@@ -808,11 +722,33 @@ export function buildQuotesPrompt(input: BuildAnalysisPromptInput = {}): BuiltAn
 // 缓存（chrome.storage.local + 统一 LRU 淘汰；读取失败静默返回 null）
 // ============================================================
 
-type SaveResult = EvictionResult | EvictionFailure;
+// 两族缓存实例（arch-slim-2/08 缓存族参数化）：键拼装 / 静默读 / LRU 淘汰写 /
+// 失败日志口径全部出自 core/cache-lru.ts 的 createCacheFamily，本模块只剩族参数。
+// 两族已注册进 CACHE_FAMILIES（core/cache-lru.ts），不再在本模块自行扩展淘汰名单。
+function isOverviewShape(value: unknown): value is OverviewAnalysis {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      Array.isArray((value as { chapters?: unknown }).chapters) &&
+      Array.isArray((value as { quotes?: unknown }).quotes)
+  );
+}
 
-// 本模块新增两族并入统一 LRU 淘汰名单：概览写入顺带维持「每族最近 3 个视频」
-// 的既有不变量（既有三族名单不动，历史行为零变化）。
-const ANALYSIS_CACHE_FAMILIES = [...CACHE_FAMILIES, ANALYSIS_SEGMENT_PREFIX, ANALYSIS_FINAL_PREFIX];
+const analysisFinalFamily = createCacheFamily<OverviewAnalysis>({
+  prefix: ANALYSIS_FINAL_PREFIX,
+  payloadField: "analysis",
+  toSourceKey: buildSubtitleSourceKey,
+  validate: isOverviewShape,
+  logFailure: (info) => logError("[BOC] failed to save analysis cache after eviction", info)
+});
+
+const analysisSegmentFamily = createCacheFamily<OverviewAnalysis>({
+  prefix: ANALYSIS_SEGMENT_PREFIX,
+  payloadField: "analysis",
+  toSourceKey: buildSubtitleSourceKey,
+  validate: isOverviewShape,
+  logFailure: (info) => logError("[BOC] failed to save analysis cache after eviction", info)
+});
 
 function contextKeyFields(context: Record<string, unknown> | undefined | null): {
   bvid: unknown;
@@ -836,9 +772,7 @@ function contextKeyFields(context: Record<string, unknown> | undefined | null): 
  * 签名随字幕内容（条数/首末时间戳/文本量）与轨道变化，重抓字幕/换轨/切分P 自然 miss。
  */
 export function buildAnalysisFinalCacheKey(context: Record<string, unknown> | undefined | null, signature: unknown): string {
-  const { bvid, cid, subtitleId, subtitleUrl, lang } = contextKeyFields(context);
-  const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
-  return `${ANALYSIS_FINAL_PREFIX}${bvid}_${cid}_${sourceKey}_${String(signature ?? "")}`;
+  return analysisFinalFamily.key(contextKeyFields(context), String(signature ?? ""));
 }
 
 /**
@@ -851,69 +785,18 @@ export function buildAnalysisSegmentCacheKey(
   segmentIndex: number | string | unknown,
   budgetScale: number | string | unknown = 1
 ): string {
-  const { bvid, cid, subtitleId, subtitleUrl, lang } = contextKeyFields(context);
-  const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
-  return `${ANALYSIS_SEGMENT_PREFIX}${bvid}_${cid}_${sourceKey}_${segmentIndex}${budgetScaleSuffix(budgetScale)}`;
-}
-
-function isOverviewShape(value: unknown): value is OverviewAnalysis {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      Array.isArray((value as { chapters?: unknown }).chapters) &&
-      Array.isArray((value as { quotes?: unknown }).quotes)
-  );
-}
-
-// 概览缓存统一读写（工单 arch-slim/03 参数化）：final / segment 两族的读写
-// 函数除族前缀外逐字相同，参数化为一对——落盘形状（{ analysis, timestamp }）、
-// LRU 淘汰、失败口径从此一处可改。family 传 ANALYSIS_FINAL_PREFIX
-// （整份）或 ANALYSIS_SEGMENT_PREFIX（分段）。
-
-/**
- * 读取概览缓存：命中返回产物，未命中/读失败/形状损坏返回 null。
- * 两族落盘形状相同，读路径不消费族前缀；family 与 saveAnalysisCache 成对对齐。
- */
-export async function loadAnalysisCache(key: string, family: string): Promise<OverviewAnalysis | null> {
-  try {
-    const result = await chrome.storage.local.get(key);
-    const value = (result[key] as { analysis?: unknown } | undefined)?.analysis;
-    return isOverviewShape(value) ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-/** 保存概览产物：落盘 { analysis, timestamp }，走统一 LRU 淘汰；最终失败 logError 不抛。 */
-export async function saveAnalysisCache(key: string, family: string, analysis: OverviewAnalysis): Promise<SaveResult> {
-  const result = await writeWithEviction({
-    family,
-    bvid: parseBvidFromCacheKey(key, family),
-    keys: [key],
-    pruneFamilies: ANALYSIS_CACHE_FAMILIES,
-    write: () =>
-      chrome.storage.local.set({
-        [key]: {
-          analysis,
-          timestamp: Date.now()
-        }
-      })
-  });
-  if (!result.ok) {
-    logError("[BOC] failed to save analysis cache after eviction", {
-      key,
-      family,
-      error: result.error?.message || result.error
-    });
-  }
-  return result;
+  return analysisSegmentFamily.key(contextKeyFields(context), `${segmentIndex}${budgetScaleSuffix(budgetScale)}`);
 }
 
 // ============================================================
 // 编排入口：双路径分派 + promise 复用 + 成本护栏
 // ============================================================
 
-export type ChatCompletionFn = (input: {
+// 以下三个依赖注入类型仅本模块的编排签名使用（runOverviewAnalysis 的入参 /
+// deps 形状），arch-slim-2/08 转私有：生产消费方（reader/overview.ts）传对象
+// 字面量无需引用类型；ladder.ts 的同名类型声明形状不同（宽松 BudgetPlan，
+// 供测试 fake 只填 mode 等少数字段），刻意不合并（见工单 Comments 裁定）。
+type ChatCompletionFn = (input: {
   provider: { baseUrl?: string; apiKey?: string; model?: string };
   messages: ChatMessage[];
   thinkingLevel?: string;
@@ -922,14 +805,14 @@ export type ChatCompletionFn = (input: {
   maxTokens?: number | null;
 }) => Promise<unknown>;
 
-export type BuildBudgetPlanFn = (args: { body?: unknown[]; chapters?: unknown[] }) => BudgetPlan;
+type BuildBudgetPlanFn = (args: { body?: unknown[]; chapters?: unknown[] }) => BudgetPlan;
 
-export type BuildCostGuardNoticeFn = (args: { estimatedCalls?: unknown; estimatedTokens?: unknown }) => {
+type BuildCostGuardNoticeFn = (args: { estimatedCalls?: unknown; estimatedTokens?: unknown }) => {
   shouldPrompt: boolean;
   message: string;
 };
 
-export interface RunOverviewAnalysisArgs {
+interface RunOverviewAnalysisArgs {
   provider: { baseUrl?: string; apiKey?: string; model?: string };
   /** AI 上下文（AiContext 形状）：bvid/cid/字幕轨三键位 + title/author/videoDescription + subtitleBody/chapters。 */
   context: Record<string, unknown>;
@@ -939,7 +822,7 @@ export interface RunOverviewAnalysisArgs {
   forceRefresh?: boolean;
 }
 
-export interface RunOverviewAnalysisDeps {
+interface RunOverviewAnalysisDeps {
   chatCompletion?: ChatCompletionFn;
   buildBudgetPlan?: BuildBudgetPlanFn;
   buildCostGuardNotice?: BuildCostGuardNoticeFn;
@@ -1169,7 +1052,7 @@ async function executeOverviewRun({
   const buildPrompt = shortPath ? buildQuotesPrompt : buildAnalysisPrompt;
   // 整份缓存命中直接复用（短路径的章节取自稿件，返回前以稿件现值覆盖，防章节晚于字幕更新）。
   if (!forceRefresh) {
-    const cached = await loadAnalysisCache(finalKey, ANALYSIS_FINAL_PREFIX);
+    const cached = await analysisFinalFamily.load(finalKey);
     if (cached) {
       return shortPath
         ? { ...cached, chapters: normalizeManuscriptChapters(manuscriptChapters, cached.chapters.at(-1)?.to ?? 0) }
@@ -1237,7 +1120,7 @@ async function executeOverviewRun({
     if (!analysis.chapters.length && !analysis.quotes.length) {
       throw makeEmptyAnalysisError();
     }
-    await saveAnalysisCache(finalKey, ANALYSIS_FINAL_PREFIX, analysis);
+    await analysisFinalFamily.save(finalKey, analysis);
     return analysis;
   }
 
@@ -1247,7 +1130,7 @@ async function executeOverviewRun({
 
   const analyzeSegment = async (segment: BudgetPlanSegment, index: number): Promise<OverviewAnalysis> => {
     const segKey = buildAnalysisSegmentCacheKey(ctx, segment.index, 1);
-    const cached = await loadAnalysisCache(segKey, ANALYSIS_SEGMENT_PREFIX);
+    const cached = await analysisSegmentFamily.load(segKey);
     if (cached) {
       return cached;
     }
@@ -1276,7 +1159,7 @@ async function executeOverviewRun({
       chatCompletionImpl
     });
     // 先落盘再返回：失败重试只重跑未落盘段（segment-cache 复用语义）。
-    await saveAnalysisCache(segKey, ANALYSIS_SEGMENT_PREFIX, part);
+    await analysisSegmentFamily.save(segKey, part);
     return part;
   };
 
@@ -1340,6 +1223,6 @@ async function executeOverviewRun({
     analysis.failedRanges = failedRanges;
   }
   // 部分结果照常落缓存（含 failedRanges）：重试走 forceRefresh，段缓存让已成功段免重付费。
-  await saveAnalysisCache(finalKey, ANALYSIS_FINAL_PREFIX, analysis);
+  await analysisFinalFamily.save(finalKey, analysis);
   return analysis;
 }

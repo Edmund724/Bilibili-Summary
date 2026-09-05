@@ -9,9 +9,11 @@
 //     ts 为该视频最近一次写入时间戳，keys 为该 bvid 在该族下的全部缓存键
 //     （每次记录写入时合并去重更新）。旧格式条目（数值 ts，无 keys）在读端归一化
 //     兼容，无需迁移；
-//   - 淘汰候选键优先取索引键清单（不做 storage 存在性检查）；仅当某族在索引中
-//     无条目、或存在无 keys 的条目（旧格式/混合状态，键面不全）时，该族回退
-//     get(null) 前缀扫描兜底。索引指向已删键的幽灵条目随淘汰被垃圾回收出索引
+//   - 淘汰候选键优先取索引键清单（不做 storage 存在性检查）；仅当索引整体缺失
+//     （LRU_INDEX_KEY 不存在/损坏 → 全族回退 get(null) 前缀扫描自愈）、或某族
+//     有条目但存在无 keys 的条目（旧格式/混合状态，键面不全 → 该族回退）时才
+//     扫描兜底；索引健康时「无条目的族」（注册但从未写入，如新注册族）直接跳过。
+//     索引指向已删键的幽灵条目随淘汰被垃圾回收出索引
 //     （storage.remove 对不存在键是 no-op，索引收缩步骤顺带清掉条目）；
 //   - 淘汰本身静默运行、不提示；仅当「淘汰后重试仍失败」时由调用方把 distinct
 //     失败（CacheWriteError）上浮到各自的 UI 通道（content 状态栏 / offscreen port notice）。
@@ -20,8 +22,22 @@
 
 // LRU 索引键。
 export const LRU_INDEX_KEY = "boc_cache_lru_index";
-// 参与统一淘汰的缓存族前缀（镜像 ai/segment-cache.js 与 subtitle/cache.js 的键前缀）。
-export const CACHE_FAMILIES = ["boc_lvs_raw_", "boc_lvs_summary_", "boc_subtitle_cache_"];
+// 参与统一淘汰的缓存族前缀（全仓唯一注册处，arch-slim-2/08 起 analysis 两族
+// 收进注册、不再由 ai/analysis.ts 自行扩展名单）：
+//   - boc_lvs_raw_* / boc_lvs_summary_*：ai/segment-cache.ts 的原始字幕段 / 分段小结；
+//   - boc_subtitle_cache_*：subtitle/cache.ts 的整篇字幕正文（值 { body, timestamp }）；
+//   - boc_lvs_analysis_* / boc_lvs_analysis_final_*：ai/analysis.ts 的概览分段 / 整份产物。
+// 前缀撞车语义：boc_lvs_analysis_final_ 以 boc_lvs_analysis_ 为前缀，段族的
+// 前缀扫描（get(null) 兜底 / 前缀过滤）会把 final 键一并纳入候选——两族键的
+// bvid 段相同，淘汰按 bvid 粒度 keep/evict，同视频的段键与整份键共存亡（既有
+// 行为零变化）；final 族的前缀过滤则精确匹配自身。
+export const CACHE_FAMILIES = [
+  "boc_lvs_raw_",
+  "boc_lvs_summary_",
+  "boc_subtitle_cache_",
+  "boc_lvs_analysis_",
+  "boc_lvs_analysis_final_"
+];
 // 每族保留的最近视频数。
 export const LRU_KEEP_VIDEOS = 3;
 
@@ -140,7 +156,8 @@ function rankBvidsInFamily(
 
 /**
  * 淘汰到每族最近 keep 个视频：候选键优先取索引里记录的各族键清单（无存在性检查），
- * 索引缺 keys 的族回退前缀扫描；bvid 不在最近 keep 名内的整键删除——索引有、
+ * 索引整体缺失或某族有条目但缺 keys 时回退前缀扫描（见上）；bvid 不在最近 keep
+ * 名内的整键删除——索引有、
  * storage 无的幽灵键也在其列（storage.remove 对其为 no-op，其索引条目随收缩清出）。
  * 返回 { [family]: string[] }（清理出的键，可能含已不存在的键）；淘汰本身静默：
  * 任何失败吞掉并返回 {}。
@@ -159,9 +176,12 @@ export async function pruneToRecentVideos(
       return {};
     }
 
-    // 索引驱动路径：各族先按索引取候选键；仅当某族在索引中无条目或存在无 keys 的
-    // 条目（旧格式/混合状态，键面不全）时，该族回退 get(null) 前缀扫描兜底。
+    // 索引驱动路径：各族先按索引取候选键。回退 get(null) 前缀扫描仅两种情形：
+    // 索引整体缺失（自愈）或某族有条目但缺 keys（旧格式/混合状态）。索引健康时
+    // 「无条目的族」（注册但从未写入，如 arch-slim-2/08 收进注册的 analysis 两族）
+    // 视为空族跳过——否则每个未使用注册族都会让所有 prune 触发全量扫描。
     const index = await readLruIndex();
+    const indexEmpty = Object.keys(index).length === 0;
     const indexDrivenKeys = new Map<string, string[]>(); // family → 索引 keys 并集
     const fallbackFamilies: string[] = [];
     for (const family of familyList) {
@@ -178,7 +198,7 @@ export async function pruneToRecentVideos(
           }
         }
         indexDrivenKeys.set(family, [...keys]);
-      } else {
+      } else if (indexEmpty || bvids.length > 0) {
         fallbackFamilies.push(family);
       }
     }
@@ -308,4 +328,93 @@ export async function writeWithEviction({
     await pruneToRecentVideos(pruneFamilies, keep);
   }
   return { ok: true };
+}
+
+// ============================================================
+// 缓存族工厂（arch-slim-2/08）：chrome.storage.local 上「族键拼装 + 静默读 +
+// { payload, timestamp } 落盘 + writeWithEviction 统一 LRU 淘汰写」的口径单源。
+// 消费实例：ai/segment-cache.ts（boc_lvs_summary_ / boc_lvs_raw_ 两族）与
+// ai/analysis.ts（boc_lvs_analysis_final_ / boc_lvs_analysis_ 两族）。
+// 本叶保持零 import：source key 推导（buildSubtitleSourceKey，属 subtitle 域）
+// 与失败日志（logError，拖 core/state）都经 options 注入，不反向依赖。
+// ============================================================
+
+export type CacheSaveResult = EvictionResult | EvictionFailure;
+
+export interface CacheFamilyOptions<TValue> {
+  /** 族键前缀（必须已进 CACHE_FAMILIES 注册，参与统一 LRU 淘汰）。 */
+  prefix: string;
+  /** 落盘 payload 字段名；值形状 { [payloadField]: value, timestamp }。 */
+  payloadField: string;
+  /** 字幕轨 source key 推导（注入 subtitle/cache.ts 的 buildSubtitleSourceKey）。 */
+  toSourceKey: (subtitleId: unknown, subtitleUrl: unknown, lang: unknown) => string;
+  /** 读端形状校验（损坏返回 null）；缺省只做 nullish 归一（值原样透传）。 */
+  validate?: (value: unknown) => boolean;
+  /** 淘汰后重试仍失败时的日志钩子（注入 shared/logging 的 logError 与各族固定文案）。 */
+  logFailure?: (info: { key: string; error: unknown }) => void;
+}
+
+export interface CacheFamilyKeyFields {
+  bvid?: unknown;
+  cid?: unknown;
+  subtitleId?: unknown;
+  subtitleUrl?: unknown;
+  lang?: unknown;
+}
+
+export interface CacheFamily<TValue> {
+  readonly prefix: string;
+  /**
+   * 族键拼装：prefix + bvid + cid + sourceKey + tail。键形与各族历史键逐字节
+   * 一致（缓存零迁移）；段序号/预算代/签名等 tail 段的拼装约定由调用方传入。
+   */
+  key(fields: CacheFamilyKeyFields, tail: unknown): string;
+  /** 读：未命中 / 读失败 / 形状损坏 → null（静默，淘汰索引元数据同理可丢）。 */
+  load(key: string): Promise<TValue | null>;
+  /** 写：经 writeWithEviction（写失败先淘汰再重试一次），最终失败走 logFailure、不抛。 */
+  save(key: string, value: TValue): Promise<CacheSaveResult>;
+}
+
+export function createCacheFamily<TValue>(options: CacheFamilyOptions<TValue>): CacheFamily<TValue> {
+  const { prefix, payloadField, toSourceKey, validate, logFailure } = options;
+  return {
+    prefix,
+    key(fields, tail) {
+      const sourceKey = toSourceKey(fields.subtitleId, fields.subtitleUrl, fields.lang);
+      return `${prefix}${fields.bvid}_${fields.cid}_${sourceKey}_${String(tail)}`;
+    },
+    async load(key) {
+      try {
+        const result = await requireStorageLocal().get(key);
+        const value = (result[key] as Record<string, unknown> | undefined)?.[payloadField];
+        if (value == null) {
+          return null;
+        }
+        if (validate && !validate(value)) {
+          return null;
+        }
+        return value as TValue;
+      } catch {
+        return null;
+      }
+    },
+    async save(key, value) {
+      const result = await writeWithEviction({
+        family: prefix,
+        bvid: parseBvidFromCacheKey(key, prefix),
+        keys: [key], // 本次写入的缓存键，记录进 LRU 索引供淘汰时免全量扫描
+        write: () =>
+          requireStorageLocal().set({
+            [key]: {
+              [payloadField]: value,
+              timestamp: Date.now()
+            }
+          })
+      });
+      if (!result.ok) {
+        logFailure?.({ key, error: result.error?.message || result.error });
+      }
+      return result;
+    }
+  };
 }

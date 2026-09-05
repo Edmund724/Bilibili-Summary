@@ -7,13 +7,30 @@
 
 import { logError } from "../shared/logging.js";
 import { buildSubtitleSourceKey } from "../subtitle/cache.js";
-import { parseBvidFromCacheKey, readLruIndex, writeWithEviction } from "../core/cache-lru.js";
+import { createCacheFamily, readLruIndex } from "../core/cache-lru.js";
 import type { EvictionFailure, EvictionResult } from "../core/cache-lru.js";
 
 // 分段小结缓存键前缀。
 const SEGMENT_SUMMARY_PREFIX = "boc_lvs_summary_";
 // 原始字幕段缓存键前缀。
 const RAW_SEGMENT_PREFIX = "boc_lvs_raw_";
+
+// 两族缓存实例（arch-slim-2/08 缓存族参数化）：键拼装 / 静默读 / LRU 淘汰写 /
+// 失败日志口径全部出自 core/cache-lru.ts 的 createCacheFamily，本模块只剩
+// 族参数（前缀、payload 字段、文案标签）。键形与历史逐字节一致，缓存零迁移。
+const summaryFamily = createCacheFamily<string>({
+  prefix: SEGMENT_SUMMARY_PREFIX,
+  payloadField: "summary",
+  toSourceKey: buildSubtitleSourceKey,
+  logFailure: (info) => logError("[BOC] failed to save segment summary cache after eviction", info)
+});
+
+const rawFamily = createCacheFamily<unknown[]>({
+  prefix: RAW_SEGMENT_PREFIX,
+  payloadField: "segments",
+  toSourceKey: buildSubtitleSourceKey,
+  logFailure: (info) => logError("[BOC] failed to save raw segments cache after eviction", info)
+});
 
 interface SegmentKeyOptions {
   bvid: unknown;
@@ -39,16 +56,14 @@ export function budgetScaleSuffix(budgetScale: unknown): string {
  * source key 随字幕轨（subtitleId / subtitleUrl / lang）区分，切换字幕轨不串。
  */
 export function getSegmentSummaryKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "", segmentIndex, budgetScale = 1 }: SegmentKeyOptions): string {
-  const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
-  return `${SEGMENT_SUMMARY_PREFIX}${bvid}_${cid}_${sourceKey}_${segmentIndex}${budgetScaleSuffix(budgetScale)}`;
+  return summaryFamily.key({ bvid, cid, subtitleId, subtitleUrl, lang }, `${segmentIndex}${budgetScaleSuffix(budgetScale)}`);
 }
 
 /**
  * 原始字幕段缓存键：同样含 bvid + cid + 字幕轨 + 段序号 [+ 预算代]。
  */
 export function getRawSegmentKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "", segmentIndex, budgetScale = 1 }: SegmentKeyOptions): string {
-  const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
-  return `${RAW_SEGMENT_PREFIX}${bvid}_${cid}_${sourceKey}_${segmentIndex}${budgetScaleSuffix(budgetScale)}`;
+  return rawFamily.key({ bvid, cid, subtitleId, subtitleUrl, lang }, `${segmentIndex}${budgetScaleSuffix(budgetScale)}`);
 }
 
 interface SegmentCacheKeyFieldsResult {
@@ -104,12 +119,7 @@ export function buildRawSegmentCacheKey(context: Record<string, unknown> | undef
  * 读取已落盘的分段小结：命中返回 item.summary（string），未命中/读失败返回 null。
  */
 export async function loadSegmentSummary(key: string): Promise<string | null> {
-  try {
-    const result = await chrome.storage.local.get(key);
-    return ((result[key] as { summary?: unknown } | undefined)?.summary as string | undefined) ?? null;
-  } catch {
-    return null;
-  }
+  return summaryFamily.load(key);
 }
 
 type SaveResult = EvictionResult | EvictionFailure;
@@ -120,37 +130,14 @@ type SaveResult = EvictionResult | EvictionFailure;
  * 返回 { ok:false, error } 供调用方上浮，成功返回 { ok:true }。
  */
 export async function saveSegmentSummary(key: string, summary: string): Promise<SaveResult> {
-  const result = await writeWithEviction({
-    family: SEGMENT_SUMMARY_PREFIX,
-    bvid: parseBvidFromCacheKey(key, SEGMENT_SUMMARY_PREFIX),
-    keys: [key], // 本次写入的缓存键，记录进 LRU 索引供淘汰时免全量扫描
-    write: () =>
-      chrome.storage.local.set({
-        [key]: {
-          summary,
-          timestamp: Date.now()
-        }
-      })
-  });
-  if (!result.ok) {
-    logError("[BOC] failed to save segment summary cache after eviction", {
-      key,
-      error: result.error?.message || result.error
-    });
-  }
-  return result;
+  return summaryFamily.save(key, summary);
 }
 
 /**
  * 读取已落盘的原始字幕段：命中返回 item.segments（数组），未命中/读失败返回 null。
  */
 export async function loadRawSegments(key: string): Promise<unknown[] | null> {
-  try {
-    const result = await chrome.storage.local.get(key);
-    return ((result[key] as { segments?: unknown } | undefined)?.segments as unknown[] | undefined) ?? null;
-  } catch {
-    return null;
-  }
+  return rawFamily.load(key);
 }
 
 /**
@@ -158,25 +145,7 @@ export async function loadRawSegments(key: string): Promise<unknown[] | null> {
  * （LRU 淘汰 + 最终失败 logError 并返回 { ok:false }）。
  */
 export async function saveRawSegments(key: string, segments: unknown[]): Promise<SaveResult> {
-  const result = await writeWithEviction({
-    family: RAW_SEGMENT_PREFIX,
-    bvid: parseBvidFromCacheKey(key, RAW_SEGMENT_PREFIX),
-    keys: [key], // 本次写入的缓存键，记录进 LRU 索引供淘汰时免全量扫描
-    write: () =>
-      chrome.storage.local.set({
-        [key]: {
-          segments,
-          timestamp: Date.now()
-        }
-      })
-  });
-  if (!result.ok) {
-    logError("[BOC] failed to save raw segments cache after eviction", {
-      key,
-      error: result.error?.message || result.error
-    });
-  }
-  return result;
+  return rawFamily.save(key, segments);
 }
 
 // 从原始段缓存键尾段解析段序号（键形如 `${前缀}${bvid}_${cid}_${sourceKey}_${index}`）。

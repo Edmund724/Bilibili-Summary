@@ -81,14 +81,18 @@ export interface ResolveFollowupContextArgs {
 
 export type ResolveFollowupContextFn = (args: ResolveFollowupContextArgs) => Promise<ChatContext | null>;
 
-export type BuildBudgetPlanFn = (args: { body: unknown[]; chapters: unknown[] }) => BudgetPlan;
+// 以下两个注入函数类型与 CostGuardNotice 仅本模块的 deps 契约使用（arch-slim-2/08
+// 裁定：与 ai/analysis.ts 的同名私有声明形状不同——本侧严格（必选参数/number 档）、
+// analysis 侧宽松（可选属性/unknown 档，供测试 fake 少填字段），刻意不合并、各自
+// 私有，消除「同名平行导出」）。
+type BuildBudgetPlanFn = (args: { body: unknown[]; chapters: unknown[] }) => BudgetPlan;
 
-export interface CostGuardNotice {
+interface CostGuardNotice {
   shouldPrompt: boolean;
   message: string;
 }
 
-export type BuildCostGuardNoticeFn = (args: { estimatedCalls?: number; estimatedTokens?: number }) => CostGuardNotice;
+type BuildCostGuardNoticeFn = (args: { estimatedCalls?: number; estimatedTokens?: number }) => CostGuardNotice;
 
 export type TrimRecentTurnsFn = (history?: ChatMessage[]) => ChatMessage[];
 

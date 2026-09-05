@@ -26,7 +26,7 @@ const CHAPTERS = [
 describe("buildSubtitlePrompt", () => {
   it("无章节：逐行渲染字幕体，默认带时间戳（includeTimestampInBody 缺省 true）", () => {
     expect(buildSubtitlePrompt({ body: BODY })).toBe(
-      "## 字幕\n\n`00:00` 第一句\n`00:05` 第二句\n`01:40` 落进第二章节的内容"
+      "## 字幕\n\n`0:00` 第一句\n`0:05` 第二句\n`1:40` 落进第二章节的内容"
     );
   });
 
@@ -39,17 +39,17 @@ describe("buildSubtitlePrompt", () => {
   it("有章节：含「## 章节」分节与章节分桶（### 章节标题 + 时间戳）", () => {
     const out = buildSubtitlePrompt({ body: BODY, chapters: CHAPTERS, videoDuration: 600 });
     expect(out).toContain("## 章节");
-    expect(out).toContain("`00:00` 开场");
+    expect(out).toContain("`0:00` 开场");
     expect(out).toContain("### 正文");
-    expect(out).toContain("`00:00` 第一句");
-    expect(out).toContain("`00:05` 第二句");
-    expect(out).toContain("`01:40` 落进第二章节的内容");
+    expect(out).toContain("`0:00` 第一句");
+    expect(out).toContain("`0:05` 第二句");
+    expect(out).toContain("`1:40` 落进第二章节的内容");
   });
 
   it("videoDuration ≥ 3600 → withHours 判定生效，时间戳带小时位", () => {
     const body = [{ from: 3600, to: 3605, content: "一小时后的内容" }];
     const out = buildSubtitlePrompt({ body, videoDuration: 3700 });
-    expect(out).toContain("`01:00:00` 一小时后的内容");
+    expect(out).toContain("`1:00:00` 一小时后的内容");
   });
 
   it("body 空/缺失 → 空串（由调用方决定「暂无字幕」占位，不虚构内容）", () => {

@@ -44,7 +44,7 @@ describe("buildSubtitleSectionLines：章节分桶四要素", () => {
     );
 
     // 不带容差会因 4.9995 < 5 被游标跳过，落到「其他片段」
-    expect(lines).toContain("### 第一章 `00:05`");
+    expect(lines).toContain("### 第一章 `0:05`");
     expect(lines.some((line) => line.includes("边界句"))).toBe(true);
     expect(lines).not.toContain("### 其他片段");
   });
@@ -57,7 +57,7 @@ describe("buildSubtitleSectionLines：章节分桶四要素", () => {
       false
     );
 
-    expect(lines).not.toContain("### 第一章 `00:05`");
+    expect(lines).not.toContain("### 第一章 `0:05`");
     expect(lines).toContain("### 其他片段");
     expect(lines.some((line) => line.includes("上一章句"))).toBe(true);
   });
@@ -77,8 +77,8 @@ describe("buildSubtitleSectionLines：章节分桶四要素", () => {
       false
     );
 
-    const firstStart = lines.indexOf("### 第一章 `00:00`");
-    const secondStart = lines.indexOf("### 第二章 `00:10`");
+    const firstStart = lines.indexOf("### 第一章 `0:00`");
+    const secondStart = lines.indexOf("### 第二章 `0:10`");
     expect(firstStart).toBeGreaterThan(-1);
     expect(secondStart).toBeGreaterThan(firstStart);
 
@@ -98,7 +98,7 @@ describe("buildSubtitleSectionLines：章节分桶四要素", () => {
       false
     );
 
-    expect(lines).not.toContain("### 第一章 `00:00`");
+    expect(lines).not.toContain("### 第一章 `0:00`");
     expect(lines).toContain("### 其他片段");
     expect(lines.some((line) => line.includes("章后句"))).toBe(true);
   });
@@ -116,8 +116,8 @@ describe("buildSubtitleSectionLines：章节分桶四要素", () => {
 
     const otherStart = lines.indexOf("### 其他片段");
     expect(otherStart).toBeGreaterThan(-1);
-    expect(lines.indexOf("### 第一章 `00:10`")).toBeGreaterThan(-1);
-    expect(lines.indexOf("### 第一章 `00:10`")).toBeLessThan(otherStart);
+    expect(lines.indexOf("### 第一章 `0:10`")).toBeGreaterThan(-1);
+    expect(lines.indexOf("### 第一章 `0:10`")).toBeLessThan(otherStart);
     const otherChunk = lines.slice(otherStart);
     expect(otherChunk.some((line) => line.includes("片头句"))).toBe(true);
     expect(otherChunk.some((line) => line.includes("章内句"))).toBe(false);
@@ -160,7 +160,7 @@ describe("buildSubtitleSectionLines：章节分桶四要素", () => {
       false
     );
 
-    expect(lines).toEqual(["`00:00` 第一句", "`00:05` 第二句"]);
+    expect(lines).toEqual(["`0:00` 第一句", "`0:05` 第二句"]);
   });
 
   it("无字幕：返回占位行「（暂无字幕）」", () => {
@@ -181,7 +181,7 @@ describe("buildSubtitleSectionLines：章节分桶四要素", () => {
     expect(lines).toEqual(["### 第一章", "", "纯文本"]);
   });
 
-  it("withHours=true：章节标题与行内时间戳走 00:00:00 口径", () => {
+  it("withHours=true：章节标题与行内时间戳走 H:MM:SS 不补零口径", () => {
     const lines = buildSubtitleSectionLines(
       body([{ from: 3600, content: "一小时后" }]),
       [{ title: "长章", from: 3600, to: 7200 }],
@@ -189,7 +189,7 @@ describe("buildSubtitleSectionLines：章节分桶四要素", () => {
       true
     );
 
-    expect(lines).toEqual(["### 长章 `01:00:00`", "", "`01:00:00` 一小时后"]);
+    expect(lines).toEqual(["### 长章 `1:00:00`", "", "`1:00:00` 一小时后"]);
   });
 });
 
@@ -258,17 +258,17 @@ describe("buildMarkdown", () => {
     expect(lines).toContain("## 简介");
     expect(lines).toContain("这是简介");
 
-    // 章节：紧凑时间戳（< 1 小时不补时位）
+    // 章节：紧凑时间戳（不补零，arch-slim-2/08 拍板 Q1）
     expect(lines).toContain("## 章节");
-    expect(lines).toContain("- `00:00` 第一章");
-    expect(lines).toContain("- `00:10` 第二章");
+    expect(lines).toContain("- `0:00` 第一章");
+    expect(lines).toContain("- `0:10` 第二章");
 
     // 字幕：走同一套章节分桶（标题带章首时间戳）
     expect(lines).toContain("## 字幕");
-    expect(lines).toContain("### 第一章 `00:00`");
-    expect(lines).toContain("`00:00` 第一句");
-    expect(lines).toContain("### 第二章 `00:10`");
-    expect(lines).toContain("`00:10` 第二句");
+    expect(lines).toContain("### 第一章 `0:00`");
+    expect(lines).toContain("`0:00` 第一句");
+    expect(lines).toContain("### 第二章 `0:10`");
+    expect(lines).toContain("`0:10` 第二句");
 
     // 顺序约束：frontmatter < iframe < 简介 < 章节 < 字幕
     const indexOf = (needle) => lines.findIndex((line) => line === needle || line.startsWith(needle));
@@ -364,13 +364,13 @@ describe("buildTxt", () => {
   it("includeTimestampInBody=true：紧凑时间戳前缀，时长 < 1 小时不补时位", () => {
     expect(
       buildTxt(body([{ from: 65, content: "一分五秒" }]), { includeTimestampInBody: true })
-    ).toBe("01:05 一分五秒");
+    ).toBe("1:05 一分五秒");
   });
 
-  it("maxTo >= 3600 时自动切 00:00:00 小时口径（shouldShowHoursInSubtitle 看 to 的 max）", () => {
+  it("maxTo >= 3600 时自动切 H:MM:SS 小时口径（shouldShowHoursInSubtitle 看 to 的 max）", () => {
     expect(
       buildTxt(body([{ from: 3600, to: 3605, content: "整点句" }]), { includeTimestampInBody: true })
-    ).toBe("01:00:00 整点句");
+    ).toBe("1:00:00 整点句");
   });
 });
 
@@ -408,7 +408,7 @@ describe("buildSubtitlePreview", () => {
         ]),
         { includeTimestampInBody: true }
       )
-    ).toBe("`00:00` 第一句\n`00:10` 第二句");
+    ).toBe("`0:00` 第一句\n`0:10` 第二句");
   });
 
   it("includeTimestampInBody=false：纯文本预览", () => {
@@ -418,7 +418,7 @@ describe("buildSubtitlePreview", () => {
   it("maxTo >= 3600 时切小时口径", () => {
     expect(
       buildSubtitlePreview(body([{ from: 7225, to: 7230, content: "两小时句" }]), { includeTimestampInBody: true })
-    ).toBe("`02:00:25` 两小时句");
+    ).toBe("`2:00:25` 两小时句");
   });
 });
 

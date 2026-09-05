@@ -10,7 +10,7 @@
 // - buildSubtitlePrompt({...})：发模型场景，输出与 buildAiConversationMarkdown 等价
 //   的 markdown；body 为空时返回空串，由调用方决定占位文案（如「（暂无字幕）」）。
 
-import { formatCompactTimestamp } from "../shared/string-utils.js";
+import { formatClock } from "../shared/clock-text.js";
 import { buildSubtitleSectionLines, shouldShowHoursInNote } from "../notes/render.js";
 import type { ChapterItem, SubtitleBodyItem } from "./types.js";
 
@@ -46,7 +46,7 @@ export function buildAiConversationMarkdown(
     chapters.forEach((item: unknown) => {
       const from = Number((item as { from?: unknown }).from) || 0;
       const title = String((item as { title?: unknown }).title || "");
-      const stamp = includeTimestampInBody ? `\`${formatCompactTimestamp(from, withHours)}\` ` : "";
+      const stamp = includeTimestampInBody ? `\`${formatClock(from, { hours: withHours })}\` ` : "";
       lines.push(`- ${stamp}${title}`);
     });
     lines.push("");

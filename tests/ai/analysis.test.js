@@ -1,12 +1,14 @@
 // ai/analysis.ts 概览数据管线测试（概览票 07 + research/analysis-pipeline.md）：
-// 覆盖 validateAnalysis 越界丢弃与秒反推、repairTruncatedJson 截断修复、
-// 部分失败降级（failedRanges）、自带章节短路径产物同构、缓存键含签名且换签名
-// miss、双路径分派（≤100k 单次 / >100k 分段）、promise 复用去重。
+// 覆盖 validateAnalysis 越界丢弃与秒反推、JSON 防线（repairTruncatedJson /
+// parseLooseJson，arch-slim-2/08 起断言 ai/json-repair.ts）、部分失败降级
+// （failedRanges）、自带章节短路径产物同构、缓存键含签名且换签名 miss、双路径
+// 分派（≤100k 单次 / >100k 分段）、promise 复用去重。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState, makeSubtitleBody } from "../setup.js";
 
 let mod;
+let jsonRepairMod;
 let storage;
 
 // 内存 Map 实现的 chrome.storage.local（get/set/remove 均 vi.fn，便于断言与注入失败）。
@@ -47,6 +49,9 @@ async function importModules() {
   storage = createMemoryStorage();
   vi.stubGlobal("chrome", { storage: { local: storage.local } });
   mod = await import("../../extension/ai/analysis.js");
+  // JSON 防线（repairTruncatedJson / parseLooseJson）已独立为 ai/json-repair.ts
+  // （arch-slim-2/08），测试面随文件迁移。
+  jsonRepairMod = await import("../../extension/ai/json-repair.js");
 }
 
 beforeEach(async () => {
@@ -163,8 +168,9 @@ describe("validateAnalysis 越界丢弃与秒反推", () => {
     const chapters = Array.from({ length: 120 }, (_, i) => ({ title: `章${i}`, timestampSeconds: i + 1 }));
     const quotes = Array.from({ length: 60 }, (_, i) => ({ quote: `句${i}`, timestampSeconds: i + 1 }));
     const result = mod.validateAnalysis({ chapters, keyQuotes: quotes }, 1000);
-    expect(result.chapters).toHaveLength(mod.MAX_ANALYSIS_CHAPTERS);
-    expect(result.quotes).toHaveLength(mod.MAX_ANALYSIS_QUOTES);
+    // MAX_ANALYSIS_CHAPTERS/MAX_ANALYSIS_QUOTES 已随导出面收窄转私有（arch-slim-2/08），字面量 = 100/50
+    expect(result.chapters).toHaveLength(100);
+    expect(result.quotes).toHaveLength(50);
 
     const chapters2 = [{ title: "小数秒", timestampSeconds: 10.9 }];
     expect(mod.validateAnalysis({ chapters: chapters2 }, 100).chapters[0].from).toBe(10);
@@ -178,7 +184,7 @@ describe("validateAnalysis 越界丢弃与秒反推", () => {
 describe("repairTruncatedJson 截断修复与 parseLooseJson 宽容解析", () => {
   it("截断在字符串中间 / 括号中间 / 逗号后，都能补齐保住已生成内容", () => {
     const expectParsed = (text) => {
-      const parsed = JSON.parse(mod.repairTruncatedJson(text));
+      const parsed = JSON.parse(jsonRepairMod.repairTruncatedJson(text));
       expect(parsed.keyQuotes).toHaveLength(2);
       expect(parsed.keyQuotes[1].quote).toBe("第二句");
     };
@@ -191,24 +197,24 @@ describe("repairTruncatedJson 截断修复与 parseLooseJson 宽容解析", () =
   });
 
   it("悬尾转义符被剥掉再补引号", () => {
-    const repaired = mod.repairTruncatedJson('{"chapters":[{"title":"反斜杠结尾\\');
+    const repaired = jsonRepairMod.repairTruncatedJson('{"chapters":[{"title":"反斜杠结尾\\');
     expect(JSON.parse(repaired)).toEqual({ chapters: [{ title: "反斜杠结尾" }] });
   });
 
   it("parseLooseJson 容忍围栏 / 前后赘语 / 尾逗号；截断时升级到 repairTruncatedJson", () => {
     const good = '{"chapters":[],"keyQuotes":[]}';
-    expect(mod.parseLooseJson("```json\n" + good + "\n```")).toEqual({ chapters: [], keyQuotes: [] });
-    expect(mod.parseLooseJson("好的，这是结果：" + good + "希望有帮助")).toEqual({ chapters: [], keyQuotes: [] });
-    expect(mod.parseLooseJson('{"chapters":[{"title":"a","timestampSeconds":1,}],}')).toEqual({
+    expect(jsonRepairMod.parseLooseJson("```json\n" + good + "\n```")).toEqual({ chapters: [], keyQuotes: [] });
+    expect(jsonRepairMod.parseLooseJson("好的，这是结果：" + good + "希望有帮助")).toEqual({ chapters: [], keyQuotes: [] });
+    expect(jsonRepairMod.parseLooseJson('{"chapters":[{"title":"a","timestampSeconds":1,}],}')).toEqual({
       chapters: [{ title: "a", timestampSeconds: 1 }]
     });
     // 输出中途被截断：补齐后拿到 chapters 数组
-    const truncated = mod.parseLooseJson('{"chapters":[{"title":"开场","timestampSeconds":0},{"title":"正题"');
+    const truncated = jsonRepairMod.parseLooseJson('{"chapters":[{"title":"开场","timestampSeconds":0},{"title":"正题"');
     expect(truncated.chapters.map((c) => c.title)).toEqual(["开场", "正题"]);
   });
 
   it("彻底坏掉的 JSON 照常抛错（由调用方处理）", () => {
-    expect(() => mod.parseLooseJson("完全不是 JSON")).toThrow();
+    expect(() => jsonRepairMod.parseLooseJson("完全不是 JSON")).toThrow();
   });
 });
 
@@ -767,9 +773,21 @@ describe("parseChapterOutline 简介/评论时间戳目录解析", () => {
     expect(mod.parseChapterOutline("参考 3:25 处的演示和 10:00 的总结")).toEqual([]);
   });
 
+  it("非法时刻行按 parseClock 严口径拒绝（outline 哨兵 -1 → 条目丢弃，arch-slim-2/08）", () => {
+    // 「99:99」原 parseOutlineClock 无范围校验会换算成非法秒数；归一后解不出
+    // 返回 -1，parseChapterOutline 丢弃该条，剩余合法行照常成目录。
+    const outline = mod.parseChapterOutline("99:99 非法时刻\n00:10 开场\n01:30 第二节");
+    expect(outline).toEqual([
+      { seconds: 10, title: "开场" },
+      { seconds: 90, title: "第二节" }
+    ]);
+  });
+
   it("章节数按 MAX_ANALYSIS_CHAPTERS 裁剪", () => {
     const lines = Array.from({ length: 120 }, (_, i) => `${String(i).padStart(2, "0")}:00 第${i}章`);
-    expect(mod.parseChapterOutline(lines.join("\n"))).toHaveLength(mod.MAX_ANALYSIS_CHAPTERS);
+    // OUTLINE_LINE_RE 的 \d{1,2} 约束 i≥100 的「100:00」形态不匹配；i=0..99 共 100 行
+    // 全部解析（2 段分钟位不封顶），恰在上限 100 内（常量已转私有，字面量 = 100）
+    expect(mod.parseChapterOutline(lines.join("\n"))).toHaveLength(100);
   });
 });
 

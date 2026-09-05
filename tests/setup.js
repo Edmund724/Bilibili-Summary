@@ -2,7 +2,9 @@
 // - 重置 ESM 模块缓存（配合 vi.resetModules 实现每用例干净导入）
 // - 确保 jsdom 的 location 落在 B 站阅读模式 URL 上（state.js 会读取 location.href）
 // - 注入浏览器扩展 API 的通用 stub（chrome.runtime.sendMessage 等）
-// - HTMLElement.prototype.click 在 jsdom 中未触发事件派发，补充为可观察的派发
+// 注：不再给 HTMLElement.prototype.click 打「手动补派发」补丁——jsdom 30 的原生
+// click 已派发 click 事件，补丁叠加原生派发会变成双事件（arch-slim-2/08：
+// timestamp-nav 测试断言恰好调用 1 次时暴露）。
 
 import { beforeEach, vi } from "vitest";
 
@@ -62,17 +64,6 @@ function stubChromeApi() {
 
 export function setupEnvironment() {
   stubChromeApi();
-
-  if (typeof HTMLElement !== "undefined" && !HTMLElement.prototype.click.__bocPatched) {
-    const originalClick = HTMLElement.prototype.click;
-    HTMLElement.prototype.click = function click() {
-      if (typeof originalClick === "function") {
-        originalClick.call(this);
-      }
-      this.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    };
-    HTMLElement.prototype.click.__bocPatched = true;
-  }
 }
 
 export function resetModuleState() {
