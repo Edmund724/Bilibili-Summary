@@ -1,10 +1,12 @@
-// presets.js / defaults.js ASR 预设与规范化测试：
+// presets.js / asr-provider-normalize.js / defaults.js ASR 预设与规范化测试：
 // 验证 ASR_PROVIDER_PRESETS 字段齐全、normalizeAsrProvider type 合法值校验、
 // DEFAULT_SETTINGS 的 3 个 ASR 标量默认项（asrProviders 列表已摘出 settings，
-// 归 provider-store 管）。
+// 归 provider-store 管）。（arch-slim-2/09：normalizeAsrProvider 随域类型搬
+// asr/asr-provider-normalize.ts，预设数据仍住 core/presets.ts。）
 
 import { describe, expect, it } from "vitest";
-import { ASR_PROVIDER_PRESETS, normalizeAsrProvider, normalizeAsrLanguage } from "../../extension/core/presets.js";
+import { ASR_PROVIDER_PRESETS, normalizeAsrLanguage } from "../../extension/core/presets.js";
+import { normalizeAsrProvider } from "../../extension/asr/asr-provider-normalize.js";
 import { DEFAULT_SETTINGS } from "../../extension/core/defaults.js";
 
 // 本地查找助手：生产代码没有按 id 查预设的导出（按需直接遍历预设表）。

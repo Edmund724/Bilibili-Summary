@@ -19,21 +19,21 @@ async function getPlayerAiState() {
 
 // 候选03：把惰性 UI 壳与 reader 呈现层 mock 为永不 resolve。若 AI 快路径依赖
 // 它们，player-ai 启动就会挂死。
-vi.mock("../../extension/core/lazy-ui.js", () => ({
+vi.mock("../../extension/ui/lazy-ui.js", () => ({
   ensureUiReady: vi.fn(() => new Promise(() => {}))
 }));
-vi.mock("../../extension/core/lazy-reader-presentation.js", () => ({
+vi.mock("../../extension/reader/lazy-reader-presentation.js", () => ({
   hydrateReaderStateFromSettings: vi.fn(() => new Promise(() => {})),
   applyReadingViewPresentation: vi.fn(() => new Promise(() => {})),
   renderReadingStatus: vi.fn(() => new Promise(() => {}))
 }));
 
-import { ensureUiReady } from "../../extension/core/lazy-ui.js";
+import { ensureUiReady } from "../../extension/ui/lazy-ui.js";
 import {
   hydrateReaderStateFromSettings,
   applyReadingViewPresentation,
   renderReadingStatus
-} from "../../extension/core/lazy-reader-presentation.js";
+} from "../../extension/reader/lazy-reader-presentation.js";
 
 const storageChangeListeners = new Set();
 let activeSettingsRef = null;
@@ -99,7 +99,7 @@ describe("player-ai 快路径与惰性装载解耦", () => {
     stubChrome({ enablePlayerAiQuickAction: true });
 
     await import("../../extension/entry/content.js");
-    const { loadPlayerAi } = await import("../../extension/core/lazy-player-ai.js");
+    const { loadPlayerAi } = await import("../../extension/ai/lazy-player-ai.js");
     await loadPlayerAi();
     await flushMicrotasks();
     const state = (await import("../../extension/core/state.js")).state;
@@ -121,7 +121,7 @@ describe("player-ai 快路径与惰性装载解耦", () => {
     stubChrome({ enablePlayerAiQuickAction: false });
 
     await import("../../extension/entry/content.js");
-    const { loadPlayerAi } = await import("../../extension/core/lazy-player-ai.js");
+    const { loadPlayerAi } = await import("../../extension/ai/lazy-player-ai.js");
     await flushMicrotasks();
 
     // content.js 注册了两个 storage 监听：bindSettingsWatcher（0）与

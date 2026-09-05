@@ -4,7 +4,7 @@
 // 事件到 request 之间只要多插一个 await，Chrome 就以「缺少用户手势」拒绝，
 // 表现为点保存/切平台永远弹不出授权框。这个约束没法在 jsdom 里跑
 // （chrome.permissions 是真实扩展 API，测试环境只有 mock），所以这里照
-// tests/core/message-handler-signature.test.js 的先例直接扫源码。
+// tests/entry/message-handler-signature.test.js 的先例直接扫源码。
 //
 // 代申请已收口为 core/host-permissions.ts 的单一实现
 // requestProviderOriginsViaBackground（content script 语境无 chrome.permissions

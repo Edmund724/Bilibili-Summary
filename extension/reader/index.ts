@@ -1,6 +1,6 @@
 // Reader 动态域入口（lazy-reader 的 import() 落点）。
 //
-// 本文件是 core/lazy-reader.ts 动态 import("../reader/index.js") 的物理入口，
+// 本文件是 reader/lazy-reader.ts 动态 import("./index.js") 的物理入口，
 // esbuild 需要它作为 reader 动态 chunk 的入口模块。它不是 facade：外部模块对
 // 静态/常驻符号（ids/view-state/scroll-state/page-state）应直接 import
 // "./state.js"，本文件不再转发。

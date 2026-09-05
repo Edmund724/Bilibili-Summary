@@ -10,7 +10,8 @@ import type {
   ContentScriptMessage,
   OffloadTaskMessage,
   OffloadTaskResponse,
-  ResponseOf
+  ResponseOf,
+  SendResponse
 } from "./messaging-protocol.js";
 
 // 局部类型：不依赖 ambient chrome 声明，避免并行迁移中 chrome 类型文件冲突。
@@ -57,6 +58,37 @@ export function sendOffloadMessage<M extends OffloadTaskMessage>(
 // 局部类型：port 只需要 postMessage 一个方法（chrome.runtime.Port 结构兼容）。
 interface PostMessageLikePort {
   postMessage(message: unknown): void;
+}
+
+// ===== 页内消息分发原语（arch-slim-2/09）=====
+// content script 页内触发源（ui/digest-button.ts 的工具栏点击 / 失同步自愈）
+// 与 runtime onMessage 监听器共用同一条处理器路径：content script 的
+// chrome.runtime.sendMessage 不会回环到本文档自己的监听器，页内源必须直接调
+// 用分发主体才能复用同一处理逻辑（handler 单源，消息形状不变）。
+//
+// 分发主体（完整路由表）是 entry/message-handler.ts 的组合根知识，住在那里；
+// 本文件只持「注册槽 + 转发」的原语壳——于 bindRuntimeEvents 时由组合根把
+// dispatchContentScriptMessage 注册进来，页内源一律经这里调用。这样
+// ui/digest-button.ts 取分发原语只依赖 shared 叶子，不建 ui → entry 的静态
+// 边（shared 不 import entry/core/域模块的叶子纪律不变）。未注册时返回
+// false，与「无人处理该消息」同义。
+type ContentMessageDispatcher = (rawMessage: unknown, sendResponse: SendResponse) => boolean;
+
+let contentScriptDispatcher: ContentMessageDispatcher | null = null;
+
+// 组合根（entry/message-handler.ts 的 bindRuntimeEvents）注册分发主体；
+// 幂等（重复注册以后注册者为准，而 bindRuntimeEvents 自带防重复绑定）。
+export function registerContentScriptDispatcher(dispatcher: ContentMessageDispatcher): void {
+  contentScriptDispatcher = dispatcher;
+}
+
+// 页内源的分发入口：语义与 runtime onMessage 监听器完全一致（返回值同为
+// 「是否异步回包」——true 表示处理器持有 sendResponse，调用方须保持通道）。
+export function dispatchContentScriptMessage(
+  rawMessage: unknown,
+  sendResponse: SendResponse
+): boolean {
+  return contentScriptDispatcher ? contentScriptDispatcher(rawMessage, sendResponse) : false;
 }
 
 // 「port 已断开则吞掉 postMessage 异常」的收口单源（arch-slim-2/03，原 5 处

@@ -1,5 +1,6 @@
-// 模块级 promise 缓存式懒加载器工厂：core/lazy-player-ai.js、core/lazy-reader.js、
-// subtitle/lazy.js、subtitle/fetcher.js（ASR 回退装载）四处同构模式的收拢。
+// 模块级 promise 缓存式懒加载器工厂：ai/lazy-player-ai.js、reader/lazy-reader.js、
+// reader/lazy-shell.js、subtitle/lazy.js、subtitle/fetcher.js（ASR 回退装载）等
+// 同构模式的收拢。
 //
 // 失败语义：首次 load() 调用 loadFn 并缓存 promise，后续调用共享同一 promise；
 // 失败时清空缓存并 rethrow，下次 load() 可重试（例如扩展刚更新、旧 chunk 404

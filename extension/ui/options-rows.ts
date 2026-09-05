@@ -409,7 +409,8 @@ const aiProviderRow = createProviderRow({
     apiKeyClass: "ai-provider-apikey",
     statusClass: "ai-provider-status",
     showStatus,
-    // AI 侧模型列表仍走 SW 消息（core/ai-provider-store.js 直连拉取）；响应形状
+    // AI 侧模型列表仍走 SW 消息（ai/provider-models.js 直连拉取，arch-slim-2/09
+    // 探针归 ai/）；响应形状
     // 由消息类型经 ResponseOf 推断（arch-slim-2/02），不再手猜
     fetchModels: ({ baseUrl, apiKey, providerId }) => sendRuntimeMessage({
       type: "ai-providers-models",

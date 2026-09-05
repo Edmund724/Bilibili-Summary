@@ -11,7 +11,9 @@
 // 列表 CRUD/归一化仍归 asr/asr-provider-store.js（SW 出于消息路由仍要加载它，
 // 但不再经它拖入 wav-encode 链）。本模块只在 options 页 context 加载，不进 SW 图。
 
-import { normalizeAsrProvider, normalizeBaseUrl, type AsrProvider } from "../core/presets.js";
+// arch-slim-2/09：AsrProvider 类型与 normalizeAsrProvider 归位 asr/ 域内。
+import { normalizeAsrProvider, type AsrProvider } from "./asr-provider-normalize.js";
+import { normalizeBaseUrl } from "../core/presets.js";
 import { HOST_PERMISSION_HINT, hasHostPermission } from "../core/host-permissions.js";
 import { formatProbeConnectionError, formatProbeHttpError } from "../core/provider-store.js";
 import { getMergedSettings } from "../core/settings-store.js";

@@ -4,8 +4,9 @@
 // - reader-get-context 处理器：ifSignature 命中 → 立即回 unchanged（不带
 //   payload）；签名不匹配 → 全量 payload 附 signature；forceRefresh 绕过短路；
 //   旧调用方不带 ifSignature 自动走全量（向后兼容）。
-// mock 模式沿 tests/core/message-handler-chapters.test.js：重依赖全 mock，
-// state 走真实模块，单纪元导入。
+// mock 模式沿 tests/entry/message-handler-chapters.test.js：重依赖全 mock，
+// state 走真实模块，单纪元导入。（arch-slim-2/09：测试随 message-handler 自
+// tests/core/ 迁 tests/entry/。）
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -32,14 +33,14 @@ vi.mock("../../extension/subtitle/fetcher.js", () => ({
   resetClipState: vi.fn()
 }));
 // 候选03 常驻瘦身：setStatus 迁入 shared/ui-status.js；ensureUiReady 迁入
-// core/lazy-ui.js；renderReadingStatus 迁入 core/lazy-reader-presentation.js。
+// ui/lazy-ui.js；renderReadingStatus 迁入 reader/lazy-reader-presentation.js。
 vi.mock("../../extension/shared/ui-status.js", () => ({
   setStatus: vi.fn()
 }));
-vi.mock("../../extension/core/lazy-ui.js", () => ({
+vi.mock("../../extension/ui/lazy-ui.js", () => ({
   ensureUiReady: vi.fn(async () => {})
 }));
-vi.mock("../../extension/core/lazy-reader-presentation.js", () => ({
+vi.mock("../../extension/reader/lazy-reader-presentation.js", () => ({
   renderReadingStatus: vi.fn(async () => {})
 }));
 vi.mock("../../extension/ai/player-ai.js", () => ({
@@ -68,7 +69,7 @@ vi.mock("../../extension/bilibili/gateway.js", () => ({
 import {
   bindRuntimeEvents,
   computeContextStateSignature
-} from "../../extension/core/message-handler.js";
+} from "../../extension/entry/message-handler.js";
 import {
   READER_CONTEXT_PAYLOAD_FIELDS,
   SIGNATURE_PARTICIPATING_FIELDS,

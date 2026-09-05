@@ -2,17 +2,17 @@ import { state, uiState } from "../core/state.js";
 import { byId } from "../shared/dom-utils.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { READING_HEADER_ICONS } from "./reading-header-icons.js";
-// PR5 AI 对话 tab 的二级惰性加载器（常驻轻叶子，动态边在 core/lazy-chat-tab 内）：
+// PR5 AI 对话 tab 的二级惰性加载器（常驻轻叶子，动态边在 reader/lazy-chat-tab 内）：
 // 首次切到对话 tab / 解释卡片「去对话追问」触达时才装载对话组合根（reader/chat-tab.ts）。
-import { ensureReaderChatTab } from "../core/lazy-chat-tab.js";
+import { ensureReaderChatTab } from "../reader/lazy-chat-tab.js";
 // PR5 外点关闭单委托：对话 tab popovers 的文档级外点关闭经桥接叶子并入本模块
 // 的单一 document click 委托（原双监听互踩风险收口，见 chat-tab-bridge.ts）。
 import { dispatchChatTabOutsideClick } from "../reader/chat-tab-bridge.js";
 // 候选03 常驻瘦身：本模块（面板 + 阅读视图壳构建、事件绑定）已整体惰性化，
-// 经 core/lazy-ui.js 动态装载。静态 import 只允许常驻叶子——reader 状态微模块
+// 经 ui/lazy-ui.js 动态装载。静态 import 只允许常驻叶子——reader 状态微模块
 //（./reader/state.js，含 ids/view-state/scroll-state）、轻状态栏写入器
 //（../shared/ui-status.js）、reader 域懒加载转发助手（./reader-gate.js，动态边
-// 在 core/lazy-reader 内部）。
+// 在 reader/lazy-reader 内部）。
 import { classes, ids, isReaderViewOpen } from "../reader/state.js";
 // 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
 import { logWarn } from "../shared/logging.js";

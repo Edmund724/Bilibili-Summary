@@ -1,6 +1,6 @@
 // tests/reader/chat-tab.test.ts
 // PR5 AI 对话 tab 组合根（reader/chat-tab.ts）回归测试：真实模板（ensureUiReady）
-// + 二级惰性装载（core/lazy-chat-tab）。
+// + 二级惰性装载（reader/lazy-chat-tab）。
 //
 // 覆盖（验收清单）：
 // - 组合根装配：懒加载边界（开壳不装载，首切对话 tab 才装载）、init 一次性
@@ -52,7 +52,7 @@ vi.mock("../../extension/bilibili/gateway-core.js", () => ({
 let state: TestState;
 let ids: typeof import("../../extension/reader/state.js").ids;
 let uiRenderer: typeof import("../../extension/ui/ui-renderer.js");
-let lazyChat: typeof import("../../extension/core/lazy-chat-tab.js");
+let lazyChat: typeof import("../../extension/reader/lazy-chat-tab.js");
 let explainIntent: typeof import("../../extension/reader/explain-intent.js");
 let chatSessionState: typeof import("../../extension/chat/chat-state.js").chatSessionState;
 let statusBus: typeof import("../../extension/shared/subtitle-status-bus.js");
@@ -124,7 +124,7 @@ async function loadShell() {
   state = (await import("../../extension/core/state.js")).state as TestState;
   ids = (await import("../../extension/reader/state.js")).ids;
   uiRenderer = await import("../../extension/ui/ui-renderer.js");
-  lazyChat = await import("../../extension/core/lazy-chat-tab.js");
+  lazyChat = await import("../../extension/reader/lazy-chat-tab.js");
   explainIntent = await import("../../extension/reader/explain-intent.js");
   chatSessionState = (await import("../../extension/chat/chat-state.js")).chatSessionState;
   statusBus = await import("../../extension/shared/subtitle-status-bus.js");
@@ -211,7 +211,7 @@ describe("explain 意图消费（自动发送 + consume 一次）", () => {
     const posted = ports[0].postMessage.mock.calls[0][0] as { action?: string; prompt?: string };
     expect(posted.action).toBe("chat");
     expect(posted.prompt).toContain("第二句话待解释");
-    expect(posted.prompt).toContain("00:10");
+    expect(posted.prompt).toContain("0:10"); // arch-slim-2/08 拍板 Q1：不补零
     const input = document.getElementById(ids.readingChatInput) as HTMLTextAreaElement;
     expect(input.value).toBe(""); // 发送受理后输入框清空
 

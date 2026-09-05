@@ -30,7 +30,7 @@ const OTHER_VIDEO_READER_URL = "https://www.bilibili.com/video/BV1test999999/?bo
 let state: TestState;
 let clipState: typeof import("../../extension/core/state.js").clipState;
 let readerUrl: typeof import("../../extension/bilibili/reader-url.js");
-let messageHandler: typeof import("../../extension/core/message-handler.js");
+let messageHandler: typeof import("../../extension/entry/message-handler.js");
 let videoIdShared: typeof import("../../extension/bilibili/video-id-shared.js");
 let uiRenderer: typeof import("../../extension/ui/ui-renderer.js");
 
@@ -42,7 +42,7 @@ async function loadModules() {
   readerUrl = await import("../../extension/bilibili/reader-url.js");
   // URL 变化编排（handleUrlChange 监听）在组合根 message-handler；
   // url-watcher.startUrlWatcher 只负责 history 补丁与 boc:urlchange 广播。
-  messageHandler = await import("../../extension/core/message-handler.js");
+  messageHandler = await import("../../extension/entry/message-handler.js");
   videoIdShared = await import("../../extension/bilibili/video-id-shared.js");
   uiRenderer = await import("../../extension/ui/ui-renderer.js");
 }

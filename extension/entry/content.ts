@@ -9,18 +9,18 @@ import { logInfo, logWarn } from "../shared/logging.js";
 
 // 播放器 AI 模块经加载器按需引入（候选4 分包）：默认关闭的设置对应的能力
 // 不再常驻，start/stop/sync 全部走 loadPlayerAi() 的动态 import。
-import { loadPlayerAi, isPlayerAiLoaded } from "../core/lazy-player-ai.js";
+import { loadPlayerAi, isPlayerAiLoaded } from "../ai/lazy-player-ai.js";
 
 // Digest 工具栏按钮经加载器按需引入（统一 Digest 阅读模式 PR1）：非阅读模式
 // 分支与阅读模式直达分支都装载——直达分支上按钮由自查守卫恒摘除（无意义），
 // 装载为的是视图失同步自愈与关闭视图后补回按钮（见 ui/digest-button.ts 头注）。
-import { loadDigestButton } from "../core/lazy-digest-button.js";
+import { loadDigestButton } from "../ui/lazy-digest-button.js";
 
 // 候选03 常驻瘦身：UI 壳构建（ensureUiReady）与 reader 静态呈现层
 //（hydrateReaderStateFromSettings / applyReadingViewPresentation / renderReadingStatus）
 // 已惰性化，只在面板打开或进入阅读模式时加载。普通页启动路径不再构建
 // #boc-root / #boc-reading-view 壳，也不应用阅读排版属性。
-import { ensureUiReady } from "../core/lazy-ui.js";
+import { ensureUiReady } from "../ui/lazy-ui.js";
 // 候选02 分层惰性 + 候选03 常驻瘦身：init() 的启动符号只保留真正常驻的轻量
 // 接线与页面状态守卫；设置水合/排版呈现/状态栏文案随阅读模式进入惰性装载。
 import {
@@ -33,8 +33,8 @@ import {
   hydrateReaderStateFromSettings,
   applyReadingViewPresentation,
   renderReadingStatus
-} from "../core/lazy-reader-presentation.js";
-import { ensureReaderDomain } from "../core/lazy-reader.js";
+} from "../reader/lazy-reader-presentation.js";
+import { ensureReaderDomain } from "../reader/lazy-reader.js";
 
 import {
   subscribeReaderSettingsPersist,
@@ -42,7 +42,7 @@ import {
   subscribePlayerAiSync
 } from "../reader/reader-bus.js";
 
-import { bindRuntimeEvents, bindUrlChangeHandler } from "../core/message-handler.js";
+import { bindRuntimeEvents, bindUrlChangeHandler } from "./message-handler.js";
 // S3 分层：阅读表随阅读模式挂载（进入/退出事务的挂摘在 reader/shell.ts 阅读壳
 // 内；此处 handle 启动直开路径与非阅读页的预清理——先于设置水合同步翻好门控）
 import { ensureReaderStyles, removeReaderStyles } from "../shared/style-injector.js";

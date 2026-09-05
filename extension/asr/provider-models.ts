@@ -3,7 +3,7 @@
 // 与 asr/provider-test.js 同属「候选 04 拆链」后的 options 页直调模块：
 // 扩展页面 context 下 host_permissions 生效，跨域 fetch 无需 SW 消息往返
 // （对照：AI 侧模型列表仍走 ai-providers-models 消息，由 SW 里的
-// core/ai-provider-store.js 直连）。本模块不进 SW 静态图。
+// ai/provider-models.js 直连，arch-slim-2/09 起探针归 ai/）。本模块不进 SW 静态图。
 
 import { normalizeBaseUrl } from "../core/presets.js";
 import { HOST_PERMISSION_HINT, hasHostPermission } from "../core/host-permissions.js";

@@ -1,6 +1,8 @@
 // extension/core/presets.ts
 // AI / ASR platform presets plus the provider normalizers built on them.
 // Pure data + pure functions; no Chrome APIs, no DOM.
+// （arch-slim-2/09：ASR 域类型 AsrProvider 与 normalizeAsrProvider 已搬
+// asr/asr-provider-normalize.ts；本文件保留跨 context 的预设数据与通用归一化。）
 
 // ===== ASR（语音转写）平台预设 =====
 // 字段含义见 spec.md 第 4 节。type 决定走哪个适配器，共一种：
@@ -48,44 +50,6 @@ export const ASR_PROVIDER_PRESETS: readonly AsrProviderPreset[] = [
     note: "兼容 OpenAI transcriptions 协议的自定义端点。"
   }
 ];
-
-// 合法的 ASR 适配器类型，决定请求构造与响应解析方式
-const ASR_PROVIDER_TYPES = new Set([
-  "openai-transcriptions"
-]);
-
-export interface AsrProvider {
-  id: string;
-  presetId: string;
-  name: string;
-  type: string;
-  baseUrl: string;
-  model: string;
-  supportsTimestamps: boolean;
-  enabled: boolean;
-}
-
-// 归一化单个 ASR provider：字段齐全 + type 合法值校验。
-// 与 normalizeAiProvider 平行：持久化层只存"明文可回传"字段，
-// apiKey 单独存放在 chrome.storage.local，不进列表，故此处不带 apiKey。
-export function normalizeAsrProvider(item: unknown): AsrProvider | null {
-  if (!item || typeof item !== "object") return null;
-  const raw = item as Partial<AsrProvider>;
-  const id = String(raw.id || "").trim();
-  if (!id) return null;
-  const type = String(raw.type || "").trim();
-  if (!ASR_PROVIDER_TYPES.has(type)) return null;
-  return {
-    id,
-    presetId: String(raw.presetId || "custom"),
-    name: String(raw.name || "自定义").trim() || "自定义",
-    type,
-    baseUrl: String(raw.baseUrl || "").trim().replace(/\/+$/, ""),
-    model: String(raw.model || "").trim(),
-    supportsTimestamps: raw.supportsTimestamps !== false,
-    enabled: raw.enabled !== false
-  };
-}
 
 // ===== AI platform presets =====
 export interface AiProviderPreset {

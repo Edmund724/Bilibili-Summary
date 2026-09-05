@@ -8,7 +8,7 @@
 // ensureSummarizeChain() 时才下载。一键总结热路径（点击 AI 键 → clip-refresh）
 // 上的装载是本地 chunk 动态 import（~10ms），被两轮消息往返完全掩盖。
 //
-// 写法与 core/lazy-player-ai.js、core/lazy-reader.js 同款：加载器本体收拢于
+// 写法与 ai/lazy-player-ai.js、reader/lazy-reader.js 同款：加载器本体收拢于
 // shared/lazy-import.js 的 createLazyLoader（手写 promise 缓存 + 失败清缓存
 // 可重试的共享工厂）。双入口（fetcher + ui）用 Promise.all 并行装载，与
 // fetcher.js 的 ASR 回退装载同款。

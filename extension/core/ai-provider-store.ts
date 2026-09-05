@@ -5,11 +5,11 @@
 // 全局设置（reader/AI/ASR/下载域）的归一化与读写已拆到 settings-store.js，
 // 本模块只负责 AI 平台列表 CRUD。连通性测试/探针已移至 ai/provider-test.js
 // （候选 04 拆链：探针依赖 ai/completion.js，留在本文件会把整条 completion 链
-// 拖进 SW 静态图；options 页直调 provider-test，本模块回归纯存储）。
+// 拖进 SW 静态图；options 页直调 provider-test，本模块回归纯存储）；
+// 模型列表探测（handleAiProvidersModels，fetch 原语）也已移至 ai/provider-models.js
+//（arch-slim-2/09：探针是 ai 域知识，core/ 回归纯共享底座）。
 
 import { createProviderStore } from "./provider-store.js";
-import { HOST_PERMISSION_HINT, hasHostPermission } from "./host-permissions.js";
-import { withTimeout } from "../shared/error-helpers.js";
 
 export interface AiProvider {
   id: string;
@@ -52,69 +52,3 @@ export const aiProviderStore = createProviderStore<AiProvider>({
   keysStorageKey: AI_PROVIDER_KEYS_STORAGE,
   normalizeProvider: normalizeAiProvider
 });
-
-// ===== 模型列表探测 =====
-// 经 SW 消息（ai-providers-models）从 options 页模型下拉调用：直连
-// `${baseUrl}/v1/models`（纯 GET fetch，不依赖 completion 链），故留在本模块。
-
-export interface AiProvidersModelsMessage {
-  baseUrl?: string;
-  apiKey?: string;
-  providerId?: string;
-}
-
-export interface AiProvidersModelsResult {
-  ok: boolean;
-  models?: string[];
-  error?: string;
-}
-
-export async function handleAiProvidersModels({
-  baseUrl,
-  apiKey,
-  providerId
-}: AiProvidersModelsMessage): Promise<AiProvidersModelsResult> {
-  const normalizedBaseUrl = String(baseUrl || "").trim().replace(/\/+$/, "").replace(/\/v1$/i, "");
-  // S2 收紧 host_permissions：平台域名未授权时这条 GET 只会以 CORS 失败，回包是
-  // 「Failed to fetch」这种看不出原因的文案，因此先做权限预检，未授权直接回可操作
-  // 提示（与 AI/ASR 连通性探针共用 core/host-permissions.js 的判定）。
-  if (!(await hasHostPermission(normalizedBaseUrl))) {
-    return { ok: false, error: HOST_PERMISSION_HINT };
-  }
-  const headers: Record<string, string> = { Accept: "application/json" };
-  // 超时原语单源（arch-slim-2/03）：原手写 AbortController + setTimeout 改走
-  // withTimeout 硬超时（timeoutError 拒绝，文案逐字不变）。差异仅在于到点后
-  // 底层 fetch 不再被 abort——竞速已出局、响应无人消费，用户可见行为不变。
-  try {
-    if (!apiKey) {
-      const keys = providerId ? await aiProviderStore.loadKeys() : {};
-      apiKey = String(keys[String(providerId || "")] || "").trim();
-    }
-    if (apiKey) {
-      headers.Authorization = `Bearer ${apiKey}`;
-    }
-
-    const resp = await withTimeout(
-      fetch(`${normalizedBaseUrl}/v1/models`, { headers, method: "GET" }),
-      15000,
-      new Error("请求超时，请检查 baseUrl 或稍后重试")
-    );
-    if (!resp.ok) {
-      const text = await resp.text();
-      return { ok: false, error: `HTTP ${resp.status}: ${text.slice(0, 200)}` };
-    }
-    const data = (await resp.json()) as { data?: Array<{ id?: string }> };
-    const models: string[] = [];
-    if (Array.isArray(data?.data)) {
-      for (const item of data.data) {
-        if (item?.id) models.push(String(item.id));
-      }
-    }
-    return { ok: true, models };
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      return { ok: false, error: "无法解析模型列表" };
-    }
-    return { ok: false, error: (error as Error | undefined)?.message || String(error) };
-  }
-}

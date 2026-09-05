@@ -26,10 +26,7 @@ import {
   getReadingSubtitlePlaceholderText
 } from "../subtitle/core.js";
 import { normalizeChapters } from "../subtitle/selection.js";
-import {
-  escapeHtml,
-  formatCompactTimestamp
-} from "../shared/string-utils.js";
+import { escapeHtml } from "../shared/string-utils.js";
 import { isAiSubtitle } from "../subtitle/selection.js";
 import { shouldShowHoursInNote } from "../notes/render.js";
 import { requestSubtitleRefresh, persistReaderSettingsThroughSeam } from "./reader-bus.js";
@@ -63,10 +60,10 @@ import { resetManualScrollPause, setProgrammaticScrollUntil } from "./state.js";
 // PR2 统一 Digest 面板：进入阅读模式时把右侧面板重置回默认「字幕」标签。
 // tab 切换是纯壳交互，实现在 ui/ui-renderer（bindUiEvents 的标签绑定同文件），
 // 本域只做打开时机上的重置调用（重渲 renderReadingView 不重置，避免打断用户）。
-// PR5：对话 tab 的二级惰性装载/断流收口经 core/lazy-chat-tab 叶子触达
+// PR5：对话 tab 的二级惰性装载/断流收口经 ./lazy-chat-tab 叶子触达
 //（本文件不静态依赖对话组合根；未装载 = 对话功能从未启用，清理 no-op）。
 import { resetReaderDigestTabs } from "../ui/ui-renderer.js";
-import { ensureReaderChatTab, isReaderChatTabLoaded } from "../core/lazy-chat-tab.js";
+import { ensureReaderChatTab, isReaderChatTabLoaded } from "./lazy-chat-tab.js";
 // 候选06 端口半边：reader 域唯一显式端口的单点注册入口（见文件尾注册区）。
 import { registerReaderPorts } from "./ports.js";
 // 候选09：字幕分批渲染状态机（rAF 任务/游标/spacer 收敛）迁往 ./batched-render.js；

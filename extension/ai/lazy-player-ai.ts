@@ -1,4 +1,5 @@
-// ai/player-ai.ts 的按需加载器（候选4 分包）。
+// ai/player-ai.ts 的按需加载器（候选4 分包；arch-slim-2/09 自 core/ 搬回 ai/：
+// 加载器跟随被加载模块的目录，subtitle/lazy.ts 先例）。
 //
 // 为什么惰性：player-ai 只在设置 enablePlayerAiQuickAction 开启时才有职责
 // （挂 observer、layout 监听、播放器快捷按钮），而该设置默认关闭
@@ -18,7 +19,7 @@
 // 调用即可（stop/remove/sync 的幂等性由该不变量保证）。
 //
 // 加载器本体收拢于 shared/lazy-import.ts 的 createLazyLoader（与
-// core/lazy-reader.ts、subtitle/lazy.ts、subtitle/fetcher.ts 的 ASR 回退装载
+// reader/lazy-reader.ts、subtitle/lazy.ts、subtitle/fetcher.ts 的 ASR 回退装载
 // 同款），本模块保留仓库既有导出名。
 interface PlayerAiDomain {
   removePlayerAiQuickActionButton(): void;
@@ -27,7 +28,7 @@ interface PlayerAiDomain {
 
 import { createLazyLoader } from "../shared/lazy-import.js";
 
-const loader = createLazyLoader<PlayerAiDomain>(() => import("../ai/player-ai.js"));
+const loader = createLazyLoader<PlayerAiDomain>(() => import("./player-ai.js"));
 
 // 按需加载 ai/player-ai.ts，同一文档内重复调用共享同一 promise。
 export function loadPlayerAi(): Promise<PlayerAiDomain> {

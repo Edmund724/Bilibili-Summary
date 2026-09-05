@@ -10,7 +10,7 @@
 // 与 AI 平台存储完全隔离：用不同的 storage key（asrProviders / asrProviderKeys），
 // 不和对话平台混用同一个列表。
 
-import { normalizeAsrProvider } from "../core/presets.js";
+import { normalizeAsrProvider } from "./asr-provider-normalize.js";
 import { createProviderStore } from "../core/provider-store.js";
 
 export type AsrProviderType = "openai-transcriptions";

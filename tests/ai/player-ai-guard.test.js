@@ -102,7 +102,7 @@ function emitStorageChange(key, newValue) {
 // content.js 顶层即执行 init()；getSettings().then 是微任务链（stub 回调同步），
 // 穿透若干层微任务后设置即已应用。
 //
-// 候选4 分包：content.js 经 core/lazy-player-ai.js 动态加载 player-ai（默认
+// 候选4 分包：content.js 经 ai/lazy-player-ai.js 动态加载 player-ai（默认
 // 关闭的设置不再静态常驻），因此这里先 await 加载器 promise（单例缓存）把
 // 模块预热到位，再穿透微任务让 start/stop 的 then 回调落地。
 async function flushMicrotasks(times = 20) {
@@ -122,7 +122,7 @@ async function loadContentScript(settings) {
   // stopLazy 据此跳过），无条件预热会让关闭用例的注册表带出能开火的 sync
   // 定时器。模块加载本身不挂 observer/监听，不影响「设置关闭」用例的断言。
   if (settings.enablePlayerAiQuickAction) {
-    const { loadPlayerAi } = await import("../../extension/core/lazy-player-ai.js");
+    const { loadPlayerAi } = await import("../../extension/ai/lazy-player-ai.js");
     await loadPlayerAi();
   }
   await flushMicrotasks();
@@ -274,7 +274,7 @@ describe("player-ai 启停守卫", () => {
     setLocationUrl(NORMAL_PAGE_URL);
     stubChrome({ enablePlayerAiQuickAction: true }, { deferGetSettings: true });
     await import("../../extension/entry/content.js");
-    const { loadPlayerAi } = await import("../../extension/core/lazy-player-ai.js");
+    const { loadPlayerAi } = await import("../../extension/ai/lazy-player-ai.js");
     await loadPlayerAi();
     await flushMicrotasks();
     const state = (await import("../../extension/core/state.js")).state;
@@ -308,7 +308,7 @@ describe("player-ai 启停守卫", () => {
     const windowRemoveSpy = vi.spyOn(window, "removeEventListener");
     const state = await loadContentScript({ enablePlayerAiQuickAction: false });
     // 关闭态未预热：首次开启会触发真实动态 import，用例内要显式等加载完成
-    const { loadPlayerAi } = await import("../../extension/core/lazy-player-ai.js");
+    const { loadPlayerAi } = await import("../../extension/ai/lazy-player-ai.js");
 
     // 初始关闭：已 stop
     expect(playerAiState.playerAiQuickActionObserver).toBeNull();

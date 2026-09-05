@@ -7,7 +7,7 @@
 // ensureReaderDomain() 动态装载。
 //
 // 依赖全部为常驻叶子（core/state、shared/logging、./reader-bus、
-// ./presentation、./view-state、core/lazy-reader、./presentation-fields 纯常量），
+// ./presentation、./view-state、./lazy-reader、./presentation-fields 纯常量），
 // 不 import lifecycle/sync 等 reader 域重实现。
 import { state, uiState } from "../core/state.js";
 import { logWarn } from "../shared/logging.js";
@@ -20,9 +20,9 @@ import {
 import {
   applyReadingViewPresentation,
   hydrateReaderStateFromSettings
-} from "../core/lazy-reader-presentation.js";
+} from "./lazy-reader-presentation.js";
 import { isReaderViewOpen } from "./state.js";
-import { ensureReaderDomain, isReaderDomainLoaded } from "../core/lazy-reader.js";
+import { ensureReaderDomain, isReaderDomainLoaded } from "./lazy-reader.js";
 import type * as LifecycleModule from "./lifecycle.js";
 import type * as DebugSnapshotModule from "./debug-snapshot.js";
 // 候选06：监听键清单从呈现属性表派生（单一事实源 presentation-fields.js）。

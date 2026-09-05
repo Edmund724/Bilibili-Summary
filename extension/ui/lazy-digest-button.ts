@@ -1,4 +1,5 @@
-// ui/digest-button.ts 的按需加载器（统一 Digest 阅读模式 PR1）。
+// ui/digest-button.ts 的按需加载器（统一 Digest 阅读模式 PR1；
+// arch-slim-2/09 自 core/ 搬回 ui/：加载器跟随被加载模块的目录）。
 //
 // 为什么惰性：Digest 按钮只在 /video/ 播放页有职责，且其水合等待链
 // （poll <video> + SETTLE_DELAY_MS）不应急着在 watchlater 等支持的普通页上跑。
@@ -23,7 +24,7 @@ interface DigestButtonDomain {
 
 import { createLazyLoader } from "../shared/lazy-import.js";
 
-const loader = createLazyLoader<DigestButtonDomain>(() => import("../ui/digest-button.js"));
+const loader = createLazyLoader<DigestButtonDomain>(() => import("./digest-button.js"));
 
 // 按需加载 ui/digest-button.ts，同一文档内重复调用共享同一 promise。
 export function loadDigestButton(): Promise<DigestButtonDomain> {

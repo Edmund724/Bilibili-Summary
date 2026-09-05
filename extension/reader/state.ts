@@ -98,7 +98,7 @@ export const classes = {
 // ===== view-state.js：阅读视图开关状态访问器 =====
 //
 // isReaderViewOpen 是纯 state 读取（state.reader.readingViewOpen），被
-// ai/player-ai.js、subtitle/fetcher.js、core/message-handler.js 等域外模块
+// ai/player-ai.js、subtitle/fetcher.js、entry/message-handler.js 等域外模块
 // 高频使用。聚合后仍只依赖 core/state.js 的常驻叶子，不触碰 reader 域
 // 重符号。
 

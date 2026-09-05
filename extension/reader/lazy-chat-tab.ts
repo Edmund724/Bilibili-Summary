@@ -1,4 +1,5 @@
-// reader 对话 tab（reader/chat-tab.ts）的按需加载器（PR5 二级惰性）。
+// reader 对话 tab（reader/chat-tab.ts）的按需加载器（PR5 二级惰性；
+// arch-slim-2/09 自 core/ 搬回 reader/：加载器跟随被加载模块的目录）。
 //
 // 为什么惰性：对话 tab 的组合根 + 三个重建壳（lists/notices/popovers）连着
 // chat/* 内核（~2000 行），只在用户首次切到「AI 对话」tab（或解释卡片的
@@ -12,7 +13,7 @@
 // 判断后再 load）。
 //
 // 为什么直接写相对路径：本模块身处 ESM 主包模块图内，动态 import() 的相对路径
-// 按扩展自身 URL 解析（与 core/lazy-reader.ts 同款，见其头注）。
+// 按扩展自身 URL 解析（与 reader/lazy-reader.ts 同款，见其头注）。
 import { createLazyLoader } from "../shared/lazy-import.js";
 
 // 对话 tab 组合根对外的窄接口（懒加载消费方——ui-renderer / lifecycle /
@@ -31,7 +32,7 @@ export interface ReaderChatTabDomain {
   runQuickActionPrompt(prompt: string): Promise<boolean>;
 }
 
-const loader = createLazyLoader<ReaderChatTabDomain>(() => import("../reader/chat-tab.js"));
+const loader = createLazyLoader<ReaderChatTabDomain>(() => import("./chat-tab.js"));
 
 // 按需加载 reader/chat-tab.ts 并激活（重复调用共享同一 promise / 同一实例）。
 export function ensureReaderChatTab(): Promise<ReaderChatTabDomain> {

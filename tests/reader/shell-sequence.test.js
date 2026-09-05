@@ -12,7 +12,8 @@
 //     进入事务的八步时序，见工单 Comments）；
 //  4. ensureReaderStyles 的调用只允许出现在 shell.ts 与 entry/content.ts（同上）；
 //  5. enterReaderShell / exitReaderShell 只允许定义在 shell.ts；
-//  6. 壳的调用方闭包 = message-handler（消息路由）+ ui-renderer（关闭按钮）+
+//  6. 壳的调用方闭包 = lazy-shell（message-handler 的动态装载边，arch-slim-2/09
+//     shell 静态边改动态、shell 不进常驻 chunk）+ ui-renderer（关闭按钮）+
 //     digest-button（失同步守卫判定）三处，新增调用方须显式扩圈。
 //
 // 用 .js 落地：扫描要读 node:fs/node:path，tsconfig 未含 node 类型（与工单 01
@@ -70,12 +71,16 @@ const REPLACE_URL_ALLOWED = new Set(["bilibili/reader-url.ts", SHELL]);
 const GATE_ATTR_ALLOWED = new Set(["entry/content.ts", SHELL]);
 // ensureReaderStyles 的允许集（style-injector.ts 是定义处，非调用）
 const STYLES_ALLOWED = new Set(["shared/style-injector.ts", "entry/content.ts", SHELL]);
-// 壳的调用方闭包
+// 壳的调用方闭包（arch-slim-2/09：message-handler 改经 reader/lazy-shell.ts
+// 动态装载，shell 不再借道常驻 chunk，message-handler 内不允许 shell 静态边）
 const SHELL_CALLERS = new Set([
-  "core/message-handler.ts",
   "ui/ui-renderer.ts",
   "ui/digest-button.ts"
 ]);
+// shell 的唯一动态装载边（加载器跟随被加载模块目录）
+const SHELL_LOADER = "reader/lazy-shell.ts";
+// message-handler 对壳的组合根引用（经 lazy-shell 动态装载）
+const MESSAGE_HANDLER = "entry/message-handler.ts";
 
 describe("阅读壳序列唯一性（arch-slim/02 验收标准 1）", () => {
   it("reader/shell.ts 包含八步进入链与退出逆事务的全部时序关键词", () => {
@@ -122,10 +127,15 @@ describe("阅读壳序列唯一性（arch-slim/02 验收标准 1）", () => {
     expect(definitions).toEqual([SHELL]);
   });
 
-  it("壳的调用方闭包：message-handler / ui-renderer / digest-button 三处", () => {
+  it("壳的调用方闭包：lazy-shell 装载边 + ui-renderer / digest-button 两处静态调用方", () => {
     const importers = [...sourceFileMap.keys()]
       .filter((file) => /["'][^"']*reader\/shell\.js["']/.test(read(file)))
       .sort();
     expect(importers).toEqual([...SHELL_CALLERS].sort());
+    // 动态装载边唯一：lazy-shell.ts 持 import("./shell.js")；组合根
+    // message-handler 只引用 reader/lazy-shell.js，不再静态 import shell。
+    expect(read(SHELL_LOADER)).toMatch(/import\("\.\/shell\.js"\)/);
+    expect(read(MESSAGE_HANDLER)).toMatch(/reader\/lazy-shell\.js/);
+    expect(read(MESSAGE_HANDLER)).not.toMatch(/reader\/shell\.js/);
   });
 });

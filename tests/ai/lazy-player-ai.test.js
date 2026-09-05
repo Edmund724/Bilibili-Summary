@@ -1,4 +1,5 @@
-// core/lazy-player-ai.js 的加载器单测（候选4 分包）。
+// ai/lazy-player-ai.js 的加载器单测（候选4 分包；arch-slim-2/09 随加载器自
+// tests/core/ 迁 tests/ai/）。
 //
 // 覆盖 player-ai 懒加载边界的三条契约：
 //   - 首次 loadPlayerAi 触发动态 import 并解析出模块命名空间；
@@ -12,7 +13,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 async function importLoader() {
-  return import("../../extension/core/lazy-player-ai.js");
+  return import("../../extension/ai/lazy-player-ai.js");
 }
 
 beforeEach(() => {

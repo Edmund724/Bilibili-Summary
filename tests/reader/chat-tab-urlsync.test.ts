@@ -39,7 +39,7 @@ vi.mock("../../extension/bilibili/gateway-core.js", () => ({
 
 let state: TestState;
 let ids: typeof import("../../extension/reader/state.js").ids;
-let lazyChat: typeof import("../../extension/core/lazy-chat-tab.js");
+let lazyChat: typeof import("../../extension/reader/lazy-chat-tab.js");
 
 type Sendstub = ReturnType<typeof vi.fn>;
 function stubChromeByType(): void {
@@ -101,7 +101,7 @@ beforeEach(async () => {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state as TestState;
   ids = (await import("../../extension/reader/state.js")).ids;
-  lazyChat = await import("../../extension/core/lazy-chat-tab.js");
+  lazyChat = await import("../../extension/reader/lazy-chat-tab.js");
   (await import("../../extension/ui/ui-renderer.js")).ensureUiReady({ forceRecreate: true });
   mountPlayerChain();
   stubChromeByType();

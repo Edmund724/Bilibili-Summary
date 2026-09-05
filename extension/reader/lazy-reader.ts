@@ -1,5 +1,6 @@
 // reader 域（reader/index.ts facade 及其 LAYOUT/SYNC/LIFECYCLE 闭包）的按需
-// 加载器（候选02 分层惰性）。
+// 加载器（候选02 分层惰性；arch-slim-2/09 自 core/ 搬回 reader/：加载器跟随
+// 被加载模块的目录，subtitle/lazy.ts 先例）。
 //
 // 为什么惰性：reader 域（~50KB）只在进入阅读模式 / reader 交互 / reader-bus
 // 通知到达且阅读视图打开时才有职责。候选02 之前它被 message-handler 与
@@ -8,7 +9,7 @@
 // 连同 lifecycle/sync 切进独立 chunk，只在首次
 // ensureReaderDomain() 时才下载。
 //
-// 写法与 core/lazy-player-ai.ts、subtitle/lazy.ts 同款：加载器本体收拢于
+// 写法与 ai/lazy-player-ai.ts、subtitle/lazy.ts 同款：加载器本体收拢于
 // shared/lazy-import.ts 的 createLazyLoader（手写 promise 缓存 + 失败清缓存
 // 可重试的共享工厂）。
 //
@@ -32,7 +33,7 @@ interface ReaderDomain {
 
 import { createLazyLoader } from "../shared/lazy-import.js";
 
-const loader = createLazyLoader<ReaderDomain>(() => import("../reader/index.js"));
+const loader = createLazyLoader<ReaderDomain>(() => import("./index.js"));
 
 // 按需加载 reader/index.ts facade，同一文档内重复调用共享同一 promise。
 export function ensureReaderDomain(): Promise<ReaderDomain> {

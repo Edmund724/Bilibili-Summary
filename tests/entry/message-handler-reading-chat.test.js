@@ -8,12 +8,15 @@
 //   经对话 seam 自动发送。
 //
 // 写法与 message-handler-seek.test.js 同款：重依赖全部 vi.mock，state 走真实
-// 模块，单纪元；对话 seam 经 core/lazy-chat-tab mock（组合根本体由
+// 模块，单纪元；对话 seam 经 reader/lazy-chat-tab mock（组合根本体由
 // tests/reader/chat-tab.test.ts 覆盖）。
+// （arch-slim-2/09：message-handler 自 core/ 归位 entry/，shell 静态边改动态
+// ——reader-enter/reader-enter-chat 的回包时点从同步即答平移为 shell 装载完成
+// 后（事务仍不等待完成），相关断言改 waitFor。）
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../extension/core/lazy-reader.js", () => ({
+vi.mock("../../extension/reader/lazy-reader.js", () => ({
   ensureReaderDomain: vi.fn(),
   isReaderDomainLoaded: vi.fn(() => false)
 }));
@@ -40,16 +43,16 @@ vi.mock("../../extension/subtitle/lazy.js", () => ({
 vi.mock("../../extension/shared/ui-status.js", () => ({
   setStatus: vi.fn()
 }));
-vi.mock("../../extension/core/lazy-ui.js", () => ({
+vi.mock("../../extension/ui/lazy-ui.js", () => ({
   ensureUiReady: vi.fn(async () => {})
 }));
-vi.mock("../../extension/core/lazy-player-ai.js", () => ({
+vi.mock("../../extension/ai/lazy-player-ai.js", () => ({
   loadPlayerAi: vi.fn(),
   isPlayerAiLoaded: vi.fn(() => false)
 }));
-// 对话 seam（core/lazy-chat-tab）：mock 掉组合根，断言消费路径与参数。
+// 对话 seam（reader/lazy-chat-tab）：mock 掉组合根，断言消费路径与参数。
 const ensureReaderChatTabMock = vi.hoisted(() => vi.fn());
-vi.mock("../../extension/core/lazy-chat-tab.js", () => ({
+vi.mock("../../extension/reader/lazy-chat-tab.js", () => ({
   ensureReaderChatTab: ensureReaderChatTabMock,
   isReaderChatTabLoaded: vi.fn(() => false)
 }));
@@ -60,8 +63,8 @@ vi.mock("../../extension/bilibili/gateway.js", () => ({
   fetchHotComments: vi.fn(async () => [])
 }));
 
-import { bindRuntimeEvents } from "../../extension/core/message-handler.js";
-import { ensureReaderDomain } from "../../extension/core/lazy-reader.js";
+import { bindRuntimeEvents } from "../../extension/entry/message-handler.js";
+import { ensureReaderDomain } from "../../extension/reader/lazy-reader.js";
 import { isReaderViewOpen } from "../../extension/reader/state.js";
 import { DEFAULT_PLAYER_AI_QUICK_PROMPT } from "../../extension/core/defaults.js";
 
@@ -106,8 +109,9 @@ describe("reader-enter-chat：打开阅读模式并激活对话 tab", () => {
       sendResponse
     );
 
-    expect(sendResponse).toHaveBeenCalledWith({ ok: true });
     expect(keepOpen).toBe(true);
+    // arch-slim-2/09：shell 动态装载完成后再即答（事务仍不等待）。
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
     await vi.waitFor(() => expect(chat.runQuickActionPrompt).toHaveBeenCalledTimes(1));
     expect(chat.runQuickActionPrompt).toHaveBeenCalledWith("总结");
     expect(chat.ensureChatTabActivated).not.toHaveBeenCalled();
@@ -122,7 +126,7 @@ describe("reader-enter-chat：打开阅读模式并激活对话 tab", () => {
     const sendResponse = vi.fn();
     messageListener({ type: "reader-enter-chat" }, {}, sendResponse);
 
-    expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
     await vi.waitFor(() => expect(chat.ensureChatTabActivated).toHaveBeenCalledTimes(1));
     expect(chat.ensureChatTabActivated).toHaveBeenCalledWith({ consumeIntent: false });
     expect(ensureReaderDomain).not.toHaveBeenCalled();
@@ -150,7 +154,7 @@ describe("空 readerUrl 兜底：视图未开时用当前地址构造阅读 URL"
     const sendResponse = vi.fn();
     messageListener({ type: "reader-enter", readerUrl: "" }, {}, sendResponse);
 
-    expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
     await vi.waitFor(() => expect(enterReaderMode).toHaveBeenCalledTimes(1));
     expect(replaceReaderModeUrl).toHaveBeenCalledWith("https://www.bilibili.com/video/BV1test000000/?boc_reader=1");
     expect(document.documentElement.getAttribute("data-boc-reader-mode")).toBe("1");
@@ -161,7 +165,10 @@ describe("空 readerUrl 兜底：视图未开时用当前地址构造阅读 URL"
     isReaderViewOpen.mockReturnValue(true);
     const { replaceReaderModeUrl } = await import("../../extension/bilibili/reader-url.js");
 
-    messageListener({ type: "reader-enter", readerUrl: "" }, {}, vi.fn());
+    const sendResponse = vi.fn();
+    messageListener({ type: "reader-enter", readerUrl: "" }, {}, sendResponse);
+    // shell 装载完成（回包已达）且进入链微任务排空后再做负向断言。
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(replaceReaderModeUrl).not.toHaveBeenCalled();

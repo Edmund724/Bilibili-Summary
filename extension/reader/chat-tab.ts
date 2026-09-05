@@ -44,7 +44,8 @@
 import { state } from "../core/state.js";
 import { buildReaderModeUrl } from "../bilibili/reader-url.js";
 import { buildContextKey, doesTabMatchContextUrl } from "../ai/conversation.js";
-import { escapeHtml, formatCompactTimestamp } from "../shared/string-utils.js";
+import { escapeHtml } from "../shared/string-utils.js";
+import { formatClock } from "../shared/clock-text.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import {
   resolveAiConversationContext,
@@ -586,7 +587,7 @@ export async function runQuickActionPrompt(prompt: string): Promise<boolean> {
 // 两种口径：卡片「去对话追问」带选中片段 → 解释这个词句；整句意图（无
 // selection）→ 解释这句字幕。
 function buildExplainPrompt(intent: { from: number; content: string; selection?: string }): string {
-  const stamp = formatCompactTimestamp(intent.from, intent.from >= 3600);
+  const stamp = formatClock(intent.from, { hours: "auto" });
   if (intent.selection) {
     return `请结合视频上下文解释我选中的词句：「${intent.selection}」。它出自字幕句「${intent.content}」（${stamp}）。说明它的含义、背景，以及在这句话里指什么。`;
   }
@@ -603,7 +604,7 @@ function renderExplainIntentCard(intent: { from: number; content: string; select
   }
   const stamp = els.intentCard.querySelector<HTMLElement>(".boc-reading-chat-intent-time");
   if (stamp) {
-    stamp.textContent = formatCompactTimestamp(intent.from, intent.from >= 3600);
+    stamp.textContent = formatClock(intent.from, { hours: "auto" });
   }
   els.intentCard.hidden = false;
 }

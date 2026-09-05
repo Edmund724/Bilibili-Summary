@@ -12,7 +12,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../extension/core/lazy-reader.js", () => ({
+vi.mock("../../extension/reader/lazy-reader.js", () => ({
   ensureReaderDomain: vi.fn(),
   isReaderDomainLoaded: vi.fn(() => false)
 }));
@@ -34,20 +34,21 @@ vi.mock("../../extension/bilibili/reader-url.js", () => ({
 vi.mock("../../extension/subtitle/lazy.js", () => ({
   ensureSummarizeChain: vi.fn()
 }));
-// 候选03 常驻瘦身：setStatus 迁入 shared/ui-status.js；ensureUiReady 迁入 core/lazy-ui.js。
+// 候选03 常驻瘦身：setStatus 迁入 shared/ui-status.js；ensureUiReady 迁入 ui/lazy-ui.js
+//（arch-slim-2/09 加载器归位各域目录）。
 vi.mock("../../extension/shared/ui-status.js", () => ({
   setStatus: vi.fn()
 }));
-vi.mock("../../extension/core/lazy-ui.js", () => ({
+vi.mock("../../extension/ui/lazy-ui.js", () => ({
   ensureUiReady: vi.fn(async () => {})
 }));
-vi.mock("../../extension/core/lazy-player-ai.js", () => ({
+vi.mock("../../extension/ai/lazy-player-ai.js", () => ({
   loadPlayerAi: vi.fn(),
   isPlayerAiLoaded: vi.fn(() => false)
 }));
 
-import { bindRuntimeEvents } from "../../extension/core/message-handler.js";
-import { ensureReaderDomain } from "../../extension/core/lazy-reader.js";
+import { bindRuntimeEvents } from "../../extension/entry/message-handler.js";
+import { ensureReaderDomain } from "../../extension/reader/lazy-reader.js";
 import { getRuntimeVideoElement } from "../../extension/bilibili/video-probe.js";
 import { isReaderViewOpen } from "../../extension/reader/state.js";
 

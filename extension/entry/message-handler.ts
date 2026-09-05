@@ -1,5 +1,7 @@
-import { state, uiState, clipState } from "./state.js";
-import { DEFAULT_SETTINGS } from "./defaults.js";
+// content 侧消息分发 + URL 变化编排的组合根（arch-slim-2/09 自 core/ 归位
+// entry/：消息分发与页内编排是 entry 层知识，core/ 回归纯共享底座）。
+import { state, uiState, clipState } from "../core/state.js";
+import { DEFAULT_SETTINGS, DEFAULT_PLAYER_AI_QUICK_PROMPT } from "../core/defaults.js";
 
 // reader-get-context 的 payload 形状 + 签名投影单源（纯模块）：字段清单、
 // 组装工厂与签名键/排除清单都在 context-payload.js，本文件只喂运行时输入
@@ -7,11 +9,10 @@ import { DEFAULT_SETTINGS } from "./defaults.js";
 import {
   createReaderContextPayload,
   computeContextStateSignature
-} from "./context-payload.js";
+} from "../core/context-payload.js";
 
-import { startUrlWatcher, BOC_URL_CHANGE_EVENT } from "./url-watcher.js";
-import { ensureReaderChatTab } from "./lazy-chat-tab.js";
-import { DEFAULT_PLAYER_AI_QUICK_PROMPT } from "./defaults.js";
+import { startUrlWatcher, BOC_URL_CHANGE_EVENT } from "../core/url-watcher.js";
+import { ensureReaderChatTab } from "../reader/lazy-chat-tab.js";
 import {
   getErrorMessage,
   isStaleRunError
@@ -27,14 +28,14 @@ import {
 // 热路径上的装载是本地 chunk 动态 import（~10ms），被消息往返掩盖。
 import { ensureSummarizeChain } from "../subtitle/lazy.js";
 // 候选03 常驻瘦身：setStatus 迁入 shared/ui-status.js（DOM 节点存在时写入，
-// 否则仅更新 state）；ensureUiReady 经 core/lazy-ui.js 惰性构建 UI 壳。
+// 否则仅更新 state）；ensureUiReady 经 ui/lazy-ui.js 惰性构建 UI 壳。
 import { setStatus } from "../shared/ui-status.js";
-import { ensureUiReady } from "./lazy-ui.js";
+import { ensureUiReady } from "../ui/lazy-ui.js";
 
 // player-ai 经加载器按需引入（候选4 分包）：默认关闭的能力不再常驻。
 // 「未加载」时按钮不可能存在，remove/sync 均可安全跳过（幂等不变量见
-// lazy-player-ai.js 头注）。
-import { loadPlayerAi, isPlayerAiLoaded } from "./lazy-player-ai.js";
+// ai/lazy-player-ai.js 头注）。
+import { loadPlayerAi, isPlayerAiLoaded } from "../ai/lazy-player-ai.js";
 
 // reader 域经加载器按需引入（候选02 分层惰性）：重符号在处理器内 ensureReaderDomain()
 // 后经命名空间取用；启动必需的轻符号直接从 reader 状态微模块 import
@@ -45,15 +46,14 @@ import { loadPlayerAi, isPlayerAiLoaded } from "./lazy-player-ai.js";
 // enterReaderShellOnUrlNavigation），八步无闪变时序不再有本文件的手抄。
 // （候选06：seek 的滚动暂停重置/跟随设置已收进 reader 域单入口
 // seekReadingTarget 的规范序，本文件不再触碰 scroll-state 与跟随状态。）
-import { ensureReaderDomain } from "./lazy-reader.js";
-import {
-  enterReaderShell,
-  enterReaderShellOnUrlNavigation,
-  exitReaderShell
-} from "../reader/shell.js";
+// arch-slim-2/09 shell 静态边改动态（ADR-0003 拆边）：reader/shell.ts 不再借道
+// 常驻包，四个 reading-view 分支与 URL 跳转入口改经 reader/lazy-shell.js 动态
+// 装载（reader-enter 本来就要装载 reader 域，shell 随行净增≈0）。
+import { ensureReaderDomain } from "../reader/lazy-reader.js";
+import { ensureReaderShell } from "../reader/lazy-shell.js";
 import { isReaderViewOpen, enforceNormalPageStateIfNeeded } from "../reader/state.js";
 // 候选03 常驻瘦身：renderReadingStatus 已惰性化。
-import { renderReadingStatus } from "./lazy-reader-presentation.js";
+import { renderReadingStatus } from "../reader/lazy-reader-presentation.js";
 // 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
 import { logWarn } from "../shared/logging.js";
 
@@ -65,6 +65,10 @@ import type {
   ContentScriptMessage,
   SendResponse
 } from "../shared/messaging-protocol.js";
+// 页内分发原语（arch-slim-2/09，与 sendRuntimeMessage 同址 shared/messaging.js）：
+// ui/digest-button.ts 等页内触发源经它进同一条处理器路径，本组合根在
+// bindRuntimeEvents 时把分发主体注册进去。
+import { registerContentScriptDispatcher } from "../shared/messaging.js";
 // 候选02 分层惰性：gateway（getCurrentAid/fetchHotComments）原被本模块与总结
 // 链共享而提升为常驻静态 chunk；其常驻侧唯一消费点是热评消息处理器（异步），
 // 改为处理器内动态 import 后，gateway/bili-api-shared 随总结链切进动态 chunk。
@@ -75,15 +79,20 @@ export function bindRuntimeEvents() {
   }
   uiState.setRuntimeEventsBound(true);
 
+  // 页内源（ui/digest-button.ts 的点击 / 失同步自愈）与 runtime 监听器共用
+  // 同一分发主体：注册进 shared/messaging.js 的原语槽（ui 侧只依赖 shared，
+  // 不建 ui → entry 静态边），再挂 chrome.runtime.onMessage。
+  registerContentScriptDispatcher(dispatchContentScriptMessage);
   chrome.runtime.onMessage.addListener((rawMessage, _sender, sendResponse: SendResponse) => {
     return dispatchContentScriptMessage(rawMessage, sendResponse);
   });
 }
 
 // onMessage 监听器的分发主体抽成可导出函数：除 runtime 消息外，页内触发源
-//（ui/digest-button.ts 的工具栏按钮）也走同一处理器路径——content script 的
-// chrome.runtime.sendMessage 不会回环到本文档自己的监听器，页内源必须直接
-// 调用分发主体才能复用同一处理逻辑（保持 handler 单源，消息形状不变）。
+//（ui/digest-button.ts 的工具栏按钮）也走同一处理器路径——页内源经
+// shared/messaging.js 的 dispatchContentScriptMessage 原语（本函数在
+// bindRuntimeEvents 时注册进去）复用同一处理逻辑（保持 handler 单源，消息
+// 形状不变）。
 export function dispatchContentScriptMessage(
   rawMessage: unknown,
   sendResponse: SendResponse
@@ -119,17 +128,35 @@ export function dispatchContentScriptMessage(
 
     // 进入阅读壳（工单 arch-slim/02）：三个 reading-view 分支只做意图路由，
     // 八步无闪变时序与 restore 失同步自愈都在 reader/shell.ts 唯一实现。
+    // arch-slim-2/09：shell 改经 lazy-shell 动态装载后，回包时点从「同步即答」
+    // 平移为「shell 模块装载完成后、进入事务发起前即答」——发响应仍不等待
+    // 事务完成（即答语义保持）；装载失败才有 ok:false 分支（本地 chunk 装载
+    // ~10ms，被消息往返掩盖）。
     if (message.type === "reader-enter") {
-      enterReaderShell({ readerUrl: String(message.readerUrl || ""), intent: "open" });
-      sendResponse({ ok: true });
+      ensureReaderShell()
+        .then((shell) => {
+          shell.enterReaderShell({ readerUrl: String(message.readerUrl || ""), intent: "open" });
+          sendResponse({ ok: true });
+        })
+        .catch((error) => {
+          logWarn("[BOC] reading shell load failed", error);
+          sendResponse({ ok: false, error: getErrorMessage(error) });
+        });
       return true;
     }
 
     // 阅读视图自愈恢复（ui/digest-button.ts 的定时自查在失同步时派发，见该文件
     // syncDigestButton）：壳完好性自查 + 先收敛再重进都在壳的 restore 档内。
     if (message.type === "reader-restore") {
-      enterReaderShell({ readerUrl: String(message.readerUrl || ""), intent: "restore" });
-      sendResponse({ ok: true });
+      ensureReaderShell()
+        .then((shell) => {
+          shell.enterReaderShell({ readerUrl: String(message.readerUrl || ""), intent: "restore" });
+          sendResponse({ ok: true });
+        })
+        .catch((error) => {
+          logWarn("[BOC] reading shell load failed", error);
+          sendResponse({ ok: false, error: getErrorMessage(error) });
+        });
       return true;
     }
 
@@ -137,8 +164,15 @@ export function dispatchContentScriptMessage(
     // 进入壳后激活对话 tab 并（带 prompt 时）自动发送快捷提示词，全部在壳的
     // focus-chat 档内。发响应不等待事务完成（即答语义与 reader-enter 一致）。
     if (message.type === "reader-enter-chat") {
-      enterReaderShell({ readerUrl: message.readerUrl ?? "", intent: "focus-chat", prompt: message.prompt ?? "" });
-      sendResponse({ ok: true });
+      ensureReaderShell()
+        .then((shell) => {
+          shell.enterReaderShell({ readerUrl: message.readerUrl ?? "", intent: "focus-chat", prompt: message.prompt ?? "" });
+          sendResponse({ ok: true });
+        })
+        .catch((error) => {
+          logWarn("[BOC] reading shell load failed", error);
+          sendResponse({ ok: false, error: getErrorMessage(error) });
+        });
       return true;
     }
 
@@ -160,7 +194,8 @@ export function dispatchContentScriptMessage(
     // 退出阅读壳（工单 arch-slim/02）：reader-close 处理器退化为退出事务委托
     // （URL 收敛 → closeReadingView → 摘阅读表都在 exitReaderShell 内）。
     if (message.type === "reader-close") {
-      exitReaderShell()
+      ensureReaderShell()
+        .then((shell) => shell.exitReaderShell())
         .then(() => sendResponse({ ok: true }))
         .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
       return true;
@@ -330,13 +365,22 @@ export function bindUrlChangeHandler() {
       // 进入链（挂表 → 翻门控属性 → enterReaderMode），但无 player-ai 前奏
       //（URL 跳转没有用户点击在先，不抑制、不摘快捷按钮）；进入前播报等落地
       //（防反向覆盖 enterReaderMode 的「已就绪」文案），失败口径写状态栏。
-      enterReaderShellOnUrlNavigation({
-        readerUrl: nextUrl,
-        announce: () => renderReadingStatus("检测到阅读视图跳转，正在打开阅读模式..."),
-        onEnterFailed: (error) => {
+      // arch-slim-2/09：shell 经 lazy-shell 动态装载，装载失败与进入失败同口径
+      // 写状态栏（本地 chunk 装载 ~10ms，被跳转往返掩盖）。
+      ensureReaderShell()
+        .then((shell) =>
+          shell.enterReaderShellOnUrlNavigation({
+            readerUrl: nextUrl,
+            announce: () => renderReadingStatus("检测到阅读视图跳转，正在打开阅读模式..."),
+            onEnterFailed: (error) => {
+              renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
+            }
+          })
+        )
+        .catch((error) => {
+          logWarn("[BOC] reading shell load failed", error);
           renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
-        }
-      });
+        });
       return;
     }
     if (isReaderViewOpen() || shouldEnterReaderMode) {

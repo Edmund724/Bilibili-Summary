@@ -1,10 +1,11 @@
-// core/message-handler.js 的 reader-get-context chapters 断供修复回归测试：
+// entry/message-handler.js 的 reader-get-context chapters 断供修复回归测试：
 // content 快照 payload 此前不含 chapters——state.clip.chapters 明明有值（fetcher
 // 从字幕 bundle 写入），侧边栏 contextData 却永远拿不到，offscreen 的章节对齐
 // 切段（budgeter）与追问章节名检索（raw-retrieval）双双失明。修复后 payload
 // 携带 chapters，此测试锁定透传行为。
 // message-handler 的重依赖（reader/ui/fetcher 等内容脚本模块）全部 mock，
 // state 走真实模块；单纪元：不使用 vi.resetModules，vi.mock 工厂闭包全程有效。
+// （arch-slim-2/09：message-handler 自 core/ 归位 entry/，测试路径随迁。）
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,14 +30,15 @@ vi.mock("../../extension/subtitle/fetcher.js", () => ({
   resetClipState: vi.fn()
 }));
 // 候选03 常驻瘦身：setStatus 迁入 shared/ui-status.js；ensureUiReady 迁入
-// core/lazy-ui.js；renderReadingStatus 迁入 core/lazy-reader-presentation.js。
+// ui/lazy-ui.js；renderReadingStatus 迁入 reader/lazy-reader-presentation.js
+//（arch-slim-2/09 加载器归位各域目录）。
 vi.mock("../../extension/shared/ui-status.js", () => ({
   setStatus: vi.fn()
 }));
-vi.mock("../../extension/core/lazy-ui.js", () => ({
+vi.mock("../../extension/ui/lazy-ui.js", () => ({
   ensureUiReady: vi.fn(async () => {})
 }));
-vi.mock("../../extension/core/lazy-reader-presentation.js", () => ({
+vi.mock("../../extension/reader/lazy-reader-presentation.js", () => ({
   renderReadingStatus: vi.fn(async () => {})
 }));
 vi.mock("../../extension/ai/player-ai.js", () => ({
@@ -62,7 +64,7 @@ vi.mock("../../extension/bilibili/gateway.js", () => ({
   fetchHotComments: vi.fn(async () => [])
 }));
 
-import { bindRuntimeEvents } from "../../extension/core/message-handler.js";
+import { bindRuntimeEvents } from "../../extension/entry/message-handler.js";
 import { state } from "../../extension/core/state.js";
 
 const onMessageListeners = [];

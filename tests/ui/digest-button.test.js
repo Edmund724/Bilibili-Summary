@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState, setLocationUrl, NORMAL_PAGE_URL } from "../setup.js";
 
 async function loadModule() {
-  const lazy = await import("../../extension/core/lazy-digest-button.js");
+  const lazy = await import("../../extension/ui/lazy-digest-button.js");
   return lazy.loadDigestButton();
 }
 

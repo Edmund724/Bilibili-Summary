@@ -22,7 +22,7 @@ export type ClipRefreshMessage = {
   type: "clip-refresh";
 };
 
-// 响应锚点：core/message-handler.ts clip-refresh 处理器——成功/失败都随包当前
+// 响应锚点：entry/message-handler.ts clip-refresh 处理器——成功/失败都随包当前
 // clip 快照 payload（失败时供调用方回落当前上下文）。
 export type ClipRefreshResponse = {
   ok: boolean;
@@ -35,18 +35,19 @@ export type ReaderEnterMessage = {
   readerUrl?: string;
 };
 
-// 响应锚点：core/message-handler.ts reader-enter 处理器——即答语义恒 { ok: true }
-//（进入事务不等待完成，失败走页内状态栏播报，不经响应）。
+// 响应锚点：entry/message-handler.ts reader-enter 处理器——shell 装载完成即答
+// { ok: true }（进入事务不等待完成；shell 装载失败回 { ok: false, error }，
+// arch-slim-2/09 shell 静态边改动态）。
 export type ReaderEnterResponse = { ok: boolean };
 
 // 退出阅读模式（SW 侧 triggerReaderModeCloseInTab 的重试发送；面板关闭按钮走
-// 页内直调 reader 域，不经消息）。消费端（core/message-handler.ts）收敛地址栏
+// 页内直调 reader 域，不经消息）。消费端（entry/message-handler.ts）收敛地址栏
 // 后交 reader 域 closeReadingView + 摘阅读表（工单 02 起由 exitReaderShell 收口）。
 export type ReaderCloseMessage = {
   type: "reader-close";
 };
 
-// 响应锚点：core/message-handler.ts reader-close 处理器——退出事务完成后回包，
+// 响应锚点：entry/message-handler.ts reader-close 处理器——退出事务完成后回包，
 // 失败带可读 error。
 export type ReaderCloseResponse = { ok: boolean; error?: string };
 
@@ -59,14 +60,14 @@ export type ReaderRestoreMessage = {
   readerUrl?: string;
 };
 
-// 响应锚点：core/message-handler.ts reader-restore 处理器——同 reader-enter 的
+// 响应锚点：entry/message-handler.ts reader-restore 处理器——同 reader-enter 的
 // 即答语义，恒 { ok: true }。
 export type ReaderRestoreResponse = { ok: boolean };
 
 // 打开/进入阅读模式并激活「AI 对话」tab：readerUrl 语义同
 // reader-enter（空串 = 已在阅读模式内，只定位/聚焦）；prompt
 // 语义同 player-ai-quick-action（空串 = 只激活对话 tab，不发送）。
-// 消费端（core/message-handler.ts）先处理打开/进入，再经 core/lazy-chat-tab
+// 消费端（entry/message-handler.ts）先处理打开/进入，再经 reader/lazy-chat-tab
 // 的 ensureChatTabActivated + runQuickActionPrompt 消费。
 export type ReaderEnterChatMessage = {
   type: "reader-enter-chat";
@@ -76,7 +77,7 @@ export type ReaderEnterChatMessage = {
 
 // 响应锚点：双通道同型——background 的 handleReaderEnterChat 可能回
 // { ok: false, error: "找不到当前标签页。" }（entry/background.ts），content 侧
-// 处理器（core/message-handler.ts）恒 { ok: true }（即答语义同 reader-enter）。
+// 处理器（entry/message-handler.ts）恒 { ok: true }（即答语义同 reader-enter）。
 export type ReaderEnterChatResponse = { ok: boolean; error?: string };
 
 // 消息类型为 reader 中性命名（PR5c 自原 sidepanel-* 改名；兼容别名已随存量
@@ -87,7 +88,7 @@ export type ReaderGetContextMessage = {
   ifSignature?: string;
 };
 
-// 响应锚点：core/message-handler.ts reader-get-context 处理器——恒成功两分支：
+// 响应锚点：entry/message-handler.ts reader-get-context 处理器——恒成功两分支：
 // 签名短路命中回 { ok: true, unchanged: true, signature }（payload 整份省略）；
 // 全量路径回 { ok: true, payload: { ...payload, signature } }（调用方存 signature
 // 供下一轮 ifSignature）。
@@ -102,7 +103,7 @@ export type ReaderGetHotCommentsMessage = {
   type: "reader-get-hot-comments";
 };
 
-// 响应锚点：core/message-handler.ts hot-comments 处理器——无失败分支，无法获取
+// 响应锚点：entry/message-handler.ts hot-comments 处理器——无失败分支，无法获取
 // aid / 拉取失败都降级为空列表 + note 说明。
 export type ReaderGetHotCommentsResponse = {
   ok: boolean;
@@ -115,7 +116,7 @@ export type ReaderSeekVideoTimeMessage = {
   seconds?: number | string;
 };
 
-// 响应锚点：core/message-handler.ts reader-seek-video-time 处理器——成功带定位后
+// 响应锚点：entry/message-handler.ts reader-seek-video-time 处理器——成功带定位后
 // 的 currentTime，失败（无播放器/未绑定）带可读 error。
 export type ReaderSeekVideoTimeResponse = {
   ok: boolean;
@@ -190,7 +191,7 @@ export type PlayerAiQuickActionChatMessage = {
   prompt?: string;
 };
 
-// 响应锚点：core/message-handler.ts player-ai-quick-action-chat 处理器——即答
+// 响应锚点：entry/message-handler.ts player-ai-quick-action-chat 处理器——即答
 // 语义恒 { ok: true }（prompt 消费失败只 logWarn，不经响应）。
 export type PlayerAiQuickActionChatResponse = { ok: boolean };
 export type FetchJsonMessage = { type: "fetch-json"; url?: string };
@@ -256,7 +257,7 @@ export type AiProvidersModelsMessage = {
   apiKey?: string;
   providerId?: string;
 };
-// 响应锚点：core/ai-provider-store.ts handleAiProvidersModels（AiProvidersModelsResult）。
+// 响应锚点：ai/provider-models.ts handleAiProvidersModels（AiProvidersModelsResult，arch-slim-2/09 自 core/ai-provider-store.ts 搬入）。
 export type AiProvidersModelsResponse = {
   ok: boolean;
   models?: string[];

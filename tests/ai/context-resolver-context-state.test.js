@@ -113,7 +113,7 @@ describe("getAiContextState：转写未完成窗口期", () => {
 // ===== 候选5：签名短路（ifSignature 透传 + unchanged 提前返回） =====
 // 本文件只锁 resolver 层的契约：ifSignature 原样带给 content、unchanged 提前
 // 返回（热评/clip-refresh 全部跳过）、全量路径 signature 透传到返回 payload。
-// content 侧的短路判定本体在 tests/core/message-handler-signature.test.js。
+// content 侧的短路判定本体在 tests/entry/message-handler-signature.test.js。
 
 const CONTENT_SIGNATURE = "sig-content-v1";
 

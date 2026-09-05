@@ -13,10 +13,11 @@ import {
 import { sendMessageToTab } from "../shared/tab-utils.js";
 import { getMergedSettings, normalizeSettings, saveSettings } from "../core/settings-store.js";
 import {
-  aiProviderStore,
-  handleAiProvidersModels as fetchAiProviderModels
+  aiProviderStore
 } from "../core/ai-provider-store.js";
 import { asrProviderStore } from "../asr/asr-provider-store.js";
+// 模型列表探测（fetch 原语）归 ai 域（arch-slim-2/09）；纯存储仍在 core/。
+import { handleAiProvidersModels as fetchAiProviderModels } from "../ai/provider-models.js";
 import {
   createProviderMessageHandlers,
   createAsrRuntimeConfigHandler,
@@ -141,7 +142,7 @@ function handlePlayerAiQuickAction(message: Msg<"player-ai-quick-action">, sende
 
 // AI 对话入口改道（PR5c）：先经 reader-enter 链打开/进入阅读
 // 模式，再把「激活对话 tab + 发送快捷提示词」的意图直发 content script——
-// 消费端在 core/message-handler.ts（ensureChatTabActivated + runQuickActionPrompt）。
+// 消费端在 entry/message-handler.ts（ensureChatTabActivated + runQuickActionPrompt）。
 function handleReaderEnterChat(message: Msg<"reader-enter-chat">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   const tabId = Number(_sender.tab?.id || 0) || 0;
   if (!tabId) {

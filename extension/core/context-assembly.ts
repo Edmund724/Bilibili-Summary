@@ -137,7 +137,7 @@ export interface InProcessContextFetchDeps {
   fetchHotComments?: () => Promise<unknown[]>;
 }
 
-// 缺省热评实现：重演 core/message-handler.ts 的 reader-get-hot-comments
+// 缺省热评实现：重演 entry/message-handler.ts 的 reader-get-hot-comments
 // 处理器（gateway 动态装载、getCurrentAid 判定、clipState.setHotComments 落账、
 // 失败降级空列表）。动态 import 避免把 core/state 与 gateway 拖进本策略消费方
 //（对话组合根）的静态模块图。

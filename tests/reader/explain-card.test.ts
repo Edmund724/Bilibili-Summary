@@ -37,7 +37,7 @@ let reader: typeof import("../../extension/reader/index.js");
 let ids: typeof import("../../extension/reader/state.js").ids;
 let uiRenderer: typeof import("../../extension/ui/ui-renderer.js");
 let explainIntent: typeof import("../../extension/reader/explain-intent.js");
-let ensureReaderChatTab: typeof import("../../extension/core/lazy-chat-tab.js").ensureReaderChatTab;
+let ensureReaderChatTab: typeof import("../../extension/reader/lazy-chat-tab.js").ensureReaderChatTab;
 let video: HTMLVideoElement;
 
 async function loadModules() {
@@ -47,7 +47,7 @@ async function loadModules() {
   reader = await import("../../extension/reader/index.js");
   ids = (await import("../../extension/reader/state.js")).ids;
   uiRenderer = await import("../../extension/ui/ui-renderer.js");
-  ensureReaderChatTab = (await import("../../extension/core/lazy-chat-tab.js")).ensureReaderChatTab;
+  ensureReaderChatTab = (await import("../../extension/reader/lazy-chat-tab.js")).ensureReaderChatTab;
 }
 
 function tabBody(name: "Subtitle" | "Overview" | "Chat") {

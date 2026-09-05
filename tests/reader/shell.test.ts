@@ -8,7 +8,7 @@
 //
 // 写法与 message-handler-reading-chat.test.js 同款：重依赖全部 vi.mock，state /
 // style-injector / player-ai-state 走真实模块（断言真实挂表、真实抑制窗口）；
-// reader 域本体经 core/lazy-reader mock（由 tests/reader/lifecycle.test.ts 覆盖）。
+// reader 域本体经 reader/lazy-reader mock（由 tests/reader/lifecycle.test.ts 覆盖）。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -28,18 +28,18 @@ const mocks = vi.hoisted(() => ({
   replaceReaderModeUrl: vi.fn()
 }));
 
-vi.mock("../../extension/core/lazy-ui.js", () => ({
+vi.mock("../../extension/ui/lazy-ui.js", () => ({
   ensureUiReady: mocks.ensureUiReady
 }));
-vi.mock("../../extension/core/lazy-player-ai.js", () => ({
+vi.mock("../../extension/ai/lazy-player-ai.js", () => ({
   loadPlayerAi: mocks.loadPlayerAi,
   isPlayerAiLoaded: mocks.isPlayerAiLoaded
 }));
-vi.mock("../../extension/core/lazy-reader.js", () => ({
+vi.mock("../../extension/reader/lazy-reader.js", () => ({
   ensureReaderDomain: mocks.ensureReaderDomain,
   isReaderDomainLoaded: vi.fn(() => false)
 }));
-vi.mock("../../extension/core/lazy-chat-tab.js", () => ({
+vi.mock("../../extension/reader/lazy-chat-tab.js", () => ({
   ensureReaderChatTab: mocks.ensureReaderChatTab,
   isReaderChatTabLoaded: vi.fn(() => false)
 }));

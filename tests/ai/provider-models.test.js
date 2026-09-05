@@ -1,4 +1,5 @@
-// core/ai-provider-store.js 的模型列表探测（handleAiProvidersModels，经
+// ai/provider-models.js（arch-slim-2/09 自 core/ai-provider-store.ts 搬入，
+// 测试随迁）的模型列表探测（handleAiProvidersModels，经
 // ai-providers-models 消息从 options 页模型下拉调用）在 S2 收紧
 // host_permissions 后的权限预检：平台域名未授权时那条 GET 只会以 CORS 失败，
 // 回包是「Failed to fetch」这类看不出原因的文案，必须换成可操作提示。
@@ -10,7 +11,7 @@ import { resetModuleState } from "../setup.js";
 let fetchMock;
 
 async function loadModule() {
-  return import("../../extension/core/ai-provider-store.js");
+  return import("../../extension/ai/provider-models.js");
 }
 
 // 最小响应对象（探测代码只消费 ok / status / text / json）。

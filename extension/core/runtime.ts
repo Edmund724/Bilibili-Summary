@@ -4,11 +4,11 @@
 //     （所有 context 共用，shared 叶子，不 import core/*）；
 //   - URL 事件机制（startUrlWatcher / BOC_URL_CHANGE_EVENT）→ core/url-watcher.ts
 //     （history 补丁 + boc:urlchange 派发的纯机制；编排仍在组合根
-//     core/message-handler.ts 的 bindUrlChangeHandler）；
+//     entry/message-handler.ts 的 bindUrlChangeHandler，arch-slim-2/09 归位 entry/）；
 //   - 阅读模式 URL 更新（replaceReaderModeUrl，含 clip 签名先于 replaceState
 //     的时序不变式）→ bilibili/reader-url.ts（B 站域）。
 // URL 变化的编排（重置 clip → 刷字幕 → reader 同步 → player-ai 按钮同步）在
-// 组合根 core/message-handler.ts 的 bindUrlChangeHandler 中。本文件不得 import
+// 组合根 entry/message-handler.ts 的 bindUrlChangeHandler 中。本文件不得 import
 // ui/reader/ai/subtitle 任何域，否则会与 subtitle/fetcher.ts → getSettings
 // 形成 core↔subtitle 循环。
 import { DEFAULT_SETTINGS, type Settings } from "./defaults.js";

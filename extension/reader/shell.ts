@@ -8,14 +8,15 @@
 // 门控属性 → enterReaderMode）与 restore 档 shell 完好性自查只存在于本文件，
 // 唯一性由 tests/reader/shell-sequence.test.ts 扫描断言把关。
 //
-// 挂在现有 ensureReaderDomain 接缝后：本模块属常驻 chunk（message-handler 的
-// reading-view 分支、ui-renderer 关闭按钮、digest-button 守卫判定静态委托到
-// 这里），reader 重符号一律经 core/lazy-* 动态装载边取用，不把重域拖进常驻
-// 图。依赖方向：shell → core/lazy-*（动态边）+ 各常驻叶子，无环。
+// 挂在现有 ensureReaderDomain 接缝后：arch-slim-2/09 起本模块改为动态 chunk
+//（message-handler 的 reading-view 分支经 reader/lazy-shell.js 动态装载；
+// ui-renderer 关闭按钮、digest-button 守卫判定是动态 chunk 内的静态委托），
+// 不再借道常驻包。reader 重符号一律经 lazy-* 动态装载边取用，不把重域拖进
+// 常驻图。依赖方向：shell → lazy-*（动态边）+ 各常驻叶子，无环。
 //
 // 三个消费面：
-//   - core/message-handler.ts：reader-enter / reader-restore / reader-enter-chat
-//     / reader-close 四个消息分支退化成一两行委托；
+//   - entry/message-handler.ts：reader-enter / reader-restore / reader-enter-chat
+//     / reader-close 四个消息分支退化成一两行委托（经 reader/lazy-shell.js）；
 //   - ui/ui-renderer.ts：Digest 面板关闭按钮的关闭链退化为 exitReaderShell 委托；
 //   - ui/digest-button.ts：定时自查的失同步判定改用 isReaderShellIntact
 //    （原本地手抄的同一判定收口为唯一实现）。
@@ -32,12 +33,13 @@ import {
   isReaderMode,
   stripReaderModeUrl
 } from "../bilibili/video-id-shared.js";
-import { ensureReaderChatTab } from "../core/lazy-chat-tab.js";
-import { ensureUiReady } from "../core/lazy-ui.js";
-import { loadPlayerAi, isPlayerAiLoaded } from "../core/lazy-player-ai.js";
-import { ensureReaderDomain } from "../core/lazy-reader.js";
+import { ensureReaderChatTab } from "./lazy-chat-tab.js";
+import { ensureUiReady } from "../ui/lazy-ui.js";
+import { loadPlayerAi, isPlayerAiLoaded } from "../ai/lazy-player-ai.js";
+import { ensureReaderDomain } from "./lazy-reader.js";
 import { ensureReaderStyles, removeReaderStyles } from "../shared/style-injector.js";
 import { logWarn } from "../shared/logging.js";
+import { READER_CLOSED_EVENT } from "../shared/self-heal.js";
 import { ids, isReaderViewOpen } from "./state.js";
 
 export type ReaderShellIntent = "open" | "restore" | "focus-chat";
@@ -101,7 +103,7 @@ interface ReaderEntrySequenceOptions {
 
 async function runReaderEntrySequence(options: ReaderEntrySequenceOptions): Promise<void> {
   // 候选03：先确保 UI 壳存在，再设置阅读模式属性并进入重域。ensureUiReady
-  // 经 core/lazy-ui 惰性构建 UI 壳，与后续 reader 操作串成同一 promise 链，
+  // 经 ui/lazy-ui 惰性构建 UI 壳，与后续 reader 操作串成同一 promise 链，
   // 避免并发触发导致壳构建两次。
   await ensureUiReady();
   await options.beforeEntry?.();
@@ -201,7 +203,7 @@ export interface EnterReaderShellOnUrlNavigationOptions {
   onEnterFailed?: (error: unknown) => void;
 }
 
-// URL 跳转编排入口（core/message-handler.ts 的 bindUrlChangeHandler）：popstate/
+// URL 跳转编排入口（entry/message-handler.ts 的 bindUrlChangeHandler）：popstate/
 // hashchange/boc:urlchange 落在 boc_reader=1 地址而视图未开时走本入口。与消息
 // 意图三档共享同一条进入链（runReaderEntrySequence 唯一实现），但无 player-ai
 // 前奏——URL 跳转没有用户点击在先，不抑制也不摘 AI 悬浮按钮（按钮同步由编排
@@ -243,4 +245,12 @@ export async function exitReaderShell(): Promise<void> {
   // presentation-fields 的 clearOnClose 清单翻回）已停止生效，摘表进一步释放
   // 级联；下次进入重挂（link 数据在浏览器缓存，二进宫无闪变）。
   removeReaderStyles();
+  // 退出完成通知（arch-slim-2/09 自愈收口）：digest-button 的自查 interval 在
+  // 阅读壳打开且完好期间降频暂停，靠本事件恢复常速并立即补回按钮。事件名
+  // 单源 shared/self-heal.js（READER_CLOSED_EVENT）；有意走 window
+  // CustomEvent 而非静态 import 边——digest-button 不 import 本模块的派发点，
+  // 两侧只共享事件名字符串。只在本事务收敛后派发：退出失败（URL 改写抛错 /
+  // closeReadingView 抛错）不走这里，失同步场景仍由 digest-button 的自查
+  // reader-restore 链兜底。
+  window.dispatchEvent(new CustomEvent(READER_CLOSED_EVENT));
 }

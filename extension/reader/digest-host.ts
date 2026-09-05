@@ -18,9 +18,11 @@
 //
 // 为什么不用 MutationObserver：弹幕每飘一条都是变更事件，白烧 CPU（见
 // ui/digest-button.ts 头注）；SPA 换页换掉锚点节点的场景由 800ms 定时自查
-// 覆盖，口径对齐 digest-button 的 REINJECT_INTERVAL_MS。
+// 覆盖，节拍单源 shared/self-heal.js（arch-slim-2/09，与 digest-button 的
+// 补回自查同源，原两处注释互引口径却各持 800ms 字面量）。
 
 import { findReaderPlayerHost } from "../bilibili/video-probe.js";
+import { SELF_HEAL_INTERVAL_MS } from "../shared/self-heal.js";
 // #boc-reading-view 的 id 单源（arch-slim-2/03）：reader/state.js 的 id 表就是
 // 为此存在，本模块四处手抄字面量收口到 ids.readingView。
 import { ids } from "./state.js";
@@ -51,8 +53,8 @@ const PINNED_MIN_HEIGHT = 240;
 // 右栏折叠断点校准后再定）。
 const FLOAT_VIEWPORT_MIN_WIDTH = 1000;
 // 定时自查间隔：SPA 换页把锚点节点换掉后靠它重锚（不用 MutationObserver，
-// 理由见文件头注）。
-const REANCHOR_INTERVAL_MS = 800;
+// 理由见文件头注；单源 shared/self-heal.js）。
+const REANCHOR_INTERVAL_MS = SELF_HEAL_INTERVAL_MS;
 
 // 贴栏宽度下限：定死 380px。
 
