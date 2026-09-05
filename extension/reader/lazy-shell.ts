@@ -19,8 +19,14 @@
 import { createLazyLoader } from "../shared/lazy-import.js";
 import type {
   EnterReaderShellOptions,
-  EnterReaderShellOnUrlNavigationOptions
+  EnterReaderShellOnUrlNavigationOptions,
+  ReaderShellIntent
 } from "./shell.js";
+
+// shell 的意图档类型随装载边对外透出（type-only，零运行时边）：消费方
+//（entry/message-handler 的意图表）不直接静态 import shell 本体，守住
+// shell-sequence 守卫的「调用方闭包」约束（shell 静态调用方仅 ui 两文件）。
+export type { ReaderShellIntent };
 
 // 阅读壳对外的窄接口（本加载器消费方只触达三个事务入口，壳完好性自查
 // isReaderShellIntact 的消费方——ui/digest-button.ts——走自己的静态轻边，

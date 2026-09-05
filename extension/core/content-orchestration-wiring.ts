@@ -6,7 +6,9 @@
 import { sendMessageToTab, waitForTabComplete } from "../shared/tab-utils.js";
 import { createBackgroundContentOrchestrator } from "../entry/background-content-orchestration.js";
 
-const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
+// 期望版本单源（arch-slim-3/04）：此前 wiring 与 entry/background.ts 各算一份
+// chrome.runtime.getManifest().version，现收编为此处唯一导出。
+export const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
 
 // 版本探针单发：读页面里 content 主包置的版本哨兵，空串 = 未读到；API 抛错
 // 交给编排层吞掉重试，单发自身不 try/catch。

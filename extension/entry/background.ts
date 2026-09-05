@@ -6,6 +6,7 @@ import { PRESETS, ASR_PROVIDER_PRESETS } from "../core/presets.js";
 import { normalizePlayerAiQuickPrompt } from "../core/validators.js";
 import { isSupportedBilibiliPage } from "../bilibili/video-id-shared.js";
 import {
+  EXPECTED_CONTENT_SCRIPT_VERSION,
   injectReaderContent,
   probeContentScriptVersion,
   triggerReaderModeInTab
@@ -110,6 +111,50 @@ function handleEnsureOffscreenChat(_message: Msg<"ensure-offscreen-chat">, _send
   return true;
 }
 
+// 「进/聚焦阅读模式 + 定位对话 tab + 自动发送快捷提示词」的统一编排
+//（arch-slim-3/04，原 handlePlayerAiQuickAction / handleReaderEnterChat 两份
+// 逐行同构手抄的收口）：两侧差异收成参数——快捷动作门开关、readerUrl 校验档
+//（quick-action 固定空串 = 已在阅读模式内只聚焦）、转发消息名。触发失败的可读
+// 文案两处历史措辞不同，按转发消息名取原文案，不静默改文案。
+const readerTriggerFailedText = {
+  "player-ai-quick-action-chat": "阅读模式触发失败，请刷新浏览器网页重试",
+  "reader-enter-chat": "阅读视图触发失败，请刷新浏览器网页重试"
+} as const;
+
+async function triggerReaderChatInTab(
+  tabId: number,
+  options: {
+    requireQuickActionEnabled: boolean;
+    readerUrl: string;
+    forwardType: keyof typeof readerTriggerFailedText;
+  }
+): Promise<{ ok: true }> {
+  const settings = await getMergedSettings();
+  if (options.requireQuickActionEnabled && !settings.enablePlayerAiQuickAction) {
+    throw new Error("AI 按钮未开启");
+  }
+  const prompt = normalizePlayerAiQuickPrompt(settings.playerAiQuickPrompt || DEFAULT_PLAYER_AI_QUICK_PROMPT);
+  let url = options.readerUrl;
+  if (url) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname !== "www.bilibili.com") {
+        throw new Error("当前网页不是 B 站视频页");
+      }
+      parsed.searchParams.set("boc_reader", "1");
+      url = parsed.toString();
+    } catch (error) {
+      throw new Error((error as Error).message || "阅读视图地址无效");
+    }
+  }
+  const triggered = await triggerReaderModeInTab(tabId, url);
+  if (!triggered) {
+    throw new Error(readerTriggerFailedText[options.forwardType]);
+  }
+  await sendMessageToTab(tabId, { type: options.forwardType, prompt });
+  return { ok: true };
+}
+
 // player-ai 悬浮按钮语义反转（工单 08 决议 2）：不再打开 AI 侧边栏 + 写
 // storage 信箱（boc_player_ai_quick_action_v1 已退役），改为「进入/聚焦阅读
 // 模式 + 定位对话 tab + 自动发送快捷提示词」——triggerReaderModeInTab 复用
@@ -124,17 +169,10 @@ function handlePlayerAiQuickAction(message: Msg<"player-ai-quick-action">, sende
   }
 
   withOkResponse(
-    getMergedSettings().then(async (settings) => {
-      if (!settings.enablePlayerAiQuickAction) {
-        throw new Error("AI 按钮未开启");
-      }
-      const prompt = normalizePlayerAiQuickPrompt(settings.playerAiQuickPrompt || DEFAULT_PLAYER_AI_QUICK_PROMPT);
-      const triggered = await triggerReaderModeInTab(tabId, "");
-      if (!triggered) {
-        throw new Error("阅读模式触发失败，请刷新浏览器网页重试");
-      }
-      await sendMessageToTab(tabId, { type: "player-ai-quick-action-chat", prompt });
-      return { ok: true };
+    triggerReaderChatInTab(tabId, {
+      requireQuickActionEnabled: true,
+      readerUrl: "",
+      forwardType: "player-ai-quick-action-chat"
     }),
     sendResponse,
     (error) => (error as Error).message || "打开 AI 对话失败"
@@ -144,7 +182,8 @@ function handlePlayerAiQuickAction(message: Msg<"player-ai-quick-action">, sende
 
 // AI 对话入口改道（PR5c）：先经 reader-enter 链打开/进入阅读
 // 模式，再把「激活对话 tab + 发送快捷提示词」的意图直发 content script——
-// 消费端在 entry/message-handler.ts（ensureChatTabActivated + runQuickActionPrompt）。
+// 消费端在 entry/message-handler.ts（enter-shell focus-chat 档 +
+// runQuickActionPrompt）。
 function handleReaderEnterChat(message: Msg<"reader-enter-chat">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   const tabId = Number(_sender.tab?.id || 0) || 0;
   if (!tabId) {
@@ -153,28 +192,10 @@ function handleReaderEnterChat(message: Msg<"reader-enter-chat">, _sender: Messa
   }
 
   withOkResponse(
-    getMergedSettings().then(async (settings) => {
-      const prompt = normalizePlayerAiQuickPrompt(settings.playerAiQuickPrompt || DEFAULT_PLAYER_AI_QUICK_PROMPT);
-      const readerUrl = String(message.readerUrl || "").trim();
-      let url = readerUrl;
-      if (url) {
-        try {
-          const parsed = new URL(url);
-          if (parsed.hostname !== "www.bilibili.com") {
-            throw new Error("当前网页不是 B 站视频页");
-          }
-          parsed.searchParams.set("boc_reader", "1");
-          url = parsed.toString();
-        } catch (error) {
-          throw new Error((error as Error).message || "阅读视图地址无效");
-        }
-      }
-      const triggered = await triggerReaderModeInTab(tabId, url);
-      if (!triggered) {
-        throw new Error("阅读视图触发失败，请刷新浏览器网页重试");
-      }
-      await sendMessageToTab(tabId, { type: "reader-enter-chat", prompt });
-      return { ok: true };
+    triggerReaderChatInTab(tabId, {
+      requireQuickActionEnabled: false,
+      readerUrl: String(message.readerUrl || "").trim(),
+      forwardType: "reader-enter-chat"
     }),
     sendResponse,
     (error) => (error as Error).message || "打开 AI 对话失败"
@@ -321,7 +342,8 @@ const messageHandlers = new Map<BackgroundMessageType, BackgroundHandler>(
   Object.entries(messageHandlerTable) as Array<[BackgroundMessageType, BackgroundHandler]>
 );
 
-const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().version || "";
+// EXPECTED_CONTENT_SCRIPT_VERSION 单源在 core/content-orchestration-wiring.ts
+//（arch-slim-3/04 收编，本文件经 import 消费）。
 
 chrome.runtime.onInstalled.addListener(async () => {
   await initializeSettingsStorage();

@@ -63,8 +63,12 @@ import {
 } from "../bilibili/video-id-shared.js";
 import type {
   ContentScriptMessage,
+  ContentScriptMessageType,
   SendResponse
 } from "../shared/messaging-protocol.js";
+// ReaderShellIntent 经 lazy-shell 装载边 type-only 透出（零运行时边）：shell
+// 本体的静态调用方闭包由 shell-sequence 守卫锁定，本组合根只触达 lazy-shell。
+import type { ReaderShellIntent } from "../reader/lazy-shell.js";
 // 页内分发原语（arch-slim-2/09，与 sendRuntimeMessage 同址 shared/messaging.js）：
 // ui/digest-button.ts 等页内触发源经它进同一条处理器路径，本组合根在
 // bindRuntimeEvents 时把分发主体注册进去。
@@ -93,209 +97,227 @@ export function bindRuntimeEvents() {
 // shared/messaging.js 的 dispatchContentScriptMessage 原语（本函数在
 // bindRuntimeEvents 时注册进去）复用同一处理逻辑（保持 handler 单源，消息
 // 形状不变）。
-export function dispatchContentScriptMessage(
-  rawMessage: unknown,
+
+// ===== content 侧消息处理器与路由表（arch-slim-3/04）=====
+
+type Msg<T extends ContentScriptMessageType> = Extract<ContentScriptMessage, { type: T }>;
+
+type ContentScriptHandler<K extends ContentScriptMessageType> = (
+  message: Msg<K>,
+  sendResponse: SendResponse
+) => boolean;
+
+function handleClipRefresh(_message: Msg<"clip-refresh">, sendResponse: SendResponse): boolean {
+  // 候选03：刷新抓取会写面板 DOM（resetClipState / renderMeta 等），先确保
+  // UI 壳存在。首开面板/首次刷新的惰性装载开销被用户动作掩盖。
+  // 本消息由背景上下文链（context-resolver 的 needsRefresh 分支）触发，
+  // ensureUiReady 保证阅读视图壳可写。
+  ensureUiReady()
+    .then(() => ensureSummarizeChain())
+    .then((chain) =>
+      chain
+        .refreshClip()
+        .then(() => sendResponse({ ok: true, payload: chain.buildClipSnapshotPayload() }))
+        .catch((error) =>
+          sendResponse({ ok: false, error: getErrorMessage(error), payload: chain.buildClipSnapshotPayload() })
+        )
+    )
+    .catch((error) => {
+      // 链装载失败（清缓存重试后仍失败）：无法组装 payload，按错误口径回包
+      //（context-resolver 对缺 payload 容错，回落当前上下文快照）。
+      sendResponse({ ok: false, error: getErrorMessage(error) });
+    });
+  return true;
+}
+
+// 进阅读壳（工单 arch-slim/02）：三个 reading-view 消息只做意图路由，八步无
+// 闪变时序与 restore 失同步自愈都在 reader/shell.ts 唯一实现；消息名 → intent
+// 的映射单源在下方意图表。arch-slim-2/09：shell 改经 lazy-shell 动态装载后，
+// 回包时点从「同步即答」平移为「shell 模块装载完成后、进入事务发起前即答」
+//——发响应仍不等待事务完成（即答语义保持）；装载失败才有 ok:false 分支
+//（本地 chunk 装载 ~10ms，被消息往返掩盖）。
+type ReaderShellEntryType = "reader-enter" | "reader-restore" | "reader-enter-chat";
+
+const readerShellIntentByType: Record<ReaderShellEntryType, ReaderShellIntent> = {
+  "reader-enter": "open",
+  "reader-restore": "restore",
+  "reader-enter-chat": "focus-chat"
+};
+
+function handleReaderShellEnter(
+  message: Msg<ReaderShellEntryType>,
   sendResponse: SendResponse
 ): boolean {
-  {
-    if (!rawMessage || typeof rawMessage !== "object") {
-      return false;
-    }
-    const message = rawMessage as ContentScriptMessage;
-
-    if (message.type === "clip-refresh") {
-      // 候选03：刷新抓取会写面板 DOM（resetClipState / renderMeta 等），先确保
-      // UI 壳存在。首开面板/首次刷新的惰性装载开销被用户动作掩盖。
-      // 本消息由背景上下文链（context-resolver 的 needsRefresh 分支）触发，
-      // ensureUiReady 保证阅读视图壳可写。
-      ensureUiReady()
-        .then(() => ensureSummarizeChain())
-        .then((chain) =>
-          chain
-            .refreshClip()
-            .then(() => sendResponse({ ok: true, payload: chain.buildClipSnapshotPayload() }))
-            .catch((error) =>
-              sendResponse({ ok: false, error: getErrorMessage(error), payload: chain.buildClipSnapshotPayload() })
-            )
-        )
-        .catch((error) => {
-          // 链装载失败（清缓存重试后仍失败）：无法组装 payload，按错误口径回包
-          // （context-resolver 对缺 payload 容错，回落当前上下文快照）。
-          sendResponse({ ok: false, error: getErrorMessage(error) });
-        });
-      return true;
-    }
-
-    // 进入阅读壳（工单 arch-slim/02）：三个 reading-view 分支只做意图路由，
-    // 八步无闪变时序与 restore 失同步自愈都在 reader/shell.ts 唯一实现。
-    // arch-slim-2/09：shell 改经 lazy-shell 动态装载后，回包时点从「同步即答」
-    // 平移为「shell 模块装载完成后、进入事务发起前即答」——发响应仍不等待
-    // 事务完成（即答语义保持）；装载失败才有 ok:false 分支（本地 chunk 装载
-    // ~10ms，被消息往返掩盖）。
-    if (message.type === "reader-enter") {
-      ensureReaderShell()
-        .then((shell) => {
-          shell.enterReaderShell({ readerUrl: String(message.readerUrl || ""), intent: "open" });
-          sendResponse({ ok: true });
-        })
-        .catch((error) => {
-          logWarn("[BOC] reading shell load failed", error);
-          sendResponse({ ok: false, error: getErrorMessage(error) });
-        });
-      return true;
-    }
-
-    // 阅读视图自愈恢复（ui/digest-button.ts 的定时自查在失同步时派发，见该文件
-    // syncDigestButton）：壳完好性自查 + 先收敛再重进都在壳的 restore 档内。
-    if (message.type === "reader-restore") {
-      ensureReaderShell()
-        .then((shell) => {
-          shell.enterReaderShell({ readerUrl: String(message.readerUrl || ""), intent: "restore" });
-          sendResponse({ ok: true });
-        })
-        .catch((error) => {
-          logWarn("[BOC] reading shell load failed", error);
-          sendResponse({ ok: false, error: getErrorMessage(error) });
-        });
-      return true;
-    }
-
-    // PR5c：AI 对话入口 / player-ai 悬浮按钮的统一消费端（工单 08 决议 2）：
-    // 进入壳后激活对话 tab 并（带 prompt 时）自动发送快捷提示词，全部在壳的
-    // focus-chat 档内。发响应不等待事务完成（即答语义与 reader-enter 一致）。
-    if (message.type === "reader-enter-chat") {
-      ensureReaderShell()
-        .then((shell) => {
-          shell.enterReaderShell({ readerUrl: message.readerUrl ?? "", intent: "focus-chat", prompt: message.prompt ?? "" });
-          sendResponse({ ok: true });
-        })
-        .catch((error) => {
-          logWarn("[BOC] reading shell load failed", error);
-          sendResponse({ ok: false, error: getErrorMessage(error) });
-        });
-      return true;
-    }
-
-    // player-ai 悬浮按钮语义反转的消费端（工单 08 决议 2）：阅读模式外/内点击
-    // 统一 = 聚焦对话 tab + 自动发送快捷提示词。进入阅读模式的编排已由
-    // background（triggerReaderModeInTab）完成，此处只消费。
-    if (message.type === "player-ai-quick-action-chat") {
-      const prompt = String(message.prompt || "").trim() || DEFAULT_PLAYER_AI_QUICK_PROMPT;
-      ensureUiReady()
-        .then(() => ensureReaderChatTab())
-        .then((chat) => chat.runQuickActionPrompt(prompt))
-        .catch((error) => {
-          logWarn("[BOC] player-ai quick action chat failed", error);
-        });
-      sendResponse({ ok: true });
-      return true;
-    }
-
-    // 退出阅读壳（工单 arch-slim/02）：reader-close 处理器退化为退出事务委托
-    // （URL 收敛 → closeReadingView → 摘阅读表都在 exitReaderShell 内）。
-    if (message.type === "reader-close") {
-      ensureReaderShell()
-        .then((shell) => shell.exitReaderShell())
-        .then(() => sendResponse({ ok: true }))
-        .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
-      return true;
-    }
-
-    if (message.type === "reader-get-context") {
-      // union 收窄即得 ReaderGetContextMessage（arch-slim-2/02：去掉冗余断言）
-      const getContextMessage = message;
-      const payload = buildReaderContextPayload();
-      const signature = computeContextStateSignature(payload);
-      // 候选5 签名短路：调用方（经 background 转发的对话上下文链）带着它上次收到的
-      // 全量快照签名来问，content 状态没变就整份省略——不取字幕、不触发上层的
-      // clip-refresh 与热评网络拉取，一次往返即返回。仅在非 forceRefresh 时生效：
-      // 手动刷新/URL 变化语义上是明确要求全网络重拉。旧调用方不带 ifSignature
-      // （空串）自然走全量路径，向后兼容。
-      if (
-        getContextMessage.forceRefresh !== true &&
-        typeof getContextMessage.ifSignature === "string" &&
-        getContextMessage.ifSignature &&
-        getContextMessage.ifSignature === signature
-      ) {
-        sendResponse({ ok: true, unchanged: true, signature });
-        return false;
+  const intent = readerShellIntentByType[message.type];
+  ensureReaderShell()
+    .then((shell) => {
+      if (message.type === "reader-enter-chat") {
+        shell.enterReaderShell({ readerUrl: String(message.readerUrl || ""), intent, prompt: message.prompt ?? "" });
+      } else {
+        shell.enterReaderShell({ readerUrl: String(message.readerUrl || ""), intent });
       }
-      // 全量路径：payload 附 signature，调用方存下来供下一轮 ifSignature 使用。
-      sendResponse({ ok: true, payload: { ...payload, signature } });
-      return false;
-    }
+      sendResponse({ ok: true });
+    })
+    .catch((error) => {
+      logWarn("[BOC] reading shell load failed", error);
+      sendResponse({ ok: false, error: getErrorMessage(error) });
+    });
+  return true;
+}
 
-    if (message.type === "reader-get-hot-comments") {
-      // gateway 动态装载（候选02，见文件头 import 注）：本地 chunk 加载 ~10ms，
-      // 被热评网络往返掩盖。装载失败与「无法获取 aid」同型降级：空列表 + note。
-      import("../bilibili/gateway.js")
-        .then(({ getCurrentAid, fetchHotComments }) => {
-          if (!getCurrentAid()) {
-            clipState.setHotComments([]);
-            sendResponse({ ok: true, comments: [], note: "无法获取视频 aid" });
-            return;
-          }
-          return fetchHotComments(20)
-            .then((hotComments) => {
-              clipState.setHotComments(hotComments);
-              sendResponse({ ok: true, comments: hotComments });
-            })
-            .catch((error) => {
-              clipState.setHotComments([]);
-              sendResponse({ ok: true, comments: [], note: String(error?.message || error) });
-            });
+// player-ai 悬浮按钮语义反转的消费端（工单 08 决议 2）：阅读模式外/内点击
+// 统一 = 聚焦对话 tab + 自动发送快捷提示词。进入阅读模式的编排已由
+// background（triggerReaderModeInTab）完成，此处只消费。
+function handlePlayerAiQuickActionChat(message: Msg<"player-ai-quick-action-chat">, sendResponse: SendResponse): boolean {
+  const prompt = String(message.prompt || "").trim() || DEFAULT_PLAYER_AI_QUICK_PROMPT;
+  ensureUiReady()
+    .then(() => ensureReaderChatTab())
+    .then((chat) => chat.runQuickActionPrompt(prompt))
+    .catch((error) => {
+      logWarn("[BOC] player-ai quick action chat failed", error);
+    });
+  sendResponse({ ok: true });
+  return true;
+}
+
+// 退出阅读壳（工单 arch-slim/02）：reader-close 处理器退化为退出事务委托
+//（URL 收敛 → closeReadingView → 摘阅读表都在 exitReaderShell 内）。
+function handleReaderClose(_message: Msg<"reader-close">, sendResponse: SendResponse): boolean {
+  ensureReaderShell()
+    .then((shell) => shell.exitReaderShell())
+    .then(() => sendResponse({ ok: true }))
+    .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
+  return true;
+}
+
+function handleReaderGetContext(message: Msg<"reader-get-context">, sendResponse: SendResponse): boolean {
+  const payload = buildReaderContextPayload();
+  const signature = computeContextStateSignature(payload);
+  // 候选5 签名短路：调用方（经 background 转发的对话上下文链）带着它上次收到的
+  // 全量快照签名来问，content 状态没变就整份省略——不取字幕、不触发上层的
+  // clip-refresh 与热评网络拉取，一次往返即返回。仅在非 forceRefresh 时生效：
+  // 手动刷新/URL 变化语义上是明确要求全网络重拉。旧调用方不带 ifSignature
+  //（空串）自然走全量路径，向后兼容。
+  if (
+    message.forceRefresh !== true &&
+    typeof message.ifSignature === "string" &&
+    message.ifSignature &&
+    message.ifSignature === signature
+  ) {
+    sendResponse({ ok: true, unchanged: true, signature });
+    return false;
+  }
+  // 全量路径：payload 附 signature，调用方存下来供下一轮 ifSignature 使用。
+  sendResponse({ ok: true, payload: { ...payload, signature } });
+  return false;
+}
+
+function handleReaderGetHotComments(_message: Msg<"reader-get-hot-comments">, sendResponse: SendResponse): boolean {
+  // gateway 动态装载（候选02，见文件头 import 注）：本地 chunk 加载 ~10ms，
+  // 被热评网络往返掩盖。装载失败与「无法获取 aid」同型降级：空列表 + note。
+  import("../bilibili/gateway.js")
+    .then(({ getCurrentAid, fetchHotComments }) => {
+      if (!getCurrentAid()) {
+        clipState.setHotComments([]);
+        sendResponse({ ok: true, comments: [], note: "无法获取视频 aid" });
+        return;
+      }
+      return fetchHotComments(20)
+        .then((hotComments) => {
+          clipState.setHotComments(hotComments);
+          sendResponse({ ok: true, comments: hotComments });
         })
         .catch((error) => {
           clipState.setHotComments([]);
           sendResponse({ ok: true, comments: [], note: String(error?.message || error) });
         });
-      return true;
-    }
+    })
+    .catch((error) => {
+      clipState.setHotComments([]);
+      sendResponse({ ok: true, comments: [], note: String(error?.message || error) });
+    });
+  return true;
+}
 
-    if (message.type === "reader-seek-video-time") {
-      // video-probe 动态装载（候选02，见文件头 import 注）：本地 chunk ~10ms，
-      // 被用户点击到执行的时间差掩盖；响应形状与搬迁前一致（ok/currentTime）。
-      // 候选06 seek 深入口：reader 开着时定位收敛为 reader 域单入口
-      // seekReadingTarget（规范序：清暂停 → 设跟随 → currentTime → 同步），
-      // resumePlayback:false = 暂停中不自动播放（与旧侧栏行为等价）；reader
-      // 未开时保持旧行为：只 seek 视频，正在播放才续播，不触碰 reader 状态。
-      import("../bilibili/video-probe.js")
-        .then(async ({ getRuntimeVideoElement }) => {
-          const video = getRuntimeVideoElement();
-          if (!video) {
-            sendResponse({ ok: false, error: "当前页面没有找到可联动的视频播放器。" });
-            return;
-          }
-          if (isReaderViewOpen()) {
-            // 视图开 ⇒ 域已装载（ensure 即命中缓存）；装载/执行失败统一走
-            // 下方 catch 的错误口径回包。
-            const reader = await ensureReaderDomain();
-            const seekedTo = reader.seekReadingTarget(message.seconds ?? 0, { resumePlayback: false });
-            if (seekedTo === null) {
-              // reader 域内未绑定到视频（与无视频同型降级）。
-              sendResponse({ ok: false, error: "当前页面没有找到可联动的视频播放器。" });
-              return;
-            }
-            sendResponse({ ok: true, currentTime: seekedTo });
-            return;
-          }
-          const seconds = Number(message.seconds);
-          const nextTime = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
-          const wasPaused = Boolean(video.paused);
-          video.currentTime = nextTime;
-          if (!wasPaused) {
-            video.play().catch(() => {});
-          }
-          sendResponse({ ok: true, currentTime: nextTime });
-        })
-        .catch((error) => {
-          sendResponse({ ok: false, error: getErrorMessage(error) });
-        });
-      return true;
-    }
+function handleReaderSeekVideoTime(message: Msg<"reader-seek-video-time">, sendResponse: SendResponse): boolean {
+  // video-probe 动态装载（候选02，见文件头 import 注）：本地 chunk ~10ms，
+  // 被用户点击到执行的时间差掩盖；响应形状与搬迁前一致（ok/currentTime）。
+  // 候选06 seek 深入口：reader 开着时定位收敛为 reader 域单入口
+  // seekReadingTarget（规范序：清暂停 → 设跟随 → currentTime → 同步），
+  // resumePlayback:false = 暂停中不自动播放（与旧侧栏行为等价）；reader
+  // 未开时保持旧行为：只 seek 视频，正在播放才续播，不触碰 reader 状态。
+  import("../bilibili/video-probe.js")
+    .then(async ({ getRuntimeVideoElement }) => {
+      const video = getRuntimeVideoElement();
+      if (!video) {
+        sendResponse({ ok: false, error: "当前页面没有找到可联动的视频播放器。" });
+        return;
+      }
+      if (isReaderViewOpen()) {
+        // 视图开 ⇒ 域已装载（ensure 即命中缓存）；装载/执行失败统一走
+        // 下方 catch 的错误口径回包。
+        const reader = await ensureReaderDomain();
+        const seekedTo = reader.seekReadingTarget(message.seconds ?? 0, { resumePlayback: false });
+        if (seekedTo === null) {
+          // reader 域内未绑定到视频（与无视频同型降级）。
+          sendResponse({ ok: false, error: "当前页面没有找到可联动的视频播放器。" });
+          return;
+        }
+        sendResponse({ ok: true, currentTime: seekedTo });
+        return;
+      }
+      const seconds = Number(message.seconds);
+      const nextTime = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+      const wasPaused = Boolean(video.paused);
+      video.currentTime = nextTime;
+      if (!wasPaused) {
+        video.play().catch(() => {});
+      }
+      sendResponse({ ok: true, currentTime: nextTime });
+    })
+    .catch((error) => {
+      sendResponse({ ok: false, error: getErrorMessage(error) });
+    });
+  return true;
+}
 
+// 编译期穷尽路由表（与 SW 侧 background.ts 的 messageHandlerTable 同款收敛，
+// arch-slim-3/04）：字面量表经 satisfies 对
+// { [K in ContentScriptMessageType]: ContentScriptHandler<K> } 校验——消息名
+// typo / 漏注册 handler 在 typecheck 即报错（此前 9 分支 if-chain + 末尾
+// return false 对此零捕获，与 SW 侧不对称）。每个条目的处理器同时按其具体
+// 消息形状 Msg<K> 校验，签名与消息类型不匹配同样报错。
+const contentMessageHandlerTable = {
+  "clip-refresh": handleClipRefresh,
+  "reader-enter": handleReaderShellEnter,
+  "reader-restore": handleReaderShellEnter,
+  "reader-enter-chat": handleReaderShellEnter,
+  "player-ai-quick-action-chat": handlePlayerAiQuickActionChat,
+  "reader-close": handleReaderClose,
+  "reader-get-context": handleReaderGetContext,
+  "reader-get-hot-comments": handleReaderGetHotComments,
+  "reader-seek-video-time": handleReaderSeekVideoTime
+} satisfies { [K in ContentScriptMessageType]: ContentScriptHandler<K> };
+
+const contentMessageHandlers = new Map<
+  string,
+  (message: ContentScriptMessage, sendResponse: SendResponse) => boolean
+>(
+  Object.entries(contentMessageHandlerTable) as Array<
+    [string, (message: ContentScriptMessage, sendResponse: SendResponse) => boolean]
+  >
+);
+
+export function dispatchContentScriptMessage(rawMessage: unknown, sendResponse: SendResponse): boolean {
+  if (!rawMessage || typeof rawMessage !== "object") {
     return false;
   }
+  const messageType = (rawMessage as { type?: unknown }).type;
+  const handler = typeof messageType === "string" ? contentMessageHandlers.get(messageType) : undefined;
+  if (!handler) {
+    return false;
+  }
+  return handler(rawMessage as ContentScriptMessage, sendResponse);
 }
 
 // ============================================================
