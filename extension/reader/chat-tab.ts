@@ -30,7 +30,7 @@
 //     ui-renderer 的单一文档级委托（风险 6，不双监听）。
 //
 // 生命周期（懒加载 + 会话收尾，工单 08 决议）：
-//   - 二级惰性：本模块经 core/lazy-chat-tab.ts 动态装载，首次切到对话 tab（或
+//   - 二级惰性：本模块经 reader/lazy-chat-tab.ts 动态装载，首次切到对话 tab（或
 //     解释卡片「去对话追问」/概览笔记按钮触达 seam）才 init；
 //   - 关闭阅读模式即断流（closeReadingView → closeChatSession：resetStreamState
 //     断 port、pending 的 subtitle-wait 立即失效、摘全局触发源）；重开从会话
@@ -456,7 +456,7 @@ const subtitleWaiter = createSubtitleWaiter({
 });
 
 // ============================================================
-// 激活 / 会话收尾（对外入口，经 core/lazy-chat-tab 暴露）
+// 激活 / 会话收尾（对外入口，经 reader/lazy-chat-tab 暴露）
 // ============================================================
 
 function bindGlobalTriggers(): void {

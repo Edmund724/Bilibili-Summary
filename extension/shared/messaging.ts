@@ -49,8 +49,8 @@ export function sendRuntimeMessage<M extends BackgroundMessage | ContentScriptMe
 // dnr 防盗链规则，后者按消息携带的 ruleId 只清自己的规则——多任务并发规则
 // 并存、互不影响）。入参为完整线格式报文（含 type: "offload-task"，调用点
 // 字面量直写， arch-slim-2/02 起不再内部拼装+断言）；执行器异常原样透传。
-export function sendOffloadMessage<M extends OffloadTaskMessage>(
-  message: M
+export function sendOffloadMessage(
+  message: OffloadTaskMessage
 ): Promise<OffloadTaskResponse> {
   return sendRuntimeMessage(message);
 }

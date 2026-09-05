@@ -23,6 +23,7 @@ export interface ClockFormatOptions {
   /**
    * 小时位档位，默认 false（never，教学格式 M:SS，分钟不封顶）。
    * boolean 为 withHours 布尔直通（迁移兼容形态）；三态枚举为正字。
+   * boolean 形态为迁移期兼容、随存量调用方收敛（后续票）清退，新调用方一律用三态枚举。
    */
   hours?: ClockHoursMode | boolean;
 }

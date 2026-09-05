@@ -77,7 +77,7 @@ The three core namespaces above form a **content-script (page-context) singleton
 `core/state.ts` runs in the content bundle (`entry/content.ts`, `reader/*`, `subtitle/*`,
 `bilibili/*`, `asr/fallback.ts`, …). The `playerAi` namespace in `ai/player-ai-state.ts` shares the
 same lifetime: it is imported by the player-ai dynamic chunk (content page context) and by
-`core/message-handler.ts` (also content), so MV3 SW termination does not touch it either. The service-worker bundle reaches `state.ts` only through
+`entry/message-handler.ts` (also content), so MV3 SW termination does not touch it either. The service-worker bundle reaches `state.ts` only through
 static imports (`shared/logging.ts`, `shared/error-helpers.ts`, `bilibili/gateway.ts`), and its
 paths only read defaults (`state.settings?.enableDebugLogs`); no SW path writes business fields.
 Loss of this state on page reload is accepted product semantics (state is re-derived from the URL,
