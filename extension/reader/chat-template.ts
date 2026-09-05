@@ -9,6 +9,8 @@
 //（reader/chat-tab.ts）首次激活时接线；未激活前壳保持静默空态（空消息区 +
 // 空输入框），不放假数据。待解释意图引用卡（PR3 契约）由对话组合根按
 // pending 意图渲染，自动发送成功即消费隐藏；卡上的取消按钮清意图。
+// 工单 03 增量：档位切换区内的「关不掉思考」提示行（默认 hidden，唯一的
+// 档位区 UI 增量，三档按钮本身不变）。
 
 import { ids } from "./state.js";
 
@@ -57,6 +59,9 @@ export function buildChatTabBodyHtml(): string {
               <button type="button" class="chat-thinking-btn" data-level="low">Low</button>
               <button type="button" class="chat-thinking-btn" data-level="high">High</button>
             </div>
+            <!-- 思考档位「关不掉」提示（工单 03）：独占折行（flex-basis:100%），
+                 默认隐藏，对话组合根按 resolver 判定写文案并显隐 -->
+            <div id="${ids.readingChatThinkingHint}" class="chat-thinking-hint" role="note" hidden></div>
             <button id="${ids.readingChatPresetBtn}" type="button" class="chat-toolbar-btn" title="预设提示词">
               <span>预设提示词</span>
             </button>

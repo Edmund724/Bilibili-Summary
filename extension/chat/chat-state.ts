@@ -34,6 +34,11 @@ export interface ChatSessionProvider {
   id: string;
   name?: string;
   model?: string;
+  // 平台请求地址 / preset 词表键（ai-providers-list 载荷透传，不参与渲染）：
+  // 思考档位「关不掉」提示的 resolver 识别入参（工单 03，判定在
+  // reader/chat-tab.ts；presetId 是主路径，baseUrl 供 custom 场景 host 兜底）。
+  baseUrl?: string;
+  presetId?: string;
   enabled?: boolean;
 }
 

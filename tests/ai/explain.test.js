@@ -108,6 +108,22 @@ describe("explainSelection", () => {
     expect(args.messages[1].content).toContain("传递信息的工具");
   });
 
+  it("provider 原样透传 chatCompletion：presetId（preset 词表键）不丢，请求构造单缝据此优先识别平台", async () => {
+    const provider = { baseUrl: "https://thinking-proxy.example.com/v1", apiKey: "sk", model: "qwen3-max", presetId: "qwen" };
+    await explain.explainSelection({
+      provider,
+      videoTitle: "T",
+      selection: "传递信息的工具",
+      line: "我们习惯将其视为传递信息的工具",
+      from: 10,
+      body: BODY,
+      index: 2
+    });
+
+    const args = completionMock.chatCompletion.mock.calls[0][0];
+    expect(args.provider).toEqual(provider);
+  });
+
   it("系统提示词带「不要思考过程，直接给解释」的措辞（兜住服务端默认开思考的平台）", async () => {
     const messages = explain.buildExplainMessages({
       videoTitle: "T",

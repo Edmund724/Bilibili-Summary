@@ -117,6 +117,11 @@ export function createProviderPrefs(deps: CreateProviderPrefsDeps): ProviderPref
         // name 不在 AiProvider 显式字段里（走索引签名，unknown），按串收窄
         name: typeof p.name === "string" ? p.name : undefined,
         model: p.model,
+        // baseUrl / presetId 透传（AiProvider 显式字段）：思考档位「关不掉」提示的
+        // resolver 识别入参（工单 03，沿本消息链读取、不开新链）。presetId 是
+        // 识别主路径（02 票纪律），baseUrl 供 custom/反代场景的 host 兜底。
+        baseUrl: typeof p.baseUrl === "string" ? p.baseUrl : undefined,
+        presetId: typeof p.presetId === "string" ? p.presetId : undefined,
         enabled: p.enabled
       }));
     const settings = settingsResp?.ok ? settingsResp.settings : null;

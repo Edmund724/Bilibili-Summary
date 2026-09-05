@@ -1352,6 +1352,20 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
+/* 思考档位「关不掉」提示行（工单 03）：档位切换区内独占一行的小字，
+ * 默认 hidden（对话组合根 reader/chat-tab.ts 按 resolver 判定显隐）。 */
+.boc-reading-chat .chat-thinking-hint {
+  flex-basis: 100%;
+  padding: 0 2px;
+  color: var(--boc-reader-muted, #6f675c);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.boc-reading-chat .chat-thinking-hint[hidden] {
+  display: none !important;
+}
+
 .boc-reading-chat .chat-icon-btn {
   flex-shrink: 0;
   width: 30px;

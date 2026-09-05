@@ -1,6 +1,6 @@
 // AI 连通性探针测试（候选 04：探针移至 ai/provider-test.js，options 页直调）。
 // 覆盖 testAiConnection / probeAiChatCompletion 的 { ok, error } 形状契约：
-// 输入预检、probe 请求负载（max_tokens:1 + ping）、成功判定 = response.ok、
+// 输入预检、probe 请求负载（token 上限 1 + ping）、成功判定 = response.ok、
 // HTTP / 连接 / 溢出错误的文案包装（复用共享 helper，AI/ASR 逐字一致）。
 // 探针只与 fetch / chrome.storage 交互，用 vi.stubGlobal 替换 fetch。
 
@@ -77,15 +77,13 @@ describe("probeAiChatCompletion { ok, error } 形状", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.example.com/v1/chat/completions");
     expect(init.method).toBe("POST");
+    // 探针省略档位 ⇒ 回落 off ⇒ 经 thinking-profiles 查表：未知平台×模型无事实
+    // → 不发任何思考字段（旧霰弹枪双发 thinking+enable_thinking 会令 OpenAI 探针必 400）
     expect(JSON.parse(init.body)).toEqual({
       model: "gpt",
       messages: [{ role: "user", content: "ping" }],
       stream: false,
-      max_tokens: 1,
-      // 探针省略思考档位 ⇒ 协议层按 off 发显式关思考字段：默认开思考的模型在
-      // 非流式 max_tokens:1 探针上会因思考模式报错，关掉才探得通。
-      thinking: { type: "disabled" },
-      enable_thinking: false
+      max_tokens: 1
     });
     expect(init.headers).toEqual({
       Accept: "application/json",
@@ -94,6 +92,26 @@ describe("probeAiChatCompletion { ok, error } 形状", () => {
     });
     // 成功判定 = response.ok：不读响应体
     expect(init.body).toBeTruthy();
+  });
+
+  it("OpenAI + reasoning 模型探针：off 查表落 reasoning_effort:none，token 上限 1", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, {}));
+    const { probeAiChatCompletion } = await loadModule();
+
+    const resp = await probeAiChatCompletion({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-1",
+      model: "gpt-5.1"
+    });
+
+    expect(resp).toEqual({ ok: true });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      model: "gpt-5.1",
+      messages: [{ role: "user", content: "ping" }],
+      stream: false,
+      max_tokens: 1,
+      reasoning_effort: "none"
+    });
   });
 
   it("无 apiKey 时不出 Authorization 头", async () => {
@@ -158,8 +176,9 @@ describe("testAiProviderConnection Key 代查", () => {
     return mod.testAiProviderConnection;
   }
 
-  it("直输 Key 优先：不读已存 Key 存储，Authorization 用重输值", async () => {
+  it("直输 Key 优先：已存 Key 不顶替直输值，Authorization 用重输值", async () => {
     storageGet().mockReset();
+    storageGet().mockResolvedValue({ aiProviderKeys: { p1: "sk-saved" } });
     fetchMock.mockResolvedValue(jsonResponse(200, {}));
     const entry = await loadEntry();
 
@@ -171,7 +190,6 @@ describe("testAiProviderConnection Key 代查", () => {
     });
 
     expect(resp).toEqual({ ok: true });
-    expect(storageGet()).not.toHaveBeenCalled();
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer sk-direct");
   });
 
@@ -283,5 +301,72 @@ describe("testAiProviderConnection 的 host 权限预检", () => {
     });
 
     expect(resp).toEqual({ ok: true });
+  });
+});
+
+// presetId 穿线（02 号票，探针链）：testAiProviderConnection 按 providerId 从
+// 已存列表读记录的 presetId（preset 词表键，非记录 id）随探针请求下发，baseUrl
+// host 推断退为兜底；旧记录（无 presetId 字段）经 normalize 落 "custom" → 回落
+// host/模型名识别，与 01 落地行为一致。
+describe("testAiProviderConnection presetId 穿线", () => {
+  // 播种 chrome.storage.sync 的已存列表（loadProviders 读取 + normalize 的入口）
+  function stubProviderStorage(list) {
+    vi.stubGlobal("chrome", {
+      ...globalThis.chrome,
+      permissions: { contains: vi.fn(async () => true) },
+      storage: {
+        sync: { get: vi.fn(async () => ({ aiProviders: list })), set: vi.fn(async () => {}) },
+        local: { get: vi.fn(async () => ({})), set: vi.fn(async () => {}) }
+      }
+    });
+  }
+
+  it("记录的 presetId 随探针下发：host 反代无规则也按 preset 平台规则出思考字段", async () => {
+    stubProviderStorage([{
+      id: "p1",
+      presetId: "ollama",
+      name: "本地 Ollama",
+      baseUrl: "https://thinking-proxy.example.com/v1",
+      model: "llama3.2",
+      requiresKey: false,
+      enabled: true
+    }]);
+    fetchMock.mockResolvedValue(jsonResponse(200, {}));
+    const { testAiProviderConnection } = await loadModule();
+
+    const resp = await testAiProviderConnection({
+      providerId: "p1",
+      baseUrl: "https://thinking-proxy.example.com/v1",
+      model: "llama3.2"
+    });
+
+    expect(resp).toEqual({ ok: true });
+    // 探针省略档位 ⇒ off ⇒ ollama unknownClass（effort 词汇）→ reasoning_effort:"none"；
+    // 穿线断裂（host 无规则 + llama3.2 不在模式表）则落 unknown、字段全缺
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ reasoning_effort: "none" });
+  });
+
+  it("旧记录无 presetId 字段 → normalize 落 custom → 回落 host 推断（与 01 行为一致）", async () => {
+    stubProviderStorage([{
+      id: "p1",
+      name: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-5.1",
+      requiresKey: true,
+      enabled: true
+    }]);
+    fetchMock.mockResolvedValue(jsonResponse(200, {}));
+    const { testAiProviderConnection } = await loadModule();
+
+    const resp = await testAiProviderConnection({
+      providerId: "p1",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-1",
+      model: "gpt-5.1"
+    });
+
+    expect(resp).toEqual({ ok: true });
+    // openai host 兜底命中 → gpt-5.1 off = effort none（01 golden 锁定）
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ reasoning_effort: "none" });
   });
 });

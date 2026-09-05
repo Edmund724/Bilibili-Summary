@@ -1,6 +1,6 @@
 // ai/completion.ts — OpenAI 兼容 /chat/completions 的纯协议接缝（候选 03）。
-// 请求构造（baseUrl 归一 / Bearer 头 / 思考档位：low·high 发 reasoning_effort、
-// off 发显式关思考字段族 / max_tokens 探针）、
+// 请求构造（baseUrl 归一 / Bearer 头 / 思考档位经 thinking-profiles 查表、
+// token 上限探针——参数名随表映射）、
 // SSE 解析、context-length 溢出判定、参数化重试策略，全部收口于此；
 // 三份历史实现（client 流式 port 回吐 / map-reduce 非流式 / provider 探针）
 // 统一经此调用，未来接入新 provider 家族（Gemini/Ollama）时在此加适配器插点。
@@ -16,6 +16,7 @@
 //   （及流式读流中断）都重试，与状态码无关。
 import { parseSsePayload } from "./sse-parser.js";
 import { makeAbortedError, isRetryableNetworkError } from "../shared/error-helpers.js";
+import { normalizeThinkingLevel, resolveThinkingProfile } from "./thinking-profiles.js";
 import type { ChatMessage, StreamChatEvent } from "./types.js";
 
 // OpenAI 兼容协议 chat 路径。
@@ -23,27 +24,9 @@ import type { ChatMessage, StreamChatEvent } from "./types.js";
 // （原 client.js 的 OPENAI_COMPAT 常量收口于此；listModels 死字段不再保留。）
 export const OPENAI_CHAT_PATH = "/chat/completions";
 
-// 思考档位：low / high 映射到 OpenAI 兼容的 reasoning_effort；off = 显式关思考
-// （见 THINKING_DISABLE_FIELDS，不再是「什么都不发」）。
-const AI_THINKING_LEVELS = ["off", "low", "high"];
-
-// 「关闭思考」的显式字段（OpenAI 兼容族里两家各认一种，一次全发，不认的一方按
-// 未知参数忽略）：
-//   thinking: {type:"disabled"}   —— DeepSeek / GLM / Kimi / MiniMax / 豆包的混合思考开关
-//   enable_thinking: false        —— Qwen（DashScope 兼容模式）/ vLLM / SiliconFlow 系
-// 写点唯一：档位 off 时由 buildChatRequestBody 注入，覆盖对话 tab（含 offscreen
-// 流式链路）、概览生成、选区解释与连通性探针——用户在对话 tab 选 Off 或调用方
-// 省略档位，都落到这里。若某平台对未知参数严格报错（表现为 HTTP 400），删掉对应
-// 一条即可，各调用方无需改动。（不用 reasoning_effort:"none"：那是 GPT-5 专属，
-// 不接受该值的模型会直接 400。）
-const THINKING_DISABLE_FIELDS = {
-  thinking: { type: "disabled" },
-  enable_thinking: false
-};
-
-export function normalizeThinkingLevel(value: unknown): string {
-  return AI_THINKING_LEVELS.includes(String(value)) ? String(value) : "off";
-}
+// 思考档位词表唯一主人在 thinking-profiles（表与档位同域）；此处 re-export
+// 保住既有 import 路径（completion 曾是词表主人）。
+export { normalizeThinkingLevel } from "./thinking-profiles.js";
 
 interface BuildChatRequestBodyInput {
   model: string;
@@ -51,6 +34,11 @@ interface BuildChatRequestBodyInput {
   stream?: boolean;
   thinkingLevel?: string;
   maxTokens?: number | null;
+  // 思考参数查表的 provider 识别输入：presetId（preset 词表键）是主路径，
+  // baseUrl host 推断兜底（custom/旧记录）——02 号票起 chatCompletion 随
+  // provider 记录穿入。
+  baseUrl?: string;
+  presetId?: string;
 }
 
 interface ChatRequestBody {
@@ -59,6 +47,7 @@ interface ChatRequestBody {
   stream: boolean;
   reasoning_effort?: string;
   max_tokens?: number;
+  max_completion_tokens?: number;
   thinking?: { type: string };
   enable_thinking?: boolean;
 }
@@ -66,17 +55,22 @@ interface ChatRequestBody {
 /**
  * 构造 chat/completions 请求体（纯函数，便于单测；请求构造单点）。
  * stream 显式传递（流式 true / 非流式 false）；maxTokens 供探针传 1。
- * 档位 off（含省略/非法回落到 off）→ 注入 THINKING_DISABLE_FIELDS 显式关思考；
- * 档位 low/high → 只发 reasoning_effort，不混入关闭字段。
+ * 思考字段由 thinking-profiles 的 resolveThinkingProfile 查表决定：平台
+ * （presetId / baseUrl host）× 模型（例外表 >> 模式表）→ 档位 patch；查不到
+ * 事实（unknown 哨兵）或缺档一律不发字段——软失败优于硬 400。resolver 返回的
+ * offUnavailable / thinkingClass / tokenParam（03 提示 UI 与 04 token 换名）
+ * 本函数不消费。
  */
-export function buildChatRequestBody({ model, messages, stream = false, thinkingLevel, maxTokens }: BuildChatRequestBodyInput): ChatRequestBody {
+export function buildChatRequestBody({ model, messages, stream = false, thinkingLevel, maxTokens, baseUrl, presetId }: BuildChatRequestBodyInput): ChatRequestBody {
   const body: ChatRequestBody = { model, messages, stream };
-  const level = normalizeThinkingLevel(thinkingLevel);
-  if (level === "off") {
-    Object.assign(body, THINKING_DISABLE_FIELDS);
-  } else {
-    body.reasoning_effort = level;
-  }
+  const thinking = resolveThinkingProfile({
+    presetId,
+    baseUrl,
+    model,
+    level: normalizeThinkingLevel(thinkingLevel),
+    stream
+  });
+  Object.assign(body, thinking.fields);
   if (maxTokens != null) {
     body.max_tokens = maxTokens;
   }
@@ -228,7 +222,10 @@ interface RetryPayload {
 }
 
 interface ChatCompletionInput {
-  provider: { baseUrl?: string; apiKey?: string; model?: string };
+  // provider 记录形状：presetId 是 preset 词表键（core/ai-provider-store 归一化
+  // 缺省 "custom"），思考参数查表的平台识别主路径——02 号票穿线，未命中（custom/
+  // 旧记录）回落 baseUrl host 推断。
+  provider: { baseUrl?: string; apiKey?: string; model?: string; presetId?: string };
   messages: ChatMessage[];
   stream?: boolean;
   signal?: AbortSignal | null;
@@ -251,7 +248,7 @@ interface ChatCompletionInput {
  * - messages: OpenAI 消息数组（组装留在调用方）。
  * - stream: 流式增量经 onEvent 吐出，成功返回 { done: true }；
  *   非流式成功返回 choices[0].message.content（非字符串回落空串）。
- * - probe: 探针模式——body 强制 max_tokens（默认 1），成功判定 = response.ok
+ * - probe: 探针模式——body 强制 token 上限参数（默认 1），成功判定 = response.ok
  *   且不读响应体（某些兼容网关在 max_tokens:1 下返回非 JSON 体，不视为失败）。
  * - retries: 重试次数，默认流式 2 / 非流式 0；退避线性 retryDelayMs × attempt。
  *   溢出/中止不重试；重试前的用户可见提示经 onRetry({ attempt, maxRetries, kind, error })，
@@ -263,7 +260,8 @@ interface ChatCompletionInput {
  * - headers: 额外请求头（探针的 Accept 等）；Content-Type 固定 JSON，
  *   Authorization 已存在时不重复注入。
  * - thinkingLevel / maxTokens / signal / fetchImpl（默认 globalThis.fetch）；
- *   档位 off（或省略）= 显式关思考，见 THINKING_DISABLE_FIELDS。
+ *   思考字段由 thinking-profiles 按平台×模型查表（provider.presetId 主路径 +
+ *   provider.baseUrl host 推断兜底，02 号票穿线）。
  * 错误模型见文件头注释。
  */
 export async function chatCompletion({
@@ -303,7 +301,11 @@ export async function chatCompletion({
     messages,
     stream,
     thinkingLevel,
-    maxTokens: probe ? (maxTokens ?? 1) : maxTokens
+    maxTokens: probe ? (maxTokens ?? 1) : maxTokens,
+    // baseUrl 已归一；思考参数查表：presetId 主路径（provider 记录随带），
+    // baseUrl host 推断兜底（custom/旧记录）。
+    presetId: provider.presetId,
+    baseUrl
   });
 
   // 上一次失败（kind + 错误）：attempt > 0 时经 onRetry 上报后再退避重试。

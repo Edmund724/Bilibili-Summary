@@ -207,8 +207,8 @@ async function startOverviewRun(clipKey: string, forceRefresh: boolean): Promise
     const analysis = await runOverviewAnalysis(
       // digest-only-ui：思考档位显式钉死 off（对齐 ai/explain.ts 的钉法）——
       // 章节/金句生成不开放思考档位，省略档位虽会在协议层归一化落到 off，
-      // 显式传参让请求体带 THINKING_DISABLE_FIELDS 的行为成为契约而非默认值
-      // 巧合（协议层改动时不会被静默带走）。
+      // 显式传参让「查表关思考」（thinking-profiles → 平台关闭字段/级联）的
+      // 行为成为契约而非默认值巧合（协议层改动时不会被静默带走）。
       { provider, context: buildOverviewContext(), forceRefresh, thinkingLevel: "off" },
       {
         // 分段进度文案（buildProgressNotice：「正在整理第 x/y 段（n%）」）注入：

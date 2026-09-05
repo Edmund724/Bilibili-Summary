@@ -44,6 +44,9 @@
 import { state } from "../core/state.js";
 import { buildReaderModeUrl } from "../bilibili/reader-url.js";
 import { buildContextKey, doesTabMatchContextUrl } from "../ai/conversation.js";
+// 思考档位「关不掉」提示的判定入口（工单 03）：纯查表 resolver，host 推断 +
+// 模型名 taxonomy，无 DOM 依赖（后台路径同款判定天然不渲染提示）。
+import { resolveThinkingProfile } from "../ai/thinking-profiles.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { formatClock } from "../shared/clock-text.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
@@ -103,6 +106,8 @@ const els = {
   modelSelect: document.getElementById(ids.readingChatModelSelect) as HTMLSelectElement,
   thinkingToggle: document.getElementById(ids.readingChatThinkingToggle) as HTMLElement,
   thinkingBtns: document.querySelectorAll<HTMLElement>(`#${ids.readingChatThinkingToggle} .chat-thinking-btn`),
+  // 思考档位「关不掉」提示行（工单 03，模板默认 hidden）
+  thinkingHint: document.getElementById(ids.readingChatThinkingHint) as HTMLElement | null,
   newChatBtn: document.getElementById(ids.readingChatNewBtn) as HTMLButtonElement,
   presetBtn: document.getElementById(ids.readingChatPresetBtn) as HTMLButtonElement,
   historyBtn: document.getElementById(ids.readingChatHistoryBtn) as HTMLButtonElement,
@@ -418,6 +423,8 @@ const presets = createPresetPrompts({
 
 // AI 平台加载渲染 + 思考档位（widthEls 即本文件模块级 `els`，含度量所需的
 // toolbar/thinkingToggle/presetBtn）；persistAiPresetPrompts 惰性互引 presets。
+// 思考档位「关不掉」提示（工单 03）的 DOM 与判定在本文件（updateThinkingHint），
+// baseUrl 识别入参由 providers 模块自 ai-providers-list 载荷透传。
 const providerPrefs = createProviderPrefs({
   modelSelect: els.modelSelect,
   thinkingBtns: els.thinkingBtns,
@@ -426,6 +433,48 @@ const providerPrefs = createProviderPrefs({
   persistAiPresetPrompts: () => presets.persistAiPresetPrompts()
 });
 const { loadProvidersAndPrefs, setThinkingLevel } = providerPrefs;
+
+// ============================================================
+// 思考档位「关不掉」提示（工单 03，对话 tab 档位区唯一的 UI 增量）
+// ============================================================
+
+// 文案逐字给定（工单 03，勿改写）：长版 = 级联落了 low 档；短版 = 连 low 都没有。
+const THINKING_OFF_FALLBACK_LOW_HINT = "当前模型不支持在本次请求中关闭思考，已使用最小思考档位";
+const THINKING_OFF_UNAVAILABLE_HINT = "当前模型没办法关掉思考";
+
+// 按当前档位 + 选中平台重判提示显隐。刷新点三处：模型选择 change、档位按钮
+// 点击、平台列表重载（init 与外部设置变更后的 loadProvidersAndPrefs 之后）——
+// 「关不掉」模型切回可关模型时提示随之消失。档位不是 Off、或 resolver 判 off
+// 正常可用（含 never 模型静默与 unknown 哨兵）时一律隐藏。
+function updateThinkingHint(): void {
+  const hint = els.thinkingHint;
+  if (!hint) {
+    return;
+  }
+  hint.textContent = "";
+  hint.hidden = true;
+  if (chatSessionState.aiThinkingLevel !== "off") {
+    return;
+  }
+  // 识别入参：baseUrl / presetId 沿 loadProvidersAndPrefs 已拉的
+  // ai-providers-list 载荷（providers.ts 已透传进 chatSessionState.providers，
+  // 不开新消息链）；模型名取选中平台记录的 model（modelSelect 选项文案同源）。
+  // stream 传 true：对话请求是流式，streamOnly 关闭规则（如 qwen3-235b 的
+  // enable_thinking:false）在对话里正常可用，不误报提示。
+  const provider = chatSessionState.providers.find((item) => item.id === els.modelSelect.value);
+  const resolution = resolveThinkingProfile({
+    presetId: String(provider?.presetId || ""),
+    baseUrl: String(provider?.baseUrl || ""),
+    model: String(provider?.model || ""),
+    level: "off",
+    stream: true
+  });
+  if (!resolution.offUnavailable) {
+    return;
+  }
+  hint.textContent = resolution.offFallback === "low" ? THINKING_OFF_FALLBACK_LOW_HINT : THINKING_OFF_UNAVAILABLE_HINT;
+  hint.hidden = false;
+}
 
 // 抓取/音频转写进行中（content 的 subtitleFetchState 为 loading 且字幕体为空）
 // 时等待其完成再放行发送流程，状态机本体在 ../chat/subtitle-wait.ts（可测）。
@@ -483,6 +532,8 @@ async function initChatTab({ consumeIntent }: { consumeIntent: boolean }): Promi
   // 聊天不再静默坏到面板重开。ensure 失败不阻断 init（catch 吞掉）。
   await sendRuntimeMessage({ type: "ensure-offscreen-chat" }).catch(() => null);
   await loadProvidersAndPrefs();
+  // 平台列表/档位落定后首判「关不掉」提示（此后由模型切换/档位点击/外部刷新续判）。
+  updateThinkingHint();
   await conversationStore.loadAll();
   await loadContextState();
   await conversationStore.restoreLatest();
@@ -700,10 +751,15 @@ function bindEvents(): void {
       chrome.storage.sync.set({ defaultModel: "" }).catch(() => {});
     }
     updateModelSelectWidth(els);
+    // 模型选择变化即重判提示（含从「关不掉」模型切回可关模型时消失）。
+    updateThinkingHint();
   });
   els.thinkingBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
+      // setThinkingLevel 首行同步写 chatSessionState.aiThinkingLevel，紧随的
+      // 重判读到的是新档位（档位切走即收提示，切回 Off 再现）。
       void setThinkingLevel(btn.dataset.level || "off");
+      updateThinkingHint();
     });
   });
   window.addEventListener("resize", onWindowResize);
@@ -778,6 +834,8 @@ async function refreshProvidersAndPrefsAfterExternalChange(): Promise<void> {
   // 选中平台回退取 providers 模块的 storage 闭包缓存。
   const previousProviderId = String(els.modelSelect?.value || providerPrefs.getStoredSelectedProviderId() || "").trim();
   await loadProvidersAndPrefs({ preferredProviderId: previousProviderId });
+  // 外部变更可能整体替换平台列表/选中平台/档位：与 init 同口径重判提示。
+  updateThinkingHint();
   if (chatRuntime.isStreaming()) {
     return;
   }

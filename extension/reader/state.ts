@@ -74,6 +74,9 @@ export const ids = {
   readingChatSuggestions: "boc-reading-chat-suggestions",
   readingChatModelSelect: "boc-reading-chat-model-select",
   readingChatThinkingToggle: "boc-reading-chat-thinking-toggle",
+  // 思考档位「关不掉」提示行（工单 03）：档位切换区内 Off/Low/High 之后，
+  // 默认 hidden，对话组合根（reader/chat-tab.ts）按 resolver 判定显隐。
+  readingChatThinkingHint: "boc-reading-chat-thinking-hint",
   readingChatPresetBtn: "boc-reading-chat-preset-btn",
   readingChatPresetPopover: "boc-reading-chat-preset-popover",
   readingChatPresetList: "boc-reading-chat-preset-list",

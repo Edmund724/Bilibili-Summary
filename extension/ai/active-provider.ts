@@ -43,6 +43,10 @@ export async function resolveActiveProvider(): Promise<AiProvider> {
   return {
     baseUrl: String(provider.baseUrl || "").trim(),
     apiKey: String(keyResp.apiKey || "").trim(),
-    model: String(provider.model || "").trim()
+    model: String(provider.model || "").trim(),
+    // presetId 穿线（provider 记录随带）：解释链下游 thinking-profiles 查表的
+    // 主识别路径，反代 baseUrl 无 host 规则时是唯一线索。缺失归一为空串
+    //（resolver 端回落 host/模型名识别，不臆造平台）。
+    presetId: String(provider.presetId || "")
   };
 }

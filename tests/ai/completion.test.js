@@ -1,6 +1,6 @@
 // ai/completion.js 纯协议接缝测试（候选 03）：
-// 假 fetch 全覆盖——请求构造对照表（尾斜杠归一 / Bearer 有无 / 思考档位 off 发
-// 显式关思考字段族、low·high 发 reasoning_effort / stream 真假 / max_tokens 探针 /
+// 假 fetch 全覆盖——请求构造对照表（尾斜杠归一 / Bearer 有无 / 思考档位经
+// thinking-profiles 查表：平台×模型→字段、无事实不发 / stream 真假 / max_tokens 探针 /
 // 额外头合并）、SSE 解析（多事件 / [DONE] /
 // 半行 buffer）、溢出判定（子串+正则样本，自 budget-single-shot 迁移）、
 // 重试 policy（流式默认 2 次 + onRetry 时序、非流式默认 0 次、溢出/abort 不重试）、
@@ -103,40 +103,42 @@ describe("请求构造对照表（url / body / headers）", () => {
     expect(noKey.headers["Content-Type"]).toBe("application/json");
   });
 
-  it("思考档位：off（含省略）发显式关思考字段族，low / high 只发 reasoning_effort；stream 真假写进 body", async () => {
+  it("思考档位经 thinking-profiles 查表：OpenAI gpt-5.1 off→effort none、low/high→effort；未知平台×模型三档不发", async () => {
     // 按请求体 stream 动态回响应：流式给 SSE 响应（可读体），非流式给 JSON 响应。
     const fetchMock = vi.fn(async (_url, init) =>
       JSON.parse(init.body).stream
         ? sseResponse([])
         : jsonResponse({ choices: [{ message: { content: "" } }] })
     );
-    const run = (overrides) =>
+    const run = (provider, overrides) =>
       chatCompletion({
-        provider: PROVIDER,
+        provider,
         messages: [{ role: "user", content: "hi" }],
         fetchImpl: fetchMock,
         ...overrides
       });
 
-    await run({ stream: false, thinkingLevel: "off" });
-    await run({ stream: true, thinkingLevel: "low" });
-    await run({ stream: true, thinkingLevel: "high" });
-    await run({ stream: true });
+    const openai = { baseUrl: "https://api.openai.com/v1", model: "gpt-5.1" };
+    await run(openai, { stream: false, thinkingLevel: "off" });
+    await run(openai, { stream: true, thinkingLevel: "low" });
+    await run(openai, { stream: true, thinkingLevel: "high" });
+    // 未知平台 × 未知模型（UNKNOWN 哨兵）：off 与省略档位都无任何思考字段
+    await run(PROVIDER, { stream: true, thinkingLevel: "off" });
+    await run(PROVIDER, { stream: true });
 
     const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body));
-    // 第 1 / 4 发（off 与省略档位）：线上请求体真的带上两组关闭字段
-    for (const body of [bodies[0], bodies[3]]) {
-      expect(body).toMatchObject({
-        model: "test-model",
-        messages: [{ role: "user", content: "hi" }],
-        thinking: { type: "disabled" },
-        enable_thinking: false
-      });
-      expect(body).not.toHaveProperty("reasoning_effort");
-    }
+    // OpenAI：off（例外表）映射 effort none——不再发会让严格 400 的未知字段族
+    expect(bodies[0]).toMatchObject({ reasoning_effort: "none" });
+    expect(bodies[0]).not.toHaveProperty("thinking");
+    expect(bodies[0]).not.toHaveProperty("enable_thinking");
     expect(bodies[1]).toMatchObject({ stream: true, reasoning_effort: "low" });
     expect(bodies[1]).not.toHaveProperty("enable_thinking");
     expect(bodies[2]).toMatchObject({ stream: true, reasoning_effort: "high" });
+    for (const body of [bodies[3], bodies[4]]) {
+      expect(body).not.toHaveProperty("reasoning_effort");
+      expect(body).not.toHaveProperty("thinking");
+      expect(body).not.toHaveProperty("enable_thinking");
+    }
   });
 
   it("probe 模式：max_tokens:1 + ping 消息 + stream:false；额外头合并且不覆盖 Content-Type", async () => {
@@ -153,15 +155,14 @@ describe("请求构造对照表（url / body / headers）", () => {
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(`https://api.example.com/v1${OPENAI_CHAT_PATH}`);
-    // 探针省略档位 ⇒ 回落 off ⇒ 带显式关思考字段：默认开思考的模型在非流式
-    // max_tokens:1 探针上会因思考模式报错，关掉才探得通。
+    // 探针省略档位 ⇒ 回落 off ⇒ 经 thinking-profiles 查表：未知平台×模型无事实
+    // （UNKNOWN 哨兵）→ 不发任何思考字段。旧实现霰弹枪双发 thinking+enable_thinking
+    // 会让 OpenAI 严格校验的探针必 400；查表后字段跟着平台走（见下一条用例）。
     expect(JSON.parse(init.body)).toEqual({
       model: "test-model",
       messages: [{ role: "user", content: "ping" }],
       stream: false,
-      max_tokens: 1,
-      thinking: { type: "disabled" },
-      enable_thinking: false
+      max_tokens: 1
     });
     expect(init.headers).toEqual({
       Accept: "application/json",
@@ -202,28 +203,93 @@ describe("请求构造对照表（url / body / headers）", () => {
   });
 });
 
-describe("buildChatRequestBody / normalizeThinkingLevel（自 client.js 迁入）", () => {
-  it("off：发 OpenAI 兼容族两组显式关思考字段，不带 reasoning_effort", () => {
-    const body = buildChatRequestBody({
-      model: "test-model",
+// presetId 穿线（02 号票）：provider 记录的 presetId 经 chatCompletion 的
+// provider 对象抵达 buildChatRequestBody，识别主路径优先于 baseUrl host 推断；
+// 旧记录（无 presetId 字段 / normalize 落 "custom"）回落 host/模型名，与 01
+// 落地行为一致（上面的请求构造对照表即 01 golden，继续锁定）。
+describe("presetId 穿线（chatCompletion → buildChatRequestBody）", () => {
+  it("provider.presetId 与 host 推断冲突时 presetId 赢：host 命中 Mimo 但记录是 ollama → effort 词汇", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ choices: [{ message: { content: "" } }] }));
+
+    await chatCompletion({
+      // baseUrl 指向 Mimo 官方域（host 推断 → enable_thinking 族）；presetId
+      // 主路径生效则整体改按 ollama 规则——字段族切换是「谁赢」的可观测判据
+      provider: { baseUrl: "https://api.mimo.ai/v1", apiKey: "sk-1", model: "llama3.2", presetId: "ollama" },
       messages: [{ role: "user", content: "hi" }],
-      stream: true,
-      thinkingLevel: "off"
+      thinkingLevel: "off",
+      fetchImpl: fetchMock
     });
-    expect(body).toEqual({
-      model: "test-model",
-      messages: [{ role: "user", content: "hi" }],
-      stream: true,
-      thinking: { type: "disabled" },
-      enable_thinking: false
-    });
-    expect(body).not.toHaveProperty("reasoning_effort");
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toMatchObject({ reasoning_effort: "none" });
+    expect(body).not.toHaveProperty("enable_thinking");
   });
 
-  it("low / high：只映射为 reasoning_effort，不混入关闭字段；maxTokens 透传", () => {
-    const base = { model: "test-model", messages: [], stream: false };
+  it("provider.presetId（如反代场景）→ 按 preset 平台规则出 enable_thinking 族", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ choices: [{ message: { content: "" } }] }));
+
+    await chatCompletion({
+      provider: { baseUrl: "https://thinking-proxy.example.com/v1", apiKey: "sk-1", model: "qwen3-max", presetId: "qwen" },
+      messages: [{ role: "user", content: "hi" }],
+      thinkingLevel: "off",
+      fetchImpl: fetchMock
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ enable_thinking: false });
+  });
+
+  it("presetId='custom'（旧记录 normalize 落点）→ 回落模型名识别：taxonomy 命中 DeepSeek 规则", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ choices: [{ message: { content: "" } }] }));
+
+    await chatCompletion({
+      provider: { baseUrl: "https://thinking-proxy.example.com/v1", apiKey: "sk-1", model: "deepseek-v4-pro", presetId: "custom" },
+      messages: [{ role: "user", content: "hi" }],
+      thinkingLevel: "off",
+      fetchImpl: fetchMock
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ thinking: { type: "disabled" } });
+  });
+
+  it("旧记录不带 presetId 字段：host 推断照常（01 golden 不回归）", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ choices: [{ message: { content: "" } }] }));
+
+    await chatCompletion({
+      provider: { baseUrl: "https://api.openai.com/v1", apiKey: "sk-1", model: "gpt-5.1" },
+      messages: [{ role: "user", content: "hi" }],
+      thinkingLevel: "off",
+      fetchImpl: fetchMock
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ reasoning_effort: "none" });
+  });
+});
+
+describe("buildChatRequestBody / normalizeThinkingLevel（自 client.js 迁入）", () => {
+  it("off：按平台表发显式关闭字段（OpenAI gpt-5.1 例外 effort none；DeepSeek v4 模式表 thinking disabled）", () => {
+    const base = { messages: [], stream: true };
+    expect(buildChatRequestBody({
+      ...base, model: "gpt-5.1", baseUrl: "https://api.openai.com/v1", thinkingLevel: "off"
+    })).toEqual({
+      model: "gpt-5.1",
+      messages: [],
+      stream: true,
+      reasoning_effort: "none"
+    });
+    expect(buildChatRequestBody({
+      ...base, model: "deepseek-v4-pro", baseUrl: "https://api.deepseek.com/v1", thinkingLevel: "off"
+    })).toEqual({
+      model: "deepseek-v4-pro",
+      messages: [],
+      stream: true,
+      thinking: { type: "disabled" }
+    });
+  });
+
+  it("low / high：按平台表映射（OpenAI effort），不混入其他思考字段；maxTokens 透传", () => {
+    const base = { model: "gpt-5.1", messages: [], stream: false, baseUrl: "https://api.openai.com/v1" };
     expect(buildChatRequestBody({ ...base, thinkingLevel: "low" })).toEqual({
-      model: "test-model",
+      model: "gpt-5.1",
       messages: [],
       stream: false,
       reasoning_effort: "low"
@@ -234,18 +300,15 @@ describe("buildChatRequestBody / normalizeThinkingLevel（自 client.js 迁入�
     expect(buildChatRequestBody({ ...base, maxTokens: 1 })).toMatchObject({ max_tokens: 1 });
   });
 
-  it("省略或非法档位：回落 off，同样发关闭字段；stream 缺省为 false", () => {
-    const base = { model: "test-model", messages: [] };
-    expect(buildChatRequestBody({ ...base })).toEqual({
-      model: "test-model",
-      messages: [],
-      stream: false,
-      thinking: { type: "disabled" },
-      enable_thinking: false
-    });
-    expect(buildChatRequestBody({ ...base, thinkingLevel: "medium" })).toMatchObject({
-      thinking: { type: "disabled" }
-    });
+  it("未知平台 × 未知模型：省略/非法/三档均不发思考字段（UNKNOWN 哨兵）；stream 缺省 false", () => {
+    const base = { model: "test-model", messages: [], baseUrl: "https://api.example.com/v1" };
+    for (const thinkingLevel of [undefined, "off", "low", "high", "medium"]) {
+      expect(buildChatRequestBody({ ...base, thinkingLevel })).toEqual({
+        model: "test-model",
+        messages: [],
+        stream: false
+      });
+    }
   });
 
   it("normalizeThinkingLevel 只接受 off/low/high，其余回落 off", () => {

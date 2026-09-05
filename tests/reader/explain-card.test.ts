@@ -18,9 +18,15 @@ import { mountPlayerChain } from "../helpers/reader-skeleton.js";
 import type { TestState } from "./reader-test-env.js";
 
 const aiMock = vi.hoisted(() => ({
-  resolveActiveProvider: vi.fn(async () => ({ baseUrl: "https://api.test/v1", apiKey: "sk-test", model: "m" })),
+  // 返回类型对齐真实 resolveActiveProvider（AiProvider，含可选 presetId）：
+  // presetId 穿线用例（下方）的 mockResolvedValue 才能通过类型检查。
+  resolveActiveProvider: vi.fn<() => Promise<
+    { baseUrl: string; apiKey: string; model: string; presetId?: string }
+  >>(),
   explainSelection: vi.fn(async (_input: Record<string, unknown>) => "这是模型给出的解释。")
 }));
+
+aiMock.resolveActiveProvider.mockImplementation(async () => ({ baseUrl: "https://api.test/v1", apiKey: "sk-test", model: "m" }));
 
 vi.mock("../../extension/ai/active-provider.js", () => ({
   resolveActiveProvider: aiMock.resolveActiveProvider,
@@ -188,6 +194,24 @@ describe("面板内解释卡片", () => {
     expect(tabBody("Subtitle").classList.contains("is-active")).toBe(true);
     expect(tabBody("Chat").classList.contains("is-active")).toBe(false);
     expect(explainIntent.peekPendingExplainIntent()).toBe(null);
+  });
+
+  it("presetId 穿线：解析结果的 presetId 随 provider 原样进入解释请求（卡片层不重建 provider）", async () => {
+    // 反代 baseUrl：host 推断无规则，presetId 是解释链唯一的平台识别线索
+    aiMock.resolveActiveProvider.mockResolvedValue({
+      baseUrl: "https://thinking-proxy.example.com/v1",
+      apiKey: "sk-test",
+      model: "qwen3-max",
+      presetId: "qwen"
+    });
+
+    selectInItem(1, "工具");
+    explainBtn().click();
+    await vi.waitFor(() => expect(aiMock.explainSelection.mock.calls.length).toBeGreaterThan(0));
+
+    const args = aiMock.explainSelection.mock.calls[0][0] as { provider: { presetId?: string; baseUrl?: string } };
+    expect(args.provider.presetId).toBe("qwen");
+    expect(args.provider.baseUrl).toBe("https://thinking-proxy.example.com/v1");
   });
 
   it("卡片「去对话追问」：写意图（含 selection）+ 切到 AI 对话 tab + 引用卡展示选中片段", async () => {

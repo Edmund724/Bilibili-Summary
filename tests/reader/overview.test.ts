@@ -68,9 +68,10 @@ function stubRuntimeMessages(extra?: (message: Record<string, unknown>) => unkno
       case "get-settings":
         return respond({ ok: true, settings: { defaultModel: "prov-1" } });
       case "ai-providers-list":
+        // presetId 为真实记录形状：core/ai-provider-store normalize 后恒有（缺省 "custom"）
         return respond({
           ok: true,
-          providers: [{ id: "prov-1", name: "测试平台", baseUrl: "https://api.test/v1", model: "test-model", enabled: true }]
+          providers: [{ id: "prov-1", presetId: "custom", name: "测试平台", baseUrl: "https://api.test/v1", model: "test-model", enabled: true }]
         });
       case "get-ai-provider-key":
         return respond({ ok: true, apiKey: "sk-test" });
@@ -168,15 +169,15 @@ describe("概览状态机与触发", () => {  it("无字幕：不触发生成，
 
     expect(runOverviewMock).toHaveBeenCalledTimes(1);
     const args = runOverviewMock.mock.calls[0][0] as {
-      provider: { apiKey?: string; baseUrl?: string; model?: string };
+      provider: { apiKey?: string; baseUrl?: string; model?: string; presetId?: string };
       context: Record<string, unknown>;
       forceRefresh?: boolean;
       thinkingLevel?: string;
     };
-    expect(args.provider).toEqual({ baseUrl: "https://api.test/v1", apiKey: "sk-test", model: "test-model" });
+    expect(args.provider).toEqual({ baseUrl: "https://api.test/v1", apiKey: "sk-test", model: "test-model", presetId: "custom" });
     expect(args.forceRefresh).toBe(false);
-    // digest-only-ui：章节/金句生成思考档位显式钉死 off（请求体由协议层
-    // buildChatRequestBody 注入 THINKING_DISABLE_FIELDS，见 ai/completion.test）
+    // digest-only-ui：章节/金句生成思考档位显式钉死 off（请求体的思考字段由
+    // thinking-profiles 查表注入，见 ai/completion.test 与 thinking-golden）
     expect(args.thinkingLevel).toBe("off");
     expect(args.context.bvid).toBe("BV1test000000");
     expect(args.context.selectedSubtitleId).toBe("sub-1");
@@ -189,6 +190,28 @@ describe("概览状态机与触发", () => {  it("无字幕：不触发生成，
     // 章节与金句都是可点击跳播目标
     expect(overviewBody().querySelectorAll(".boc-reading-ov-chapter").length).toBe(2);
     expect(overviewBody().querySelectorAll(".boc-reading-ov-quote").length).toBe(1);
+  });
+
+  it("presetId 穿线：解析链带回记录的 presetId（preset 词表键），随 provider 进入概览管线", async () => {
+    seedClip();
+    runOverviewMock.mockResolvedValue(SAMPLE_ANALYSIS);
+    // 反代 baseUrl：host 推断无规则，presetId 是概览链唯一的平台识别线索
+    stubRuntimeMessages((message) => {
+      if (message?.type === "ai-providers-list") {
+        return {
+          ok: true,
+          providers: [{ id: "prov-1", presetId: "qwen", name: "反代百炼", baseUrl: "https://thinking-proxy.example.com/v1", model: "qwen3-max", enabled: true }]
+        };
+      }
+      return undefined;
+    });
+
+    await reader.triggerReaderOverviewGeneration();
+
+    const args = runOverviewMock.mock.calls[0][0] as { provider: { presetId?: string; baseUrl?: string; model?: string } };
+    expect(args.provider.presetId).toBe("qwen");
+    expect(args.provider.baseUrl).toBe("https://thinking-proxy.example.com/v1");
+    expect(args.provider.model).toBe("qwen3-max");
   });
 
   it("生成中重复触发：复用进行中 promise，管线只发起一次；落定后 ready", async () => {

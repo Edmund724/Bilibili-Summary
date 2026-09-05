@@ -197,6 +197,12 @@ Bilibili Summary 不收款，也不转售 API 服务。建议为账号设置消�
 
 没有你要用的平台时，选择「自定义」预设，手动填写该平台的 API Base URL（需兼容 OpenAI 协议）。
 
+### 思考档位的平台适配
+
+各平台对「关闭思考 / 思考档位」的请求参数并不一致（有的认 `reasoning_effort`，有的认 `thinking` 开关，有的认 `enable_thinking`）。扩展内置了一张「平台 × 模型」适配表：档位按钮会自动换成当前平台和模型认识的参数；模型结构上关不掉思考时（如 MiniMax M 系列、kimi-k2.7-code），对话里会提示并自动落到最低思考档。未收录的模型不发任何思考参数，交由平台默认行为。
+
+适配表的参数事实以各平台官方文档为准（2026-09 复核）；表结构与机制参考开源项目 [hana-model-catalog](https://github.com/liliMozi/hana-model-catalog)，特此致谢。
+
 ## 隐私和数据流向
 
 Bilibili Summary 直接从扩展向服务商发送请求：

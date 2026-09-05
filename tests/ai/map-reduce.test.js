@@ -550,3 +550,34 @@ describe("溢出放宽预算重跑（context-length 溢出的编排级兜底）"
     expect(postMessages.some((m) => m.type === "notice" && String(m.data).includes("已自动调低单段素材量并重试"))).toBe(false);
   });
 });
+
+// presetId 穿线（02 号票，概览 Map-Reduce 链）：provider 记录的 presetId 随
+// provider 对象穿过编排层抵达 chatCompletion → 请求构造单缝。反代 host 无规则
+// + 模式表未列模型（org 限定 id）时，presetId（modelscope unknownClass）是唯一
+// 识别线索——分段/成稿请求体出现 enable_thinking 即穿线判据。
+describe("presetId 穿线（概览 Map-Reduce 链 → 请求体）", () => {
+  it("provider 记录的 presetId 抵达分段与成稿请求体：反代 host 无规则也按 modelscope 出 enable_thinking", async () => {
+    const { fetchMock } = buildSequencedMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const port = makePort();
+    const context = makeContext();
+    const plan = (await import("../../extension/ai/budgeter.js")).buildBudgetPlan({
+      body: context.subtitleBody,
+      chapters: []
+    });
+
+    const result = await mod.orchestrateMapReduce({
+      provider: { baseUrl: "https://thinking-proxy.example.com/v1", model: "Qwen/Qwen3-32B", apiKey: "sk-test", presetId: "modelscope" },
+      context,
+      plan,
+      port,
+      thinkingLevel: "off"
+    });
+
+    expect(result.aborted).toBe(false);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(0);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(JSON.parse(init.body)).toMatchObject({ enable_thinking: false });
+    }
+  });
+});

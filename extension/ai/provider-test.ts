@@ -34,6 +34,7 @@ export interface TestAiConnectionInput {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  presetId?: string;
 }
 
 export interface TestAiConnectionResult {
@@ -41,7 +42,7 @@ export interface TestAiConnectionResult {
   error?: string;
 }
 
-export async function testAiConnection({ baseUrl, apiKey, model }: TestAiConnectionInput): Promise<TestAiConnectionResult> {
+export async function testAiConnection({ baseUrl, apiKey, model, presetId }: TestAiConnectionInput): Promise<TestAiConnectionResult> {
   const normalizedBaseUrl = String(baseUrl || "").trim().replace(/\/+$/, "");
   const normalizedModel = String(model || "").trim();
   if (!normalizedBaseUrl) {
@@ -55,6 +56,7 @@ export async function testAiConnection({ baseUrl, apiKey, model }: TestAiConnect
     baseUrl: normalizedBaseUrl,
     apiKey,
     model: normalizedModel,
+    presetId,
     headers: { Accept: "application/json" }
   });
 }
@@ -63,10 +65,11 @@ interface ProbeAiChatCompletionInput {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  presetId?: string;
   headers?: Record<string, string>;
 }
 
-export async function probeAiChatCompletion({ baseUrl, apiKey, model, headers }: ProbeAiChatCompletionInput): Promise<TestAiConnectionResult> {
+export async function probeAiChatCompletion({ baseUrl, apiKey, model, presetId, headers }: ProbeAiChatCompletionInput): Promise<TestAiConnectionResult> {
   const requestHeaders: Record<string, string> = { ...(headers || { Accept: "application/json" }) };
   if (apiKey && !requestHeaders.Authorization) {
     requestHeaders.Authorization = `Bearer ${apiKey}`;
@@ -74,7 +77,7 @@ export async function probeAiChatCompletion({ baseUrl, apiKey, model, headers }:
 
   try {
     await chatCompletion({
-      provider: { baseUrl, apiKey, model },
+      provider: { baseUrl, apiKey, model, presetId },
       messages: [{ role: "user", content: "ping" }],
       probe: true,
       headers: requestHeaders,
@@ -100,6 +103,18 @@ export async function testAiProviderConnection({ providerId, baseUrl, apiKey, mo
     return { ok: false, error: HOST_PERMISSION_HINT };
   }
   let resolvedApiKey = String(apiKey || "").trim();
+  // presetId 穿线（02 号票）：按 providerId 从已存列表读记录的 presetId（preset
+  // 词表键，loadProviders 已 normalize），随探针请求下发——host 反代无 host 规则
+  // 时这是思考字段查表的唯一识别线索；读取失败按无 presetId 继续（不阻塞探针）。
+  let resolvedPresetId = "";
+  if (providerId) {
+    try {
+      const record = (await aiProviderStore.loadProviders()).find((item) => item.id === providerId);
+      resolvedPresetId = String(record?.presetId || "");
+    } catch (error) {
+      console.warn("读取已存平台 presetId 失败，按无 presetId 继续", error);
+    }
+  }
   if (!resolvedApiKey && providerId) {
     try {
       const keys = await aiProviderStore.loadKeys();
@@ -109,5 +124,5 @@ export async function testAiProviderConnection({ providerId, baseUrl, apiKey, mo
       console.warn("读取已存 API Key 失败，按未填写 Key 继续", error);
     }
   }
-  return testAiConnection({ baseUrl, apiKey: resolvedApiKey, model });
+  return testAiConnection({ baseUrl, apiKey: resolvedApiKey, model, presetId: resolvedPresetId });
 }
