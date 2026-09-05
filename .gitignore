@@ -31,9 +31,8 @@ docs/agents/domain.md
 # Generated reports / scratch outputs that may land in the root
 architecture-review-*.html
 
-# Domain docs (session-generated, kept local)
-/CONTEXT.md
-/docs/adr/
+# Domain docs：CONTEXT.md 与 docs/adr/ 是承重决策记录，入库（拍板 Q4，
+# arch-slim-2/01）；harness compaction excerpt 仍是会话产物，保持本地。
 docs/harness-compaction-context-excerpt.md
 
 # Eval harness artifacts (ASR speed comparison)

@@ -1,7 +1,9 @@
 // extension/chrome-types.d.ts
 // 最小 Chrome 扩展 API 类型声明：本仓库未安装 @types/chrome，声明覆盖迁移模块
-// 实际使用的 runtime / tabs / storage / permissions / scripting /
-// offscreen 表面。保持最窄契约，不扩展未使用的方法/事件。
+// 实际使用的 runtime / tabs / storage / permissions / scripting / offscreen /
+// declarativeNetRequest 表面。保持最窄契约，不扩展未使用的方法/事件。
+// 域目录的局部 ambient 补充（asr/chrome-asr-types.d.ts、entry/entry-globals.d.ts）
+// 已归并于此，不再维护分散声明。
 
 declare namespace chrome {
   namespace runtime {
@@ -25,6 +27,8 @@ declare namespace chrome {
 
     function getManifest(): Manifest;
     function getURL(path: string): string;
+    // 页面直连 offscreen 文档的具名端口（asr-decode 端口，asr/offscreen-bridge.page）。
+    function connect(connectInfo: { name: string }): Port;
     function sendMessage(message: unknown): Promise<unknown>;
     function sendMessage(message: unknown, responseCallback?: SendMessageCallback): void;
     // Chrome 116+：查询 offscreen 文档是否存在（chat/offscreen-ensure 的
@@ -151,6 +155,59 @@ declare namespace chrome {
   }
 
   namespace offscreen {
+    interface CreateDocumentOptions {
+      url: string;
+      reasons: string[];
+      justification: string;
+    }
+
+    function createDocument(options: CreateDocumentOptions): Promise<void>;
     function closeDocument(): Promise<void>;
   }
+
+  namespace declarativeNetRequest {
+    interface SessionRule {
+      id: number;
+    }
+
+    interface ModifyHeaderInfo {
+      header: string;
+      operation: string;
+      value?: string;
+    }
+
+    interface RuleAction {
+      type: string;
+      requestHeaders?: ModifyHeaderInfo[];
+    }
+
+    interface RuleCondition {
+      urlFilter?: string;
+      resourceTypes: string[];
+    }
+
+    interface Rule {
+      id: number;
+      priority?: number;
+      action: RuleAction;
+      condition: RuleCondition;
+    }
+
+    function getSessionRules(): Promise<SessionRule[]>;
+
+    function updateSessionRules(options: {
+      removeRuleIds?: number[];
+      addRules?: Rule[];
+    }): Promise<void>;
+  }
 }
+
+// content 入口的全局哨兵（原 entry/entry-globals.d.ts 归并于此）：全局脚本
+// 作用域直接与 lib.dom 的 Window 合并；var 声明供 globalThis.xxx 访问。
+interface Window {
+  __BOC_CONTENT_SCRIPT_LOADED__?: string;
+  __BOC_CONTENT_BOOTSTRAP_STARTED__?: boolean;
+}
+
+var __BOC_CONTENT_SCRIPT_LOADED__: string | undefined;
+var __BOC_CONTENT_BOOTSTRAP_STARTED__: boolean | undefined;

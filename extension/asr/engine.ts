@@ -50,11 +50,14 @@ export interface AsrTranscribeResult {
   _asrDiag?: unknown;
 }
 
-// 调度引擎消费的单片最小形状（index/durationSec 由引擎与合并逻辑使用，
-// 其余字段如 startSec/wavBlob 随对象透传给注入的 transcribe）
+// 调度引擎消费的单片形状：index/durationSec 由引擎与合并逻辑使用；
+// startSec/wavBlob 是透传字段（引擎自身不消费，随对象原样交给注入的
+// transcribe）——与 chunker.WavChunk 结构同构，切片产出可直接 push。
 export interface TranscribeChunk {
   index: number;
+  startSec: number;
   durationSec: number;
+  wavBlob: Blob;
 }
 
 // 注入的逐片转写函数：(chunk, { onProgress }) => Promise<result>（multipart/

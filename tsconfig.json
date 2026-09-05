@@ -22,5 +22,5 @@
     "tests/**/*.ts",
     "tests/**/*.d.ts"
   ],
-  "exclude": ["node_modules", "dist", "extension/entry/content-classic.js"]
+  "exclude": ["node_modules", "dist"]
 }
