@@ -124,9 +124,10 @@ describe("player-ai 快路径与惰性装载解耦", () => {
     const { loadPlayerAi } = await import("../../extension/ai/lazy-player-ai.js");
     await flushMicrotasks();
 
-    // content.js 注册了两个 storage 监听：bindSettingsWatcher（0）与
-    // bindPlayerAiSettingsWatcher（1）。后者才是启停 player-ai 的监听。
-    const listener = chrome.storage.onChanged.addListener.mock.calls[1][0];
+    // content.js 注册了三个 storage 监听：debug-log-gate（0）、
+    // bindSettingsWatcher（1）与 bindPlayerAiSettingsWatcher（2）。
+    // 最后者才是启停 player-ai 的监听。
+    const listener = chrome.storage.onChanged.addListener.mock.calls[2][0];
     activeSettingsRef.current = { ...activeSettingsRef.current, enablePlayerAiQuickAction: true };
     listener({ enablePlayerAiQuickAction: { newValue: true } }, "sync");
 

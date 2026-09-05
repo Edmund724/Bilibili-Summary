@@ -12,6 +12,8 @@ import {
 } from "../core/content-orchestration-wiring.js";
 import { sendMessageToTab } from "../shared/tab-utils.js";
 import { getMergedSettings, normalizeSettings, saveSettings } from "../core/settings-store.js";
+// 调试日志门三宿主接线（shared/logging 的 registerDebugGate 消费方）
+import { registerDebugLogGate } from "../shared/debug-log-gate.js";
 import {
   aiProviderStore
 } from "../core/ai-provider-store.js";
@@ -341,6 +343,10 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 });
 
 // ===== 入口监听 =====
+
+// 调试日志门：SW 自读 storage（此前门读 state.settings，SW 里恒为缺省关，
+// 用户开的调试日志在 SW 静默）。
+registerDebugLogGate();
 
 chrome.runtime.onMessage.addListener((rawMessage, rawSender, sendResponse: SendResponse) => {
   if (!rawMessage || typeof rawMessage !== "object") {

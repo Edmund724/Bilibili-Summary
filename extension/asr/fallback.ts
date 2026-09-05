@@ -192,7 +192,7 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
     // 的调用方更替（ensureRunActive），见下方赋值点与函数注释。
     let isStale: () => boolean = () => false;
     try {
-      ensureRunActive(runId);
+      ensureRunActive(runId, state.clip.fetchRunId);
 
       // 设置判定：开关未启用或没有激活平台 → skip（与现状行为一致，仅文案变化）。
       // 快速出口先于消息请求：回退关闭时不产生 background 往返。
@@ -241,7 +241,7 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
 
       // 缓存命中：直接收尾（校验通过才用，不通过则清掉重新生成）
       const cachedBody = await loadSubtitleFromCache(cacheKey);
-      ensureRunActive(runId);
+      ensureRunActive(runId, state.clip.fetchRunId);
       if (cachedBody && Array.isArray(cachedBody) && cachedBody.length > 0) {
         const cachedCheck = validateSubtitleByDuration(cachedBody as SubtitleItem[], state.clip.videoDuration);
         if (cachedCheck.ok) {
@@ -263,7 +263,7 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
           reason: (cachedCheck as { reason?: string }).reason
         });
         await clearSubtitleCacheByKey(cacheKey);
-        ensureRunActive(runId);
+        ensureRunActive(runId, state.clip.fetchRunId);
       }
 
       setStatus(`无字幕轨，正在使用语音识别（${platformName}）生成字幕…`);
@@ -482,7 +482,7 @@ export function createAsrFallback(deps: CreateAsrFallbackDeps): AsrFallback {
   // 升序」不变量单点保证。缓存写入已在转写共享单元内完成。runId 只守卫 UI
   // 状态收尾（被更新的抓取顶掉时静默让位，转写成果本身已落缓存）。
   async function finishAsrFallback({ runId, body, platformName }: { runId: number; body: SubtitleItem[]; platformName: string }): Promise<"done"> {
-    ensureRunActive(runId);
+    ensureRunActive(runId, state.clip.fetchRunId);
     clipState.setSubtitles([
       { id: "asr", lan: "asr-zh", lanDoc: `语音识别（${platformName}）`, subtitleUrl: "" },
       ...(state.clip.subtitles || [])

@@ -46,6 +46,8 @@ import { bindRuntimeEvents, bindUrlChangeHandler } from "./message-handler.js";
 // S3 分层：阅读表随阅读模式挂载（进入/退出事务的挂摘在 reader/shell.ts 阅读壳
 // 内；此处 handle 启动直开路径与非阅读页的预清理——先于设置水合同步翻好门控）
 import { ensureReaderStyles, removeReaderStyles } from "../shared/style-injector.js";
+// 调试日志门三宿主接线（shared/logging 的 registerDebugGate 消费方）
+import { registerDebugLogGate } from "../shared/debug-log-gate.js";
 
 // lazy-player-ai.ts 的接口未覆盖 content 侧实际调用的全部方法；用局部接口
 // 精确描述本文件消费的 API，避免把调用点退化成 any。
@@ -76,6 +78,9 @@ function isSupportedUrl(): boolean {
 }
 
 function init(): void {
+  // 先注册调试日志门再打启动日志；初始读 storage 是异步的，首条日志可能竞争
+  // 失败，onChanged 保活后续开关。
+  registerDebugLogGate();
   logInfo(`[BOC] content script loaded, version=${BOC_VERSION}`);
   if (!isSupportedUrl()) {
     return;

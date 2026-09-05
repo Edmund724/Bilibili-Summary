@@ -128,7 +128,7 @@ export async function tryLoadSubtitleCandidates(
       } else {
         logWarn(`[BOC] subtitle track rejected ${JSON.stringify(meta)}`);
       }
-      ensureRunActive(runId);
+      ensureRunActive(runId, state.clip.fetchRunId);
       continue;
     }
   }
@@ -195,7 +195,7 @@ export async function refreshClip(): Promise<void> {
       notifyReaderPresenter("rerender");
     }
     state.setSettings(await getSettings());
-    ensureRunActive(runId);
+    ensureRunActive(runId, state.clip.fetchRunId);
 
     clipState.setBvid(extractBvid(location.href));
     if (!state.clip.bvid) {
@@ -203,7 +203,7 @@ export async function refreshClip(): Promise<void> {
     }
 
     const meta = await retryAsync(() => gatewayFetchVideoMeta(contentFetchJson, state.clip.bvid), 2, 250);
-    ensureRunActive(runId);
+    ensureRunActive(runId, state.clip.fetchRunId);
 
     // 调试：打印 API 返回的原始数据
     logInfo("[BOC] raw meta data", {
@@ -255,7 +255,7 @@ export async function refreshClip(): Promise<void> {
       3,
       500
     );
-    ensureRunActive(runId);
+    ensureRunActive(runId, state.clip.fetchRunId);
     clipState.setSubtitles(normalizeSubtitleTracks(subtitleBundle.tracks) as unknown as SubtitleOption[]);
     clipState.setChapters(normalizeChapters(subtitleBundle.chapters) as import("../core/state.js").ChapterItem[]);
     logInfo(
@@ -308,7 +308,7 @@ export async function refreshClip(): Promise<void> {
       // Retry because subtitle signed URLs may expire quickly or hit rate limit.
       selected = await retryWithFreshBundle({ retryReason: error, preferred, runId, forceRefresh });
     }
-    ensureRunActive(runId);
+    ensureRunActive(runId, state.clip.fetchRunId);
     if (selected) {
       logInfo("[BOC] selected subtitle track", {
         id: selected.id,
@@ -403,7 +403,7 @@ async function retryWithFreshBundle({
     2,
     500
   );
-  ensureRunActive(runId);
+  ensureRunActive(runId, state.clip.fetchRunId);
   clipState.setSubtitles(normalizeSubtitleTracks(bundle.tracks) as unknown as SubtitleOption[]);
   clipState.setChapters(normalizeChapters(bundle.chapters) as import("../core/state.js").ChapterItem[]);
   const retryPreferred = pickPreferredSubtitle(state.clip.subtitles, {
@@ -450,7 +450,7 @@ export async function loadSubtitle(
         await clearSubtitleCacheByKey(cacheKey);
       } else {
         logInfo("[BOC] using cached subtitle", { cacheKey, itemCount: cachedBody.length });
-        ensureRunActive(runId);
+        ensureRunActive(runId, state.clip.fetchRunId);
         // 字幕接受事务（commit.acceptSubtitle）：写 selected 三项 → ready →
         // 清原因 → 刷新派生 → 通知 reader，旧缓存条目可能无序，幂等稳定排序
         // 由事务单点完成（「subtitleBody 按 from 升序」不变量）。
@@ -467,7 +467,7 @@ export async function loadSubtitle(
 
   // 从网络获取
   const subtitle = await fetchSubtitleBody(url);
-  ensureRunActive(runId);
+  ensureRunActive(runId, state.clip.fetchRunId);
   // 候选10 批1：B站 CC 接口返回的 body 实践上有序但接口并不承诺；在这里
   // （写入端）稳定排序一次，落缓存与落 state 都是有序副本，读路径不做排序。
   const body = sortSubtitleBodyByFrom(Array.isArray(subtitle.body) ? subtitle.body : []) as unknown[];

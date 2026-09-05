@@ -38,6 +38,12 @@ import type {
   OffscreenChatPortMessage
 } from "../shared/messaging-protocol.js";
 import type { ChatMsg } from "../ai/ladder.js";
+// 调试日志门三宿主接线（shared/logging 的 registerDebugGate 消费方）
+import { registerDebugLogGate } from "../shared/debug-log-gate.js";
+
+// 调试日志门：offscreen 自读 storage（此前门读 state.settings，本 context 恒
+// 取到缺省关，用户开的调试日志在这里静默）。
+registerDebugLogGate();
 
 let activeAbortController: AbortController | null = null;
 let pendingCostGuard: { resolve: (value: boolean) => void } | null = null;

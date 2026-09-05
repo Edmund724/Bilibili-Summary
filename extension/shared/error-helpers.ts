@@ -1,4 +1,3 @@
-import { state } from "../core/state.js";
 import { sleep } from "./utils.js";
 import { logInfo } from "./logging.js";
 
@@ -63,8 +62,10 @@ export function makeStaleRunError(): Error & { code: string } {
   return error;
 }
 
-export function ensureRunActive(runId: string | number): void {
-  if (runId !== state.clip.fetchRunId) {
+// 双参纯函数：期望 runId 由调用方传入（消费方只有页面侧两条字幕抓取链，
+// 本模块是 shared 叶子，不读 core/state——SW/offscreen 经此静态边拖入状态袋）。
+export function ensureRunActive(runId: string | number, expectedRunId: string | number): void {
+  if (runId !== expectedRunId) {
     throw makeStaleRunError();
   }
 }
