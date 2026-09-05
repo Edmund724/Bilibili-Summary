@@ -341,6 +341,11 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
         return;
       }
       const currentMeta = chatSessionState.currentConversationMeta;
+      // 发送前上下文失配守卫（CONTEXT.md「拆除会话」词条出口五）：刻意只清身份
+      // 两键（id/meta）——不清 chatHistory、不发断流（此点流式尚未发起，无断流
+      // 可言；旧会话的消息史仍在视图中延续，仅会话身份随上下文键失配作废）。
+      // 不收编进 store 的 detachCurrent 原语：不为半序列强造抽象
+      //（工单 arch-slim-2/07 D/E 半场裁定）。
       if (!currentMeta?.pinnedContext && currentMeta?.contextKey && currentMeta.contextKey !== chatSessionState.currentContextKey) {
         chatSessionState.currentConversationId = "";
         chatSessionState.currentConversationMeta = null;

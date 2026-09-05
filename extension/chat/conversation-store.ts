@@ -18,8 +18,10 @@
 //     loadAll/save（仅列表）、hydratePages/apply/hydratePinned 成功（列表+chip）、
 //     applyById/删当前/清空（列表+chip+视图重建；清空另收 popover）。
 //   - onStreamInterrupted()：当前会话被拆除（恢复无匹配 / 删当前会话 / 清空
-//     全部）时同步发出——必须先于任何 await 落盘（原 stopActiveChat dep 的
-//     承重时序：流式身份守卫在 id 清空前依赖同步断流，防会话复活）。
+//     全部 / 新会话重启经 detachForRestart）时同步发出——必须先于任何 await
+//     落盘（原 stopActiveChat dep 的承重时序：流式身份守卫在 id 清空前依赖
+//     同步断流，防会话复活）。工单 arch-slim-2/07 把该序列收进「拆除会话」
+//     唯一事务（detachCurrent / repopulateLive 原语，见实现区注记）。
 //   - onContextNotice(notice)：上下文补水提示生命周期（pending 展示 / clear
 //     撤除 / error 展示），消息文案属补水结果，由 store 提供。
 //
@@ -169,17 +171,18 @@ export interface CreateConversationStoreDeps {
   storage?: StorageArea;
 }
 
+// 工单 arch-slim-2/07 接口收窄 11→8：apply / resolveContext / hydratePages 三键
+// 摘除（全仓无外部消费方，仅 store 内部互调；实现保留为工厂内私有函数）。
+// 另有工单 D 授权的公开窄方法 detachForRestart（「拆除会话」出口四）。
 export interface ConversationStore {
   loadAll: () => Promise<void>;
-  hydratePages: () => Promise<void>;
   isCurrent: (id: string) => boolean;
   persistCurrent: () => Promise<void>;
   applyById: (id: string) => void;
-  apply: (conversation: Conversation | null | undefined) => void;
   deleteById: (id: string) => Promise<void>;
   clearAll: () => Promise<void>;
   restoreLatest: () => Promise<boolean>;
-  resolveContext: (contextRef: ConversationContextRef) => Promise<{ ok?: boolean; payload?: unknown; error?: string }>;
+  detachForRestart: () => void;
   hydratePinned: (opts?: HydratePinnedOptions) => Promise<boolean>;
 }
 
@@ -275,6 +278,34 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
   }
   function commitSaved(next: Conversation[]): void {
     chatSessionState.savedConversations = next;
+  }
+
+  // =========================================================================
+  // 「拆除会话」唯一事务的原语（CONTEXT.md 词条；工单 arch-slim-2/07 收口）
+  // =========================================================================
+  // 原语一 detachCurrent：清会话身份与历史。断流通知同步发出——必须先于任何
+  // await 与落盘（流式身份守卫在 id 清空前依赖同步断流，防会话复活；「断流
+  // 先于落盘」的不变式全仓只在此表达，各出口禁止手抄序列）。是否 live 回填
+  // 由各出口自行组合：restoreLatest 无匹配 / detachForRestart 不回填，
+  // deleteById 当前会话 / clearAll 在落盘后经 repopulateLive 回填。
+  function detachCurrent(): void {
+    onStreamInterrupted();
+    chatSessionState.currentConversationId = "";
+    chatSessionState.currentConversationMeta = null;
+    chatSessionState.chatHistory = [];
+  }
+
+  // 原语二 repopulateLive：live 上下文回填——拆除当前会话后把活跃标签页快照
+  // （liveContextData/liveContextKey，loadContextState 维护）拷回主上下文，
+  // 让视图立刻持有最新页面上下文。无 live 快照时为无害空操作。
+  // 注意：apply 内的 live 写入不是本原语的同型体——它条件于会话键 === live 键
+  // 且额外写 meta.resolvedContext，语义不同，保持独立。
+  function repopulateLive(): void {
+    const liveData = chatSessionState.liveContextData;
+    if (liveData) {
+      chatSessionState.contextData = { ...liveData };
+      chatSessionState.currentContextKey = chatSessionState.liveContextKey || _buildContextKey(liveData);
+    }
   }
 
   async function loadAll(): Promise<void> {
@@ -384,12 +415,9 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
       _doesConversationMatchCurrentContext(item, currentRef, targetContextKey)
     );
     if (!latest) {
-      // 当前会话拆除：同步断流（先于下方状态清空与任何 await——流式身份守卫的
-      // 承重时序，会话复活回归防线）。原编排此处不重渲列表/chip/视图。
-      onStreamInterrupted();
-      chatSessionState.currentConversationId = "";
-      chatSessionState.currentConversationMeta = null;
-      chatSessionState.chatHistory = [];
+      // 当前会话拆除（出口一 = detachCurrent 原语：断流先于状态清空，无落盘、
+      // 无 live 回填——原编排此处不重渲列表/chip/视图）。
+      detachCurrent();
       return false;
     }
     apply(latest);
@@ -453,8 +481,9 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
   async function deleteById(id: string): Promise<void> {
     const wasCurrent = id && id === chatSessionState.currentConversationId;
     if (wasCurrent) {
-      // 断流先于落盘（同步，见 restoreLatest 注记）
-      onStreamInterrupted();
+      // 拆除当前会话（出口二 = detachCurrent 原语）：断流先于落盘——同步发出，
+      // 亦即先于下方 commitSaved 与 await save（原编排同位次序）。
+      detachCurrent();
     }
     const next = saved().filter((item) => item.id !== id);
     commitSaved(next);
@@ -462,14 +491,8 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     if (!wasCurrent) {
       return;
     }
-    chatSessionState.currentConversationId = "";
-    chatSessionState.currentConversationMeta = null;
-    chatSessionState.chatHistory = [];
-    const liveData = chatSessionState.liveContextData;
-    if (liveData) {
-      chatSessionState.contextData = { ...liveData };
-      chatSessionState.currentContextKey = chatSessionState.liveContextKey || _buildContextKey(liveData);
-    }
+    // 落盘后 live 回填 + 重建视图（拆除事务的收尾面，标志逐字不动）
+    repopulateLive();
     emitChange({ refreshContextChip: true, resetView: true });
   }
 
@@ -481,19 +504,24 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
       return;
     }
     commitSaved([]);
-    onStreamInterrupted();
-    chatSessionState.currentConversationId = "";
-    chatSessionState.currentConversationMeta = null;
-    chatSessionState.chatHistory = [];
+    // 拆除当前会话（出口三 = detachCurrent 原语）：commitSaved([])（内存）→
+    // detach → await save 的次序保持（断流先于落盘）。
+    detachCurrent();
     await saveConversations();
-    const liveData = chatSessionState.liveContextData;
-    if (liveData) {
-      chatSessionState.contextData = { ...liveData };
-      chatSessionState.currentContextKey = chatSessionState.liveContextKey || _buildContextKey(liveData);
-    }
+    repopulateLive();
     // 原编排：save 后收起 popover → live 回填 + chip → renderInitialState；
     // 合成一次发火（历史列表已随 save 的 change 重渲，此处各面幂等）。
     emitChange({ refreshContextChip: true, historyCleared: true, resetView: true });
+  }
+
+  // 「拆除会话」出口四：新会话重启（reader/chat-tab 的 restartChat 消费）。
+  // 公开窄方法（工单 arch-slim-2/07 D 半场）——断流双轨统一：caller 不再直调
+  // chatRuntime.resetStreamState，经本方法发出 onStreamInterrupted（组合根订阅
+  // 处是 resetStreamState 的唯一接线点），断流仍先于会话身份清空（时序与直调
+  // 时代一致）。不回填 live、不发 change——原 restartChat 编排即不重渲列表/
+  // chip，视图重建由 caller 在清键后自行编排（防第三轨的边界注记在 restartChat）。
+  function detachForRestart(): void {
+    detachCurrent();
   }
 
   function isCurrent(id: string): boolean {
@@ -636,17 +664,18 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     }
   }
 
+  // 工单 arch-slim-2/07：返回面 9 键 = 收窄 8 键（原 11 摘除 apply/resolve-
+  // Context/hydratePages——实现保留为工厂内私有函数，内部调用点不变）+ 工单 D
+  // 授权的公开窄方法 detachForRestart。
   return {
     loadAll,
-    hydratePages,
     isCurrent,
     persistCurrent,
     applyById,
-    apply,
     deleteById,
     clearAll,
     restoreLatest,
-    resolveContext,
+    detachForRestart,
     hydratePinned
   };
 }
