@@ -26,7 +26,6 @@ import {
   getReadingSubtitleItems,
   getReadingSubtitlePlaceholderText
 } from "../subtitle/core.js";
-import { normalizeChapters } from "../subtitle/selection.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { isAiSubtitle } from "../subtitle/selection.js";
 import { shouldShowHoursInNote } from "../notes/render.js";
@@ -337,13 +336,10 @@ export function renderReadingView() {
   cancelReadingSubtitleAppend();
   const titleNode = document.querySelector(`.${classes.readingTitle}`);
   const metaNode = getReaderElement(ids.readingMeta);
-  // 章节渲染由概览 tab 接管（rail 章节列表 DOM 已随整页接管退役）；
-  // hasChapters 属性链保留（presentation 属性表与 CSS 消费方仍读它）。
-  const chapters = normalizeChapters(state.clip.chapters || []);
+  // 章节渲染由概览 tab 接管（rail 章节列表 DOM 已随整页接管退役）。
   const body = Array.isArray(state.clip.subtitleBody) ? state.clip.subtitleBody : [];
   const subtitleItems = getReadingSubtitleItems();
   const withHours = shouldShowHoursInNote(state, body);
-  const hasChapters = chapters.length > 0;
 
   if (titleNode) {
     titleNode.textContent = state.clip.title || "B站字幕阅读";
@@ -376,7 +372,6 @@ export function renderReadingView() {
     }
   }
 
-  updateReaderChapterPresence(hasChapters);
   renderReadingSubtitleSelect();
   renderReaderPanels();
   applyReadingViewPresentation();
@@ -396,14 +391,6 @@ export function renderReadingView() {
 // hydrateReaderStateFromSettings / applyReadingViewPresentation 已迁往
 // ./presentation.js（常驻微模块）；enterReaderMode/renderReadingView 等
 // 域内调用方经文件头 import 的 presentation 绑定取用。
-
-export function updateReaderChapterPresence(hasChapters: boolean) {
-  const value = hasChapters ? "1" : "0";
-  const readingView = getReaderElement(ids.readingView);
-  readingView.dataset.hasChapters = value;
-  document.documentElement.dataset.bocReaderHasChapters = value;
-  document.body.dataset.bocReaderHasChapters = value;
-}
 
 // ===== 设置面板/步进器/偏好更新（候选02：自 presentation.js 移回本域——
 // 仅在阅读视图交互时执行，常驻侧经 ensureReaderDomain 转发到这些导出） =====

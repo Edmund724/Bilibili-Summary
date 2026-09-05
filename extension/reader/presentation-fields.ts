@@ -21,7 +21,6 @@ import type { ReaderState } from "../core/state.js";
 
 export type ReaderPresentationFieldKind =
   | "presentation"
-  | "derived"
   | "enter-flag"
   | "view-flag"
   | "settings";
@@ -52,8 +51,6 @@ export interface ReaderPresentationField {
 //   kind            字段归属：
 //                     "presentation" 排版设置属性（storage 设置驱动，
 //                                    applyReadingViewPresentation 写入）；
-//                     "derived"      阅读期派生属性（has-chapters，由
-//                                    lifecycle.updateReaderChapterPresence 写入）；
 //                     "enter-flag"   进入标记（mode / reading-active，由组合根
 //                                    content.js、message-handler.js 与
 //                                    enterReaderMode 写入，apply 不负责）；
@@ -78,7 +75,7 @@ export interface ReaderPresentationField {
 //   clearViewOnClose  readingView 上的短名镜像是否随 close 清除。排版字段的
 //                   短名镜像不清：#boc-reading-view 是常驻模板壳，close 只把
 //                   它复位到关闭基线（class/aria/ready），短名属性由下次 open
-//                   的 apply/updateReaderChapterPresence 全量重写，且无任何
+//                   的 apply 全量重写，且无任何
 //                   close→open 窗口期消费方；视图内标志 follow 则必须清。
 //   writtenByApply  applyReadingViewPresentation 是否写入；为 true 时必须提供
 //                   readValue，为 false 时 readValue 必须为 null。
@@ -100,23 +97,6 @@ export const READER_PRESENTATION_FIELDS: ReaderPresentationField[] = [
     clearViewOnClose: false,
     writtenByApply: true,
     readValue: (reader) => reader.readingTheme
-  },
-  {
-    id: "hasChapters",
-    kind: "derived",
-    // 非 storage 设置：由 state.clip.chapters 派生，无对应键。
-    targets: { html: "data-boc-reader-has-chapters", body: "data-boc-reader-has-chapters", readingView: "data-has-chapters" },
-    datasetKeys: { html: "bocReaderHasChapters", body: "bocReaderHasChapters", readingView: "hasChapters" },
-    storageKey: null,
-    legacyStorageKey: null,
-    watchedByGuard: true,
-    clearOnGuard: true,
-    clearOnClose: true,
-    clearViewOnClose: false,
-    // apply 不写它：写入方是 lifecycle.updateReaderChapterPresence（renderReadingView
-    // 按章节数据调用）。表只声明它的目标/清理职责，防止移除清单再漂移。
-    writtenByApply: false,
-    readValue: null
   },
   // —— 进入标记：apply 不写（组合根/enterReaderMode 写 "1"），close/守卫都清 ——
   {

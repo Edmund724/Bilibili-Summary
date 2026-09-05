@@ -551,9 +551,6 @@ async function startWatch(esbuildContexts) {
   for (const dir of copyDirs) {
     fs.watch(path.join(extensionRoot, dir), scheduleRecopy);
   }
-  fs.watch(path.join(extensionRoot, "pages"), (event, filename) => {
-    if (filename && copyFiles.includes(`pages/${filename}`)) scheduleRecopy();
-  });
   fs.watch(path.join(extensionRoot, "entry"), (event, filename) => {
     if (filename && copyFiles.includes(`entry/${filename}`)) scheduleRecopy();
   });

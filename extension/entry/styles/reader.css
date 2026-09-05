@@ -144,14 +144,9 @@
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
 }
 
-.boc-reading-list,
 .boc-reading-subtitle {
   min-height: 0;
   overflow: auto;
-}
-
-.boc-reading-list {
-  padding-right: 6px;
 }
 
 /* ===== 统一 Digest 面板（PR2）：右侧面板壳 + 三标签 =====
@@ -320,7 +315,6 @@
   border: 2px solid transparent;
   background-clip: content-box;
 }
-.boc-reading-chapter,
 .boc-reading-item {
   width: 100%;
   border: 0;
@@ -330,13 +324,6 @@
   cursor: pointer;
   user-select: text;
   -webkit-user-select: text;
-}
-
-.boc-reading-chapter {
-  display: grid;
-  gap: 4px;
-  padding: 8px 10px;
-  color: #4b5563;
 }
 
 .boc-reading-item {
@@ -354,11 +341,6 @@
   contain-intrinsic-size: auto 44px;
 }
 
-.boc-reading-chapter:hover {
-  background: #f9fafb;
-}
-
-.boc-reading-chapter.is-active,
 .boc-reading-item.is-active {
   background: transparent;
   box-shadow: none;
@@ -366,7 +348,6 @@
 
 /* 时间戳 pill：贯穿字幕行 / 章节 / 金句 / AI 引用的视觉母题
  *（prototype/direction-approved.md）——等宽字体 + accent-soft 底 + accent 字。 */
-.boc-reading-chapter-time,
 .boc-reading-time {
   font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
   font-size: 13.5px;
@@ -381,13 +362,6 @@
   align-self: start;
 }
 
-.boc-reading-chapter-title {
-  font-size: 15px;
-  line-height: 1.45;
-  color: inherit;
-}
-
-.boc-reading-chapter.is-active .boc-reading-chapter-title,
 .boc-reading-item.is-active .boc-reading-text {
   text-decoration-line: underline;
   text-decoration-color: #22c55e;
@@ -440,7 +414,6 @@
 #boc-reading-view,
 #boc-reading-view .boc-reading-meta,
 #boc-reading-view .boc-reading-status,
-#boc-reading-view .boc-reading-chapter,
 #boc-reading-view .boc-reading-item,
 #boc-reading-view .boc-reading-panel,
 #boc-reading-view .boc-reading-select {
@@ -568,17 +541,11 @@
   background: transparent;
 }
 
-#boc-reading-view .boc-reading-chapter:hover {
-  background: var(--boc-reader-surface-2);
-}
-
-#boc-reading-view .boc-reading-item.is-active,
-#boc-reading-view .boc-reading-chapter.is-active {
+#boc-reading-view .boc-reading-item.is-active {
   background: var(--boc-reader-accent-soft);
 }
 
-#boc-reading-view .boc-reading-time,
-#boc-reading-view .boc-reading-chapter-time {
+#boc-reading-view .boc-reading-time {
   color: var(--boc-reader-accent);
 }
 

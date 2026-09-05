@@ -32,7 +32,7 @@ import { mockPlayerRects, mountPlayerChain, mountReaderSkeleton } from "../helpe
 import type { TestState } from "./reader-test-env.js";
 
 const TARGETS = ["html", "body", "readingView"] as const;
-const VALID_KINDS = new Set(["presentation", "derived", "enter-flag", "view-flag", "settings"]);
+const VALID_KINDS = new Set(["presentation", "enter-flag", "view-flag", "settings"]);
 
 // 连字符属性名 → dataset 驼峰键（浏览器 dataset 语义：去 "data-"，余下按 "-"
 // 分段、首段原样、后继段首字母大写）。
@@ -294,7 +294,6 @@ describe("E. 行为：表声明的职责与 DOM 真实读写一致", () => {
     document.body.setAttribute("data-boc-reading-active", "1");
     const readingView = document.getElementById(ids.readingView) as HTMLElement;
     readingView.setAttribute("data-boc-reader-follow", "manual");
-    readingView.setAttribute("data-has-chapters", "1");
 
     presentation.applyReadingViewPresentation();
 
@@ -311,11 +310,9 @@ describe("E. 行为：表声明的职责与 DOM 真实读写一致", () => {
     expect(document.documentElement.getAttribute("data-boc-reader-mode")).toBe("1");
     expect(document.body.getAttribute("data-boc-reading-active")).toBe("1");
     expect(readingView.getAttribute("data-boc-reader-follow")).toBe("manual");
-    expect(readingView.getAttribute("data-has-chapters")).toBe("1");
   });
 
   it("E2. closeReadingView 清全 clearOnClose 字段（现只含 theme + 页面级标志）", async () => {
-    state.clip.chapters = [{ title: "开场", from: 0 }];
     state.clip.subtitleBody = [{ from: 0, to: 10, content: "大家好" }];
     // 组合根语义：进入前 mode 由 content.js/message-handler 写
     document.documentElement.setAttribute("data-boc-reader-mode", "1");
@@ -324,7 +321,6 @@ describe("E. 行为：表声明的职责与 DOM 真实读写一致", () => {
     await shell.enterReaderMode();
     // 进入后确认属性确实已落位（否则 close 断言空转）
     expect(document.documentElement.getAttribute("data-boc-reader-theme")).toBeTruthy();
-    expect(document.documentElement.getAttribute("data-boc-reader-has-chapters")).toBeTruthy();
     expect(document.body.getAttribute("data-boc-reading-active")).toBe("1");
 
     shell.closeReadingView();
