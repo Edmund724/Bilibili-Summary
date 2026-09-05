@@ -475,3 +475,85 @@ describe("golden：streamOnly（qwen3-235b/32b/30b 仅流式可关）", () => {
     });
   });
 });
+
+// token 参数名映射（04 号票）：openai-reasoning 系类声明 tokenParam=
+// "max_completion_tokens"（reasoning 模型不认 max_tokens，传了 400），maxTokens
+// 写入请求体时随表换名且不得再出现 max_tokens；其余类与 unknown（resolver 不
+// 返回 tokenParam）维持 max_tokens 现状不变（OpenRouter 透传上游同理）。
+describe("golden：token 参数名映射（maxTokens 按类换名，04 号票）", () => {
+  const OPENAI = PLATFORMS[0].baseUrl; // api.openai.com
+  const DEEPSEEK = PLATFORMS[1].baseUrl; // api.deepseek.com
+  const QWEN = PLATFORMS[2].baseUrl; // dashscope
+  const OPENROUTER = PLATFORMS[8].baseUrl; // openrouter.ai
+
+  it("openai-reasoning（gpt-5.1）+ maxTokens → max_completion_tokens，无 max_tokens", () => {
+    const body = bodyFor({ baseUrl: OPENAI, model: "gpt-5.1", level: "low", maxTokens: 2048 });
+    expect(body).toEqual({
+      model: "gpt-5.1",
+      messages: MESSAGES,
+      stream: false,
+      reasoning_effort: "low",
+      max_completion_tokens: 2048
+    });
+    expect(body).not.toHaveProperty("max_tokens");
+  });
+
+  it("openai-reasoning always 系（o3）+ maxTokens → max_completion_tokens（off 级联 low 同换名）", () => {
+    const body = bodyFor({ baseUrl: OPENAI, model: "o3", level: "off", maxTokens: 1 });
+    expect(body).toEqual({
+      model: "o3",
+      messages: MESSAGES,
+      stream: false,
+      reasoning_effort: "low",
+      max_completion_tokens: 1
+    });
+    expect(body).not.toHaveProperty("max_tokens");
+  });
+
+  it("qwen 混合（qwen3-max）+ maxTokens → 仍 max_tokens（现状不变）", () => {
+    const body = bodyFor({ baseUrl: QWEN, model: "qwen3-max", level: "low", maxTokens: 2048 });
+    expect(body).toEqual({
+      model: "qwen3-max",
+      messages: MESSAGES,
+      stream: false,
+      enable_thinking: true,
+      max_tokens: 2048
+    });
+    expect(body).not.toHaveProperty("max_completion_tokens");
+  });
+
+  it("deepseek v4（deepseek-v4-pro）+ maxTokens → 仍 max_tokens", () => {
+    const body = bodyFor({ baseUrl: DEEPSEEK, model: "deepseek-v4-pro", level: "off", maxTokens: 4096 });
+    expect(body).toEqual({
+      model: "deepseek-v4-pro",
+      messages: MESSAGES,
+      stream: false,
+      thinking: { type: "disabled" },
+      max_tokens: 4096
+    });
+    expect(body).not.toHaveProperty("max_completion_tokens");
+  });
+
+  it("unknown 模型 + maxTokens → max_tokens（默认参数名）", () => {
+    const body = bodyFor({ baseUrl: "https://api.example.com/v1", model: "vendor-future-1", level: "low", maxTokens: 2048 });
+    expect(body).toEqual({
+      model: "vendor-future-1",
+      messages: MESSAGES,
+      stream: false,
+      max_tokens: 2048
+    });
+    expect(body).not.toHaveProperty("max_completion_tokens");
+  });
+
+  it("OpenRouter override（透传上游）+ maxTokens → 仍 max_tokens（spec token 维度）", () => {
+    const body = bodyFor({ baseUrl: OPENROUTER, model: "deepseek-v4-pro", level: "low", maxTokens: 2048 });
+    expect(body).toEqual({
+      model: "deepseek-v4-pro",
+      messages: MESSAGES,
+      stream: false,
+      reasoning_effort: "low",
+      max_tokens: 2048
+    });
+    expect(body).not.toHaveProperty("max_completion_tokens");
+  });
+});

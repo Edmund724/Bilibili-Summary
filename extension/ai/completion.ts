@@ -58,8 +58,9 @@ interface ChatRequestBody {
  * 思考字段由 thinking-profiles 的 resolveThinkingProfile 查表决定：平台
  * （presetId / baseUrl host）× 模型（例外表 >> 模式表）→ 档位 patch；查不到
  * 事实（unknown 哨兵）或缺档一律不发字段——软失败优于硬 400。resolver 返回的
- * offUnavailable / thinkingClass / tokenParam（03 提示 UI 与 04 token 换名）
- * 本函数不消费。
+ * offUnavailable / thinkingClass（03 对话提示）本函数不消费；tokenParam（04
+ * token 参数映射）在 maxTokens 写入时消费：openai-reasoning 系写
+ * max_completion_tokens，其余类与 unknown 维持 max_tokens 现状。
  */
 export function buildChatRequestBody({ model, messages, stream = false, thinkingLevel, maxTokens, baseUrl, presetId }: BuildChatRequestBodyInput): ChatRequestBody {
   const body: ChatRequestBody = { model, messages, stream };
@@ -72,7 +73,11 @@ export function buildChatRequestBody({ model, messages, stream = false, thinking
   });
   Object.assign(body, thinking.fields);
   if (maxTokens != null) {
-    body.max_tokens = maxTokens;
+    // token 上限参数名随表（04 号票）：openai-reasoning 系不认 max_tokens（严格
+    // 400），写 max_completion_tokens；其余类与 unknown（resolver 不返回
+    // tokenParam）维持 max_tokens 现状。探针（maxTokens 默认 1）与概览/分析的
+    // 估算预算（含空正文加倍重试）同走此接缝，自动生效、无需调用方特判。
+    body[thinking.tokenParam ?? "max_tokens"] = maxTokens;
   }
   return body;
 }
@@ -248,7 +253,8 @@ interface ChatCompletionInput {
  * - messages: OpenAI 消息数组（组装留在调用方）。
  * - stream: 流式增量经 onEvent 吐出，成功返回 { done: true }；
  *   非流式成功返回 choices[0].message.content（非字符串回落空串）。
- * - probe: 探针模式——body 强制 token 上限参数（默认 1），成功判定 = response.ok
+ * - probe: 探针模式——body 强制 token 上限参数（默认 1，参数名随 tokenParam
+ *   映射，见 buildChatRequestBody），成功判定 = response.ok
  *   且不读响应体（某些兼容网关在 max_tokens:1 下返回非 JSON 体，不视为失败）。
  * - retries: 重试次数，默认流式 2 / 非流式 0；退避线性 retryDelayMs × attempt。
  *   溢出/中止不重试；重试前的用户可见提示经 onRetry({ attempt, maxRetries, kind, error })，

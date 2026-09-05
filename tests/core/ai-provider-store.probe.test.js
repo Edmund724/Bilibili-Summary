@@ -1,6 +1,7 @@
 // AI 连通性探针测试（候选 04：探针移至 ai/provider-test.js，options 页直调）。
 // 覆盖 testAiConnection / probeAiChatCompletion 的 { ok, error } 形状契约：
-// 输入预检、probe 请求负载（token 上限 1 + ping）、成功判定 = response.ok、
+// 输入预检、probe 请求负载（token 上限 1 + ping，参数名随模型类映射：reasoning
+// 系 max_completion_tokens、其余 max_tokens）、成功判定 = response.ok、
 // HTTP / 连接 / 溢出错误的文案包装（复用共享 helper，AI/ASR 逐字一致）。
 // 探针只与 fetch / chrome.storage 交互，用 vi.stubGlobal 替换 fetch。
 
@@ -94,7 +95,7 @@ describe("probeAiChatCompletion { ok, error } 形状", () => {
     expect(init.body).toBeTruthy();
   });
 
-  it("OpenAI + reasoning 模型探针：off 查表落 reasoning_effort:none，token 上限 1", async () => {
+  it("OpenAI + reasoning 模型探针：off 查表落 reasoning_effort:none，token 上限写 max_completion_tokens:1（reasoning 系不认 max_tokens）", async () => {
     fetchMock.mockResolvedValue(jsonResponse(200, {}));
     const { probeAiChatCompletion } = await loadModule();
 
@@ -109,7 +110,7 @@ describe("probeAiChatCompletion { ok, error } 形状", () => {
       model: "gpt-5.1",
       messages: [{ role: "user", content: "ping" }],
       stream: false,
-      max_tokens: 1,
+      max_completion_tokens: 1,
       reasoning_effort: "none"
     });
   });

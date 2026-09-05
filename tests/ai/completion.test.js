@@ -171,6 +171,25 @@ describe("请求构造对照表（url / body / headers）", () => {
     });
   });
 
+  it("probe 在 OpenAI reasoning 模型上发 reasoning_effort:none + max_completion_tokens:1（查表后不再带必 400 的字段族）", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ choices: [{ message: { content: "" } }] }));
+
+    await chatCompletion({
+      provider: { baseUrl: "https://api.openai.com/v1", model: "gpt-5.1", apiKey: "sk-1" },
+      messages: [{ role: "user", content: "ping" }],
+      probe: true,
+      fetchImpl: fetchMock
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      model: "gpt-5.1",
+      messages: [{ role: "user", content: "ping" }],
+      stream: false,
+      max_completion_tokens: 1,
+      reasoning_effort: "none"
+    });
+  });
+
   it("显式 maxTokens 写进 body；传入 headers 已带 Authorization 时不重复注入", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ choices: [{ message: { content: "" } }] }));
 
@@ -265,6 +284,42 @@ describe("presetId 穿线（chatCompletion → buildChatRequestBody）", () => {
   });
 });
 
+// token 参数名映射（04 号票）：chatCompletion 的非空 maxTokens 经
+// buildChatRequestBody 随 resolver tokenParam 换名——openai-reasoning 系写
+// max_completion_tokens 且不得再出现 max_tokens；其余类维持 max_tokens 现状。
+// 概览/分析的估算预算（含空正文加倍重试）与探针（maxTokens 默认 1）走同一接缝。
+describe("token 参数名映射（maxTokens 随类换名，04 号票）", () => {
+  it("OpenAI reasoning 模型（gpt-5.1）+ maxTokens → 请求体 max_completion_tokens，无 max_tokens", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ choices: [{ message: { content: "" } }] }));
+
+    await chatCompletion({
+      provider: { baseUrl: "https://api.openai.com/v1", apiKey: "sk-1", model: "gpt-5.1" },
+      messages: [{ role: "user", content: "hi" }],
+      maxTokens: 4096,
+      fetchImpl: fetchMock
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toMatchObject({ max_completion_tokens: 4096 });
+    expect(body).not.toHaveProperty("max_tokens");
+  });
+
+  it("非 reasoning 模型（deepseek-v4）+ maxTokens → 请求体仍 max_tokens（现状不变）", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ choices: [{ message: { content: "" } }] }));
+
+    await chatCompletion({
+      provider: { baseUrl: "https://api.deepseek.com/v1", apiKey: "sk-1", model: "deepseek-v4-pro" },
+      messages: [{ role: "user", content: "hi" }],
+      maxTokens: 4096,
+      fetchImpl: fetchMock
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toMatchObject({ max_tokens: 4096 });
+    expect(body).not.toHaveProperty("max_completion_tokens");
+  });
+});
+
 describe("buildChatRequestBody / normalizeThinkingLevel（自 client.js 迁入）", () => {
   it("off：按平台表发显式关闭字段（OpenAI gpt-5.1 例外 effort none；DeepSeek v4 模式表 thinking disabled）", () => {
     const base = { messages: [], stream: true };
@@ -286,7 +341,7 @@ describe("buildChatRequestBody / normalizeThinkingLevel（自 client.js 迁入�
     });
   });
 
-  it("low / high：按平台表映射（OpenAI effort），不混入其他思考字段；maxTokens 透传", () => {
+  it("low / high：按平台表映射（OpenAI effort），不混入其他思考字段；maxTokens 透传（openai-reasoning 系随表换名）", () => {
     const base = { model: "gpt-5.1", messages: [], stream: false, baseUrl: "https://api.openai.com/v1" };
     expect(buildChatRequestBody({ ...base, thinkingLevel: "low" })).toEqual({
       model: "gpt-5.1",
@@ -297,7 +352,7 @@ describe("buildChatRequestBody / normalizeThinkingLevel（自 client.js 迁入�
     expect(buildChatRequestBody({ ...base, thinkingLevel: "high" })).toMatchObject({
       reasoning_effort: "high"
     });
-    expect(buildChatRequestBody({ ...base, maxTokens: 1 })).toMatchObject({ max_tokens: 1 });
+    expect(buildChatRequestBody({ ...base, maxTokens: 1 })).toMatchObject({ max_completion_tokens: 1 });
   });
 
   it("未知平台 × 未知模型：省略/非法/三档均不发思考字段（UNKNOWN 哨兵）；stream 缺省 false", () => {
