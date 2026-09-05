@@ -39,12 +39,21 @@ export type ProviderEditorSave = (
   options: { requestPermissions: boolean }
 ) => Promise<{ ok: boolean; error?: string }>;
 
+// 删除回调（settings-panel 注入，仅编辑态提供）：回收 orphan origin + 删除
+// 消息 + 列表重渲都收口在 settings-panel，本模块只传目标（id + 行内 baseUrl）。
+export type ProviderEditorDelete = (
+  kind: ProviderEditorKind,
+  target: { id: string; baseUrl: string }
+) => Promise<{ ok: boolean; error?: string }>;
+
 export interface ProviderEditorOpenOptions {
   kind: ProviderEditorKind;
   // 编辑目标（后端权威列表项，含 hasSavedKey）；缺省 = 新增空白
   item?: ProviderRowItem | null;
   presets: readonly ProviderRowPreset[];
   onSave: ProviderEditorSave;
+  // 编辑态的删除入口（Modal 头部警示按钮）；缺省 = 不渲染删除按钮
+  onDelete?: ProviderEditorDelete;
 }
 
 interface EditorState {
@@ -55,6 +64,7 @@ interface EditorState {
   // 打开参数直达（collectUpsert / runTest / 预设切换读取）
   presets: readonly ProviderRowPreset[];
   onSave: ProviderEditorSave;
+  onDelete: ProviderEditorDelete | null;
   // 打开时的字段快照（dirty 对比用）
   dirtySnapshot: string;
   // 代际号：测试探针/保存回执落定前比对，Modal 已关/已重开则丢弃过期回执
@@ -70,6 +80,7 @@ const state: EditorState = {
   hasSavedKey: false,
   presets: [],
   onSave: async () => ({ ok: false, error: "保存回调未注入" }),
+  onDelete: null,
   dirtySnapshot: "",
   generation: 0,
   host: null,
@@ -225,15 +236,49 @@ async function save(): Promise<void> {
   setBusy(true);
   showStatus("正在保存...");
   const generation = state.generation;
-  const result = await state.onSave(state.kind, upsert, { requestPermissions: true });
-  if (generation !== state.generation || !state.open) {
-    return; // Modal 已关/已重开：过期回执丢弃
-  }
-  if (result.ok) {
-    closeProviderEditor(true);
-  } else {
+  try {
+    const result = await state.onSave(state.kind, upsert, { requestPermissions: true });
+    if (generation !== state.generation || !state.open) {
+      return; // Modal 已关/已重开：过期回执丢弃
+    }
+    if (result.ok) {
+      closeProviderEditor(true);
+    } else {
+      setBusy(false);
+      showStatus(result.error || "保存失败", true);
+    }
+  } catch (error) {
+    // void save() 会吞 rejection——任何异常都必须落到状态行，不允许无反馈
+    if (generation !== state.generation || !state.open) return;
     setBusy(false);
-    showStatus(result.error || "保存失败", true);
+    showStatus(`保存失败：${(error as Error).message || "未知错误"}`, true);
+  }
+}
+
+// ===== 删除（编辑态，Modal 头部警示按钮；回收权限/删除消息/重渲在 onDelete） =====
+
+async function deleteActive(): Promise<void> {
+  if (!state.editingId || !state.onDelete) return;
+  if (!confirm("确定要删除这个平台吗？删除后需要重新配置。")) return;
+  setBusy(true);
+  showStatus("正在删除...");
+  const generation = state.generation;
+  try {
+    const result = await state.onDelete(state.kind, {
+      id: state.editingId,
+      baseUrl: readField(".provider-editor-baseurl")
+    });
+    if (generation !== state.generation || !state.open) return;
+    if (result.ok) {
+      closeProviderEditor(true);
+    } else {
+      setBusy(false);
+      showStatus(result.error || "删除失败", true);
+    }
+  } catch (error) {
+    if (generation !== state.generation || !state.open) return;
+    setBusy(false);
+    showStatus(`删除失败：${(error as Error).message || "未知错误"}`, true);
   }
 }
 
@@ -319,7 +364,7 @@ function buildDialogHtml(options: ProviderEditorOpenOptions): string {
     <section class="provider-editor-dialog" role="dialog" aria-modal="true" aria-label="${escapeHtml(editorTitle(options.kind, Boolean(item?.id)))}" tabindex="-1">
       <header class="provider-editor-head">
         <span class="provider-editor-title">${escapeHtml(editorTitle(options.kind, Boolean(item?.id)))}</span>
-        <button type="button" class="provider-editor-close" data-provider-editor-action="close" title="关闭" aria-label="关闭">×</button>
+        ${item?.id && options.onDelete ? `<button type="button" class="provider-editor-delete" data-provider-editor-action="delete" title="删除该平台">删除</button>` : ""}
       </header>
       <div class="provider-editor-body">
         <div class="provider-editor-field">
@@ -349,13 +394,13 @@ function buildDialogHtml(options: ProviderEditorOpenOptions): string {
           })}
         </div>
         <div class="provider-editor-testrow">
-          <button type="button" class="provider-editor-test">测试</button>
+          <button type="button" class="provider-editor-test" data-provider-editor-action="test">测试</button>
           <p class="provider-editor-status" hidden></p>
         </div>
       </div>
       <footer class="provider-editor-foot">
         <button type="button" class="provider-editor-cancel" data-provider-editor-action="close">取消</button>
-        <button type="button" class="provider-editor-save">保存</button>
+        <button type="button" class="provider-editor-save" data-provider-editor-action="save">保存</button>
       </footer>
     </section>
   `;
@@ -436,16 +481,13 @@ function wireDialog(options: ProviderEditorOpenOptions): void {
       host.querySelectorAll<HTMLElement>(".ai-provider-model-dropdown").forEach((d) => (d.hidden = true));
       host.querySelectorAll<HTMLElement>(".custom-select-dropdown").forEach((d) => (d.hidden = true));
     }
-    if (target.closest("[data-provider-editor-action]")) {
-      requestClose();
-    }
-  });
-
-  dialog.querySelector(".provider-editor-save")?.addEventListener("click", () => {
-    void save();
-  });
-  dialog.querySelector(".provider-editor-test")?.addEventListener("click", () => {
-    void runTest();
+    // 四个动作全部走这一条委托（按钮直连绑定曾在真实页面失效，close 是
+    // 用户验证过的同源路径）；异常兜底在各 handler 内部落状态行
+    const action = target.closest<HTMLElement>("[data-provider-editor-action]")?.dataset.providerEditorAction;
+    if (action === "close") requestClose();
+    else if (action === "save") void save();
+    else if (action === "test") void runTest();
+    else if (action === "delete") void deleteActive();
   });
 
   const presetSelect = dialog.querySelector<HTMLSelectElement>(".provider-editor-preset");
@@ -529,6 +571,7 @@ export function openProviderEditor(options: ProviderEditorOpenOptions): void {
   state.kind = options.kind;
   state.presets = options.presets;
   state.onSave = options.onSave;
+  state.onDelete = options.onDelete || null;
   state.editingId = String(options.item?.id || "");
   state.hasSavedKey = Boolean(options.item?.hasSavedKey);
   state.open = true;

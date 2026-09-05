@@ -306,6 +306,42 @@ describe("provider-editor：编辑预填与 upsert 替换（拍板 Q3）", () =>
   });
 });
 
+describe("provider-editor：头部删除按钮（用户拍板：× 改警示删除，编辑态提供）", () => {
+  const aiItem = { id: "p1", presetId: "custom", name: "自定义", baseUrl: "https://api.example.com/v1", model: "gpt-4o-mini", requiresKey: true, enabled: true, hasSavedKey: true };
+
+  it("编辑态：头部显示删除按钮；confirm 后发删除消息 + 权限回收现查 + 重渲 + 关 Modal", async () => {
+    const { sent, host } = await mountPanel({
+      "ai-providers-list": () => ({ ok: true, providers: [aiItem] }),
+      "ai-providers-save": () => ({ ok: true, providers: [] }),
+      "ai-providers-delete": () => ({ ok: true, providers: [] })
+    });
+
+    const row = host.querySelector("#aiProvidersList .ai-provider-row");
+    const { dialog } = await openEditor(host, row.querySelector(".provider-row-edit"));
+
+    const deleteBtn = dialog.querySelector(".provider-editor-delete");
+    expect(deleteBtn).not.toBeNull();
+    expect(deleteBtn.textContent).toBe("删除");
+
+    fireClick(deleteBtn);
+    expect(confirmMock).toHaveBeenCalledWith("确定要删除这个平台吗？删除后需要重新配置。");
+
+    await vi.waitFor(() => {
+      expect(sent.some((message) => message.type === "ai-providers-delete")).toBe(true);
+    });
+    // 回收 orphan origin 需现查两组存活列表（AI 一组在打开时已查，ASR 一组在删除时查）
+    expect(sent.some((message) => message.type === "asr-providers-list")).toBe(true);
+    expect(sent.find((message) => message.type === "ai-providers-delete").providerId).toBe("p1");
+    expect(editorGone()).toBe(true);
+  });
+
+  it("新增态：不渲染删除按钮（无可删对象）", async () => {
+    const { host } = await mountPanel();
+    const { dialog } = await openEditor(host, "#addAiProviderBtn");
+    expect(dialog.querySelector(".provider-editor-delete")).toBeNull();
+  });
+});
+
 describe("provider-editor：dirty 保护与关闭语义（拍板 Q6）", () => {
   it("有改动：取消/Esc/点遮罩先 confirm，拒绝不关；确认后关", async () => {
     const { host } = await mountPanel();

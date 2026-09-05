@@ -466,6 +466,38 @@ async function saveFromEditor(
   return result;
 }
 
+// provider-editor 的 onDelete（编辑态头部删除按钮）：回收 orphan origin（与
+// 列表行删除共用判定，存活列表现查）→ 删除消息 → 用响应存活列表重渲。回收
+// 失败不阻断删除（与列表行同语义），错误文案落抽屉状态条。
+async function deleteFromEditor(
+  kind: ProviderEditorKind,
+  target: { id: string; baseUrl: string }
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const [aiProviders, asrProviders] = await Promise.all([loadAiProviders(), loadAsrProviders()]);
+    const { origins, revoked } = await revokeOrphanOrigin(
+      { id: target.id, baseUrl: target.baseUrl },
+      [...aiProviders, ...asrProviders]
+    );
+    const host = settingsHostRef;
+    if (origins.length > 0 && !revoked && host) {
+      setStatus(collectElements(host), permissionRevokeErrorMessage(origins), true);
+    }
+    const resp = kind === "ai"
+      ? await sendRuntimeMessage({ type: "ai-providers-delete", providerId: target.id })
+      : await sendRuntimeMessage({ type: "asr-providers-delete", providerId: target.id });
+    if (!resp?.ok) {
+      return { ok: false, error: resp?.error || "删除失败" };
+    }
+    if (Array.isArray(resp.providers)) {
+      rerenderProviderList(kind, resp.providers);
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message || "删除失败" };
+  }
+}
+
 // 打开编辑 Modal：编辑按 id 现查后端权威列表项（API Key 不在行 DOM 上，平铺行
 // dataset 只有占位信息）；找不到（已被并发删除等竞态）静默不打开。新增传空 id。
 async function openProviderEditorById(kind: ProviderEditorKind, providerId: string): Promise<void> {
@@ -478,7 +510,8 @@ async function openProviderEditorById(kind: ProviderEditorKind, providerId: stri
     kind,
     item,
     presets: kind === "ai" ? aiPresets : asrPresets,
-    onSave: saveFromEditor
+    onSave: saveFromEditor,
+    onDelete: deleteFromEditor
   });
 }
 

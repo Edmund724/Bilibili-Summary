@@ -2828,6 +2828,10 @@
   position: absolute;
   inset: 0;
   z-index: 40;
+  /* 贴栏态（reader-gate.css）整个 view 是 pointer-events:none、digest-panel
+   * 单点恢复 auto——本宿主挂在 view 直下不在 digest-panel 内，缺这条整层
+   * 对鼠标穿透（Modal 内所有点击落到下层抽屉内容上，按钮全无响应）。 */
+  pointer-events: auto;
 }
 
 #boc-reading-view .provider-editor-mask {
@@ -2873,22 +2877,24 @@
   color: var(--boc-reader-text, #2b2620);
 }
 
-#boc-reading-view .provider-editor-close {
-  width: 26px;
-  height: 26px;
-  padding: 0;
+/* 删除按钮（Modal 头部右侧，对齐参考截图的编辑页布局；用户拍板改为醒目
+ * 警示底色）。红用固定警示色：token 表无红色语义，rgba 底在三主题下均不刺眼 */
+#boc-reading-view .provider-editor-delete {
+  height: 28px;
+  padding: 0 14px;
   border: 0;
   border-radius: 8px;
-  background: transparent;
-  color: var(--boc-reader-faint, #a39a8d);
-  font-size: 18px;
-  line-height: 1;
+  background: rgba(217, 48, 37, 0.14);
+  color: #d93025;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
 }
 
-#boc-reading-view .provider-editor-close:hover {
-  background: var(--boc-reader-surface-2, #f0e9df);
-  color: var(--boc-reader-text, #2b2620);
+#boc-reading-view .provider-editor-delete:hover {
+  background: #d93025;
+  color: #fff;
 }
 
 #boc-reading-view .provider-editor-body {
