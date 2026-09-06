@@ -21,6 +21,7 @@
 import { ensureRunActive, isStaleRunError, getErrorMessage, makeStaleRunError } from "../shared/error-helpers.js";
 import { logInfo, logWarn } from "../shared/logging.js";
 import { state, clipState } from "../core/state.js";
+import type { NoSubtitleReason } from "../core/state.js";
 import {
   getSubtitleCacheKey,
   loadSubtitleFromCache,
@@ -57,9 +58,12 @@ function buildAsrEmptyStatusText({ failedChunks, diag = "" }: { failedChunks: nu
 // reason（未知）→ 归 null，sidepanel 展示通用无字幕文案。
 const KNOWN_ASR_SKIP_REASONS = new Set(["asr-disabled", "no-asr-config"]);
 
-function noSubtitleReasonFromAsrSkipError(error: unknown): string | null {
-  const reason = (error as { reason?: string }).reason;
-  return typeof reason === "string" && KNOWN_ASR_SKIP_REASONS.has(reason) ? reason : null;
+function noSubtitleReasonFromAsrSkipError(error: unknown): NoSubtitleReason {
+  const reason = (error as { reason?: unknown }).reason;
+  // 白名单与 NoSubtitleReason 联合的两个配置级字面量同源（构造自同集），命中即成员
+  return typeof reason === "string" && KNOWN_ASR_SKIP_REASONS.has(reason)
+    ? (reason as NoSubtitleReason)
+    : null;
 }
 
 export interface AsrSettings {
@@ -89,7 +93,7 @@ export interface AcceptSubtitleArgs {
 }
 
 export interface CommitNoSubtitleArgs {
-  noSubtitleReason: string;
+  noSubtitleReason: NoSubtitleReason;
   asrResult: string;
 }
 

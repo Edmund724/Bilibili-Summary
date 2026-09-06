@@ -15,16 +15,17 @@
 //   "asr-empty"     未识别到语音内容 → 该视频没有人声
 
 import type { ChatSessionContextSnapshot } from "./chat-state.js";
+import type { NoSubtitleReason as ClipNoSubtitleReason } from "../core/state.js";
 
 // ensureCurrentContextForSend 的类型化拦截信号：非 true 的返回值一律让
 // chat-runtime 的 sendMessage 提前返回（不追加用户消息、不落 chatHistory、
 // 不发起 port）。与既有 boolean false（上下文读取失败）区分开。
 export const NO_SUBTITLE_SEND_BLOCKED = "no-subtitle-send-blocked";
 
-// noSubtitleReason 的可能取值（content 侧写入 "no-asr-config"/"asr-disabled"/
-// "asr-failed"/"asr-empty"，经 payload 透传；缺失/未知 → 通用文案）。快照经
-// AiContext 的开放索引签名读出为 unknown，调用点显式收窄。
-export type NoSubtitleReason = string | null | undefined;
+// noSubtitleReason 的可能取值：单源 core/state 的字面量联合（快照经 AiContext
+// 的开放索引签名读出为 unknown，调用点显式收窄），此处只叠加读边界的
+// undefined（可选字段缺失）。
+export type NoSubtitleReason = ClipNoSubtitleReason | undefined;
 
 // 「当前快照是否为无字幕空上下文」判定（ensureCurrentContextForSend 用，纯函数）。
 // 与 isContextPending 的边界互补：pending 管"还在抓取/转写"（loading），

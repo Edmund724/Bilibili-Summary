@@ -12,7 +12,14 @@ import { DEFAULT_SETTINGS, type Settings } from "./defaults.js";
  * supported; use the structured namespace (state.reader.readingViewOpen) instead.
  */
 
-export type NoSubtitleReason = string | null;
+// subtitleFetchState 的取值全集（写入点：fetcher resetClipState/refreshClip/catch
+// 收尾与 subtitle/commit 的接受/无字幕两事务；读取点 subtitle/core 占位文案、
+// chat/subtitle-wait pending 判定、chat/no-subtitle 拦截、context-payload 快照）。
+export type SubtitleFetchState = "idle" | "loading" | "ready" | "error" | "empty";
+
+// noSubtitleReason 的取值全集（写入点 asr/fallback.ts 各终态分支与 commit 事务；
+// KNOWN_ASR_SKIP_REASONS 白名单与 "asr-disabled"/"no-asr-config" 同源）。
+export type NoSubtitleReason = null | "no-asr-config" | "asr-disabled" | "asr-failed" | "asr-empty";
 
 export type SubtitleOption = {
   id?: string;
@@ -109,7 +116,7 @@ type ClipBusinessState = {
   selectedSubtitleUrl: string;
   selectedSubtitleLang: string;
   subtitleBody: SubtitleBodyItem[];
-  subtitleFetchState: string;
+  subtitleFetchState: SubtitleFetchState;
   noSubtitleReason: NoSubtitleReason;
   chapters: ChapterItem[];
   hotComments: unknown[];
@@ -139,7 +146,7 @@ type ClipSetters = {
   setSelectedSubtitleUrl(value: string): void;
   setSelectedSubtitleLang(value: string): void;
   setSubtitleBody(value: SubtitleBodyItem[]): void;
-  setSubtitleFetchState(value: string): void;
+  setSubtitleFetchState(value: SubtitleFetchState): void;
   setNoSubtitleReason(value: NoSubtitleReason): void;
   setChapters(value: ChapterItem[]): void;
   setHotComments(value: unknown[]): void;

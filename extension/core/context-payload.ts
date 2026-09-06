@@ -17,7 +17,7 @@
 // 纯模块约束：不 import state/defaults/location——运行时输入（clip/settings/url）
 // 全部由调用方注入；对 snapshot 的非法形状一律按旧实现的缺省口径容错。
 
-import type { ClipState, NoSubtitleReason, SubtitleBodyItem, SubtitleOption, ChapterItem } from "./state.js";
+import type { ClipState, NoSubtitleReason, SubtitleFetchState, SubtitleBodyItem, SubtitleOption, ChapterItem } from "./state.js";
 import type { Settings } from "./defaults.js";
 
 // ============================================================
@@ -38,7 +38,7 @@ export type ReaderContextPayload = {
   subtitleBody: SubtitleBodyItem[];
   videoDuration: number;
   includeTimestampInBody: boolean;
-  subtitleFetchState: string;
+  subtitleFetchState: SubtitleFetchState;
   noSubtitleReason: NoSubtitleReason;
   subtitleLang: string;
   selectedSubtitleId: string;
