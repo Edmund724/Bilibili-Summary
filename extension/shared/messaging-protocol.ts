@@ -281,6 +281,27 @@ export type ResolveAiProviderResponse = {
   error?: string;
 };
 
+// ===== offscreen storage 桥 =====
+// 平台事实（chrome.offscreen 官方文档）：offscreen 文档仅支持 chrome.runtime，
+// 无 chrome.storage——Map-Reduce（跑在 offscreen）经 cache-lru/segment-cache
+// 的缓存读写会抛「chrome.storage.local 不可用」，读路径静默当 miss。本桥把
+// get/set/remove 转发到 SW 的真实 storage：垫片安装器见 core/storage-bridge.ts
+// installStorageLocalBridge（offscreen 启动时安装），SW 端 handler 同文件工厂。
+export type StorageLocalBridgeMessage = {
+  type: "storage-local-bridge";
+  op: "get" | "set" | "remove";
+  // get：null（全量枚举）/ string / string[]；remove：string | string[]
+  keys?: string | string[] | null;
+  // set：键值对整体覆写
+  entries?: Record<string, unknown>;
+};
+export type StorageLocalBridgeResponse = {
+  ok: boolean;
+  // get 的回包：键值对（缺失的键不出现）
+  data?: Record<string, unknown>;
+  error?: string;
+};
+
 export type AsrPresetsListMessage = { type: "asr-presets-list" };
 // 响应锚点：entry/background.ts handleAsrPresetsList。
 export type AsrPresetsListResponse = {
@@ -359,6 +380,7 @@ export type BackgroundMessage =
   | AsrProvidersSaveMessage
   | AsrProvidersDeleteMessage
   | GetAsrRuntimeConfigMessage
+  | StorageLocalBridgeMessage
   | OffloadTaskMessage;
 
 export type BackgroundMessageType = BackgroundMessage["type"];
@@ -367,7 +389,8 @@ export type BackgroundMessageType = BackgroundMessage["type"];
 
 export type OffscreenRuntimeRequest =
   | ResolveAiProviderMessage
-  | GetAsrRuntimeConfigMessage;
+  | GetAsrRuntimeConfigMessage
+  | StorageLocalBridgeMessage;
 
 // ===== offscreen document 接收的 port 消息 =====
 
@@ -440,6 +463,7 @@ export type ResponseOf<M> = M extends ClipRefreshMessage ? ClipRefreshResponse
   : M extends AsrProvidersSaveMessage ? AsrProvidersSaveResponse
   : M extends AsrProvidersDeleteMessage ? AsrProvidersDeleteResponse
   : M extends GetAsrRuntimeConfigMessage ? GetAsrRuntimeConfigResponse
+  : M extends StorageLocalBridgeMessage ? StorageLocalBridgeResponse
   : M extends OffloadTaskMessage ? OffloadTaskResponse
   : never;
 

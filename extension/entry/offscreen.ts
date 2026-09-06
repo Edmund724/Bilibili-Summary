@@ -39,10 +39,17 @@ import type {
 import type { ChatMsg } from "../ai/ladder.js";
 // 调试日志门三宿主接线（shared/logging 的 registerDebugGate 消费方）
 import { registerDebugLogGate } from "../shared/debug-log-gate.js";
+// offscreen storage 桥垫片（本 context 无 chrome.storage，缓存读写转发到 SW）
+import { installStorageLocalBridge } from "../core/storage-bridge.js";
 
 // 调试日志门：offscreen 自读 storage（此前门读 state.settings，本 context 恒
 // 取到缺省关，用户开的调试日志在这里静默）。
 registerDebugLogGate();
+
+// offscreen 文档只有 chrome.runtime（平台限制，无 chrome.storage）——Map-Reduce
+// 与概览的缓存读写经此垫片转发到 SW 的真实 chrome.storage.local（core/storage-bridge）。
+// 有原生 storage 的宿主不安装，测试桩缺 runtime 时也不安装。
+installStorageLocalBridge();
 
 let activeAbortController: AbortController | null = null;
 let pendingCostGuard: { resolve: (value: boolean) => void } | null = null;
