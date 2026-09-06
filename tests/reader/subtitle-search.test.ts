@@ -310,3 +310,125 @@ describe("字幕句内搜索", () => {
     expect(searchInput().value).toBe("");
   });
 });
+
+// 防抖接线（arch-slim-4/03）：input 路径 180ms trailing 防抖 + Enter/Escape/
+// prev/next 冲刷，全部经真实事件绑定驱动（模块层零改动，防抖只存在于
+// bindSubtitleTabEvents 闭包）。
+describe("字幕句内搜索防抖接线", () => {
+  function flushDebounceWindow(): void {
+    // jsdom 环境：直接快进所有挂起的 setTimeout（fake timers 与既有 rAF 假时钟
+    // 不冲突——分批渲染用 rAF，防抖用 timer，两套互不干扰）。
+    vi.runAllTimers();
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // withReader 首次触发走 reader 域动态 import 边（其 then 链在 fake timers 下
+  // 需十几个微任务 tick 兑现，探针实测 17）；逐轮 await 排空直到落地。
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 50; i += 1) {
+      await Promise.resolve();
+    }
+  }
+
+  async function bindRealEvents() {
+    shell.renderReadingView();
+    mountBindExtras();
+    uiRenderer.bindUiEvents();
+  }
+
+  it("input 停顿 180ms 后 refresh 恰一次（非逐键）", async () => {
+    await bindRealEvents();
+    searchInput().value = "目标词";
+    searchInput().dispatchEvent(new Event("input", { bubbles: true }));
+    // 防抖窗口内不刷新
+    vi.advanceTimersByTime(179);
+    expect(searchCount()).toBe("");
+    // 停顿过线后恰一次
+    vi.advanceTimersByTime(1);
+    await settle();
+    expect(searchCount()).toBe("1 / 2");
+  });
+
+  it("防抖窗口内多键合并为停顿后一次", async () => {
+    await bindRealEvents();
+    // 逐字打「目标词」：每键重置计时器，只在最后一次停顿后执行
+    for (const ch of ["目", "标", "词"]) {
+      searchInput().value = searchInput().value + ch;
+      searchInput().dispatchEvent(new Event("input", { bubbles: true }));
+      vi.advanceTimersByTime(100);
+    }
+    expect(searchCount()).toBe("");
+    vi.advanceTimersByTime(80);
+    await settle();
+    expect(searchCount()).toBe("1 / 2");
+  });
+
+  it("防抖窗口内按 Enter：先冲刷新词再导航（不作用于旧词 matches）", async () => {
+    await bindRealEvents();
+    // 先建立「目标词」的稳定结果并移动一次（currentIndex=0）
+    searchInput().value = "目标词";
+    searchInput().dispatchEvent(new Event("input", { bubbles: true }));
+    flushDebounceWindow();
+    await settle();
+    expect(searchCount()).toBe("1 / 2");
+
+    // 防抖窗口内改成「目标词乙」并立即 Enter：冲刷后应在乙的匹配上导航
+    searchInput().value = "目标词乙";
+    searchInput().dispatchEvent(new Event("input", { bubbles: true }));
+    searchInput().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })
+    );
+    await settle();
+    expect(searchCount()).toBe("1 / 1");
+    expect(
+      subtitleList().querySelector('[data-index="2"] mark.boc-reading-search-hit.search-current')
+    ).not.toBe(null);
+    // 计时器已被冲刷消费：快进不再二次刷新
+    flushDebounceWindow();
+    await settle();
+    expect(searchCount()).toBe("1 / 1");
+  });
+
+  it("防抖窗口内按 prev/next：先冲刷新词再导航", async () => {
+    await bindRealEvents();
+    // 先建立稳定搜索让 next 按钮脱离初始 disabled（无匹配时 jsdom click 不派发）
+    searchInput().value = "目标词";
+    searchInput().dispatchEvent(new Event("input", { bubbles: true }));
+    flushDebounceWindow();
+    await settle();
+    expect(searchCount()).toBe("1 / 2");
+
+    // 防抖窗口内改成「目标词乙」（唯一命中）并点 next：冲刷使导航作用于新词
+    //（冲刷与 move 是两次独立 withReader，先后各排空一次微任务）
+    searchInput().value = "目标词乙";
+    searchInput().dispatchEvent(new Event("input", { bubbles: true }));
+    (document.getElementById(ids.readingSearchNextBtn) as HTMLButtonElement).click();
+    await settle();
+    await settle();
+    expect(searchCount()).toBe("1 / 1");
+  });
+
+  it("防抖窗口内按 Escape：冲刷后清空（高亮与计时器无残留）", async () => {
+    await bindRealEvents();
+    searchInput().value = "目标词乙";
+    searchInput().dispatchEvent(new Event("input", { bubbles: true }));
+    searchInput().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+    );
+    await settle();
+    expect(searchInput().value).toBe("");
+    expect(searchMarks().length).toBe(0);
+    expect(searchCount()).toBe("");
+    // 计时器已消费：快进不再把已清空的词重新刷回来
+    flushDebounceWindow();
+    await settle();
+    expect(searchMarks().length).toBe(0);
+  });
+});

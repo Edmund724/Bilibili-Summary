@@ -97,20 +97,47 @@ export function bindSubtitleTabEvents(): void {
       });
   });
 
+  const readingSearchInput = byId(ids.readingSearchInput) as HTMLInputElement;
   // ===== PR3 句内搜索（输入/键盘/上下条）：搜索状态与高亮逻辑在
   // reader/subtitle-search.ts（重域：补渲染走分批渲染状态机），交互回调经
   // ui/reader-gate 的 withReader 装载后转发（首次输入多一次本地动态 import，
   // 其后命中缓存 promise，与滚动/点击回调同款）。
-  const readingSearchInput = byId(ids.readingSearchInput) as HTMLInputElement;
+  //
+  // input 路径 180ms trailing 防抖：逐键的全量流水线（清高亮→matchAll→逐命中
+  // DOM 重建→smooth scroll）聚簇为停顿后一次。防抖状态挂本函数闭包（随壳
+  // forceRecreate 重建自然重置，与 handleReaderManualScroll 先例同款）。防抖只
+  // 包 input 事件；Enter/Escape/prev/next 先冲刷未兑现的防抖再动作——
+  // moveReadingSubtitleSearch 读模块闭包 matches（不读输入框），不冲刷就会在
+  // 旧词的匹配上导航。重渲重放路径（lifecycle 渲染尾部 refresh({scroll:false})）
+  // 不走防抖，高亮即时恢复。
+  const SEARCH_DEBOUNCE_MS = 180;
+  let searchDebounceTimer: number | null = null;
   const searchRefresh = () => {
     withReader("subtitle search refresh", (reader) => reader.refreshReadingSubtitleSearch());
   };
-  readingSearchInput.addEventListener("input", searchRefresh);
+  const flushSearchDebounce = () => {
+    if (searchDebounceTimer === null) {
+      return;
+    }
+    window.clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = null;
+    searchRefresh();
+  };
+  readingSearchInput.addEventListener("input", () => {
+    if (searchDebounceTimer !== null) {
+      window.clearTimeout(searchDebounceTimer);
+    }
+    searchDebounceTimer = window.setTimeout(() => {
+      searchDebounceTimer = null;
+      searchRefresh();
+    }, SEARCH_DEBOUNCE_MS);
+  });
   readingSearchInput.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== "Escape") {
       return;
     }
     event.preventDefault();
+    flushSearchDebounce();
     withReader("subtitle search keydown", (reader) => {
       if (event.key === "Enter") {
         reader.moveReadingSubtitleSearch(event.shiftKey ? -1 : 1);
@@ -123,9 +150,11 @@ export function bindSubtitleTabEvents(): void {
     });
   });
   byId(ids.readingSearchPrevBtn).addEventListener("click", () => {
+    flushSearchDebounce();
     withReader("subtitle search prev", (reader) => reader.moveReadingSubtitleSearch(-1));
   });
   byId(ids.readingSearchNextBtn).addEventListener("click", () => {
+    flushSearchDebounce();
     withReader("subtitle search next", (reader) => reader.moveReadingSubtitleSearch(1));
   });
 
