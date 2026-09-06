@@ -173,33 +173,28 @@ function init(): void {
     } else {
       stopPlayerAiQuickActionLazy();
     }
-    if (shouldEnterReaderMode) {
-      // 候选03：阅读模式直达链接才惰性装载 UI 壳 + reader 呈现层，再进入重域。
-      // ensureUiReady 与 hydrate/apply 并发装载，壳构建完成后应用排版属性，
-      // 最后 enterReaderMode（其内部会再次 hydrate/apply，保证状态最终一致）。
-      ensureUiReady({ forceRecreate: true })
-        .then(() => hydrateReaderStateFromSettings(settings))
-        .then(() => applyReadingViewPresentation())
-        .then(() => ensureReaderDomain())
-        .then((reader) => reader.enterReaderMode())
-        .catch((error) => {
-          renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
-        });
-      // 阅读直达分支同样装载工具栏按钮模块（非阅读分支见下方 else）：装载不为
+      if (shouldEnterReaderMode) {
+        // 候选03：阅读模式直达链接才惰性装载 UI 壳 + reader 呈现层，再进入重域。
+        // ensureUiReady 与 hydrate/apply 并发装载，壳构建完成后应用排版属性，
+        // 最后 enterReaderMode（其内部会再次 hydrate/apply，保证状态最终一致）。
+        ensureUiReady({ forceRecreate: true })
+          .then(() => hydrateReaderStateFromSettings(settings))
+          .then(() => applyReadingViewPresentation())
+          .then(() => ensureReaderDomain())
+          .then((reader) => reader.enterReaderMode())
+          .catch((error) => {
+            renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
+          });
+      }
+      // 两分支（阅读直达 / 非阅读模式）同样装载工具栏按钮模块：模块自管「等
+      // hydration 稳定 → 自查注入/摘除 → 定时自查 + 失同步自愈」生命周期，阅读
+      // 视图打开后由其自查守卫摘除按钮，无需在此 stop；阅读直达分支装载不为
       // 按钮本身（阅读模式下自查守卫恒摘除），为视图失同步自愈与「关闭视图后
       // 补回按钮」——启动失败文案写进隐藏面板用户看不见，没有自查就真只剩刷新。
       loadDigestButton().catch((error) => {
         logWarn("[BOC] digest-button module load failed", error);
       });
-    } else {
-      // 统一 Digest 阅读模式 PR1：非阅读模式分支装载工具栏按钮模块。模块
-      // 自管「等 hydration 稳定 → 自查注入/摘除 → 定时自查 + 失同步自愈」生命
-      // 周期；阅读视图打开后由其自查守卫摘除按钮，无需在此 stop。
-      loadDigestButton().catch((error) => {
-        logWarn("[BOC] digest-button module load failed", error);
-      });
-    }
-  });
+    });
 }
 
 // 播放器 AI 开关存放在 chrome.storage.sync：监听该键变更动态启停，设置切换
