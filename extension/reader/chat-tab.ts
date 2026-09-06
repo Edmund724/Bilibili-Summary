@@ -141,11 +141,22 @@ function requireShell(): void {
 // reader 与转写编排同进程收不到自己的广播，改订阅 shared/subtitle-status-bus。）
 let unsubscribeStatusBus: (() => void) | null = null;
 
+// 无字幕转写提示：本行只在转写相位（含等待发送期间）显示。原实现等待发送时在
+// 消息区另起一条 .chat-context-notice（「正在等待音频转写完成…」），与状态行
+// 「该视频无字幕，正在音频转写…」同屏重复——现按相位路由：转写相位下等待期并入
+// 本行切换为合并句（唯一提示），非转写相位的等待（字幕抓取进行中）沿用消息区
+// 通知（该场景状态行隐藏，无重复）。
+const ASR_TRANSCRIBING_NOTICE = "该视频无字幕，正在音频转写…";
+const ASR_WAITING_NOTICE = "该视频无字幕，正在音频转写，完成后自动开始总结…";
+const SUBTITLE_WAIT_NOTICE = "正在等待音频转写完成，完成后自动开始总结…";
+let asrWaitingActive = false;
+
 function updateAsrNotice(): void {
   if (!els.asrNotice) {
     return;
   }
-  els.asrNotice.hidden = getSubtitleStatusPhase() !== "asr-transcribing";
+  els.asrNotice.hidden = getSubtitleStatusPhase() !== "asr-transcribing" && !asrWaitingActive;
+  els.asrNotice.textContent = asrWaitingActive ? ASR_WAITING_NOTICE : ASR_TRANSCRIBING_NOTICE;
 }
 
 function bindSubtitleStatusBus(): void {
@@ -158,6 +169,10 @@ function bindSubtitleStatusBus(): void {
     } else if (phase === "asr-done" || phase === "asr-failed") {
       chatSessionState.asrTranscribingActive = false;
       subtitleWaiter.kick();
+    }
+    if (phase !== "asr-transcribing") {
+      // 转写相位结束：状态行从合并句回落基础句/隐藏，等待提示回消息区通知。
+      asrWaitingActive = false;
     }
     updateAsrNotice();
   });
@@ -502,8 +517,25 @@ const subtitleWaiter = createSubtitleWaiter({
       pending: isContextPending(snapshot, { asrTranscribingActive: chatSessionState.asrTranscribingActive })
     };
   },
-  showWaitingNotice: () => showConversationContextNotice("正在等待音频转写完成，完成后自动开始总结…", 0),
-  removeNotice: removeConversationContextNotice,
+  // 等待提示按相位路由：转写相位下并入转写状态行（合成一句，不另起消息区通知，
+  // 顺带清掉此前非转写相位等期待遇残留的消息区通知）；非转写相位（如字幕抓取
+  // 进行中状态行隐藏）沿用消息区通知，两者互斥不重复。
+  showWaitingNotice: () => {
+    if (getSubtitleStatusPhase() === "asr-transcribing") {
+      asrWaitingActive = true;
+      removeConversationContextNotice();
+      updateAsrNotice();
+      return;
+    }
+    showConversationContextNotice(SUBTITLE_WAIT_NOTICE, 0);
+  },
+  removeNotice: () => {
+    if (asrWaitingActive) {
+      asrWaitingActive = false;
+      updateAsrNotice();
+    }
+    removeConversationContextNotice();
+  },
   setTimer: (fn, ms) => window.setTimeout(fn, ms),
   clearTimer: (handle) => window.clearTimeout(handle)
 });

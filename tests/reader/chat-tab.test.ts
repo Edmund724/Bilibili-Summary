@@ -272,12 +272,13 @@ describe("subtitle-wait kick 总线接线", () => {
     expect(asrNotice.hidden).toBe(false);
     expect(chatSessionState.asrTranscribingActive).toBe(true);
 
-    // 发送被 subtitle-wait 挂起：未发起 port，意图保持 pending，等待提示在显
+    // 发送被 subtitle-wait 挂起：未发起 port，意图保持 pending；
+    // 等待提示并入转写状态行（合成一句，消息区不再另起 .chat-context-notice）
     const messages = document.getElementById(ids.readingChatMessages) as HTMLElement;
-    await waitFor(() => Boolean(messages.querySelector(".chat-context-notice")));
+    await waitFor(() => Boolean(asrNotice.textContent?.includes("完成后自动开始总结")));
     expect(ports).toHaveLength(0);
     expect(explainIntent.peekPendingExplainIntent()).not.toBe(null);
-    expect(messages.querySelector(".chat-context-notice")?.textContent).toContain("等待音频转写完成");
+    expect(messages.querySelector(".chat-context-notice")).toBeNull();
 
     // 转写完成（字幕落账 + 相位 asr-done）→ kick 补轮放行
     state.clip.subtitleFetchState = "ready";

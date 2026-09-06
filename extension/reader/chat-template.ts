@@ -47,6 +47,7 @@ export function buildChatTabBodyHtml(): string {
           <blockquote class="boc-reading-chat-intent-quote"></blockquote>
         </div>
 
+        <!-- 转写状态行：默认基础句；等待发送期间文案由 chat-tab.ts 切换（唯一提示，不另起消息区通知） -->
         <div id="${ids.readingChatAsrNotice}" class="chat-asr-notice" hidden>该视频无字幕，正在音频转写…</div>
         <main class="chat-messages" id="${ids.readingChatMessages}">
           <div class="chat-suggestions" id="${ids.readingChatSuggestions}"></div>
