@@ -1,7 +1,7 @@
 import { state } from "../core/state.js";
 import { BOC_VERSION } from "../core/defaults.js";
 
-import { isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
+import { isReaderMode, isSupportedVideoPage } from "../bilibili/video-id-shared.js";
 import { getSettings } from "../core/runtime.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
@@ -72,9 +72,7 @@ init();
 
 function isSupportedUrl(): boolean {
   if (isReaderMode()) return true;
-  if (isWatchlaterPage()) return true;
-  if (/\/video\//.test(location.pathname)) return true;
-  return false;
+  return isSupportedVideoPage();
 }
 
 function init(): void {

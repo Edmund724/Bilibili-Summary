@@ -32,7 +32,7 @@
 // 视图关闭（exitReaderShell 派发 READER_CLOSED_EVENT 窗口事件，不建静态
 // import 边）时恢复常速并立即自查一轮补按钮，visibilitychange 现有链保持。
 
-import { isReaderMode, isWatchlaterPage } from "../bilibili/video-id-shared.js";
+import { isReaderMode, isSupportedVideoPage } from "../bilibili/video-id-shared.js";
 import { buildReaderModeUrl } from "../bilibili/reader-url.js";
 // 页内分发原语（arch-slim-2/09）：分发主体住 entry/message-handler.ts，于
 // bindRuntimeEvents 时注册进 shared 的原语槽——本模块只依赖 shared 叶子，
@@ -159,11 +159,11 @@ let brokenTicks = 0;
 let lastRestoreAt = 0;
 
 function syncDigestButton(): void {
-  // SPA 换到非视频页：工具栏按钮无意义，主动摘除。口径与 content.ts
-  // isSupportedUrl 一致——稍后再看等列表播放页（/list/watchlater?bvid=）
-  // 由 isWatchlaterPage 覆盖，不能只看 /video/ pathname（否则按钮在装载后
-  // 一个自查周期就被摘掉）。
-  if (!/\/video\//.test(location.pathname) && !isWatchlaterPage()) {
+  // SPA 换到非视频页：工具栏按钮无意义，主动摘除。口径单源
+  // video-id-shared 的 isSupportedVideoPage（与 content.ts isSupportedUrl
+  // 共用）——稍后再看等列表播放页（/list/watchlater?bvid=）由该 predicate
+  // 覆盖，不能只看 /video/ pathname（否则按钮在装载后一个自查周期就被摘掉）。
+  if (!isSupportedVideoPage()) {
     brokenTicks = 0;
     setTickInterval(REINJECT_INTERVAL_MS);
     removeDigestButton();

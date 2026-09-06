@@ -29,6 +29,21 @@ export function isWatchlaterPage(url: string = location.href): boolean {
   }
 }
 
+// Unified "supported video page" predicate (arch-slim-3/riders R1): a /video/
+// pathname or a watchlater list playback page. Single source shared by the
+// content.ts startup gate and the digest-button self-check (previously two
+// hand-copied versions of the same rule).
+export function isSupportedVideoPage(url: string = location.href): boolean {
+  if (isWatchlaterPage(url)) {
+    return true;
+  }
+  try {
+    return /\/video\//.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
 export function computeCurrentClipSignature(url: string = location.href): string {
   const bvid = extractBvid(url);
   const page = extractPageIndex(url);
