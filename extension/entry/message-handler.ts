@@ -1,15 +1,7 @@
 // content 侧消息分发 + URL 变化编排的组合根（arch-slim-2/09 自 core/ 归位
 // entry/：消息分发与页内编排是 entry 层知识，core/ 回归纯共享底座）。
 import { state, uiState, clipState } from "../core/state.js";
-import { DEFAULT_SETTINGS, DEFAULT_PLAYER_AI_QUICK_PROMPT } from "../core/defaults.js";
-
-// reader-get-context 的 payload 形状 + 签名投影单源（纯模块）：字段清单、
-// 组装工厂与签名键/排除清单都在 context-payload.js，本文件只喂运行时输入
-//（state.clip / state.settings / location.href）并 re-export 签名函数。
-import {
-  createReaderContextPayload,
-  computeContextStateSignature
-} from "../core/context-payload.js";
+import { DEFAULT_PLAYER_AI_QUICK_PROMPT } from "../core/defaults.js";
 
 import { startUrlWatcher, BOC_URL_CHANGE_EVENT } from "../core/url-watcher.js";
 import { ensureReaderChatTab } from "../reader/lazy-chat-tab.js";
@@ -107,29 +99,6 @@ type ContentScriptHandler<K extends ContentScriptMessageType> = (
   sendResponse: SendResponse
 ) => boolean;
 
-function handleClipRefresh(_message: Msg<"clip-refresh">, sendResponse: SendResponse): boolean {
-  // 候选03：刷新抓取会写面板 DOM（resetClipState / renderMeta 等），先确保
-  // UI 壳存在。首开面板/首次刷新的惰性装载开销被用户动作掩盖。
-  // 本消息由背景上下文链（context-resolver 的 needsRefresh 分支）触发，
-  // ensureUiReady 保证阅读视图壳可写。
-  ensureUiReady()
-    .then(() => ensureSummarizeChain())
-    .then((chain) =>
-      chain
-        .refreshClip()
-        .then(() => sendResponse({ ok: true, payload: chain.buildClipSnapshotPayload() }))
-        .catch((error) =>
-          sendResponse({ ok: false, error: getErrorMessage(error), payload: chain.buildClipSnapshotPayload() })
-        )
-    )
-    .catch((error) => {
-      // 链装载失败（清缓存重试后仍失败）：无法组装 payload，按错误口径回包
-      //（context-resolver 对缺 payload 容错，回落当前上下文快照）。
-      sendResponse({ ok: false, error: getErrorMessage(error) });
-    });
-  return true;
-}
-
 // 进阅读壳（工单 arch-slim/02）：三个 reading-view 消息只做意图路由，八步无
 // 闪变时序与 restore 失同步自愈都在 reader/shell.ts 唯一实现；消息名 → intent
 // 的映射单源在下方意图表。arch-slim-2/09：shell 改经 lazy-shell 动态装载后，
@@ -188,28 +157,6 @@ function handleReaderClose(_message: Msg<"reader-close">, sendResponse: SendResp
     .then(() => sendResponse({ ok: true }))
     .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
   return true;
-}
-
-function handleReaderGetContext(message: Msg<"reader-get-context">, sendResponse: SendResponse): boolean {
-  const payload = buildReaderContextPayload();
-  const signature = computeContextStateSignature(payload);
-  // 候选5 签名短路：调用方（经 background 转发的对话上下文链）带着它上次收到的
-  // 全量快照签名来问，content 状态没变就整份省略——不取字幕、不触发上层的
-  // clip-refresh 与热评网络拉取，一次往返即返回。仅在非 forceRefresh 时生效：
-  // 手动刷新/URL 变化语义上是明确要求全网络重拉。旧调用方不带 ifSignature
-  //（空串）自然走全量路径，向后兼容。
-  if (
-    message.forceRefresh !== true &&
-    typeof message.ifSignature === "string" &&
-    message.ifSignature &&
-    message.ifSignature === signature
-  ) {
-    sendResponse({ ok: true, unchanged: true, signature });
-    return false;
-  }
-  // 全量路径：payload 附 signature，调用方存下来供下一轮 ifSignature 使用。
-  sendResponse({ ok: true, payload: { ...payload, signature } });
-  return false;
 }
 
 function handleReaderGetHotComments(_message: Msg<"reader-get-hot-comments">, sendResponse: SendResponse): boolean {
@@ -288,13 +235,11 @@ function handleReaderSeekVideoTime(message: Msg<"reader-seek-video-time">, sendR
 // return false 对此零捕获，与 SW 侧不对称）。每个条目的处理器同时按其具体
 // 消息形状 Msg<K> 校验，签名与消息类型不匹配同样报错。
 const contentMessageHandlerTable = {
-  "clip-refresh": handleClipRefresh,
   "reader-enter": handleReaderShellEnter,
   "reader-restore": handleReaderShellEnter,
   "reader-enter-chat": handleReaderShellEnter,
   "player-ai-quick-action-chat": handlePlayerAiQuickActionChat,
   "reader-close": handleReaderClose,
-  "reader-get-context": handleReaderGetContext,
   "reader-get-hot-comments": handleReaderGetHotComments,
   "reader-seek-video-time": handleReaderSeekVideoTime
 } satisfies { [K in ContentScriptMessageType]: ContentScriptHandler<K> };
@@ -319,26 +264,6 @@ export function dispatchContentScriptMessage(rawMessage: unknown, sendResponse: 
   }
   return handler(rawMessage as ContentScriptMessage, sendResponse);
 }
-
-// ============================================================
-// reader-get-context：payload 组装 + 状态签名（候选5 上下文同步瘦身）
-// ============================================================
-
-// reader-get-context 的全量 payload 组装：字段清单/组装/缺省口径全部单源在
-// core/context-payload.js（createReaderContextPayload），本壳只注入运行时
-// 输入。抽出成函数（而非处理器内联）的唯一原因是签名短路要先拿到 payload 才能
-// 算签名。
-function buildReaderContextPayload() {
-  return createReaderContextPayload({
-    clip: state.clip,
-    settings: state.settings || DEFAULT_SETTINGS,
-    url: location.href
-  });
-}
-
-// 签名实现与「哪些字段参与/排除失效判定」的知识单源在 context-payload.js
-//（签名从 payload 字段清单的投影表派生）；此处 re-export 维持既有导入面。
-export { computeContextStateSignature };
 
 // URL 变化编排（自 core/runtime.js 搬入）：core/url-watcher.js 只负责给 history
 // 打补丁并广播 boc:urlchange（纯机制），本组合根监听 popstate/hashchange/

@@ -33,8 +33,7 @@ import type { LoadContextStateOptions } from "./conversation-store.js";
 // ===========================================================================
 
 export interface CreateContextLoadDeps {
-  // 上下文组装策略（core/context-assembly 的 createMessageChainContextFetch /
-  // createInProcessContextFetch）
+  // 上下文组装策略（core/context-assembly 的 createInProcessContextFetch）
   fetchContext: ContextFetch;
   // openCurrentContextUrl 的 transport（扩展页专属：chip 点击跳转目标视频；
   // reader 壳可不注入——缺省时 openCurrentContextUrl 为 no-op）
@@ -69,8 +68,7 @@ export function createContextLoad(deps: CreateContextLoadDeps): ContextLoad {
       .catch((error: unknown) => ({ kind: "error", error: (error as Error)?.message }) as ContextFetchOutcome);
 
     if (outcome.kind === "no-tab") {
-      // 决策点一（迁移前为 getActiveTab 落空即走，现由策略信封报告——getAiContextState
-      // 同样不被调用）：无可用标签页，按计划做失败清理（文案/清上下文/
+      // 决策点一：无可用标签页，按计划做失败清理（文案/清上下文/
       // 重置视图的取舍全部来自策略计划）。
       const plan = resolveNoTabPlan({ hasPinnedConversation, silent });
       chatSessionState.liveContextData = null;

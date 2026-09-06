@@ -7,10 +7,9 @@
 //                                  未命中（无当前页面可快照）时的兜底，组合根
 //                                  经 conversation-store 的 resolveAiConversationRef
 //                                  接缝注入（purpose="context"）；
-//   resolveAiConversationPageRef  分页信息解析（purpose="page"）；
-//   getAiContextState             扩展页消息链的 tab transport（无标签页世界经
-//                                  core/context-assembly 的
-//                                  createMessageChainContextFetch 调用）。
+//   resolveAiConversationPageRef  分页信息解析（purpose="page"）。
+// （原 getAiContextState 的 tab transport 随扩展页消息链策略退役，见 ticket
+// arch-slim-4/01——它是 reader-get-context / clip-refresh 两条消息的唯一发送方。）
 // B站抓取统一走 bilibili/gateway-core.js 的 bgFetchJson 传输叶（arch-slim-2/04 拆叶）。
 
 import { getSubtitleCacheKey, loadSubtitleFromCache } from "../subtitle/cache.js";
@@ -26,31 +25,15 @@ import {
 import { bgFetchJson } from "../bilibili/gateway-core.js";
 import {
   extractPageIndexFromUrl,
-  buildCanonicalVideoUrl,
-  isSupportedBilibiliPage
+  buildCanonicalVideoUrl
 } from "../bilibili/video-id-shared.js";
 import {
   pickPreferredSubtitle as pickPreferredSubtitleTrack,
   normalizeSubtitleTracks
 } from "../subtitle/selection.js";
 import { getMergedSettings } from "../core/settings-store.js";
-import { withTimeout } from "../shared/error-helpers.js";
 import { buildAiContextRef } from "./conversation.js";
 import type { AiContext, HotComment, SubtitleBodyItem } from "./types.js";
-
-// ===== 页内状态（由调用方注入：ensureReaderContentReady / sendMessageToTab）=====
-// 调用方直接传入，避免把注入生命周期耦合进本模块。
-
-interface ContextResponse {
-  ok?: boolean;
-  unchanged?: boolean;
-  payload?: Record<string, unknown>;
-  error?: string;
-  comments?: unknown[];
-}
-
-type SendMessageToTab = (tabId: number, message: Record<string, unknown>) => Promise<ContextResponse>;
-type EnsureReaderContentReady = (tabId: number) => Promise<void>;
 
 // ===== 上下文解析 =====
 
@@ -196,122 +179,5 @@ export async function resolveAiConversationPageRef(contextRef: unknown): Promise
     cid: String(page?.cid || ref.cid || "").trim(),
     pageIndex,
     pageTitle: String(page?.part || ref.pageTitle || "").trim()
-  };
-}
-
-// ===== 页内状态获取（依赖注入 tabOps：ensureReaderContentReady + sendMessageToTab）=====
-
-// clip-refresh 的响应要等 content 的 refreshClip 全程完成；无字幕长视频会
-// 触发小时级 ASR 转写，消息通道撑不住这种长事务（挂起期间任何失败都会让
-// 侧边栏把上下文清空、误报"不是 B 站视频页"）。限时等待，超时视为"抓取仍在
-// 后台进行"，回退读取当前快照（subtitleFetchState 会告知转写进行中）。
-const REFRESH_WAIT_MS = 10000;
-
-interface GetAiContextStateOptions {
-  forceRefresh?: boolean;
-  ifSignature?: string;
-}
-
-interface AiContextStateResult extends Record<string, unknown> {
-  unchanged?: boolean;
-  hotComments?: unknown[];
-  isVideoContext?: boolean;
-}
-
-export async function getAiContextState(
-  tabId: number | string | unknown,
-  { forceRefresh = false, ifSignature = "" }: GetAiContextStateOptions = {},
-  tabOps: { ensureReaderContentReady?: EnsureReaderContentReady; sendMessageToTab?: SendMessageToTab } = {}
-): Promise<AiContextStateResult> {
-  const { ensureReaderContentReady, sendMessageToTab } = tabOps;
-  if (!tabId) {
-    throw new Error("缺少标签页信息");
-  }
-
-  const tab = await chrome.tabs.get(Number(tabId)).catch(() => null);
-  if (!tab?.id) {
-    throw new Error("找不到当前标签页。");
-  }
-
-  if (!isSupportedBilibiliPage(tab.url)) {
-    const tabLike = tab as chrome.tabs.Tab & { title?: string; url?: string };
-    return {
-      title: String(tabLike.title || "").trim(),
-      url: String(tabLike.url || "").trim(),
-      author: "",
-      uploadDate: "",
-      subtitleBody: [],
-      hotComments: [],
-      isVideoContext: false
-    };
-  }
-
-  await ensureReaderContentReady!(tab.id);
-
-  let contextResp = await sendMessageToTab!(tab.id, {
-    type: "reader-get-context",
-    forceRefresh,
-    // 候选5：透传调用方上次全量快照的签名；content 判定状态未变时整份省略。
-    // forceRefresh=true 时 content 侧忽略签名，语义不变。
-    ifSignature
-  });
-
-  // 候选5 签名短路：content 状态与调用方快照一致 → 不取字幕、不发 clip-refresh、
-  // 也不拉热评（下方热评块不可达），直接返回 { unchanged: true }（调用方
-  // 据此跳过 apply/渲染）。短路只发生在首查——后面 needsRefresh 分支的复查不
-  // 带签名，必然回全量。
-  if (contextResp?.ok && contextResp?.unchanged === true) {
-    return { unchanged: true };
-  }
-
-  const hasPayload = Boolean(contextResp?.ok && contextResp?.payload);
-  const hasLoadedClip = Boolean(
-    contextResp?.payload?.bvid ||
-    contextResp?.payload?.aid ||
-    contextResp?.payload?.title
-  );
-  const needsRefresh =
-    forceRefresh ||
-    !hasPayload ||
-    (!hasLoadedClip && (!Array.isArray(contextResp!.payload!.subtitleBody) || !contextResp!.payload!.subtitleBody.length));
-
-  if (needsRefresh) {
-    const refreshResp = await withTimeout(
-      sendMessageToTab!(tab.id, { type: "clip-refresh" }),
-      REFRESH_WAIT_MS
-    );
-    if (!refreshResp?.ok) {
-      // 超时（无响应）或 content 报错：不整体失败，回退读取当前快照。
-      // 无字幕长视频的 ASR 转写以分钟/小时计，这里必须立刻返回"转写中"的
-      // 可用快照，由调用方决定等待策略。
-      contextResp = await sendMessageToTab!(tab.id, { type: "reader-get-context" });
-      if (!contextResp?.ok || !contextResp?.payload) {
-        throw new Error(refreshResp?.error || "当前视频上下文加载失败");
-      }
-    } else {
-      contextResp = await sendMessageToTab!(tab.id, { type: "reader-get-context" });
-    }
-  }
-
-  if (!contextResp?.ok || !contextResp?.payload) {
-    throw new Error("当前页面上下文读取失败");
-  }
-
-  // 候选5：热评网络拉取只发生在全量路径——unchanged 已在上方提前返回，走到
-  // 这里必然是全量（或 forceRefresh 后的复查），为热评多一次往返才值得。
-  let hotComments: unknown[] = [];
-  try {
-    const commentsResp = await sendMessageToTab!(tab.id, { type: "reader-get-hot-comments" });
-    if (commentsResp?.ok && Array.isArray(commentsResp.comments)) {
-      hotComments = commentsResp.comments;
-    }
-  } catch {
-    // 评论失败时静默降级，避免阻断主流程
-  }
-
-  return {
-    ...contextResp.payload,
-    hotComments,
-    isVideoContext: true
   };
 }

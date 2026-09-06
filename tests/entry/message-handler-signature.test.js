@@ -1,12 +1,14 @@
-// 候选5「sidepanel 上下文同步瘦身」content 侧回归测试：
+// context-payload 形状单源回归测试：
 // - computeContextStateSignature：签名字段覆盖 对话侧 消费的全部可变状态，
 //   且对 url/title/hotComments 等非判定字段免疫；
-// - reader-get-context 处理器：ifSignature 命中 → 立即回 unchanged（不带
-//   payload）；签名不匹配 → 全量 payload 附 signature；forceRefresh 绕过短路；
-//   旧调用方不带 ifSignature 自动走全量（向后兼容）。
-// mock 模式沿 tests/entry/message-handler-chapters.test.js：重依赖全 mock，
-// state 走真实模块，单纪元导入。（arch-slim-2/09：测试随 message-handler 自
-// tests/core/ 迁 tests/entry/。）
+// - createReaderContextPayload：组装映射与缺省/归一化口径；
+// - 消费方对账锚点：对话侧读取的快照字段 ⊆ payload ∪ 附加层字段（源码静态
+//   扫描）。
+// （原 reader-get-context 处理器回归随该处理器退役——消息链策略与消息本身
+// 已删，见 ticket arch-slim-4/01；签名语义由 context-payload 纯函数测试与
+// context-inprocess.test.js 的进程内链契约覆盖。）
+// mock 模式：重依赖全 mock，state 走真实模块，单纪元导入。（arch-slim-2/09：
+// 测试随 message-handler 自 tests/core/ 迁 tests/entry/。）
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -67,8 +69,7 @@ vi.mock("../../extension/bilibili/gateway.js", () => ({
 }));
 
 import {
-  bindRuntimeEvents,
-  computeContextStateSignature
+  bindRuntimeEvents
 } from "../../extension/entry/message-handler.js";
 import {
   READER_CONTEXT_PAYLOAD_FIELDS,
@@ -76,8 +77,6 @@ import {
   SIGNATURE_INDIRECT_FIELDS,
   SIGNATURE_EXCLUDED_FIELDS,
   createReaderContextPayload,
-  // 纯函数块直接测 context-payload.js 的单源实现（message-handler 的 re-export
-  // 与此为同一函数，处理器级行为由上方 describe 覆盖）。
   computeContextStateSignature
 } from "../../extension/core/context-payload.js";
 import { state } from "../../extension/core/state.js";
@@ -92,14 +91,6 @@ vi.stubGlobal("chrome", {
 });
 
 bindRuntimeEvents();
-const messageListener = onMessageListeners[0];
-
-function requestContext(message = {}) {
-  const sendResponse = vi.fn();
-  messageListener({ type: "reader-get-context", ...message }, {}, sendResponse);
-  expect(sendResponse).toHaveBeenCalledTimes(1);
-  return sendResponse.mock.calls[0][0];
-}
 
 // 组一份「就绪」状态的 clip：字段覆盖签名判定矩阵
 function seedReadyClip() {
@@ -212,70 +203,6 @@ describe("computeContextStateSignature 纯函数", () => {
   });
 });
 
-describe("reader-get-context 签名短路", () => {
-  beforeEach(() => {
-    seedReadyClip();
-  });
-
-  it("旧调用方不带 ifSignature → 全量 payload 且附 signature（向后兼容）", () => {
-    const response = requestContext();
-    expect(response.ok).toBe(true);
-    expect(response.payload).toBeTruthy();
-    const payload = response.payload;
-    expect(payload.bvid).toBe("BV1sig");
-    expect(payload.signature).toBe(computeContextStateSignature(payload));
-  });
-
-  it("ifSignature 命中 → 立即回 unchanged（无 payload），一次往返", () => {
-    const first = requestContext();
-    const signature = first.payload.signature;
-
-    const second = requestContext({ ifSignature: signature });
-    expect(second).toEqual({ ok: true, unchanged: true, signature });
-    expect(second.payload).toBeUndefined();
-  });
-
-  it("ifSignature 不匹配（对话侧 换签/换标签页）→ 走全量路径", () => {
-    const response = requestContext({ ifSignature: "stale-signature" });
-    expect(response.ok).toBe(true);
-    expect(response.payload?.bvid).toBe("BV1sig");
-    expect(response.unchanged).toBeUndefined();
-  });
-
-  it("forceRefresh=true 时即使签名命中也绕过短路（手动刷新语义）", () => {
-    const first = requestContext();
-    const signature = first.payload.signature;
-
-    const forced = requestContext({ ifSignature: signature, forceRefresh: true });
-    expect(forced.ok).toBe(true);
-    expect(forced.payload?.bvid).toBe("BV1sig");
-    expect(forced.unchanged).toBeUndefined();
-  });
-
-  it("content 状态变化（body 追加）→ 旧签名不再命中，全量返回新状态", () => {
-    const first = requestContext();
-    const oldSignature = first.payload.signature;
-
-    state.clip.setSubtitleBody([
-      ...state.clip.subtitleBody,
-      { from: 9, to: 12, content: "第三句" }
-    ]);
-
-    const second = requestContext({ ifSignature: oldSignature });
-    expect(second.ok).toBe(true);
-    expect(second.payload?.subtitleBody).toHaveLength(3);
-    expect(second.payload?.signature).not.toBe(oldSignature);
-  });
-});
-
-function buildPayload() {
-  // 经真实处理器组 payload（含 location.href / settings 等运行时输入），
-  // 保证签名函数测试的是与线上完全一致的 shape
-  const response = requestContext();
-  expect(response.ok).toBe(true);
-  return response.payload;
-}
-
 // ============================================================
 // context-payload 形状单源（补齐模块头注承诺的形状锁死断言）
 //
@@ -288,7 +215,7 @@ function buildPayload() {
 
 // —— 手写期望固件：改动以上任一清单都必须显式过这里的逐字断言 ——
 
-// reader-get-context 全量 payload 的字段清单（顺序 = 工厂组装序 = 线上 key 序）
+// AiContext 快照全量 payload 的字段清单（顺序 = 工厂组装序）
 const EXPECTED_PAYLOAD_FIELDS = [
   "url",
   "title",
@@ -398,6 +325,19 @@ const EXPECTED_FULL_PAYLOAD = {
   hotComments: []
 };
 
+// 组 payload 供签名测试：工厂直读当下 state（不重置——用例先 seed/扰动再
+// buildPayload，内置 seed 会抹掉扰动）。原「经 reader-get-context 处理器组
+// payload」随处理器退役（ticket arch-slim-4/01）；签名键/排除语义由
+// context-payload 单源覆盖，线上组装点（message-handler bindUrlChangeHandler /
+// context-assembly 进程内链）喂同一工厂。
+function buildPayload() {
+  return createReaderContextPayload({
+    clip: state.clip,
+    settings: state.settings,
+    url: "https://www.bilibili.com/video/BV1sig"
+  });
+}
+
 // 纯函数块的基础 payload：直接经工厂组（不经处理器），只依赖单源模块
 function makeFullPayload() {
   return createReaderContextPayload({
@@ -415,12 +355,6 @@ describe("context-payload 形状快照与签名三分类对账", () => {
   it("工厂产物的 key 集合与顺序 = 字段清单（形状快照）", () => {
     const payload = makeFullPayload();
     expect(Object.keys(payload)).toEqual(EXPECTED_PAYLOAD_FIELDS);
-  });
-
-  it("处理器接线一致性：经 reader-get-context 组出的 payload key 序 = 字段清单 + signature", () => {
-    // message-handler 的 buildSidepanelContextPayload 壳只喂运行时输入，产出形状
-    // 必须与工厂直出一致；signature 由处理器附加在末尾。
-    expect(Object.keys(buildPayload())).toEqual([...EXPECTED_PAYLOAD_FIELDS, "signature"]);
   });
 
   it("签名三分类常量逐字锁死", () => {
@@ -616,8 +550,8 @@ describe("createReaderContextPayload 组装映射", () => {
 // 消费方对账锚点（静态扫描）
 //
 // 契约边界（context-payload.js 头注）：对话侧实际持有的快照 =
-//   payload + { signature }（message-handler 附加）
-//          + { hotComments 覆盖, isVideoContext }（background 转发层补写）。
+//   payload + { signature }（进程内装配链 createInProcessContextFetch 附加）
+//          + { hotComments, isVideoContext }（同上补写）。
 // 这里把对账结论固化为测试：扫描 sidepanel 消费方源码中对快照的属性访问，
 // 逐点断言「扫描结果 == 手写期望集」且「⊆ 允许集」。相等断言防漏报（新增
 // 读取必须显式更新期望），子集断言即对账结论本身。
@@ -628,13 +562,13 @@ describe("createReaderContextPayload 组装映射", () => {
 // 允许 对话侧 读取的快照字段全集 = payload 清单 ∪ 附加层字段 ∪ 两处已记录的兼容项
 const ALLOWED_SNAPSHOT_FIELDS = new Set([
   ...READER_CONTEXT_PAYLOAD_FIELDS,
-  "signature", // message-handler 处理器附加（ifSignature 回传来源）
-  "hotComments", // background getAiContextState 整体覆盖
-  "isVideoContext", // background getAiContextState 补写（content 不组装）
+  "signature", // 进程内装配链附加（ifSignature 回传来源）
+  "hotComments", // 装配链全量路径整体覆盖
+  "isVideoContext", // 装配链补写（payload 单源不组装）
   // 兼容回退（已记录，非 payload 字段）：ai/conversation.js 的旧持久化会话
   // ref 兼容读取——context?.pageIndex 缺失时回落 context?.page
   "page",
-  // 响应信封字段（非快照字段）：sidepanel.js 读 resp.payload.unchanged 判定
+  // 响应信封字段（非快照字段）：context-policy 读 resp.payload.unchanged 判定
   // 签名短路
   "unchanged"
 ]);
@@ -810,24 +744,6 @@ describe("消费方对账锚点：对话侧 读取字段 ⊆ payload ∪ {signat
       ["pageIndex", "page", "url"],
       "extractConversationPageSuffix context"
     );
-  });
-
-  it("ai/context-resolver.js getAiContextState：转发层读取与覆盖契约", () => {
-    const source = readSource("../../extension/ai/context-resolver.js");
-    const block = sliceBlock(source, "export async function getAiContextState");
-    // hasLoadedClip 判定（bvid/aid/title）+ needsRefresh 的字幕体空判定（subtitleBody）
-    assertReconciliation(
-      scanFields(block, "payload"),
-      ["bvid", "aid", "title", "subtitleBody"],
-      "getAiContextState payload"
-    );
-    // 覆盖契约固化：返回包 = 整包展开 content payload + hotComments 整体覆盖 +
-    // isVideoContext 补写（content 侧恒 [] 的字段在此获得真值）
-    expect(block).toMatch(/\.\.\.contextResp\.payload/);
-    expect(block).toMatch(/(?<![A-Za-z0-9_$])hotComments\s*,/);
-    expect(block).toMatch(/isVideoContext:\s*true/);
-    // 签名短路透传：content 回 unchanged 时转发层原样上抛（不带快照）
-    expect(block).toMatch(/unchanged:\s*true/);
   });
 
   it("chat/chat-runtime.js：整包转发 contextData（含 subtitleBody 省略重传）", () => {

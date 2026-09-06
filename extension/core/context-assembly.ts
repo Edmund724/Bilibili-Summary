@@ -2,9 +2,9 @@
 //
 // 为什么存在：AiContext 快照的「装配」此前分居两处——core/context-payload.ts
 // 持有字段清单/组装工厂/签名投影（形状与签名单源），而把运行时输入变成快照的
-// 三条 ContextFetch 策略（扩展页消息链、进程内直读、pinned 补水身份短路）住在
+// 两条 ContextFetch 策略（进程内直读、pinned 补水身份短路）住在
 // chat/context-load.ts，与 loadContextState 编排壳混装在一个模块里，「从哪里
-// 装配 AiContext」因此有两个答案。本模块把三条策略收进 context-payload 锚定的
+// 装配 AiContext」因此有两个答案。本模块把两条策略收进 context-payload 锚定的
 // 唯一装配链：两条装配路（阅读对话 tab 的当前视频路径 = createInProcessContextFetch；
 // pinned 补水路径 = createInProcessPinnedContextResolver，命中时复用上一条）共享
 // 同一套校验（createReaderContextPayload 的缺省容错）与字幕签名语义
@@ -12,20 +12,18 @@
 //
 // 装配链与网络适配器的分工：本模块只负责「装配」（运行时输入 → 带
 // signature / isVideoContext 的 AiContext 快照信封）；「无页面 / 无标签页」时的
-// 纯网络路径（ai/context-resolver 的 resolveAiConversationContext /
-// getAiContextState）只是装配链落回的适配器——消息链策略调用 getAiContextState
-// 的 tab transport，pinned 解析器未命中时调用注入的 resolveNetwork，本模块不
-// 复制任何网络装配知识。
+// 纯网络路径（ai/context-resolver 的 resolveAiConversationContext）只是装配链
+// 落回的适配器——pinned 解析器未命中时调用注入的 resolveNetwork，本模块不
+// 复制任何网络装配知识。（原「扩展页消息链」策略随 sidepanel 页面摘除退役，
+// 见 ticket arch-slim-4/01。）
 //
 // 依赖方向（无环）：core/context-payload（形状/签名纯模块）+ ai/conversation
-//（contextRef 归一化纯函数）+ ai/context-resolver（消息链 transport）+
-// core/defaults；core/state 与 bilibili/gateway 仅热评缺省实现的动态 import
-//（不拖进消费方的静态模块图）。不 import chat/*——快照类型用 ai/types 的
-// AiContext（chat-state 的 ChatSessionContextSnapshot 就是它的别名）——也不
-// import 组合根。生产消费方仅 reader/chat-tab.ts（对话组合根，按 ContextFetch
-// 策略注入点与 resolveAiConversationRef 接缝接线）。
+//（contextRef 归一化纯函数）+ core/defaults；core/state 与 bilibili/gateway
+// 仅热评缺省实现的动态 import（不拖进消费方的静态模块图）。不 import chat/*——
+// 快照类型用 ai/types 的 AiContext（chat-state 的 ChatSessionContextSnapshot
+// 就是它的别名）——也不 import 组合根。生产消费方仅 reader/chat-tab.ts（对话
+// 组合根，按 ContextFetch 策略注入点与 resolveAiConversationRef 接缝接线）。
 import { buildAiContextRef } from "../ai/conversation.js";
-import { getAiContextState } from "../ai/context-resolver.js";
 import type { AiContext } from "../ai/types.js";
 import {
   createReaderContextPayload,
@@ -34,27 +32,16 @@ import {
 import { DEFAULT_SETTINGS, type Settings } from "./defaults.js";
 import type { ClipState } from "./state.js";
 
-// getAiContextState 的 tabOps 消息响应信封（对齐 context-resolver 的
-// ContextResponse 结构；测试注入宽松桩）
-interface TabStateResponse {
-  ok?: boolean;
-  unchanged?: boolean;
-  payload?: Record<string, unknown>;
-  error?: string;
-  comments?: unknown[];
-}
-
 // ===========================================================================
 // 上下文组装策略（ContextFetch）：loadContextState 的「拉数据」注入点（PR5）
 // ===========================================================================
 
 // fetchContext 的输出信封（判别联合）：
-//   no-tab   无可用标签页（消息链专属：getActiveTab 落空；进程内直读恒有
-//            当前页，不产生该分支）→ loadContextState 走 resolveNoTabPlan
+//   no-tab   无可用标签页（进程内直读恒有当前页，不产生该分支；联合保留该
+//            分支承载「无页面」语义）→ loadContextState 走 resolveNoTabPlan
 //   payload  全量快照，或签名短路命中（payload.unchanged === true，policy 据
 //            此走 SKIP_UNCHANGED；两条策略实现都以该形态表达短路）
-//   error    读取失败（tabUrl 可选：消息链在拿到 tab 后失败仍携带，与迁移前
-//            「error 分支也刷新 liveTabUrl」的行为一致）
+//   error    读取失败（tabUrl 可选）
 export type ContextFetchPayload = AiContext | { unchanged: true };
 
 export type ContextFetchOutcome =
@@ -73,55 +60,7 @@ export interface ContextFetchOptions {
 export type ContextFetch = (opts: ContextFetchOptions) => Promise<ContextFetchOutcome>;
 
 // ---------------------------------------------------------------------------
-// 策略一：扩展页消息链（sidepanel 页面已随 PR5c 摘除，策略保留供扩展页复用）
-// ---------------------------------------------------------------------------
-
-export interface MessageChainContextFetchDeps {
-  getActiveTab: () => Promise<{ id?: number; url?: string } | null>;
-  // getAiContextState 的 tabOps（content 就绪 + 单发 tab 消息，生产组装点
-  // 传 core/shared 的真实实现；签名对齐 context-resolver 的 EnsureReaderContentReady
-  // / SendMessageToTab，测试注入宽松桩）
-  ensureReaderContentReady: (tabId: number) => Promise<void>;
-  sendMessageToTab: (tabId: number, message: Record<string, unknown>) => Promise<TabStateResponse>;
-}
-
-// 行为与迁移前 loadContextState 内联的「getActiveTab → getAiContextState」
-// 一致：无可用标签页 → no-tab 信封（getAiContextState 不被调用）；往返失败
-// → error 信封（tabUrl 照带——迁移前 error 分支也刷新 liveTabUrl）。
-// getAiContextState 的错误不外抛，折成 error 信封（error 字段与迁移前同为
-// (error as Error).message）。
-export function createMessageChainContextFetch(deps: MessageChainContextFetchDeps): ContextFetch {
-  return async function fetchContext({ forceRefresh, ifSignature }: ContextFetchOptions): Promise<ContextFetchOutcome> {
-    const tab = await deps.getActiveTab();
-    if (!tab?.id) {
-      return { kind: "no-tab" };
-    }
-    const tabUrl = String(tab.url || "").trim();
-    try {
-      // 解析器的返回面是 { unchanged: true } 或全量快照（运行时判别），类型上
-      // 的宽 boolean 收窄为字面量信封（与消息链现状一致，policy 读 unchanged
-      // 严格 === true）。
-      const payload = (await getAiContextState(
-        tab.id,
-        {
-          forceRefresh,
-          // 候选5：带上次全量快照的签名，content 侧状态未变时一次往返即短路返回
-          //（不重发整份字幕体、不拉热评）。forceRefresh=true 时 content 忽略签名，
-          // 手动刷新语义不变。liveContextData 为空（首次/此前失败）时签名为空串，
-          // content 必走全量。
-          ifSignature
-        },
-        { ensureReaderContentReady: deps.ensureReaderContentReady, sendMessageToTab: deps.sendMessageToTab }
-      )) as ContextFetchPayload;
-      return { kind: "payload", tabUrl, payload };
-    } catch (error: unknown) {
-      return { kind: "error", tabUrl, error: (error as Error).message };
-    }
-  };
-}
-
-// ---------------------------------------------------------------------------
-// 策略二：进程内直读（reader 用，当前视频路径的装配入口）
+// 策略一：进程内直读（reader 用，当前视频路径的装配入口）
 // ---------------------------------------------------------------------------
 
 export interface InProcessContextFetchDeps {
@@ -164,15 +103,13 @@ async function defaultFetchHotComments(): Promise<unknown[]> {
 }
 
 // reader 与 content 同进程：直接读 state.clip + core/context-payload 组装，
-// 不走「扩展页 → background → content」的消息往返。消息链的三件事在此重演
-//（工单 08 短路验收，测试见 tests/chat/context-inprocess.test.js）：
+// 不走「扩展页 → background → content」的消息往返。此前的消息链策略退役后，
+// 这是 ContextFetch 的唯一生产实现（工单 08 短路验收，测试见
+// tests/chat/context-inprocess.test.js），三件事在此收敛：
 //   1. 签名短路：ifSignature 与当前 payload 签名一致且非 forceRefresh →
-//      unchanged 信封（不重发字幕体、不拉热评，对应 message-handler
-//      reader-get-context 处理器的现有语义）；
-//   2. 热评时机：仅全量路径拉热评（unchanged 已提前返回），时机与
-//      getAiContextState 现状一致；
-//   3. 快照附带 signature（对应 content 全量路径的回执附签）与 isVideoContext
-//      补写（对应 background 转发层的补写职责——payload 单源不组装该字段），
+//      unchanged 信封（不重发字幕体、不拉热评）；
+//   2. 热评时机：仅全量路径拉热评（unchanged 已提前返回）；
+//   3. 快照附带 signature 与 isVideoContext 补写（payload 单源不组装该字段），
 //      loadContextState 落进 liveContextData 供下一轮 ifSignature。
 // 「clip-refresh 驱动抓取」不在此重演：reader 世界的抓取由 reader 自身的
 // URL 变化编排（message-handler bindUrlChangeHandler）驱动；转写中发送的等待
@@ -226,7 +163,7 @@ export function createInProcessContextFetch(deps: InProcessContextFetchDeps = {}
 //     装配给 pinned 补水（其发送路径不经 subtitle-wait 等待闸）。
 // ref 先经 buildAiContextRef 归一（单一构造器；bvid 允许从 url 回落，但 cid
 // 必须显式存在才可能命中）。
-export function doesContextRefMatchCurrentClip(
+function doesContextRefMatchCurrentClip(
   contextRef: unknown,
   clip: Partial<ClipState> | null | undefined
 ): boolean {
@@ -259,7 +196,7 @@ export function doesContextRefMatchCurrentClip(
 //（换视频/换分P/换轨/无页面/转写中）→ 原样落回注入的网络解析器
 //（ai/context-resolver 的纯网络路径适配器，本装配链不复制其装配知识）。
 // conversation-store 的 context 解析 dep 因此保持「进程内短路 + 网络」两个
-// 适配器的复合，接缝真实（扩展页消息链世界仍直接接纯网络解析器）。
+// 适配器的复合，接缝真实。
 export interface InProcessPinnedContextResolverDeps {
   // 进程内快照输入（与 createInProcessContextFetch 同一套注入、同一缺省口径）。
   clip?: () => Partial<ClipState>;

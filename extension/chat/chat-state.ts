@@ -24,9 +24,9 @@
 import { DEFAULT_INITIAL_QUICK_PROMPTS, DEFAULT_PRESET_PROMPTS } from "../core/defaults.js";
 import type { AiContext } from "../ai/types.js";
 
-// 上下文快照 = getAiContextState 返回的 payload 的落地形态。结构上
-// 与 AI 域的 AiContext 同形（含 subtitleBody / isVideoContext / url 等字段与
-// 开放索引签名），复用该类型避免第二份手写契约。
+// 上下文快照 = ContextFetch 全量 payload 的落地形态（core/context-assembly
+// 装配链组出）。结构上与 AI 域的 AiContext 同形（含 subtitleBody /
+// isVideoContext / url 等字段与开放索引签名），复用该类型避免第二份手写契约。
 export type ChatSessionContextSnapshot = AiContext;
 
 // 可用 AI 平台（loadProvidersAndProviders 过滤 enabled 后写入 providers）

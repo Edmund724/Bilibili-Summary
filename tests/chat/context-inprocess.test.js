@@ -1,17 +1,14 @@
 // tests/chat/context-inprocess.test.js
-// 工单 08「消息链短路验收」的进程内直读重演（三事各一条 + 缺省热评实现的对账）：
+// createInProcessContextFetch 装配链的进程内契约（三事各一条 + 缺省热评实现的对账）：
 //
 //   ① 字幕签名未变 → 不重发字幕体到 offscreen：createInProcessContextFetch 的
-//      签名短路命中（对应 message-handler reader-get-context 处理器现有签名
-//      短路语义的进程内重演）→ loadContextState 走 SKIP_UNCHANGED（不落新
+//      签名短路命中 → loadContextState 走 SKIP_UNCHANGED（不落新
 //      payload、contextKey 不变）→ chat-runtime 依 lastAckedContextKey 省略
 //      字幕体。签名短路与 offscreen 省传的接力在进程内路径完整成立。
 //
-//   ② 首次上下文组装时拉热评（时机与消息链现状一致）：仅全量路径拉取（对应
-//      getAiContextState「unchanged 已提前返回，热评只在全量路径」的时机），
-//      热评合并进快照（对应 background 转发层的整体覆盖），并随快照附带
-//      signature / isVideoContext 补写（分别对应 content 回执附签与背景层补写
-//      职责）。forceRefresh 语义与消息链一致：忽略签名强制全量。
+//   ② 首次上下文组装时拉热评：仅全量路径拉取（unchanged 已提前返回），
+//      热评合并进快照，并随快照附带 signature / isVideoContext 补写。
+//      forceRefresh 语义：忽略签名强制全量。
 //
 //   ③ ASR 转写中发送 → 走 subtitle-wait 等待而非发空上下文（事故史见
 //      chat/subtitle-wait.ts 头注）：转写中（subtitleFetchState "loading" 且

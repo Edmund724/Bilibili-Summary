@@ -1,12 +1,12 @@
 // 总结链（subtitle/fetcher.js 抓取编排 + subtitle/ui.js + notes/render.js 及其
 // 独占依赖）的按需加载器（候选02 分层惰性）。
 //
-// 为什么惰性：抓字幕/笔记渲染链（~20KB）只在首次抓字幕（clip-refresh、刷新
-// 抓取按钮、URL 变化自动刷新、阅读模式进入后的后台刷新）时才有职责。候选02
+// 为什么惰性：抓字幕/笔记渲染链（~20KB）只在首次抓字幕（刷新抓取按钮、URL
+// 变化自动刷新、阅读模式进入后的后台刷新）时才有职责。候选02
 // 之前它经 message-handler / ui-renderer 的静态 import 常驻。分层后这里成为
 // 动态 import 边：esbuild 把 fetcher 连同其独占依赖切进独立 chunk，只在首次
-// ensureSummarizeChain() 时才下载。一键总结热路径（点击 AI 键 → clip-refresh）
-// 上的装载是本地 chunk 动态 import（~10ms），被两轮消息往返完全掩盖。
+// ensureSummarizeChain() 时才下载。热路径上的装载是本地 chunk 动态 import
+//（~10ms），被消息往返/用户动作掩盖。
 //
 // 写法与 ai/lazy-player-ai.js、reader/lazy-reader.js 同款：加载器本体收拢于
 // shared/lazy-import.js 的 createLazyLoader（手写 promise 缓存 + 失败清缓存

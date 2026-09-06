@@ -14,21 +14,8 @@ import type { Settings } from "../core/defaults.js";
 import type { AiProviderPreset, AsrProviderPreset } from "../core/presets.js";
 import type { AiProvider, HotComment } from "../ai/types.js";
 import type { AsrProvider } from "../asr/asr-provider-store.js";
-import type { ReaderContextPayload } from "../core/context-payload.js";
 
 // ===== content script 处理的 runtime 消息 =====
-
-export type ClipRefreshMessage = {
-  type: "clip-refresh";
-};
-
-// 响应锚点：entry/message-handler.ts clip-refresh 处理器——成功/失败都随包当前
-// clip 快照 payload（失败时供调用方回落当前上下文）。
-export type ClipRefreshResponse = {
-  ok: boolean;
-  payload?: Record<string, unknown>;
-  error?: string;
-};
 
 export type ReaderEnterMessage = {
   type: "reader-enter";
@@ -80,25 +67,6 @@ export type ReaderEnterChatMessage = {
 // 处理器（entry/message-handler.ts）恒 { ok: true }（即答语义同 reader-enter）。
 export type ReaderEnterChatResponse = { ok: boolean; error?: string };
 
-// 消息类型为 reader 中性命名（PR5c 自原 sidepanel-* 改名；兼容别名已随存量
-// 消费方迁移到期移除）。
-export type ReaderGetContextMessage = {
-  type: "reader-get-context";
-  forceRefresh?: boolean;
-  ifSignature?: string;
-};
-
-// 响应锚点：entry/message-handler.ts reader-get-context 处理器——恒成功两分支：
-// 签名短路命中回 { ok: true, unchanged: true, signature }（payload 整份省略）；
-// 全量路径回 { ok: true, payload: { ...payload, signature } }（调用方存 signature
-// 供下一轮 ifSignature）。
-export type ReaderGetContextResponse = {
-  ok: boolean;
-  unchanged?: boolean;
-  payload?: ReaderContextPayload & { signature: string };
-  signature?: string;
-};
-
 export type ReaderGetHotCommentsMessage = {
   type: "reader-get-hot-comments";
 };
@@ -125,12 +93,10 @@ export type ReaderSeekVideoTimeResponse = {
 };
 
 export type ContentScriptMessage =
-  | ClipRefreshMessage
   | ReaderEnterMessage
   | ReaderCloseMessage
   | ReaderEnterChatMessage
   | ReaderRestoreMessage
-  | ReaderGetContextMessage
   | ReaderGetHotCommentsMessage
   | ReaderSeekVideoTimeMessage
   // background → content 直发：player-ai 悬浮按钮语义反转后的快捷动作消费
@@ -436,12 +402,10 @@ export type SendResponse = (response?: MessageResponse) => void;
 // 点以消息字面量（如 { type: "get-settings" }）即得完整响应形状（设计 A 案）。
 // 新增消息漏配响应条目时 M 解析为 never——tests/shared/messaging-response-map.guard.ts
 // 的类型级穷尽断言会在 tsc 门禁报错，不会静默退化为 unknown。
-export type ResponseOf<M> = M extends ClipRefreshMessage ? ClipRefreshResponse
-  : M extends ReaderEnterMessage ? ReaderEnterResponse
+export type ResponseOf<M> = M extends ReaderEnterMessage ? ReaderEnterResponse
   : M extends ReaderCloseMessage ? ReaderCloseResponse
   : M extends ReaderEnterChatMessage ? ReaderEnterChatResponse
   : M extends ReaderRestoreMessage ? ReaderRestoreResponse
-  : M extends ReaderGetContextMessage ? ReaderGetContextResponse
   : M extends ReaderGetHotCommentsMessage ? ReaderGetHotCommentsResponse
   : M extends ReaderSeekVideoTimeMessage ? ReaderSeekVideoTimeResponse
   : M extends PlayerAiQuickActionChatMessage ? PlayerAiQuickActionChatResponse

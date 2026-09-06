@@ -3,8 +3,7 @@
 // 直测；PR5 自 tests/sidepanel 随迁并适配 ContextFetch 策略注入——组装面更新，
 // 行为断言与迁移前一致）。
 //
-// 覆盖 loadContextState 的策略动作分支（表驱动）：
-//   no-tab（清 live/主上下文，非静默重置视图）
+// 覆盖 loadContextState 的策略动作分支（表驱动，注入替身 ContextFetch）：
 //   skip-unchanged（短路返回 true，不动任何状态）
 //   error（清 live，非 pinned 连主上下文一起清；静默不重置视图）
 //   apply-pinned（只落地 live 快照，不进主上下文）
@@ -12,36 +11,22 @@
 //   apply-live（正常落地 + 上下文变化时 restoreLatest + renderInitialState）
 // 以及 updateContextChip（空上下文/标题截断/mismatch 标记）与 openCurrentContextUrl
 //（同视频不跳转、跨视频更新 URL + 等待加载 + 强刷）。
+// （原消息链包装器用例——no-tab/error 信封/参数透传——随消息链策略退役，见
+// ticket arch-slim-4/01；no-tab/error 的落地动作契约由 context-policy 与
+// context-inprocess.test.js 覆盖。）
 //
-// 依赖全注入：getActiveTab / 流式判定 / 渲染回调均为 vi.fn；getAiContextState
-// 的消息往返经 vi.mock ../ai/context-resolver（hoisted mock，模板同
-// presets.test.js）。PR5：拉数据段注入消息链策略 createMessageChainContextFetch
-//（getActiveTab + ensureReaderContentReady + sendMessageToTab 三 transport 也在
-// 注入面），进程内直读策略的行为契约见 context-inprocess.test.js。
+// 依赖全注入：fetchContext 为替身 vi.fn；渲染回调均为 vi.fn。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 
-const { getAiContextStateMock } = vi.hoisted(() => ({
-  getAiContextStateMock: vi.fn()
-}));
-
-vi.mock("../../extension/ai/context-resolver.js", () => ({
-  getAiContextState: getAiContextStateMock
-}));
-
 let createContextLoad;
-let createMessageChainContextFetch;
 let chatSessionState;
 
 async function importModule() {
   const module = await import("../../extension/chat/context-load.js");
   const state = (await import("../../extension/chat/chat-state.js")).chatSessionState;
   createContextLoad = module.createContextLoad;
-  // 工单 07 装配收口：消息链策略自 chat/context-load 迁 core/context-assembly
-  //（context-payload 锚定的唯一装配链），导入路径随迁，断言语义零变化。
-  const assemblyModule = await import("../../extension/core/context-assembly.js");
-  createMessageChainContextFetch = assemblyModule.createMessageChainContextFetch;
   chatSessionState = state;
 }
 
@@ -51,13 +36,17 @@ function makePayload(overrides = {}) {
   return { signature: "sig-1", title: "测试视频", url: "https://www.bilibili.com/video/BV1", isVideoContext: true, ...overrides };
 }
 
-function makeHarness({ tab = ACTIVE_TAB } = {}) {
+function makeHarness({ tab = ACTIVE_TAB, fetchOutcome } = {}) {
   const contextChip = document.createElement("button");
   document.body.appendChild(contextChip);
   const deps = {
     getActiveTab: vi.fn(async () => tab),
-    ensureReaderContentReady: vi.fn(async () => {}),
-    sendMessageToTab: vi.fn(async () => ({ ok: true })),
+    fetchContext: vi.fn(async () => {
+      if (fetchOutcome) {
+        return fetchOutcome();
+      }
+      return { kind: "payload", tabUrl: tab?.url || "", payload: makePayload() };
+    }),
     contextChip,
     renderHistoryList: vi.fn(),
     renderInitialState: vi.fn(),
@@ -69,12 +58,7 @@ function makeHarness({ tab = ACTIVE_TAB } = {}) {
     hasPendingUserPrompt: vi.fn(() => false)
   };
   const contextLoad = createContextLoad({
-    // 消息链策略：getAiContextState 走 vi.mock，往返参数断言保留原样
-    fetchContext: createMessageChainContextFetch({
-      getActiveTab: deps.getActiveTab,
-      ensureReaderContentReady: deps.ensureReaderContentReady,
-      sendMessageToTab: deps.sendMessageToTab
-    }),
+    fetchContext: deps.fetchContext,
     getActiveTab: deps.getActiveTab,
     contextChip: deps.contextChip,
     renderHistoryList: deps.renderHistoryList,
@@ -91,7 +75,6 @@ function makeHarness({ tab = ACTIVE_TAB } = {}) {
 
 beforeEach(async () => {
   resetModuleState();
-  getAiContextStateMock.mockReset();
   await importModule();
   chatSessionState.contextData = null;
   chatSessionState.currentContextKey = "";
@@ -102,49 +85,17 @@ beforeEach(async () => {
 });
 
 describe("loadContextState 动作分支", () => {
-  it("no-tab：清 live 快照，非 pinned 连主上下文一起清并重置视图", async () => {
-    chatSessionState.contextData = makePayload();
-    chatSessionState.currentContextKey = "k1";
-    chatSessionState.liveContextData = makePayload();
-    const { deps, contextLoad } = makeHarness({ tab: null });
-
-    const ok = await contextLoad.loadContextState({ silent: false });
-
-    expect(ok).toBe(false);
-    expect(chatSessionState.liveContextData).toBeNull();
-    expect(chatSessionState.liveTabUrl).toBe("");
-    expect(chatSessionState.contextData).toBeNull();
-    expect(chatSessionState.currentContextKey).toBe("");
-    expect(deps.renderHistoryList).not.toHaveBeenCalled();
-    expect(deps.resetConversationView).toHaveBeenCalledTimes(1);
-    expect(getAiContextStateMock).not.toHaveBeenCalled();
-  });
-
-  it("no-tab + pinned 对话：保留主上下文，不重置视图", async () => {
-    chatSessionState.contextData = makePayload();
-    chatSessionState.currentConversationMeta = { pinnedContext: true };
-    const { deps, contextLoad } = makeHarness({ tab: null });
-
-    await contextLoad.loadContextState({ silent: false });
-
-    expect(chatSessionState.contextData).not.toBeNull();
-    expect(deps.resetConversationView).not.toHaveBeenCalled();
-  });
-
   it("skip-unchanged：短路返回 true，不动任何状态不重渲染", async () => {
     chatSessionState.liveContextData = makePayload();
     const prevContextData = chatSessionState.contextData;
-    getAiContextStateMock.mockResolvedValue({ unchanged: true });
-    const { deps, contextLoad } = makeHarness();
+    const { deps, contextLoad } = makeHarness({
+      fetchOutcome: () => ({ kind: "payload", tabUrl: ACTIVE_TAB.url, payload: { unchanged: true } })
+    });
 
     const ok = await contextLoad.loadContextState({ forceRefresh: false, silent: true });
 
     expect(ok).toBe(true);
-    expect(getAiContextStateMock).toHaveBeenCalledWith(
-      42,
-      { forceRefresh: false, ifSignature: "sig-1" },
-      expect.anything()
-    );
+    expect(deps.fetchContext).toHaveBeenCalledWith({ forceRefresh: false, ifSignature: "sig-1" });
     expect(chatSessionState.contextData).toBe(prevContextData);
     expect(deps.renderHistoryList).not.toHaveBeenCalled();
     expect(deps.renderInitialState).not.toHaveBeenCalled();
@@ -152,8 +103,9 @@ describe("loadContextState 动作分支", () => {
   });
 
   it("error：清 live 快照，非静默重置视图并透传错误信息", async () => {
-    getAiContextStateMock.mockRejectedValue(new Error("内容脚本未响应"));
-    const { deps, contextLoad } = makeHarness();
+    const { deps, contextLoad } = makeHarness({
+      fetchOutcome: () => ({ kind: "error", tabUrl: ACTIVE_TAB.url, error: "内容脚本未响应" })
+    });
 
     const ok = await contextLoad.loadContextState({ silent: false });
 
@@ -164,8 +116,9 @@ describe("loadContextState 动作分支", () => {
   });
 
   it("error + 静默：不重置视图（返回值仍 false）", async () => {
-    getAiContextStateMock.mockRejectedValue(new Error("超时"));
-    const { deps, contextLoad } = makeHarness();
+    const { deps, contextLoad } = makeHarness({
+      fetchOutcome: () => ({ kind: "error", tabUrl: ACTIVE_TAB.url, error: "超时" })
+    });
 
     const ok = await contextLoad.loadContextState({ silent: true });
 
@@ -173,11 +126,28 @@ describe("loadContextState 动作分支", () => {
     expect(deps.resetConversationView).not.toHaveBeenCalled();
   });
 
+  it("no-tab 信封：清 live 快照（进程内策略不产生该分支，信封语义由 policy 锁定）", async () => {
+    chatSessionState.contextData = makePayload();
+    chatSessionState.currentContextKey = "k1";
+    chatSessionState.liveContextData = makePayload();
+    const { deps, contextLoad } = makeHarness({
+      fetchOutcome: () => ({ kind: "no-tab" })
+    });
+
+    const ok = await contextLoad.loadContextState({ silent: false });
+
+    expect(ok).toBe(false);
+    expect(chatSessionState.liveContextData).toBeNull();
+    expect(chatSessionState.contextData).toBeNull();
+    expect(deps.resetConversationView).toHaveBeenCalledTimes(1);
+  });
+
   it("apply-pinned：只落地 live 快照（不进主上下文、不触发对话恢复）", async () => {
     chatSessionState.currentConversationMeta = { pinnedContext: true };
     const payload = makePayload({ signature: "sig-2" });
-    getAiContextStateMock.mockResolvedValue(payload);
-    const { deps, contextLoad } = makeHarness();
+    const { deps, contextLoad } = makeHarness({
+      fetchOutcome: () => ({ kind: "payload", tabUrl: ACTIVE_TAB.url, payload })
+    });
 
     const ok = await contextLoad.loadContextState({ silent: true });
 
@@ -192,8 +162,9 @@ describe("loadContextState 动作分支", () => {
 
   it("blocked-streaming：同 pinned 执行体（只落地 live 快照）", async () => {
     const payload = makePayload({ signature: "sig-3" });
-    getAiContextStateMock.mockResolvedValue(payload);
-    const { deps, contextLoad } = makeHarness();
+    const { deps, contextLoad } = makeHarness({
+      fetchOutcome: () => ({ kind: "payload", tabUrl: ACTIVE_TAB.url, payload })
+    });
     deps.isStreaming.mockReturnValue(true);
 
     const ok = await contextLoad.loadContextState({ silent: true });
@@ -208,8 +179,9 @@ describe("loadContextState 动作分支", () => {
     chatSessionState.currentContextKey = "old-key";
     chatSessionState.contextData = makePayload();
     const payload = makePayload({ signature: "sig-4", title: "新视频" });
-    getAiContextStateMock.mockResolvedValue(payload);
-    const { deps, contextLoad } = makeHarness();
+    const { deps, contextLoad } = makeHarness({
+      fetchOutcome: () => ({ kind: "payload", tabUrl: ACTIVE_TAB.url, payload })
+    });
 
     const ok = await contextLoad.loadContextState({ silent: true });
 
@@ -225,8 +197,9 @@ describe("loadContextState 动作分支", () => {
 
   it("apply-live：上下文未变化（首次落地）不触发对话恢复，走 renderSuggestions", async () => {
     const payload = makePayload();
-    getAiContextStateMock.mockResolvedValue(payload);
-    const { deps, contextLoad } = makeHarness();
+    const { deps, contextLoad } = makeHarness({
+      fetchOutcome: () => ({ kind: "payload", tabUrl: ACTIVE_TAB.url, payload })
+    });
 
     const ok = await contextLoad.loadContextState({ silent: true });
 
@@ -240,8 +213,9 @@ describe("loadContextState 动作分支", () => {
   it("apply-live：上下文变化但流式中 → 动作被 policy 判为 blocked-streaming（只落地 live 快照）", async () => {
     chatSessionState.currentContextKey = "old-key";
     chatSessionState.contextData = makePayload();
-    getAiContextStateMock.mockResolvedValue(makePayload({ signature: "sig-5", title: "新视频" }));
-    const { deps, contextLoad } = makeHarness();
+    const { deps, contextLoad } = makeHarness({
+      fetchOutcome: () => ({ kind: "payload", tabUrl: ACTIVE_TAB.url, payload: makePayload({ signature: "sig-5", title: "新视频" }) })
+    });
     deps.isStreaming.mockReturnValue(true);
 
     const ok = await contextLoad.loadContextState({ silent: true });
@@ -304,8 +278,7 @@ describe("openCurrentContextUrl", () => {
 
   it("同视频：不更新 URL，但强刷一轮上下文", async () => {
     chatSessionState.contextData = { title: "视频", url: "https://www.bilibili.com/video/BV1" };
-    getAiContextStateMock.mockResolvedValue(makePayload());
-    const { contextLoad } = makeHarness();
+    const { deps, contextLoad } = makeHarness();
     const updateSpy = vi.fn(async () => {});
     window.chrome = window.chrome || {};
     window.chrome.tabs = { ...window.chrome.tabs, update: updateSpy };
@@ -313,17 +286,12 @@ describe("openCurrentContextUrl", () => {
     await contextLoad.openCurrentContextUrl();
 
     expect(updateSpy).not.toHaveBeenCalled();
-    expect(getAiContextStateMock).toHaveBeenCalledWith(
-      42,
-      { forceRefresh: true, ifSignature: "" },
-      expect.anything()
-    );
+    expect(deps.fetchContext).toHaveBeenCalledWith({ forceRefresh: true, ifSignature: "" });
   });
 
   it("跨视频：更新 URL 后强刷（waitForTabComplete 需 chrome.tabs.get stub）", async () => {
     chatSessionState.contextData = { title: "视频", url: "https://www.bilibili.com/video/BV1" };
-    getAiContextStateMock.mockResolvedValue(makePayload());
-    const { contextLoad } = makeHarness({ tab: { id: 42, url: "https://www.bilibili.com/video/BVother" } });
+    const { deps, contextLoad } = makeHarness({ tab: { id: 42, url: "https://www.bilibili.com/video/BVother" } });
     const updateSpy = vi.fn(async () => {});
     window.chrome = window.chrome || {};
     window.chrome.tabs = {
@@ -335,6 +303,6 @@ describe("openCurrentContextUrl", () => {
     await contextLoad.openCurrentContextUrl();
 
     expect(updateSpy).toHaveBeenCalledWith(42, { url: "https://www.bilibili.com/video/BV1" });
-    expect(getAiContextStateMock).toHaveBeenCalled();
+    expect(deps.fetchContext).toHaveBeenCalled();
   });
 });

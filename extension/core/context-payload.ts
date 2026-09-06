@@ -1,18 +1,18 @@
 // context-payload.ts — content ↔ 对话上下文快照的「形状单源」（纯模块，零依赖）。
 //
-// 为什么存在：reader-get-context 的 payload 是 content 与对话上下文之间的隐式
+// 为什么存在：AiContext 快照的 payload 是 content 与对话上下文之间的隐式
 // 跨 context 契约。此前字段清单手写在 message-handler 的组装字面量里，「哪些字段
 // 参与签名失效判定」又只活在 computeContextStateSignature 的注释里，两处知识
 // 分居、改动靠人肉对账。本模块把三件事收进一处：
 //   1. 字段清单（READER_CONTEXT_PAYLOAD_FIELDS，含每个字段「给谁消费」的对账注）；
-//   2. 组装工厂（createReaderContextPayload，message-handler 只喂运行时输入）；
+//   2. 组装工厂（createReaderContextPayload，调用方只喂运行时输入）；
 //   3. 签名投影（参与字段集合 + 逐字段投影 + 排除清单，签名从 payload 字段清单
 //      派生而非手列 join 数组）。
 //
 // 契约边界（对账结论，勿在本模块补字段）：对话侧实际持有的快照 = 本 payload +
-//   { signature }（message-handler 处理器附加）+ { hotComments 覆盖, isVideoContext }
-//   （background 的 ai/context-resolver.js getAiContextState 转发层覆盖/补写）。
-//   即 isVideoContext 不由 content 组装，对话侧读取依赖背景层补写。
+//   { signature } + { hotComments 覆盖, isVideoContext }（均由
+//   core/context-assembly 的装配链附加/补写）。即 isVideoContext 不在本工厂
+//   组装，对话侧读取依赖装配链补写。
 //
 // 纯模块约束：不 import state/defaults/location——运行时输入（clip/settings/url）
 // 全部由调用方注入；对 snapshot 的非法形状一律按旧实现的缺省口径容错。
@@ -48,8 +48,8 @@ export type ReaderContextPayload = {
   hotComments: unknown[];
 };
 
-// reader-get-context 全量 payload 的字段清单。每个字段注明消费方（对账于
-// reader/chat-tab.ts 对话壳、ai/context-resolver.js、offscreen/ai 层）：
+// AiContext 快照全量 payload 的字段清单。每个字段注明消费方（对账于
+// reader/chat-tab.ts 对话壳、core/context-assembly 装配链、offscreen/ai 层）：
 //   url                   对话侧 上下文 chip 跳转/禁用态（对话壳 updateContextChip）、
 //                         会话 contextUrl 兜底；无 bvid/cid/aid 时经
 //                         ai/conversation.js buildContextKey / buildAiContextRef 回落。
@@ -78,8 +78,8 @@ export type ReaderContextPayload = {
 //                         同源 state.clip.subtitles，且签名按其长度判定换轨）。
 //   chapters              offscreen 章节对齐切段（budgeter）与追问章节名检索
 //                         （raw-retrieval/followup-context）。
-//   hotComments           content 侧恒为 []：真值由 background 全量路径拉取后
-//                         整体覆盖（getAiContextState）。此占位仅为字段齐全。
+//   hotComments           本工厂恒为 []：真值由装配链全量路径拉取后整体覆盖。
+//                         此占位仅为字段齐全。
 // 新增字段必须：同时进本清单 + 工厂 + 签名三分类（参与/间接/排除）之一，
 // 并在 tests/entry/message-handler-signature.test.js 的形状锁死断言里显式过测试。
 export const READER_CONTEXT_PAYLOAD_FIELDS: readonly (keyof ReaderContextPayload)[] = Object.freeze([
