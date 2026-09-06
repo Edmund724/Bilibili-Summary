@@ -22,7 +22,6 @@ import { escapeHtml } from "../shared/string-utils.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { renderMarkdown } from "../ui/markdown.js";
 import { resolveActiveProvider } from "../ai/active-provider.js";
-import { explainSelection } from "../ai/explain.js";
 import { logWarn } from "../shared/logging.js";
 import { ids } from "./state.js";
 import { setPendingExplainIntent } from "./explain-intent.js";
@@ -157,6 +156,9 @@ function startExplainRequest(): void {
   void (async () => {
     try {
       const provider = await resolveActiveProvider();
+      // explainSelection 按需动态装载（ai/explain 不再常驻 reader chunk），
+      // 装载失败与请求失败同走 error 态。
+      const { explainSelection } = await import("../ai/explain.js");
       const text = await explainSelection({
         provider,
         videoTitle: state.clip.title,

@@ -50,7 +50,7 @@ import {
   setAsrBeforeDeleteHandler,
   setAsrRowEditHandler
 } from "./options-asr-rows.js";
-import { openProviderEditor, type ProviderEditorKind } from "./provider-editor.js";
+import type { ProviderEditorKind } from "./provider-editor.js";
 import {
   requestProviderOriginsViaBackground,
   revokeOrphanOrigin,
@@ -500,19 +500,29 @@ async function deleteFromEditor(
 
 // 打开编辑 Modal：编辑按 id 现查后端权威列表项（API Key 不在行 DOM 上，平铺行
 // dataset 只有占位信息）；找不到（已被并发删除等竞态）静默不打开。新增传空 id。
+// openProviderEditor 按需动态装载（provider-editor 连同其探针链整体进动态
+// chunk），装载失败落抽屉状态条，不静默。
 async function openProviderEditorById(kind: ProviderEditorKind, providerId: string): Promise<void> {
   const providers = kind === "ai" ? await loadAiProviders() : await loadAsrProviders();
   const item = providerId ? providers.find((p) => String(p?.id || "") === providerId) || null : null;
   if (providerId && !item) {
     return;
   }
-  openProviderEditor({
-    kind,
-    item,
-    presets: kind === "ai" ? aiPresets : asrPresets,
-    onSave: saveFromEditor,
-    onDelete: deleteFromEditor
-  });
+  try {
+    const { openProviderEditor } = await import("./provider-editor.js");
+    openProviderEditor({
+      kind,
+      item,
+      presets: kind === "ai" ? aiPresets : asrPresets,
+      onSave: saveFromEditor,
+      onDelete: deleteFromEditor
+    });
+  } catch (error) {
+    const host = settingsHostRef;
+    if (host) {
+      setStatus(collectElements(host), (error as Error).message || "编辑器加载失败", true);
+    }
+  }
 }
 
 function collectFormPayload(elements: SettingsElements): SettingsFormPayload {
