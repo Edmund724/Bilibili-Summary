@@ -47,7 +47,6 @@ import { buildContextKey, doesTabMatchContextUrl } from "../ai/conversation.js";
 // 思考档位「关不掉」提示的判定入口（工单 03）：纯查表 resolver，host 推断 +
 // 模型名 taxonomy，无 DOM 依赖（后台路径同款判定天然不渲染提示）。
 import { resolveThinkingProfile } from "../ai/thinking-profiles.js";
-import { escapeHtml } from "../shared/string-utils.js";
 import { formatClock } from "../shared/clock-text.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { watchStorageKeys } from "../shared/watch-storage-keys.js";
@@ -386,7 +385,6 @@ const chatRuntime = createChatRuntime({
   // ---- DOM 容器 / 元素引用（本文件模块级 `els`）----
   messages: els.messages,
   input: els.input,
-  stopBtn: els.stopBtn,
   // ---- conversation-store 窄接口（实例；isCurrent 为会话身份守卫的单一判定
   // 点，chat-runtime finalize/stopped 持久化前调用）----
   store: conversationStore,
@@ -628,12 +626,7 @@ export async function runQuickActionPrompt(prompt: string): Promise<boolean> {
     return false;
   }
   await startNewConversation();
-  els.input.value = text;
-  autosizeInput();
-  await chatRuntime.sendMessage();
-  // 受理成功 = 发送路径清空了输入框（ensureCurrentContextForSend 通过后才会
-  // 清）；false = 被 provider/上下文/无字幕闸拦下（notice 已显示）。
-  return els.input.value === "" || chatRuntime.hasPendingUserPrompt();
+  return sendViaInputBox(text);
 }
 
 // ============================================================
@@ -690,6 +683,19 @@ async function consumeExplainIntentIfPending(): Promise<void> {
   }
 }
 
+// 发送芯（runQuickActionPrompt / autoSendPrompt 的共同尾部）：填输入框 →
+// autosize → sendMessage → 折算是否受理。两函数头部的闸（新会话 vs 双发闸、
+// 空串聚焦 vs 空串直 false）语义不同，不并入本芯。
+// 受理成功 = 发送路径清空了输入框（ensureCurrentContextForSend 通过后才会清）；
+// false = 被 provider/上下文/无字幕闸拦下（notice 已显示）。
+async function sendViaInputBox(text: string): Promise<boolean> {
+  els.input.value = text;
+  autosizeInput();
+  // sendMessage 兑现即发送流程已出结果（subtitle-wait 挂起在其内部 await）。
+  await chatRuntime.sendMessage();
+  return els.input.value === "" || chatRuntime.hasPendingUserPrompt();
+}
+
 // 自动发送共用体：填输入框 → sendMessage → 折算是否受理。流式中/有待发 prompt
 // 时不注入第二次发送（双发竞态闸也会拦下），返回 false 让意图保持 pending。
 async function autoSendPrompt(text: string): Promise<boolean> {
@@ -699,12 +705,7 @@ async function autoSendPrompt(text: string): Promise<boolean> {
   if (chatRuntime.isStreaming() || chatRuntime.hasPendingUserPrompt()) {
     return false;
   }
-  els.input.value = text;
-  autosizeInput();
-  await chatRuntime.sendMessage();
-  // sendMessage 兑现即发送流程已出结果（subtitle-wait 挂起在其内部 await）。
-  // 受理成功 = 发送路径清空了输入框（ensure 通过后才会清）。
-  return els.input.value === "" || chatRuntime.hasPendingUserPrompt();
+  return sendViaInputBox(text);
 }
 
 // ============================================================

@@ -41,11 +41,10 @@ export interface ChatPort {
   postMessage(message: unknown): void;
 }
 
-export interface BudgetPlan {
-  mode: "single" | "map-reduce";
-  estimatedCalls?: number;
-  estimatedTokens?: number;
-}
+// ladder deps 契约的预算计划窄面：mode 必选，估算字段可选（注入方假实现只给
+// mode 也能过编译）。字段名单源自 ai/types 的同名全量定义，经 Pick 单源收窄。
+export type BudgetPlan = Pick<import("./types.js").BudgetPlan, "mode"> &
+  Partial<Pick<import("./types.js").BudgetPlan, "estimatedCalls" | "estimatedTokens">>;
 
 export interface StreamChatArgs {
   provider: ChatProvider;

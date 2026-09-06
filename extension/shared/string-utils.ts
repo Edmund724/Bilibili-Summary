@@ -66,9 +66,3 @@ export function parseFrontmatterArrayItems(value: unknown): string[] {
 export function sanitizeFileName(value: string): string {
   return value.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim().slice(0, 120);
 }
-
-
-export function truncate(value: unknown, max: number): string {
-  const s = String(value || "");
-  return s.length > max ? s.slice(0, max) + "..." : s;
-}

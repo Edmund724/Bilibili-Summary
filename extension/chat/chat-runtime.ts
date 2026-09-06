@@ -93,7 +93,6 @@ export interface CreateChatRuntimeDeps {
   // ---- DOM container / element refs (sidepanel module-level `els`) ----
   messages: HTMLElement;
   input: HTMLTextAreaElement;
-  stopBtn: HTMLButtonElement | null;
   // ---- conversation-store narrow interface (ticket 05) ----
   store: ChatRuntimeStore;
   // ---- UI 门面 ----
@@ -142,7 +141,6 @@ interface ThinkingDisplayState {
  *     // ---- DOM container / element refs (sidepanel module-level `els`) ----
  *     messages,        // els.messages  (messages scroll container)
  *     input,           // els.input
- *     stopBtn,         // els.stopBtn (optional)
  *     // ---- conversation-store narrow interface (ticket 05) ----
  *     store,           // conversationStore instance: { isCurrent(id), persistCurrent() }
  *                      // isCurrent(id)：会话身份守卫的单一判定点（store 内实现，
@@ -769,10 +767,9 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     if (!activePort) {
       return;
     }
-    if (deps.stopBtn) {
-      deps.stopBtn.disabled = true;
-      deps.stopBtn.textContent = "停止中...";
-    }
+    // 按钮终态（disabled + 「停止中...」）由 ui.setStreamingUiState 的 stopping
+    // 分支统一负责，不再直写按钮——组合根是按钮态的唯一所有者。
+    setStreamingUiState(true, { stopping: true });
     try {
       activePort.postMessage({ action: "stop" });
     } catch {

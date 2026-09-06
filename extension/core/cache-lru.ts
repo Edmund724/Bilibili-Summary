@@ -38,8 +38,8 @@ export const CACHE_FAMILIES = [
   "boc_lvs_analysis_",
   "boc_lvs_analysis_final_"
 ];
-// 每族保留的最近视频数。
-export const LRU_KEEP_VIDEOS = 3;
+// 每族保留的最近视频数（模块私有；evictLruByCount 的 keep 缺省值）。
+const LRU_KEEP_VIDEOS = 3;
 
 interface LruIndexEntry {
   ts: number;

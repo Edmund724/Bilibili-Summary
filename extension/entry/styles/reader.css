@@ -490,43 +490,6 @@
   box-shadow: var(--boc-reader-shadow);
 }
 
-#boc-reading-view .boc-reading-info-group {
-  display: grid;
-  gap: 6px;
-  font-size: 15px;
-}
-
-#boc-reading-view .boc-reading-info-panel,
-#boc-reading-view .boc-reading-info-list {
-  display: grid;
-  gap: 6px;
-}
-
-#boc-reading-view .boc-reading-info-item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-}
-
-#boc-reading-view .boc-reading-info-value,
-#boc-reading-view .boc-reading-info-copy {
-  font-size: 16px;
-  line-height: 1.45;
-  color: var(--boc-reader-text);
-  word-break: break-word;
-}
-
-#boc-reading-view .boc-reading-text-btn {
-  border: 0;
-  background: transparent;
-  color: var(--boc-reader-accent);
-  padding: 0;
-  cursor: pointer;
-  width: fit-content;
-  font-size: 15px;
-}
-
 #boc-reading-view .boc-reading-main {
   justify-content: stretch;
   background: transparent;
@@ -2370,9 +2333,7 @@
   line-height: 1.2;
 }
 
-#boc-reading-view .boc-reading-settings-host .note-section-fields select.note-section-position,
-#boc-reading-view .boc-reading-settings-host .ai-provider-row select.ai-provider-preset,
-#boc-reading-view .boc-reading-settings-host .asr-provider-row select.asr-provider-preset {
+#boc-reading-view .boc-reading-settings-host .note-section-fields select.note-section-position {
   appearance: none;
   -webkit-appearance: none;
   padding-right: 26px;
