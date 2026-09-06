@@ -68,6 +68,9 @@ const cssEntries = [
   "entry/styles/reader.css",
   "entry/styles/reader-gate.css",
   "entry/styles/player-ai.css",
+  // 设置分区表（arch-slim-4/04）：随 ui/settings-panel chunk 按需挂载
+  //（shared/style-injector ensureReaderSettingsStyles），独立入口 minify。
+  "entry/styles/reader-settings.css",
 ];
 
 // 原样拷贝的文件（产物路径与源路径一致 → html/manifest 零改写）。

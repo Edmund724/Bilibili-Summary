@@ -58,6 +58,16 @@ import {
   permissionRevokeErrorMessage
 } from "../core/host-permissions.js";
 import { ids } from "../reader/state.js";
+// 设置分区样式随本 chunk 按需装载（arch-slim-4/04）：本模块只在抽屉打开时被
+// lifecycle.renderReaderPanels 动态 import（player-ai.ts:29 模块顶挂载先例），
+// 时序天然对齐——模块求值即挂表。onload 门控在 renderReaderSettingsPanel 首建
+// 分支等待 whenReaderSettingsStylesReady（~50ms 兜底），首帧零闪变。
+import {
+  ensureReaderSettingsStyles,
+  whenReaderSettingsStylesReady
+} from "../shared/style-injector.js";
+
+ensureReaderSettingsStyles();
 
 const NOTE_SECTION_POSITIONS = new Set(["before_intro", "before_chapters", "before_subtitle"]);
 
@@ -266,6 +276,8 @@ type SettingsElements = ReturnType<typeof collectElements>;
 
 // 渲染设置面板（renderReaderPanels 打开抽屉时调用）：模板只建一次，数据每次
 // 打开都重新装载（与 options 页打开即 loadSettings 的语义一致）。
+// 首建分支等设置分区表 onload 就绪再渲染（arch-slim-4/04 门控：避免内容先于
+// 样式一帧闪变；后续打开命中已挂载即同步渲染）。
 export function renderReaderSettingsPanel(): void {
   const host = document.getElementById(ids.readingSettingsHost);
   if (!host) {
@@ -273,9 +285,16 @@ export function renderReaderSettingsPanel(): void {
   }
   settingsHostRef = host;
   if (!host.dataset.bocSettingsRendered) {
-    host.innerHTML = buildSettingsHtml();
-    bindSettingsEvents(host);
-    host.dataset.bocSettingsRendered = "1";
+    void whenReaderSettingsStylesReady().then(() => {
+      if (!host.isConnected || host.dataset.bocSettingsRendered) {
+        return;
+      }
+      host.innerHTML = buildSettingsHtml();
+      bindSettingsEvents(host);
+      host.dataset.bocSettingsRendered = "1";
+      void loadSettings(collectElements(host));
+    });
+    return;
   }
   void loadSettings(collectElements(host));
 }
