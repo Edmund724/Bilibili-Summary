@@ -165,12 +165,18 @@ async function summarizeSegment({
   }
 
   // 原始字幕段落盘（04 实现落盘；06 按需检索时可跨会话复用；仅常态档）。
-  // 淘汰后重试仍失败 → 上浮一次（编排层去重），不中断本段小结。
+  // fire-and-forget 不阻塞模型调用（追问用的按需缓存，缺段时追问路径回落完整
+  // Map-Reduce）；淘汰后重试仍失败 → 上浮一次（编排层去重），不中断本段小结。
   if (budgetScale === 1) {
-    const savedRaw = await saveRawSegments(rawKey, segment.items || []);
-    if (savedRaw && savedRaw.ok === false && typeof notifyCacheWriteError === "function") {
-      notifyCacheWriteError();
-    }
+    saveRawSegments(rawKey, segment.items || [])
+      .then((savedRaw) => {
+        if (savedRaw && savedRaw.ok === false && typeof notifyCacheWriteError === "function") {
+          notifyCacheWriteError();
+        }
+      })
+      .catch(() => {
+        notifyCacheWriteError();
+      });
   }
 
   if (signal?.aborted) {
