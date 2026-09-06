@@ -5,7 +5,7 @@
 // （每族仅保留最近 3 个视频），淘汰后重试仍失败时 logError 并返回 { ok:false }
 // 供调用方按各自通道上浮一次；全程不抛异常。
 
-import { logError } from "../shared/logging.js";
+import { logError, logWarn } from "../shared/logging.js";
 import { buildSubtitleSourceKey } from "../subtitle/cache.js";
 import { createCacheFamily, readLruIndex } from "../core/cache-lru.js";
 import type { EvictionFailure, EvictionResult } from "../core/cache-lru.js";
@@ -169,6 +169,10 @@ interface LoadStoredRawSegmentsInput {
   lang?: string;
 }
 
+// 索引退化一次性告警标志（模块级，防刷屏）：回退路径可能被每次追问触发，
+// 只在首个 bvid 上 logWarn 一次，便于发现索引退化。
+let indexFallbackWarned = false;
+
 /**
  * 跨会话回退读取：按 (bvid, cid, 字幕轨 source key) 枚举已落盘的原始字幕段键，
  * 按段序返回与 plan.segments 同构的数组（{ index, from, to, items }）。
@@ -189,10 +193,15 @@ export async function loadStoredRawSegments({ bvid, cid, subtitleId = "", subtit
     const index = await readLruIndex();
     const familyEntry = index[RAW_SEGMENT_PREFIX] && typeof index[RAW_SEGMENT_PREFIX] === "object" ? index[RAW_SEGMENT_PREFIX] : {};
     const bvidEntry = (familyEntry as Record<string, unknown>)[bvid];
-    const all = Array.isArray((bvidEntry as { keys?: unknown })?.keys) && ((bvidEntry as { keys: unknown[] }).keys.length > 0)
-      ? await chrome.storage.local.get(
-          (bvidEntry as { keys: unknown[] }).keys.filter((key): key is string => typeof key === "string" && key.startsWith(keyPrefix))
-        )
+    const indexKeys = Array.isArray((bvidEntry as { keys?: unknown })?.keys) && ((bvidEntry as { keys: unknown[] }).keys.length > 0)
+      ? (bvidEntry as { keys: unknown[] }).keys.filter((key): key is string => typeof key === "string" && key.startsWith(keyPrefix))
+      : null;
+    if (!indexKeys && !indexFallbackWarned) {
+      indexFallbackWarned = true;
+      logWarn(`[BOC] segment-cache index missing for bvid=${bvid}, fallback to full storage scan`);
+    }
+    const all = indexKeys
+      ? await chrome.storage.local.get(indexKeys)
       : await chrome.storage.local.get(null);
     const keys = Object.keys(all || {})
       .filter((key): key is string => typeof key === "string" && key.startsWith(keyPrefix))
