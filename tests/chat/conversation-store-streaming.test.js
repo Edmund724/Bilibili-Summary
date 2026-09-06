@@ -195,11 +195,10 @@ describe("conversation-store reset 路径在流式中的停流", () => {
   });
 
   it("clearAll（流式中）：先同步停流再清空，流结束不复活", async () => {
-    const h = makeStreamHarness();
+    const h = makeStreamHarness({ confirmClearAll: () => true });
     chatSessionState.savedConversations = [makeConversation("c1")];
     h.store.applyById("c1");
     h.startStream("在途问题");
-    vi.spyOn(window, "confirm").mockReturnValue(true);
 
     await h.store.clearAll();
 
@@ -215,10 +214,9 @@ describe("conversation-store reset 路径在流式中的停流", () => {
   });
 
   it("clearAll（非流式中）：回调幂等空操作，状态照常清空", async () => {
-    const h = makeStreamHarness();
+    const h = makeStreamHarness({ confirmClearAll: () => true });
     chatSessionState.savedConversations = [makeConversation("c1")];
     h.store.applyById("c1");
-    vi.spyOn(window, "confirm").mockReturnValue(true);
 
     await h.store.clearAll();
 
@@ -228,13 +226,13 @@ describe("conversation-store reset 路径在流式中的停流", () => {
   });
 
   it("clearAll 无会话时早退：不停流（confirm 也不弹）", async () => {
-    const h = makeStreamHarness();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const confirmClearAll = vi.fn(() => true);
+    const h = makeStreamHarness({ confirmClearAll });
 
     await h.store.clearAll();
 
     expect(h.stopCalls.length).toBe(0);
-    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(confirmClearAll).not.toHaveBeenCalled();
   });
 
   it("restoreLatest 无匹配（非流式中）：停流回调幂等，当前会话状态清空", async () => {

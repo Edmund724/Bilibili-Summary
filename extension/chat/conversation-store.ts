@@ -41,34 +41,12 @@ import {
   MAX_SAVED_CONVERSATIONS
 } from "../ai/conversation.js";
 import { extractPageIndexFromUrl } from "../bilibili/video-id-shared.js";
-import { chatSessionState as _chatSessionState } from "./chat-state.js";
+import type { AiContext } from "../ai/types.js";
+import { chatSessionState as _chatSessionState, type ChatSessionMessage } from "./chat-state.js";
 
 // ---------------------------------------------------------------------------
 // 本地类型契约
 // ---------------------------------------------------------------------------
-
-export interface ConversationContextRef {
-  title?: string;
-  url?: string;
-  author?: string;
-  uploadDate?: string;
-  bvid?: string;
-  cid?: string;
-  aid?: string;
-  pageIndex?: number;
-  pageCount?: number;
-  pageTitle?: string;
-  subtitleLang?: string;
-  selectedSubtitleId?: string;
-  selectedSubtitleUrl?: string;
-  chapters?: unknown[];
-  isVideoContext?: boolean;
-}
-
-export interface ConversationMessage {
-  role: string;
-  content: string;
-}
 
 export interface Conversation {
   id: string;
@@ -79,8 +57,8 @@ export interface Conversation {
   isVideoContext: boolean;
   createdAt: number;
   updatedAt: number;
-  contextRef: ConversationContextRef;
-  messages: ConversationMessage[];
+  contextRef: AiContext;
+  messages: ChatSessionMessage[];
 }
 
 export interface ConversationMeta {
@@ -93,19 +71,19 @@ export interface ConversationMeta {
   contextUrl: string;
   isVideoContext: boolean;
   pinnedContext: boolean;
-  contextRef: ConversationContextRef | null;
-  resolvedContext?: Record<string, unknown> | null;
+  contextRef: AiContext | null;
+  resolvedContext?: AiContext | null;
 }
 
 export interface ChatSessionState {
-  contextData: Record<string, unknown> | null;
+  contextData: AiContext | null;
   currentContextKey: string;
   providers: unknown[];
-  chatHistory: ConversationMessage[];
+  chatHistory: ChatSessionMessage[];
   savedConversations: Conversation[];
   currentConversationId: string;
   currentConversationMeta: ConversationMeta | null;
-  liveContextData: Record<string, unknown> | null;
+  liveContextData: AiContext | null;
   liveContextKey: string;
   liveTabUrl: string;
   aiPrefs: {
@@ -160,7 +138,7 @@ export interface CreateConversationStoreDeps {
   // 对话上下文（pinned 补水；组合根接工单 04 的进程内短路 + 网络复合适配器），
   // purpose="page" 解析分页信息（hydratePages 的会话分页补水）。
   resolveAiConversationRef: (
-    contextRef: ConversationContextRef,
+    contextRef: AiContext,
     purpose: "context" | "page"
   ) => Promise<Record<string, unknown>>;
   // ---- 能力事件（store 编排渲染时机；caller 只订阅结果） ----
@@ -169,6 +147,9 @@ export interface CreateConversationStoreDeps {
   onContextNotice: (notice: ConversationContextNotice) => void;
   // ---- 存储（可选；测试注入，缺省 chrome.storage.local） ----
   storage?: StorageArea;
+  // 清空全部历史对话前的确认通道（惯用法同 chat-runtime 的 confirmCostGuard）。
+  // 可选注入，缺省 window.confirm；Node 测试注入桩函数。
+  confirmClearAll?: (message: string) => boolean;
 }
 
 // 工单 arch-slim-2/07 接口收窄 11→8：apply / resolveContext / hydratePages 三键
@@ -186,39 +167,9 @@ export interface ConversationStore {
   hydratePinned: (opts?: HydratePinnedOptions) => Promise<boolean>;
 }
 
-// ---------------------------------------------------------------------------
-// 从 JS 模块导入的函数在 checkJs:false 下无类型；用本地接口断言到实际契约。
-// ---------------------------------------------------------------------------
-
 // 本地窄视图（store 实际读写的字段形态）经断言对齐 chat-state 的宽类型：
 // currentConversationMeta 的完整形态由 ConversationMeta 承载，宽侧只约束读写面。
 const chatSessionState = _chatSessionState as ChatSessionState;
-
-const _buildAiContextRef = buildAiContextRef as unknown as (context: unknown) => ConversationContextRef;
-const _buildContextKey = buildContextKey as unknown as (payload: unknown) => string;
-const _buildContextPlaceholder = buildContextPlaceholder as unknown as (
-  ref: ConversationContextRef
-) => Record<string, unknown> | null;
-const _buildConversationTitle = buildConversationTitle as unknown as (context: unknown) => string;
-const _generateConversationId = generateConversationId as unknown as () => string;
-const _normalizeConversations = normalizeConversations as unknown as (value: unknown) => Conversation[];
-const _resolveConversationStorageKey = resolveConversationStorageKey as unknown as (
-  rawKey: unknown,
-  contextRef: ConversationContextRef,
-  contextUrl?: string
-) => string;
-const _normalizeConversationTitle = normalizeConversationTitle as unknown as (
-  title: unknown,
-  contextTitle: unknown,
-  contextRef: ConversationContextRef | null,
-  contextUrl?: string
-) => string;
-const _doesConversationMatchCurrentContext = doesConversationMatchCurrentContext as unknown as (
-  conversation: Conversation,
-  currentRef: unknown,
-  targetContextKey?: string
-) => boolean;
-const _extractPageIndexFromUrl = extractPageIndexFromUrl as unknown as (url: string) => number;
 
 // ---------------------------------------------------------------------------
 // 纯函数（直接 export，无需 store 实例即可测试）
@@ -235,7 +186,7 @@ export function needsConversationPageHydration(conversation: Conversation | null
   if (pageIndex > 1) {
     return true;
   }
-  const urlPageIndex = _extractPageIndexFromUrl(conversation.contextUrl || conversation.contextRef?.url || "");
+  const urlPageIndex = extractPageIndexFromUrl(conversation.contextUrl || conversation.contextRef?.url || "");
   if (urlPageIndex > 1) {
     return true;
   }
@@ -265,6 +216,8 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
   }
   const { loadContextState, resolveAiConversationRef, onConversationChanged, onStreamInterrupted, onContextNotice } = deps;
   const storage = deps.storage || (typeof chrome !== "undefined" && chrome?.storage?.local) || undefined;
+  // deps 注入（缺省 window.confirm，Node 测试注入桩；惯用法同 chat-runtime 的 confirmCostGuard）。
+  const confirmClearAll = deps.confirmClearAll || ((message: string) => window.confirm(message));
   const conversationsStorageKey = CONVERSATIONS_STORAGE_KEY;
   const maxSavedConversations = MAX_SAVED_CONVERSATIONS;
 
@@ -304,7 +257,7 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     const liveData = chatSessionState.liveContextData;
     if (liveData) {
       chatSessionState.contextData = { ...liveData };
-      chatSessionState.currentContextKey = chatSessionState.liveContextKey || _buildContextKey(liveData);
+      chatSessionState.currentContextKey = chatSessionState.liveContextKey || buildContextKey(liveData);
     }
   }
 
@@ -312,7 +265,7 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     const data = await storage
       ?.get([conversationsStorageKey])
       .catch(() => ({}) as Record<string, unknown>);
-    commitSaved(_normalizeConversations(data?.[conversationsStorageKey]));
+    commitSaved(normalizeConversations(data?.[conversationsStorageKey]));
     emitChange({});
     void hydratePages();
   }
@@ -349,20 +302,20 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
       };
       const nextPageIndex = Number(payload.pageIndex) > 0 ? Number(payload.pageIndex) : 1;
       const nextUrl = String(payload.url || conversation.contextUrl || contextRef.url || "").trim();
-      const nextContextRef: ConversationContextRef = {
+      const nextContextRef: AiContext = {
         ...contextRef,
         url: nextUrl,
         cid: String(payload.cid || contextRef.cid || "").trim(),
         pageIndex: nextPageIndex,
         pageTitle: String(payload.pageTitle || contextRef.pageTitle || "").trim()
       };
-      const nextTitle = _normalizeConversationTitle(
+      const nextTitle = normalizeConversationTitle(
         conversation.title,
         conversation.contextTitle,
         nextContextRef,
         nextUrl
       );
-      const nextContextKey = _resolveConversationStorageKey(conversation.contextKey, nextContextRef, nextUrl);
+      const nextContextKey = resolveConversationStorageKey(conversation.contextKey, nextContextRef, nextUrl);
       if (
         nextTitle === conversation.title &&
         nextUrl === conversation.contextUrl &&
@@ -412,7 +365,7 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     const currentRef = chatSessionState.liveContextData || chatSessionState.contextData;
     const conversations = saved();
     const latest = conversations.find((item) =>
-      _doesConversationMatchCurrentContext(item, currentRef, targetContextKey)
+      doesConversationMatchCurrentContext(item, currentRef, targetContextKey)
     );
     if (!latest) {
       // 当前会话拆除（出口一 = detachCurrent 原语：断流先于状态清空，无落盘、
@@ -457,8 +410,8 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
         resolvedContext: { ...liveData }
       } as ConversationMeta;
     } else if (conversation.contextRef) {
-      chatSessionState.contextData = _buildContextPlaceholder(conversation.contextRef);
-      chatSessionState.currentContextKey = conversation.contextKey || _buildContextKey(chatSessionState.contextData);
+      chatSessionState.contextData = buildContextPlaceholder(conversation.contextRef);
+      chatSessionState.currentContextKey = conversation.contextKey || buildContextKey(chatSessionState.contextData);
     }
     emitChange({ refreshContextChip: true, ...change });
   }
@@ -500,7 +453,7 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     if (!saved().length) {
       return;
     }
-    if (!confirm("确定要清空全部历史对话吗？")) {
+    if (!confirmClearAll("确定要清空全部历史对话吗？")) {
       return;
     }
     commitSaved([]);
@@ -538,11 +491,11 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     let currentId = chatSessionState.currentConversationId;
     let meta = chatSessionState.currentConversationMeta;
     if (!currentId) {
-      currentId = _generateConversationId();
+      currentId = generateConversationId();
       chatSessionState.currentConversationId = currentId;
       meta = {
         id: currentId,
-        title: _buildConversationTitle(context),
+        title: buildConversationTitle(context),
         createdAt: now,
         updatedAt: now,
         contextKey: chatSessionState.currentContextKey,
@@ -550,21 +503,21 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
         contextUrl: String(context.url || "").trim(),
         isVideoContext: context.isVideoContext !== false,
         pinnedContext: true,
-        contextRef: _buildAiContextRef(context),
+        contextRef: buildAiContextRef(context),
         resolvedContext: { ...context }
       };
       chatSessionState.currentConversationMeta = meta;
     }
     const nextConversation: Conversation = {
       id: currentId,
-      title: meta?.title || _buildConversationTitle(context),
+      title: meta?.title || buildConversationTitle(context),
       contextKey: String(meta?.contextKey || chatSessionState.currentContextKey || "").trim(),
       contextTitle: String(meta?.contextTitle || context.title || "").trim(),
       contextUrl: String(meta?.contextUrl || context.url || "").trim(),
       isVideoContext: meta?.isVideoContext !== false,
       createdAt: Number(meta?.createdAt) || now,
       updatedAt: now,
-      contextRef: meta?.contextRef || _buildAiContextRef(context),
+      contextRef: meta?.contextRef || buildAiContextRef(context),
       messages: chat.map((item) => ({ role: item.role, content: String(item.content || "") }))
     };
     const filtered = saved().filter((item) => item.id !== currentId);
@@ -591,7 +544,7 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
     const cachedResolvedContext = meta?.resolvedContext;
     if (cachedResolvedContext && typeof cachedResolvedContext === "object") {
       chatSessionState.contextData = { ...cachedResolvedContext };
-      chatSessionState.currentContextKey = targetKey || _buildContextKey(chatSessionState.contextData);
+      chatSessionState.currentContextKey = targetKey || buildContextKey(chatSessionState.contextData);
       emitChange({ refreshContextChip: true });
       onContextNotice({ kind: "clear" });
       return true;
@@ -636,16 +589,16 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
       return false;
     }
 
-    const resolved = response.payload as Record<string, unknown>;
+    const resolved = response.payload as AiContext;
     chatSessionState.contextData = resolved;
-    chatSessionState.currentContextKey = targetKey || _buildContextKey(resolved);
+    chatSessionState.currentContextKey = targetKey || buildContextKey(resolved);
     meta = chatSessionState.currentConversationMeta;
     chatSessionState.currentConversationMeta = {
       ...meta,
       contextKey: chatSessionState.currentContextKey,
       contextTitle: String(resolved.title || meta?.contextTitle || "").trim(),
       contextUrl: String(resolved.url || meta?.contextUrl || "").trim(),
-      contextRef: _buildAiContextRef(resolved),
+      contextRef: buildAiContextRef(resolved),
       resolvedContext: { ...resolved }
     } as ConversationMeta;
     emitChange({ refreshContextChip: true });
@@ -654,7 +607,7 @@ export function createConversationStore(deps: CreateConversationStoreDeps): Conv
   }
 
   async function resolveContext(
-    contextRef: ConversationContextRef
+    contextRef: AiContext
   ): Promise<{ ok?: boolean; payload?: unknown; error?: string }> {
     try {
       const payload = await resolveAiConversationRef(contextRef, "context");

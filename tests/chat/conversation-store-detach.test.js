@@ -167,9 +167,9 @@ const DETACH_EXITS = [
   },
   {
     label: "clearAll",
+    storeDeps: { confirmClearAll: () => true },
     setup() {
       seedCurrentConversation("c1");
-      vi.spyOn(window, "confirm").mockReturnValue(true);
     },
     run(store) {
       return store.clearAll();
@@ -192,8 +192,8 @@ const DETACH_EXITS = [
 // 承重不变式(参数化):断流先于身份清空、先于落盘;拆除恰为身份三键清空
 // ===========================================================================
 describe("拆除会话四出口的承重不变式", () => {
-  it.each(DETACH_EXITS)("$label:断流恰一次且先于身份清空(发起瞬间 id 仍在);收尾 id/meta/历史清空", async ({ setup, run }) => {
-    const { store, deps, storage } = makeHarness();
+  it.each(DETACH_EXITS)("$label:断流恰一次且先于身份清空(发起瞬间 id 仍在);收尾 id/meta/历史清空", async ({ setup, run, storeDeps }) => {
+    const { store, deps, storage } = makeHarness(storeDeps);
     const { interruptedWith } = makeOrderLog(deps, storage);
     setup();
 
@@ -210,8 +210,8 @@ describe("拆除会话四出口的承重不变式", () => {
     expect(chatSessionState.chatHistory).toEqual([]);
   });
 
-  it.each(DETACH_EXITS)("$label:断流先于落盘(落盘出口)或不落盘(无落盘出口)", async ({ setup, run, persisted }) => {
-    const { store, deps, storage } = makeHarness();
+  it.each(DETACH_EXITS)("$label:断流先于落盘(落盘出口)或不落盘(无落盘出口)", async ({ setup, run, persisted, storeDeps }) => {
+    const { store, deps, storage } = makeHarness(storeDeps);
     const { log } = makeOrderLog(deps, storage);
     setup();
 
@@ -295,13 +295,12 @@ describe("出口二 deleteById 当前会话", () => {
 // ===========================================================================
 describe("出口三 clearAll", () => {
   it("事件次序 = [interrupt, persist, change {}, change {refreshContextChip, historyCleared, resetView}];detach 瞬间存档已清(commitSaved([]) 在 detach 前)", async () => {
-    const { store, deps, storage } = makeHarness();
+    const { store, deps, storage } = makeHarness({ confirmClearAll: () => true });
     const { log, interruptedWith } = makeOrderLog(deps, storage);
     seedCurrentConversation("c1");
     const liveData = { bvid: "BV1abc", url: URL_A, title: "视频A", isVideoContext: true };
     chatSessionState.liveContextData = liveData;
     chatSessionState.liveContextKey = "k-live";
-    vi.spyOn(window, "confirm").mockReturnValue(true);
 
     await store.clearAll();
 

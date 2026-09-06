@@ -311,6 +311,7 @@ describe("deleteById / clearAll 的断流与 change 时序", () => {
   it("clearAll:onStreamInterrupted 在先,尾次 change = {refreshContextChip, historyCleared, resetView}", async () => {
     const { store, deps } = makeHarness();
     const log = makeOrderLog(deps);
+    // 缺省确认通道用例：不注入 confirmClearAll，stub window.confirm 锁定缺省路径
     vi.spyOn(window, "confirm").mockReturnValue(true);
     chatSessionState.savedConversations = [makeConversation("c1")];
     chatSessionState.liveContextData = { bvid: "BV1abc", url: URL_A, isVideoContext: true };
@@ -331,7 +332,7 @@ describe("deleteById / clearAll 的断流与 change 时序", () => {
   });
 
   it("clearAll 空档早退 / confirm 取消:零事件", async () => {
-    const { store, deps } = makeHarness();
+    const { store, deps } = makeHarness({ confirmClearAll: () => false });
     makeOrderLog(deps);
 
     await store.clearAll();
@@ -340,7 +341,6 @@ describe("deleteById / clearAll 的断流与 change 时序", () => {
     expect(deps.onStreamInterrupted).not.toHaveBeenCalled();
 
     chatSessionState.savedConversations = [makeConversation("c1")];
-    vi.spyOn(window, "confirm").mockReturnValue(false);
     await store.clearAll();
 
     expect(deps.onConversationChanged).not.toHaveBeenCalled();
