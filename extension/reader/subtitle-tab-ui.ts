@@ -152,10 +152,21 @@ export function bindSubtitleTabEvents(): void {
 
   // ===== 字幕列表交互（手动滚动暂停 + 点句跳转；实现在 reader/sync.ts） =====
   const subtitleList = byId(ids.readingSubtitleList);
+  // scroll/wheel 是高频路径，每事件一次 withReader 都要分配 promise：250ms
+  // 节流（与 sync tick 同档）首发立即透传、窗口内丢弃。节流间隔远小于手动
+  // 暂停窗口（noteManualReaderInteraction 默认 durationMs=3000），滚动期间
+  // 自动同步照样保持暂停。
+  const MANUAL_SCROLL_THROTTLE_MS = 250;
+  let lastManualScrollAt = 0;
   const handleReaderManualScroll = () => {
     if (isProgrammaticScrolling()) {
       return;
     }
+    const now = Date.now();
+    if (now - lastManualScrollAt < MANUAL_SCROLL_THROTTLE_MS) {
+      return;
+    }
+    lastManualScrollAt = now;
     // 高频路径：首次交互装载 reader 域，其后命中缓存 promise；装载失败静默
     //（下次交互自然重试，避免滚动期间刷日志）。
     withReader(null, (reader) => reader.noteManualReaderInteraction());
