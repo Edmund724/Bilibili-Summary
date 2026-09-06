@@ -33,7 +33,7 @@ function makeContext() {
     bvid: "BV1test",
     cid: "123",
     selectedSubtitleId: "sub-1",
-    subtitleBody: makeSubtitleBody(110000),
+    subtitleBody: makeSubtitleBody(210000),
     chapters: []
   };
 }
@@ -54,7 +54,13 @@ function jsonResponse(payload, ok = true, status = 200) {
 
 // 依 messages[user].content 里的「第 i/N 个连续片段」返回小结；成稿调用返回笔记。
 function buildSequencedMock() {
-  const summaryTexts = { 1: "小结一：事实A。", 2: "小结二：事实B。", 3: "小结三：事实C。" };
+  const summaryTexts = {
+    1: "小结一：事实A。",
+    2: "小结二：事实B。",
+    3: "小结三：事实C。",
+    4: "小结四：事实D。",
+    5: "小结五：事实E。"
+  };
   const fetchMock = vi.fn(async (_url, init) => {
     const body = JSON.parse(init.body);
     const user = body.messages[body.messages.length - 1]?.content || "";
@@ -98,21 +104,29 @@ describe("orchestrateMapReduce 切片→小结→成稿编排", () => {
       chapters: []
     });
     expect(plan.mode).toBe("map-reduce");
-    expect(plan.segments).toHaveLength(3);
+    expect(plan.segments).toHaveLength(5);
 
     const result = await mod.orchestrateMapReduce({ provider: makeProvider(), context, plan, port });
 
     expect(result.aborted).toBe(false);
     expect(result.draft).toBe("# 视频笔记：《测试视频》\n完整笔记正文。");
-    expect(result.segmentSummaries).toEqual(["小结一：事实A。", "小结二：事实B。", "小结三：事实C。"]);
+    expect(result.segmentSummaries).toEqual([
+      "小结一：事实A。",
+      "小结二：事实B。",
+      "小结三：事实C。",
+      "小结四：事实D。",
+      "小结五：事实E。"
+    ]);
 
     const postMessages = port.postMessage.mock.calls.map((c) => c[0]);
     const notices = postMessages.filter((m) => m.type === "notice");
     // 完成序不固定（08 起并发小结），断言进度文案集合而非顺序。
     expect(notices.map((n) => n.data).sort()).toEqual([
-      "正在整理第 1/3 段（33%）",
-      "正在整理第 2/3 段（67%）",
-      "正在整理第 3/3 段（100%）"
+      "正在整理第 1/5 段（20%）",
+      "正在整理第 2/5 段（40%）",
+      "正在整理第 3/5 段（60%）",
+      "正在整理第 4/5 段（80%）",
+      "正在整理第 5/5 段（100%）"
     ]);
 
     const tokens = postMessages.filter((m) => m.type === "token");
@@ -124,8 +138,8 @@ describe("orchestrateMapReduce 切片→小结→成稿编排", () => {
     const doneIdx = postMessages.findIndex((m) => m.type === "done");
     expect(doneIdx).toBeGreaterThan(tokenIdx);
 
-    // 小结调用 3 次 + 成稿 1 次，共 4 次模型调用
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    // 小结调用 5 次 + 成稿 1 次，共 6 次模型调用
+    expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 
   it("小结 prompt 忠实压缩且保留时间戳（对齐蓝本 _chunk_prompt 措辞）", async () => {
@@ -143,7 +157,7 @@ describe("orchestrateMapReduce 切片→小结→成稿编排", () => {
     const userContents = fetchMock.mock.calls.map((c) => JSON.parse(c[1].body).messages.at(-1).content);
     const segmentPrompt = userContents.find((c) => c.includes("连续片段"));
     expect(segmentPrompt).toContain("视频标题：测试视频");
-    expect(segmentPrompt).toContain("这是第 1/3 个连续片段");
+    expect(segmentPrompt).toContain("这是第 1/5 个连续片段");
     expect(segmentPrompt).toContain("请忠实压缩这个片段");
     expect(segmentPrompt).toContain("保留重要事实、例子、论证关系和原有时间点");
     expect(segmentPrompt).toContain("不做评价，不补充外部知识");
@@ -171,8 +185,10 @@ describe("orchestrateMapReduce 切片→小结→成稿编排", () => {
     expect(notePrompt).toContain("### 片段 1");
     expect(notePrompt).toContain("### 片段 2");
     expect(notePrompt).toContain("### 片段 3");
+    expect(notePrompt).toContain("### 片段 4");
+    expect(notePrompt).toContain("### 片段 5");
     expect(notePrompt).toContain("小结一：事实A。");
-    expect(notePrompt).toContain("小结三：事实C。");
+    expect(notePrompt).toContain("小结五：事实E。");
   });
 
   it("成稿输出 clamp 到 FINAL_OUTPUT_CHARS（16000）以内", async () => {
@@ -269,7 +285,7 @@ describe("orchestrateMapReduce 中止", () => {
     const notices = postMessages.filter((m) => m.type === "notice").map((n) => n.data);
     expect(new Set(notices).size).toBe(notices.length);
     for (const notice of notices) {
-      expect(notice).toMatch(/^正在整理第 \d\/3 段（\d+%）$/);
+      expect(notice).toMatch(/^正在整理第 \d\/5 段（\d+%）$/);
     }
   });
 
@@ -289,7 +305,7 @@ describe("orchestrateMapReduce 中止", () => {
     fetchMock.mockImplementation(async (_url, init) => {
       const body = JSON.parse(init.body);
       const user = body.messages[body.messages.length - 1]?.content || "";
-      if (user.includes("连续片段") && user.includes("第 2/3")) {
+      if (user.includes("连续片段") && user.includes("第 2/5")) {
         throw abortError;
       }
       if (user.includes("连续片段")) {
@@ -353,12 +369,12 @@ describe("plan.mode==='map-reduce' 才编排（不归并/超预算判定）", ()
     expect(plan.segments).toEqual([]);
   });
 
-  it("100k 边界一越 → mode=map-reduce 且 needsReduce=false；500k 段数=10 不归并", async () => {
+  it("200k 边界一越 → mode=map-reduce 且 needsReduce=false；500k 段数=10 不归并", async () => {
     const { buildBudgetPlan } = await import("../../extension/ai/budgeter.js");
-    const single = buildBudgetPlan({ body: makeSubtitleBody(100000) });
+    const single = buildBudgetPlan({ body: makeSubtitleBody(200000) });
     expect(single.mode).toBe("single");
 
-    const over = buildBudgetPlan({ body: makeSubtitleBody(100001) });
+    const over = buildBudgetPlan({ body: makeSubtitleBody(200001) });
     expect(over.mode).toBe("map-reduce");
     expect(over.needsReduce).toBe(false);
 
@@ -432,7 +448,8 @@ describe("溢出放宽预算重跑（context-length 溢出的编排级兜底）"
   }
 
   it("段小结溢出 → notice 告知 → 按 0.5 倍预算重切段整轮重跑 → 成功回吐一次", async () => {
-    // 110k 字符：常态 50k 段 = 3 段；收紧 25k 段 = 5 段。首轮 3 段全部溢出。
+    // 210k 字符：常态 50k 段 = 5 段；收紧 25k 段 = 9 段。溢出计数跨轮共享：
+    // 首轮首波 3 个并发全溢出即 settle（剩余 2 段不再拉起），重跑 9 段全部成功。
     const { fetchMock } = buildOverflowSequencedMock({ overflowSegments: 3 });
     vi.stubGlobal("fetch", fetchMock);
     const port = makePort();
@@ -441,7 +458,7 @@ describe("溢出放宽预算重跑（context-length 溢出的编排级兜底）"
       body: context.subtitleBody,
       chapters: []
     });
-    expect(plan.segments).toHaveLength(3);
+    expect(plan.segments).toHaveLength(5);
 
     const result = await mod.orchestrateMapReduce({ provider: makeProvider(), context, plan, port });
 
@@ -455,11 +472,11 @@ describe("溢出放宽预算重跑（context-length 溢出的编排级兜底）"
     expect(postMessages.filter((m) => m.type === "done")).toHaveLength(1);
     expect(postMessages.filter((m) => m.type === "token")).toHaveLength(1);
 
-    // 首轮 3 段（1/3）+ 重跑 5 段（1/5）+ 成稿 1 次 = 9 次调用
-    expect(fetchMock).toHaveBeenCalledTimes(9);
+    // 首轮首波 3 段（1/5）+ 重跑 9 段（1/9）+ 成稿 1 次 = 13 次调用
+    expect(fetchMock).toHaveBeenCalledTimes(13);
     const userContents = fetchMock.mock.calls.map((c) => JSON.parse(c[1].body).messages.at(-1).content);
-    expect(userContents.some((c) => c.includes("这是第 1/3 个连续片段"))).toBe(true);
     expect(userContents.some((c) => c.includes("这是第 1/5 个连续片段"))).toBe(true);
+    expect(userContents.some((c) => c.includes("这是第 1/9 个连续片段"))).toBe(true);
   });
 
   it("重跑仍溢出 → 带明确文案抛出（不静默），无 done/token", async () => {
@@ -480,8 +497,8 @@ describe("溢出放宽预算重跑（context-length 溢出的编排级兜底）"
     expect(postMessages.some((m) => m.type === "notice" && String(m.data).includes("已自动调低单段素材量并重试"))).toBe(true);
     expect(postMessages.some((m) => m.type === "done")).toBe(false);
     expect(postMessages.some((m) => m.type === "token")).toBe(false);
-    // 首轮 3 段（并发全发全溢出）+ 重跑首波 3 段（首个溢出即 settle 终止，
-    // 剩余 2 段不再拉起）——绝不进入第三轮。
+    // 首轮 5 段（并发 3：首波 3 个全溢出即 settle，剩余 2 段不再拉起）
+    // + 重跑 9 段首波 3 个（同理）——绝不进入第三轮。
     expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 
@@ -504,7 +521,7 @@ describe("溢出放宽预算重跑（context-length 溢出的编排级兜底）"
   });
 
   it("成稿阶段溢出 → 已完成段不浪费判断，整轮重跑后成稿成功", async () => {
-    // 首轮 3 段成功、成稿溢出 → 重跑 5 段（成功）+ 成稿成功 = 3+1+5+1 = 10 次。
+    // 首轮 5 段成功、成稿溢出 → 重跑 9 段（成功）+ 成稿成功 = 5+1+9+1 = 16 次。
     const { fetchMock } = buildOverflowSequencedMock({ overflowNotes: 1 });
     vi.stubGlobal("fetch", fetchMock);
     const port = makePort();
@@ -517,7 +534,7 @@ describe("溢出放宽预算重跑（context-length 溢出的编排级兜底）"
     const result = await mod.orchestrateMapReduce({ provider: makeProvider(), context, plan, port });
 
     expect(result.draft).toBe("# 视频笔记：《测试视频》\n完整笔记正文。");
-    expect(fetchMock).toHaveBeenCalledTimes(10);
+    expect(fetchMock).toHaveBeenCalledTimes(16);
     const postMessages = port.postMessage.mock.calls.map((c) => c[0]);
     expect(postMessages.filter((m) => m.type === "done")).toHaveLength(1);
   });

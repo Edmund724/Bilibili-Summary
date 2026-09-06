@@ -23,7 +23,7 @@
 // 触发——触发装载的端口必已入集，故任一分支「装载中」期间其他任务的终态
 // 判定都会因 size>0 / currentChatCount>0 保留文档，不会被提前关闭。
 import { getErrorMessage } from "../shared/error-helpers.js";
-import { logWarn } from "../shared/logging.js";
+import { logInfo, logWarn, shouldDebugLog } from "../shared/logging.js";
 import { safePostMessage } from "../shared/messaging.js";
 import { shouldCloseAfterAsrTask } from "./offscreen-lifecycle.js";
 import { ASR_DECODE_PORT_NAME, ASR_DECODE_ACTION, ASR_MSG_ERROR } from "../asr/protocol.js";
@@ -177,6 +177,18 @@ chrome.runtime.onConnect.addListener((port) => {
       // 文档；装载期间空闲超时照常计时（超时 abort 后即使装载完成，
       // runLadderChat 收到已 abort 的 signal 也会退出）。
       const runLadderChat = await ladderLoader.load();
+
+      // 核数打点（调试日志门默认关，门关时连计数都跳过）：素材字符数与 budgeter
+      // totalChars 同口径（trim 后非空 content），供长视频「单发/分段」路径核数
+      // 与字幕膨胀排查。
+      if (shouldDebugLog()) {
+        const chatBody = (msg as ChatMsg).context?.subtitleBody;
+        const materialChars = ((chatBody || []) as Array<{ content?: unknown }>).reduce((sum, item) => {
+          const text = String(item?.content ?? "").trim();
+          return sum + text.length;
+        }, 0);
+        logInfo("[BOC] AI chat material chars:", materialChars);
+      }
 
       // 阶梯分派策略（预算内单次流式 → 超预算 Map-Reduce → 追问压缩/成本护栏）
       // 在 ai/ladder.js（策略模块由 ladder 自行引入默认实现）；此处只接线：

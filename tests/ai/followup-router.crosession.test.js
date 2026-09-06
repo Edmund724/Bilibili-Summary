@@ -188,7 +188,7 @@ describe("会话内路径不变：plan.segments 存在时完全优先内存段",
   });
 
   it("既有会话内行为回归：成稿后追问的压缩上下文语义不变", async () => {
-    const body = Array.from({ length: 110 }, (_, i) => ({
+    const body = Array.from({ length: 210 }, (_, i) => ({
       from: i * 5,
       to: i * 5 + 5,
       content: "x".repeat(1000)

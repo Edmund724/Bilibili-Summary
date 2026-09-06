@@ -23,7 +23,7 @@ interface SubtitleResolution {
 }
 
 /**
- * 决定给模型的字幕：素材预算内（≤100k token）整篇原样；超预算回落 50k 硬截断并打标记。
+ * 决定给模型的字幕：素材预算内（≤200k 字符）整篇原样；超预算回落 50k 硬截断并打标记。
  * 纯函数，streamChat 只负责消费返回的 { markdown, mode, notice, overflowMarked }。
  * 预算输入与发送物同源：发送物由 subtitle-prompt 的 buildSubtitlePrompt 从
  * subtitleBody 现场渲染（追问压缩路径则直接用 compressedSummaryMarkdown 文本产物）；

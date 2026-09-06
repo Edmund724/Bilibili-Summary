@@ -197,11 +197,11 @@ describe("streamChat 溢出语义（catch 查标记）", () => {
     expect(port.messages).toHaveLength(0);
   });
 
-  it("超预算（>100k）→ 仍发 notice 提示 + 抛 overflow 标记错误，不发任何请求", async () => {
+  it("超预算（>200k）→ 仍发 notice 提示 + 抛 overflow 标记错误，不发任何请求", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ choices: [{ message: { content: "" } }] }));
     vi.stubGlobal("fetch", fetchMock);
     const port = makePort();
-    const context = { title: "t", subtitleBody: makeSubtitleBody(110000) };
+    const context = { title: "t", subtitleBody: makeSubtitleBody(210000) };
 
     await expect(
       streamChat({
@@ -236,14 +236,14 @@ describe("streamChat 溢出语义（catch 查标记）", () => {
     expect(port.messages.some((m) => m.type === "error")).toBe(true);
   });
 
-  it("追问压缩摘要超预算（body 空 + compressedSummaryMarkdown >100k）→ overflow 标记错误", async () => {
+  it("追问压缩摘要超预算（body 空 + compressedSummaryMarkdown >200k）→ overflow 标记错误", async () => {
     vi.stubGlobal("fetch", vi.fn());
     const port = makePort();
 
     await expect(
       streamChat({
         provider: PROVIDER,
-        context: { title: "t", subtitleBody: [], compressedSummaryMarkdown: "a".repeat(100001) },
+        context: { title: "t", subtitleBody: [], compressedSummaryMarkdown: "a".repeat(200001) },
         userPrompt: "追问",
         history: [],
         port
@@ -254,12 +254,12 @@ describe("streamChat 溢出语义（catch 查标记）", () => {
 
 describe("resolveSubtitleForContext / OVER_BUDGET_NOTICE（预算策略留在 client）", () => {
   it("预算内与超预算的发送物判定（承接 budget-single-shot 的溢出标记语义）", () => {
-    const over = resolveSubtitleForContext({ subtitleBody: makeSubtitleBody(110000) });
+    const over = resolveSubtitleForContext({ subtitleBody: makeSubtitleBody(210000) });
     expect(over.mode).toBe("map-reduce");
     expect(over.overflowMarked).toBe(true);
     expect(over.notice).toBe(OVER_BUDGET_NOTICE);
 
-    const within = resolveSubtitleForContext({ subtitleBody: makeSubtitleBody(100000) });
+    const within = resolveSubtitleForContext({ subtitleBody: makeSubtitleBody(200000) });
     expect(within.mode).toBe("single");
     expect(within.overflowMarked).toBe(false);
     expect(within.notice).toBe("");

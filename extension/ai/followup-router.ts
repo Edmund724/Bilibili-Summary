@@ -102,7 +102,7 @@ interface ResolveFollowupContextInput {
  * 解析追问上下文：超预算视频 + 已有历史 + 已能拼出「成稿笔记 + 分段小结」时，
  * 返回供 streamChat 复用的压缩上下文（compressedSummaryMarkdown 换成压缩摘要，
  * subtitleBody 置空）；
- * 其余情况（≤100k / 首轮 / 尚未成稿）返回 null，表示走完整 Map-Reduce。
+ * 其余情况（≤200k / 首轮 / 尚未成稿）返回 null，表示走完整 Map-Reduce。
  *
  * 段来源两级：会话内直接用内存 plan.segments（行为与既有路径逐字节一致）；
  * 跨会话（恢复会话 / 新会话，内存段已不在）且 plan.segments 为空时，回退到段缓存

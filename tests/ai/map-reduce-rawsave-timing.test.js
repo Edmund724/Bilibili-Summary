@@ -60,7 +60,7 @@ function makePort() {
 
 async function makePlan() {
   const { buildBudgetPlan } = await import("../../extension/ai/budgeter.js");
-  return buildBudgetPlan({ body: makeSubtitleBody(110000), chapters: [] });
+  return buildBudgetPlan({ body: makeSubtitleBody(210000), chapters: [] });
 }
 
 // 可控 promise：外部手动 resolve/reject（时序锁的载体）
@@ -93,7 +93,7 @@ function cacheWriteNotices(port) {
 describe("原始段盘 fire-and-forget（#10）", () => {
   it("用例A：分段模型调用先于段盘写盘 resolve（写盘不阻塞模型调用）", async () => {
     const plan = await makePlan();
-    expect(plan.segments).toHaveLength(3);
+    expect(plan.segments).toHaveLength(5);
 
     const events = [];
     const deferreds = [];
@@ -117,10 +117,10 @@ describe("原始段盘 fire-and-forget（#10）", () => {
     const port = makePort();
     const orchestration = mod.orchestrateMapReduce({ provider: makeProvider(), context: makeContext(), plan, port, chatCompletion: chatImpl });
 
-    // 段盘全部挂起期间：三个分段小结的模型调用应已全部发出（fire-and-forget 生效）
+    // 段盘全部挂起期间：五个分段小结的模型调用应已全部发出（fire-and-forget 生效）
     await flushMicrotasks();
-    expect(events.filter((e) => e === "model:segment")).toHaveLength(3);
-    expect(deferreds).toHaveLength(3);
+    expect(events.filter((e) => e === "model:segment")).toHaveLength(5);
+    expect(deferreds).toHaveLength(5);
 
     // 段盘 resolve 全部发生在模型调用之后（时序锁）
     deferreds.forEach((d, i) => {
@@ -152,7 +152,7 @@ describe("原始段盘 fire-and-forget（#10）", () => {
     const port = makePort();
     const orchestration = mod.orchestrateMapReduce({ provider: makeProvider(), context: makeContext(), plan, port, chatCompletion: chatImpl });
 
-    // 三段模型调用完成、小结盘全部挂起：成稿未开始、无 done/token 回吐
+    // 首波三段（并发 3）模型调用完成、小结盘全部挂起：成稿未开始、无 done/token 回吐
     await flushMicrotasks();
     expect(chatImpl).toHaveBeenCalledTimes(3);
     expect(deferreds).toHaveLength(3);
@@ -160,11 +160,14 @@ describe("原始段盘 fire-and-forget（#10）", () => {
     expect(postMessages.some((m) => m.type === "done")).toBe(false);
     expect(postMessages.some((m) => m.type === "token")).toBe(false);
 
-    // 放行小结盘 → 编排才结算（复用语义依赖不变）
+    // 放行小结盘 → 编排才结算（复用语义依赖不变）。并发 3 共两波：已 resolve 的
+    // 重复 resolve 无害，第二波新挂起的小结盘靠第二次放行收尾。
+    deferreds.forEach((d) => d.resolve({ ok: true }));
+    await flushMicrotasks();
     deferreds.forEach((d) => d.resolve({ ok: true }));
     const result = await orchestration;
     expect(result.aborted).toBe(false);
-    expect(chatImpl).toHaveBeenCalledTimes(4);
+    expect(chatImpl).toHaveBeenCalledTimes(6);
     expect(port.postMessage.mock.calls.map((c) => c[0]).some((m) => m.type === "done")).toBe(true);
   });
 
@@ -188,6 +191,6 @@ describe("原始段盘 fire-and-forget（#10）", () => {
     expect(result2.draft).toBe("# 视频笔记：《测试视频》\n完整笔记正文。");
     expect(cacheWriteNotices(port2)).toHaveLength(1);
     // 模型调用不受段盘失败影响
-    expect(chatImpl).toHaveBeenCalledTimes(8);
+    expect(chatImpl).toHaveBeenCalledTimes(12);
   });
 });

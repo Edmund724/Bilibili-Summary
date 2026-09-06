@@ -19,9 +19,10 @@ vi.mock("../../extension/ai/completion.js", async (importOriginal) => ({
 
 import { createStorageLocalBridgeHandler } from "../../extension/core/storage-bridge.js";
 
-// 120k 字符（>100k 预算线 → map-reduce；3 段 + 成稿 = 4 次调用 < 5 → 不弹成本护栏）
+// 208k 字符（>200k 预算线 → map-reduce；5 段 + 成稿 = 6 次调用 ≥5 → 弹成本护栏，
+// 测试内自动确认）
 function makeBody() {
-  return Array.from({ length: 1500 }, (_, i) => ({
+  return Array.from({ length: 2600 }, (_, i) => ({
     from: i * 4,
     to: i * 4 + 4,
     content: "字".repeat(80)
@@ -119,7 +120,13 @@ describe("offscreen storage 桥端到端（Map-Reduce 缓存落盘）", () => {
       prompt: "总结"
     });
 
-    // 成稿回吐 = 编排完整跑完（map 3 段 + 成稿，全部走桥落盘）
+    // 抬线（200k）后夹具预估 6 次调用 ≥5 → 先弹成本护栏：自动确认后编排才启动
+    await vi.waitFor(() => {
+      expect(session.port.postMessage.mock.calls.some((c) => c[0]?.type === "cost-guard")).toBe(true);
+    });
+    session.send({ action: "cost-guard-confirm", ok: true });
+
+    // 成稿回吐 = 编排完整跑完（map 5 段 + 成稿，全部走桥落盘）
     await vi.waitFor(() => {
       expect(session.port.postMessage.mock.calls.some((c) => c[0]?.type === "done")).toBe(true);
     });
@@ -127,8 +134,8 @@ describe("offscreen storage 桥端到端（Map-Reduce 缓存落盘）", () => {
     const storeKeys = [...memoryArea.store.keys()];
     const rawKeys = storeKeys.filter((k) => k.startsWith("boc_lvs_raw_"));
     const summaryKeys = storeKeys.filter((k) => k.startsWith("boc_lvs_summary_"));
-    expect(rawKeys.length).toBe(3);
-    expect(summaryKeys.length).toBe(3);
+    expect(rawKeys.length).toBe(5);
+    expect(summaryKeys.length).toBe(5);
     expect(storeKeys).toContain("boc_cache_lru_index");
 
     const notices = session.port.postMessage.mock.calls.map((c) => c[0]).filter((m) => m?.type === "notice");

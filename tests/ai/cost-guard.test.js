@@ -82,24 +82,33 @@ describe("buildCostGuardNotice", () => {
 
   it("可直接复用预算器 plan.estimatedCalls / plan.estimatedTokens", async () => {
     const { buildBudgetPlan } = await import("../../extension/ai/budgeter.js");
-    // 110k 字幕 → 3 段小结 + 1 次成稿 = 4 次调用：不弹
+    // 110k 字幕 → 抬线（200k）后走 single，1 次调用：不弹
     const small = buildBudgetPlan({
       body: Array.from({ length: 22 }, (_, i) => ({ from: i * 5, to: i * 5 + 5, content: "x".repeat(5000) }))
     });
-    expect(small.mode).toBe("map-reduce");
-    expect(small.estimatedCalls).toBe(4);
+    expect(small.mode).toBe("single");
+    expect(small.estimatedCalls).toBe(1);
     expect(mod.buildCostGuardNotice(small).shouldPrompt).toBe(false);
 
-    // 600k 字幕 → 12 段小结 + 1 次成稿 + 归并层 = ≥5 次调用：弹
-    const big = buildBudgetPlan({
-      body: Array.from({ length: 120 }, (_, i) => ({ from: i * 5, to: i * 5 + 5, content: "x".repeat(5000) }))
+    // 210k 字幕 → 5 段小结 + 1 次成稿 = 6 次调用：弹
+    const mid = buildBudgetPlan({
+      body: Array.from({ length: 42 }, (_, i) => ({ from: i * 5, to: i * 5 + 5, content: "x".repeat(5000) }))
     });
-    expect(big.mode).toBe("map-reduce");
-    expect(big.estimatedCalls).toBeGreaterThanOrEqual(5);
-    const notice = mod.buildCostGuardNotice(big);
+    expect(mid.mode).toBe("map-reduce");
+    expect(mid.estimatedCalls).toBe(6);
+    const notice = mod.buildCostGuardNotice(mid);
     expect(notice.shouldPrompt).toBe(true);
     expect(notice.message).toContain("次调用");
     expect(notice.message).toContain("token");
     expect(notice.message).toContain("可取消");
+
+    // 600k 字幕 → 12 段小结 + 1 次成稿 + 归并层：needsReduce 参与护栏估算的分支
+    const big = buildBudgetPlan({
+      body: Array.from({ length: 120 }, (_, i) => ({ from: i * 5, to: i * 5 + 5, content: "x".repeat(5000) }))
+    });
+    expect(big.mode).toBe("map-reduce");
+    expect(big.needsReduce).toBe(true);
+    expect(big.estimatedCalls).toBeGreaterThanOrEqual(5);
+    expect(mod.buildCostGuardNotice(big).shouldPrompt).toBe(true);
   });
 });

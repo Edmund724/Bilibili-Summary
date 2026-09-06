@@ -1,5 +1,6 @@
 // 「预算器」纯函数模块：把字幕正文字符数保守估成 token，并产出「阶梯」判定与分段计划。
-// 决策记录见 ADR-0001（docs/adr/0001-long-video-summarization-map-reduce.md）。
+// 决策记录见 ADR-0001（docs/adr/0001-long-video-summarization-map-reduce.md；
+// 2026-09-06 抬线修订见该文末尾）。
 // 不接 UI、不发请求、不依赖 Chrome API，供 Map-Reduce 编排与预算内单次路径共用。
 // 常量（素材预算 / 单段输入 / 分段小结 / 归并组输入 / 成稿输出 / 系数）集中在此作为单一事实来源。
 
@@ -7,8 +8,10 @@ import type { BudgetPlan, BudgetPlanSegment, ChapterItem, SubtitleBodyItem } fro
 
 // 字符 → token 系数：每字符≈1 token（保守，宁可早进 Map-Reduce，溢出兜底保证正确性）。
 export const CHAR_PER_TOKEN = 1.0;
-// 素材预算（100k token × 1.0）：预算内一次成稿，超出即进入分段 + 归并。
-export const MATERIAL_BUDGET_CHARS = 100000;
+// 素材预算（200k 字符 ≈ 256k 窗口 − 16k 输出 − 余量）：预算内一次成稿，7h 级
+// 长视频必单发；超出（15h+ 级或更小窗口模型）即进入分段 + 归并，由溢出回落
+// 链路（ladder 自动转 Map-Reduce）兜底。抬线决策见 ADR-0001 文末修订。
+export const MATERIAL_BUDGET_CHARS = 200000;
 // 单段输入：分段写入小结的原始字幕字符上限。
 export const SEGMENT_INPUT_CHARS = 50000;
 // 分段小结 ≤10k（20% 保留）。
@@ -130,7 +133,7 @@ function splitByBudget(
 // - segmentInputChars：单段原始字幕输入上限（默认 SEGMENT_INPUT_CHARS）。
 // - reduceGroupInputChars：归并组输入上限（默认 REDUCE_GROUP_INPUT_CHARS），
 //   随 plan.reduceGroupInputChars 带出，供归并层（reduceSummaries）消费。
-// 模式判定（100k 线）与归并触发线（500k 线）不随 options 变：二者本质是
+// 模式判定（200k 线）与归并触发线（500k 线）不随 options 变：二者本质是
 // 「材料体量 ≈ 输入 20%」的出口侧语义，与单段/单组输入多大（入口侧）无关。
 export function buildBudgetPlan(
   { body = [], chapters = [] }: { body?: unknown[]; chapters?: unknown[] } = {},

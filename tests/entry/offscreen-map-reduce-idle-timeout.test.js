@@ -21,9 +21,10 @@ vi.mock("../../extension/ai/completion.js", async (importOriginal) => ({
   chatCompletion: chatCompletionMock
 }));
 
-// 120k 字符（>100k 预算线 → map-reduce；3 段 + 成稿 = 4 次调用 < 5 → 不弹成本护栏）
+// 208k 字符（>200k 预算线 → map-reduce；5 段 + 成稿 = 6 次调用 ≥5 → 弹成本护栏，
+// 测试内自动确认）
 function makeBody() {
-  return Array.from({ length: 1500 }, (_, i) => ({
+  return Array.from({ length: 2600 }, (_, i) => ({
     from: i * 4,
     to: i * 4 + 4,
     content: "字".repeat(80)
@@ -138,6 +139,15 @@ describe("Map-Reduce 编排期间空闲超时暂停（回归）", () => {
       context: { title: "七小时长视频", subtitleBody: makeBody() },
       prompt: "总结"
     });
+
+    // 抬线（200k）后夹具预估 6 次调用 ≥5 → 先弹成本护栏：自动确认后编排才启动
+    for (let i = 0; i < 50; i++) {
+      await vi.advanceTimersByTimeAsync(1);
+      if (session.port.postMessage.mock.calls.some((c) => c[0]?.type === "cost-guard")) break;
+    }
+    expect(session.port.postMessage.mock.calls.some((c) => c[0]?.type === "cost-guard")).toBe(true);
+    session.send({ action: "cost-guard-confirm", ok: true });
+
     await flushThroughChatCall(session);
 
     // 并发 3：首批段调用全部在途且挂起；推进远超原 90 秒窗口（含多次窗口跨度）

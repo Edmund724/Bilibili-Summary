@@ -2,7 +2,7 @@
 // 覆盖 validateAnalysis 越界丢弃与秒反推、JSON 防线（repairTruncatedJson /
 // parseLooseJson，arch-slim-2/08 起断言 ai/json-repair.ts）、部分失败降级
 // （failedRanges）、自带章节短路径产物同构、缓存键含签名且换签名 miss、双路径
-// 分派（≤100k 单次 / >100k 分段）、promise 复用去重。
+// 分派（≤200k 单次 / >200k 分段）、promise 复用去重。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState, makeSubtitleBody } from "../setup.js";
@@ -222,11 +222,11 @@ describe("repairTruncatedJson 截断修复与 parseLooseJson 宽容解析", () =
 });
 
 // ============================================================
-// 双路径分派（≤100k 单次 / >100k 分段）
+// 双路径分派（≤200k 单次 / >200k 分段）
 // ============================================================
 
 describe("双路径分派", () => {
-  it("≤100k 单次路径：1 次调用、显式 retries:2、无 rangeNote，产物含章节/金句", async () => {
+  it("≤200k 单次路径：1 次调用、显式 retries:2、无 rangeNote，产物含章节/金句", async () => {
     const { chatCompletion, calls } = buildCompletionFake();
     const body = makeSubtitleBody(50000);
     const result = await mod.runOverviewAnalysis(
@@ -258,55 +258,57 @@ describe("双路径分派", () => {
     expect(result.failedRanges).toBeUndefined();
   });
 
-  it(">100k 分段路径：buildBudgetPlan 切段并发跑每段，段提示词带 rangeNote 与前情回顾，产物合并去重", async () => {
+  it(">200k 分段路径：buildBudgetPlan 切段并发跑每段，段提示词带 rangeNote 与前情回顾，产物合并去重", async () => {
     const { chatCompletion, calls } = buildCompletionFake();
-    const body = makeSubtitleBody(110000); // 3 段：50k / 50k / 10k
+    const body = makeSubtitleBody(210000); // 5 段：50k ×4 / 10k
     const result = await mod.runOverviewAnalysis(
       // digest-only-ui：显式 off 透传（reader/overview 调用方钉死），每段调用都带
       { provider: makeProvider(), context: makeContext({ subtitleBody: body }), thinkingLevel: "off" },
       { chatCompletion }
     );
 
-    expect(chatCompletion).toHaveBeenCalledTimes(3);
+    expect(chatCompletion).toHaveBeenCalledTimes(5);
     // 每段一次调用：无显式 retries（重试由池层负责）
     expect(calls.every((c) => c.retries === undefined)).toBe(true);
     // 每段请求都携带 off 档位（协议层据此注入 THINKING_DISABLE_FIELDS）
     expect(calls.every((c) => c.thinkingLevel === "off")).toBe(true);
 
-    const firstUser = calls.find((c) => c.messages.at(-1).content.includes("第 1 / 3 段")).messages.at(-1).content;
-    expect(firstUser).toContain("注意：这是长视频切分后的第 1 / 3 段，覆盖 0:00 到 4:10");
+    const firstUser = calls.find((c) => c.messages.at(-1).content.includes("第 1 / 5 段")).messages.at(-1).content;
+    expect(firstUser).toContain("注意：这是长视频切分后的第 1 / 5 段，覆盖 0:00 到 4:10");
     expect(firstUser).toContain("只为这一段产出章节与金句，不要涉及其它时间段");
     expect(firstUser).not.toContain("前情回顾");
 
-    const secondUser = calls.find((c) => c.messages.at(-1).content.includes("第 2 / 3 段")).messages.at(-1).content;
+    const secondUser = calls.find((c) => c.messages.at(-1).content.includes("第 2 / 5 段")).messages.at(-1).content;
     expect(secondUser).toContain("前情回顾（上一段的结尾，只用来理解本段承接什么，不要为它开章节或挑金句）");
     // 前情回顾只进输入不进输出：maxTokens 估算基于本段正文
     expect(secondUser).toContain("字幕：");
 
     // 合并：各段章节按 from 排序，金句按文本去重
-    expect(result.chapters.map((c) => c.title)).toEqual(["章1a", "章1b", "章2a", "章2b", "章3a", "章3b"]);
+    expect(result.chapters.map((c) => c.title)).toEqual([
+      "章1a", "章1b", "章2a", "章2b", "章3a", "章3b", "章4a", "章4b", "章5a", "章5b"
+    ]);
     expect(result.chapters[0].from).toBe(5);
-    expect(result.quotes.map((q) => q.content)).toEqual(["金句1", "金句2", "金句3"]);
+    expect(result.quotes.map((q) => q.content)).toEqual(["金句1", "金句2", "金句3", "金句4", "金句5"]);
     expect(result.failedRanges).toBeUndefined();
   });
 
   it("分段路径每段先落盘（boc_lvs_analysis_ 族 + 段序号），再次生成只补未落盘段", async () => {
     const { chatCompletion } = buildCompletionFake();
-    const context = makeContext({ subtitleBody: makeSubtitleBody(110000) });
+    const context = makeContext({ subtitleBody: makeSubtitleBody(210000) });
     await mod.runOverviewAnalysis({ provider: makeProvider(), context, forceRefresh: true }, { chatCompletion });
-    expect(chatCompletion).toHaveBeenCalledTimes(3);
+    expect(chatCompletion).toHaveBeenCalledTimes(5);
 
     const segKeys = [...storage.map.keys()].filter((k) => k.startsWith("boc_lvs_analysis_BV1test_123_"));
-    expect(segKeys).toHaveLength(3);
-    expect(segKeys.map((k) => Number(k.split("_").at(-1))).sort((a, b) => a - b)).toEqual([1, 2, 3]);
+    expect(segKeys).toHaveLength(5);
+    expect(segKeys.map((k) => Number(k.split("_").at(-1))).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
 
-    // 清掉段 2 的落盘 → 重跑只重跑段 2（1、3 命中段缓存）
+    // 清掉段 2 的落盘 → 重跑只重跑段 2（其余段命中段缓存）
     const seg2Key = segKeys.find((k) => k.endsWith("_2"));
     storage.map.delete(seg2Key);
     chatCompletion.mockClear();
     await mod.runOverviewAnalysis({ provider: makeProvider(), context, forceRefresh: true }, { chatCompletion });
     expect(chatCompletion).toHaveBeenCalledTimes(1);
-    expect(chatCompletion.mock.calls[0][0].messages.at(-1).content).toContain("第 2 / 3 段");
+    expect(chatCompletion.mock.calls[0][0].messages.at(-1).content).toContain("第 2 / 5 段");
   });
 });
 
@@ -360,26 +362,28 @@ describe("部分失败降级", () => {
   it("分段路径单段失败：跳过该段出部分结果，failedRanges 记录段区间", async () => {
     const { chatCompletion } = buildCompletionFake({ failedSegments: new Set([2]) });
     const result = await mod.runOverviewAnalysis(
-      { provider: makeProvider(), context: makeContext({ subtitleBody: makeSubtitleBody(110000) }) },
+      { provider: makeProvider(), context: makeContext({ subtitleBody: makeSubtitleBody(210000) }) },
       { chatCompletion }
     );
 
-    expect(result.chapters.map((c) => c.title)).toEqual(["章1a", "章1b", "章3a", "章3b"]);
+    expect(result.chapters.map((c) => c.title)).toEqual([
+      "章1a", "章1b", "章3a", "章3b", "章4a", "章4b", "章5a", "章5b"
+    ]);
     expect(result.failedRanges).toEqual([{ from: 250, to: 500 }]);
     // 部分结果照常落整份缓存（含 failedRanges），重试走 forceRefresh
     const finalKeys = [...storage.map.keys()].filter((k) => k.startsWith("boc_lvs_analysis_final_"));
     expect(finalKeys).toHaveLength(1);
     expect(storage.map.get(finalKeys[0]).analysis.failedRanges).toEqual([{ from: 250, to: 500 }]);
-    // 失败段不落段缓存：1、3 段落盘，2 段没有
+    // 失败段不落段缓存：1、3、4、5 段落盘，2 段没有
     const segKeys = [...storage.map.keys()].filter((k) => k.startsWith("boc_lvs_analysis_BV1test_123_"));
-    expect(segKeys).toHaveLength(2);
+    expect(segKeys).toHaveLength(4);
   });
 
   it("分段路径全军覆没：抛第一个真实错误，不落任何缓存", async () => {
-    const { chatCompletion } = buildCompletionFake({ failedSegments: new Set([1, 2, 3]) });
+    const { chatCompletion } = buildCompletionFake({ failedSegments: new Set([1, 2, 3, 4, 5]) });
     await expect(
       mod.runOverviewAnalysis(
-        { provider: makeProvider(), context: makeContext({ subtitleBody: makeSubtitleBody(110000) }) },
+        { provider: makeProvider(), context: makeContext({ subtitleBody: makeSubtitleBody(210000) }) },
         { chatCompletion }
       )
     ).rejects.toThrow("段 1 生成失败");
@@ -454,27 +458,27 @@ describe("自带章节短路径", () => {
     expect(Object.keys(result).sort()).toEqual(["chapters", "quotes"]);
   });
 
-  it("短路径分段（>100k + 自带章节）：每段只挑金句，章节仍取稿件，合并后同构", async () => {
+  it("短路径分段（>200k + 自带章节）：每段只挑金句，章节仍取稿件，合并后同构", async () => {
     const { chatCompletion, calls } = buildCompletionFake();
     const chapters = [
       { from: 0, to: 250, title: "上半" },
       { from: 250, to: 550, title: "下半" }
     ];
     const result = await mod.runOverviewAnalysis(
-      { provider: makeProvider(), context: makeContext({ subtitleBody: makeSubtitleBody(110000), chapters }) },
+      { provider: makeProvider(), context: makeContext({ subtitleBody: makeSubtitleBody(210000), chapters }) },
       { chatCompletion }
     );
 
-    expect(chatCompletion).toHaveBeenCalledTimes(3);
+    expect(chatCompletion).toHaveBeenCalledTimes(5);
     expect(calls.every((c) => c.messages[0].content.includes("为它挑选金句"))).toBe(true);
-    const secondUser = calls.find((c) => c.messages.at(-1).content.includes("第 2 / 3 段")).messages.at(-1).content;
+    const secondUser = calls.find((c) => c.messages.at(-1).content.includes("第 2 / 5 段")).messages.at(-1).content;
     expect(secondUser).toContain("只为这一段挑选金句，不要涉及其它时间段");
     expect(secondUser).toContain("前情回顾（上一段的结尾，只用来理解本段承接什么，不要从中挑金句）");
     expect(result.chapters).toEqual([
       { from: 0, to: 250, title: "上半", summary: "" },
       { from: 250, to: 550, title: "下半", summary: "" }
     ]);
-    expect(result.quotes.map((q) => q.content)).toEqual(["金句1", "金句2", "金句3"]);
+    expect(result.quotes.map((q) => q.content)).toEqual(["金句1", "金句2", "金句3", "金句4", "金句5"]);
   });
 });
 
@@ -644,13 +648,15 @@ describe("成本护栏与进度", () => {
     const { chatCompletion } = buildCompletionFake();
     const onProgress = vi.fn();
     await mod.runOverviewAnalysis(
-      { provider: makeProvider(), context: makeContext({ subtitleBody: makeSubtitleBody(110000) }) },
+      { provider: makeProvider(), context: makeContext({ subtitleBody: makeSubtitleBody(210000) }) },
       { chatCompletion, onProgress }
     );
     expect(onProgress.mock.calls.map(([n]) => n).sort()).toEqual([
-      "正在整理第 1/3 段（33%）",
-      "正在整理第 2/3 段（67%）",
-      "正在整理第 3/3 段（100%）"
+      "正在整理第 1/5 段（20%）",
+      "正在整理第 2/5 段（40%）",
+      "正在整理第 3/5 段（60%）",
+      "正在整理第 4/5 段（80%）",
+      "正在整理第 5/5 段（100%）"
     ]);
   });
 });
@@ -890,13 +896,13 @@ describe("双路径 × 现成章节目录（简介/评论）", () => {
 
   it("分段路径：目录注入每段提示词（各段只对落在本段区间的目录条目出章）", async () => {
     const { chatCompletion, calls } = buildCompletionFake();
-    const body = makeSubtitleBody(110000); // 3 段
+    const body = makeSubtitleBody(210000); // 5 段
     const description = "00:00 开场\n00:10 第一节\n04:20 第二节\n08:30 第三节";
     await mod.runOverviewAnalysis(
       { provider: makeProvider(), context: makeContext({ subtitleBody: body, videoDescription: description }) },
       { chatCompletion }
     );
-    expect(chatCompletion).toHaveBeenCalledTimes(3);
+    expect(chatCompletion).toHaveBeenCalledTimes(5);
     for (const call of calls) {
       expect(call.messages.at(-1).content).toContain("现成章节目录（来自视频简介/评论，共 4 章）：");
     }

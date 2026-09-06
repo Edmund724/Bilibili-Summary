@@ -11,7 +11,7 @@ import { buildSubtitlePrompt, formatSegmentHeading } from "./subtitle-prompt.js"
 export const RECENT_TURNS_DEFAULT = 6;
 
 // 检索注入（相关原始字幕段）总量上限：压缩摘要默认 ≤60k，注入 ≤30k，
-// 合计 ≤90k < 素材预算 100k，保证追问仍走预算内单次、绝不溢出。
+// 合计 ≤90k < 素材预算 200k，保证追问仍走预算内单次、绝不溢出。
 export const RAW_INJECTION_MAX_CHARS = 30000;
 
 // 分段小结常驻的独立 token 上限：每条小结本身已由 03 按 ≤10k clamp，

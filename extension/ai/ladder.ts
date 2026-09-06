@@ -140,7 +140,7 @@ export async function runLadderChat(
   const trimRecentTurns: TrimRecentTurnsFn = deps.trimRecentTurns ?? (_trimRecentTurns as unknown as TrimRecentTurnsFn);
   const { askCostGuard, onActivity, pauseIdleTimeout } = deps;
 
-  // 阶梯分派：预算内（≤100k token）走单次流式；超预算走 Map-Reduce 分段编排。
+  // 阶梯分派：预算内（≤200k 字符）走单次流式；超预算走 Map-Reduce 分段编排。
   const plan = buildBudgetPlan({
     body: Array.isArray(msg.context?.subtitleBody) ? msg.context.subtitleBody : [],
     chapters: Array.isArray(msg.context?.chapters) ? msg.context.chapters : []

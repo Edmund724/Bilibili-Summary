@@ -272,8 +272,8 @@ async function requestValidatedPart({
 
 /**
  * 概览生成编排入口（纯数据层，依赖注入对齐 ladder / orchestrateMapReduce 惯例）：
- * 1. 双路径分派：字幕 ≤100k 字符（buildBudgetPlan mode=single）单次非流式调用
- *    （显式 retries: 2）；>100k 走 buildBudgetPlan 切段 + runMapBounded 有界并发
+ * 1. 双路径分派：字幕 ≤200k 字符（buildBudgetPlan mode=single）单次非流式调用
+ *    （显式 retries: 2）；>200k 走 buildBudgetPlan 切段 + runMapBounded 有界并发
  *    每段生成 + 段产物合并。
  * 2. 自带章节短路径：context.chapters 非空时只跑金句挑选调用（短提示词），
  *    章节取稿件标题，产物与 AI 分章完全同构。

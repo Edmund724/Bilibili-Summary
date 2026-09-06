@@ -1,5 +1,5 @@
 // ai/followup-router.js 测试：追问路由——超预算视频总结后追问改走压缩上下文 + 按需检索；
-// 首轮 / 尚未成稿 / ≤100k → 返回 null（交给完整 Map-Reduce）。
+// 首轮 / 尚未成稿 / ≤200k → 返回 null（交给完整 Map-Reduce）。
 
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -10,8 +10,8 @@ import {
 } from "../../extension/ai/followup-router.js";
 import { buildBudgetPlan } from "../../extension/ai/budgeter.js";
 
-// 构造 >100k 的 map-reduce plan（3 段）
-const body = Array.from({ length: 110 }, (_, i) => ({
+// 构造 >200k 的 map-reduce plan（5 段）
+const body = Array.from({ length: 210 }, (_, i) => ({
   from: i * 5,
   to: i * 5 + 5,
   content: "x".repeat(1000)
@@ -51,7 +51,7 @@ describe("loadSegmentSummaries", () => {
   it("按段序加载非空小结，注入 loader 生效", async () => {
     const loader = vi.fn(async (key) => (String(key).endsWith("_1") ? "小结一" : null));
     const summaries = await loadSegmentSummaries({ context, plan, loadSummary: loader });
-    expect(loader).toHaveBeenCalledTimes(3);
+    expect(loader).toHaveBeenCalledTimes(5);
     expect(summaries).toEqual(["小结一"]);
   });
 
@@ -82,7 +82,7 @@ describe("buildRetrieveRaw", () => {
 });
 
 describe("resolveFollowupContext", () => {
-  it("≤100k（mode=single）→ null", async () => {
+  it("≤200k（mode=single）→ null", async () => {
     const singlePlan = buildBudgetPlan({ body: [{ from: 0, to: 5, content: "短字幕" }], chapters: [] });
     const result = await resolveFollowupContext({
       context,

@@ -15,7 +15,7 @@ import { buildSubtitlePrompt } from "../../extension/ai/subtitle-prompt.js";
 import { clipSubtitleForContext } from "../../extension/ai/context.js";
 
 describe("resolveSubtitleForContext 预算内全文", () => {
-  it("body ≤100k：发送物 = buildSubtitlePrompt 从同一份 body 的渲染产物，结尾不丢", () => {
+  it("body ≤200k：发送物 = buildSubtitlePrompt 从同一份 body 的渲染产物，结尾不丢", () => {
     const body = [
       ...makeSubtitleBody(59000),
       // 结尾标记项：验证渲染产物完整包含 body 尾部（整篇原样，不按渲染字符截断）
@@ -33,8 +33,8 @@ describe("resolveSubtitleForContext 预算内全文", () => {
     expect(result.overflowMarked).toBe(false);
   });
 
-  it("恰好 100k 边界：single，整篇不截断", () => {
-    const body = makeSubtitleBody(100000);
+  it("恰好 200k 边界：single，整篇不截断", () => {
+    const body = makeSubtitleBody(200000);
     const result = resolveSubtitleForContext({ subtitleBody: body });
     expect(result.mode).toBe("single");
     expect(result.markdown).toBe(buildSubtitlePrompt({ body }));
@@ -44,8 +44,8 @@ describe("resolveSubtitleForContext 预算内全文", () => {
 });
 
 describe("resolveSubtitleForContext 超预算回落", () => {
-  it("body 110k：map-reduce，回落到 50k 截断 + 提示 + 打标记", () => {
-    const body = makeSubtitleBody(110000);
+  it("body 210k：map-reduce，回落到 50k 截断 + 提示 + 打标记", () => {
+    const body = makeSubtitleBody(210000);
     const result = resolveSubtitleForContext({ subtitleBody: body });
     const rendered = buildSubtitlePrompt({ body });
 
@@ -58,8 +58,8 @@ describe("resolveSubtitleForContext 超预算回落", () => {
     expect(result.markdown.endsWith("已截断）")).toBe(true);
   });
 
-  it("body 缺失但追问压缩摘要超 100k：按摘要实际长度退化判定并回落打标记", () => {
-    const compacted = "a".repeat(100001);
+  it("body 缺失但追问压缩摘要超 200k：按摘要实际长度退化判定并回落打标记", () => {
+    const compacted = "a".repeat(200001);
     const result = resolveSubtitleForContext({ compressedSummaryMarkdown: compacted });
     expect(result.mode).toBe("map-reduce");
     expect(result.notice).toBe(OVER_BUDGET_NOTICE);
