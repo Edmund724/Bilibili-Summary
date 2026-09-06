@@ -188,6 +188,38 @@ export function isAiSubtitle(item: { lan?: string } | null | undefined): boolean
   return lan.startsWith("ai-");
 }
 
+export interface SubtitleOptionView {
+  id: string;
+  url: string | undefined;
+  lang: string;
+  isAi: boolean;
+  selected: boolean;
+}
+
+// 字幕轨 option 视图模型的唯一投影（arch-slim-3/riders R2）：lang 即显示标签
+//（lanDoc||lan||"unknown"），isAi 标 [AI]，选中态按 id（弱比较）或 URL 精确匹配。
+// reader/lifecycle 的 select HTML 与 subtitle/ui 的快照 payload 共用本模型，
+// 各自保留自己的渲染形式，不再各抄一份投影。
+export function buildSubtitleOptionViews(
+  subtitles: SubtitleTrack[] | RawSubtitleTrack[] | null | undefined,
+  selectedSubtitleId?: string,
+  selectedSubtitleUrl?: string
+): SubtitleOptionView[] {
+  return (subtitles || []).map((item) => {
+    const lang = item.lanDoc || item.lan || "unknown";
+    const isAi = isAiSubtitle(item);
+    const selectedById = selectedSubtitleId && String(item.id || "") === String(selectedSubtitleId);
+    const selectedByUrl = item.subtitleUrl === selectedSubtitleUrl;
+    return {
+      id: String(item.id || ""),
+      url: item.subtitleUrl,
+      lang,
+      isAi,
+      selected: Boolean(selectedById || selectedByUrl)
+    };
+  });
+}
+
 // 候选10 批1：写入端统一保证 subtitleBody 按 from 升序（稳定排序，同 from
 // 保持原有相对顺序，与读路径旧线性扫描的命中顺序一致）。core.js 的
 // findActiveSubtitleIndex 二分查找依赖该不变量；读路径一律不排序。

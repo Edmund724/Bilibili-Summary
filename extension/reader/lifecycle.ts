@@ -27,7 +27,7 @@ import {
   getReadingSubtitlePlaceholderText
 } from "../subtitle/core.js";
 import { escapeHtml } from "../shared/string-utils.js";
-import { isAiSubtitle } from "../subtitle/selection.js";
+import { buildSubtitleOptionViews } from "../subtitle/selection.js";
 import { shouldShowHoursInNote } from "../notes/render.js";
 import { requestSubtitleRefresh, persistReaderSettingsThroughSeam } from "./reader-bus.js";
 import { logWarn } from "../shared/logging.js";
@@ -203,21 +203,20 @@ function renderReadingSubtitleSelect() {
     return;
   }
 
-  select.innerHTML = subtitles
-    .map((item) => {
-      const selectedById =
-        state.clip.selectedSubtitleId && String(item.id) === String(state.clip.selectedSubtitleId);
-      const selectedByUrl = item.subtitleUrl === state.clip.selectedSubtitleUrl;
-      const selected = selectedById || selectedByUrl ? "selected" : "";
-      const label = item.lanDoc || item.lan || "unknown";
-      const isAi = isAiSubtitle(item);
-      const aiTag = isAi ? " [AI]" : "";
+  select.innerHTML = buildSubtitleOptionViews(
+    subtitles,
+    state.clip.selectedSubtitleId,
+    state.clip.selectedSubtitleUrl
+  )
+    .map((option) => {
+      const label = option.lang;
+      const aiTag = option.isAi ? " [AI]" : "";
       const optionLabel = `${label}${aiTag}`;
-      return `<option value="${escapeHtml(item.subtitleUrl)}" data-lang="${escapeHtml(
+      return `<option value="${escapeHtml(option.url)}" data-lang="${escapeHtml(
         label
-      )}" data-id="${escapeHtml(String(item.id || ""))}" data-isai="${isAi}" ${selected}>${escapeHtml(
-        optionLabel
-      )}</option>`;
+      )}" data-id="${escapeHtml(option.id)}" data-isai="${option.isAi}" ${
+        option.selected ? "selected" : ""
+      }>${escapeHtml(optionLabel)}</option>`;
     })
     .join("");
   select.disabled = false;

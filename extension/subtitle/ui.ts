@@ -1,7 +1,7 @@
 import { BOC_VERSION } from "../core/defaults.js";
 import { loadSubtitle } from "./fetcher.js";
 import { buildSubtitlePreview, buildTxt } from "../notes/render.js";
-import { isAiSubtitle } from "./selection.js";
+import { buildSubtitleOptionViews } from "./selection.js";
 import { sanitizeFileName, escapeHtml } from "../shared/string-utils.js";
 import { cleanVideoUrl } from "../bilibili/video-id-shared.js";
 import { getSettings } from "../core/runtime.js";
@@ -113,20 +113,11 @@ export async function downloadSubtitle(): Promise<void> {
 }
 
 export function buildClipSnapshotPayload(): Record<string, unknown> {
-  const subtitleOptions = (state.clip.subtitles || []).map((item) => {
-    const label = item.lanDoc || item.lan || "unknown";
-    const isAi = isAiSubtitle(item);
-    const selectedById =
-      state.clip.selectedSubtitleId && String(item.id || "") === String(state.clip.selectedSubtitleId);
-    const selectedByUrl = item.subtitleUrl === state.clip.selectedSubtitleUrl;
-    return {
-      id: String(item.id || ""),
-      url: item.subtitleUrl,
-      lang: label,
-      isAi,
-      selected: selectedById || selectedByUrl
-    };
-  });
+  const subtitleOptions = buildSubtitleOptionViews(
+    state.clip.subtitles,
+    state.clip.selectedSubtitleId,
+    state.clip.selectedSubtitleUrl
+  );
 
   return {
     contentVersion: BOC_VERSION,
