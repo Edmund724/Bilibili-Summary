@@ -48,6 +48,8 @@ import { bindRuntimeEvents, bindUrlChangeHandler } from "./message-handler.js";
 import { ensureReaderStyles, removeReaderStyles } from "../shared/style-injector.js";
 // 调试日志门三宿主接线（shared/logging 的 registerDebugGate 消费方）
 import { registerDebugLogGate } from "../shared/debug-log-gate.js";
+// storage.onChanged 区/键过滤 seam（R3 收口：播放器 AI 开关门不再自挂监听）
+import { watchStorageKeys } from "../shared/watch-storage-keys.js";
 
 // lazy-player-ai.ts 的接口未覆盖 content 侧实际调用的全部方法；用局部接口
 // 精确描述本文件消费的 API，避免把调用点退化成 any。
@@ -204,10 +206,7 @@ function bindPlayerAiSettingsWatcher(): void {
     return;
   }
   playerAiSettingsWatcherBound = true;
-  chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "sync") {
-      return;
-    }
+  watchStorageKeys((changes) => {
     const change = changes["enablePlayerAiQuickAction"];
     if (!change) {
       return;
@@ -223,7 +222,7 @@ function bindPlayerAiSettingsWatcher(): void {
     } else {
       stopPlayerAiQuickActionLazy();
     }
-  });
+  }, { sync: ["enablePlayerAiQuickAction"] });
 }
 
 // ===== 懒加载边界 a（候选4 分包）：player-ai 的 start/stop 适配 =====

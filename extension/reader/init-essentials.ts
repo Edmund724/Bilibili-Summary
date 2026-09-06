@@ -11,6 +11,7 @@
 // 不 import lifecycle/sync 等 reader 域重实现。
 import { state, uiState } from "../core/state.js";
 import { logWarn } from "../shared/logging.js";
+import { watchStorageKeys } from "../shared/watch-storage-keys.js";
 import {
   loadReaderSettingsThroughSeam,
   requestPlayerAiSync,
@@ -67,16 +68,10 @@ export function bindSettingsWatcher() {
   }
   uiState.setSettingsWatcherBound(true);
 
-  chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "sync" && areaName !== "local") {
-      return;
-    }
-    // 候选06：键清单表驱动（READER_SETTINGS_WATCH_KEYS = 全部 storageKey ∪
-    // legacyStorageKey），不再手抄。
-    if (!READER_SETTINGS_WATCH_KEYS.some((key) => key && Object.prototype.hasOwnProperty.call(changes, key))) {
-      return;
-    }
-
+  // 候选06：键清单表驱动（READER_SETTINGS_WATCH_KEYS = 全部 storageKey ∪
+  // legacyStorageKey），不再手抄；区/键过滤经 shared/watch-storage-keys seam
+  //（R3 收口，sync+local 两区同一键清单）。
+  watchStorageKeys((changes) => {
     loadReaderSettingsThroughSeam()
       .then((settings) => {
         const next = settings as Settings;
@@ -95,7 +90,7 @@ export function bindSettingsWatcher() {
       .catch((error) => {
         logWarn("[BOC] failed to refresh settings after storage change", error);
       });
-  });
+  }, { sync: READER_SETTINGS_WATCH_KEYS, local: READER_SETTINGS_WATCH_KEYS });
 }
 
 // reader-bus seam（presenter.ts 改名，arch-slim-2/03）的 reader 侧注册：fetcher（总结链层）发布数据变更通知时，

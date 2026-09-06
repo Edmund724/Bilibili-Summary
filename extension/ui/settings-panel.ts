@@ -26,6 +26,7 @@ import {
   validateNotePlaceholderSections
 } from "../core/validators.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
+import { watchStorageKeys } from "../shared/watch-storage-keys.js";
 import { initCustomSelect } from "./custom-select.js";
 import {
   renderFixedPropertyRows,
@@ -753,11 +754,10 @@ function bindSettingsEvents(host: HTMLElement): void {
   elements.asrAutoFallback?.addEventListener("change", async () => {
     await sendRuntimeMessage({ type: "save-settings", settings: { asrAutoFallback: elements.asrAutoFallback.checked } });
   });
-  chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === "sync" && "asrAutoFallback" in changes) {
-      elements.asrAutoFallback.checked = changes.asrAutoFallback.newValue !== false;
-    }
-  });
+  // onChanged 回读他端改动（区/键过滤走 shared/watch-storage-keys seam，R3 收口）。
+  watchStorageKeys((changes) => {
+    elements.asrAutoFallback.checked = changes.asrAutoFallback.newValue !== false;
+  }, { sync: ["asrAutoFallback"] });
 }
 
 // ===== host 权限申请 =====

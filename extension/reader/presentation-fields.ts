@@ -217,12 +217,13 @@ export const READER_APPLY_FIELDS = READER_PRESENTATION_FIELDS.filter(
   (field) => field.writtenByApply
 );
 
-// storage 变更监听键全集：所有 storageKey ∪ legacyStorageKey（去重）。
-export const READER_SETTINGS_WATCH_KEYS = [
+// storage 变更监听键全集：所有 storageKey ∪ legacyStorageKey（去重，null 滤除
+// 并收窄为 string——R3 起 watch-storage-keys seam 的键清单参数要求 string）。
+export const READER_SETTINGS_WATCH_KEYS: string[] = [
   ...new Set(
-    READER_PRESENTATION_FIELDS.flatMap((field) =>
-      [field.storageKey, field.legacyStorageKey].filter(Boolean)
-    )
+    READER_PRESENTATION_FIELDS.flatMap(
+      (field): (string | null)[] => [field.storageKey, field.legacyStorageKey]
+    ).filter((key): key is string => Boolean(key))
   )
 ];
 

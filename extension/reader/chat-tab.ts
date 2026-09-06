@@ -50,6 +50,7 @@ import { resolveThinkingProfile } from "../ai/thinking-profiles.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { formatClock } from "../shared/clock-text.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
+import { watchStorageKeys } from "../shared/watch-storage-keys.js";
 import {
   resolveAiConversationContext,
   resolveAiConversationPageRef
@@ -208,30 +209,35 @@ function unbindUrlChangeTrigger(): void {
 
 // 外部设置变更 → 刷新平台/偏好（与 sidepanel bindEvents 的 storage.onChanged
 // 监听同语义；player-ai 信箱键的监听属摘除任务，不在 reader 消费）。
-let storageChangedHandler: ((changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => void) | null = null;
+// 区/键过滤经 shared/watch-storage-keys seam（R3 收口）：sync 区六键或
+// local 区 aiProviderKeys，解绑改 unsubscribe。
+let unwatchStorageKeys: (() => void) | null = null;
 
 function bindStorageWatcher(): void {
-  if (storageChangedHandler) {
+  if (unwatchStorageKeys) {
     return;
   }
-  storageChangedHandler = (changes, areaName) => {
-    if (
-      (areaName === "sync" &&
-        (changes.aiProviders || changes.aiSystemPrompt || changes.aiInitialQuickPrompts || changes.aiPresetPrompts || changes.defaultModel || changes.aiThinkingLevel)) ||
-      (areaName === "local" && changes.aiProviderKeys)
-    ) {
-      void refreshProvidersAndPrefsAfterExternalChange();
-    }
-  };
-  chrome.storage.onChanged.addListener(storageChangedHandler);
+  unwatchStorageKeys = watchStorageKeys(() => {
+    void refreshProvidersAndPrefsAfterExternalChange();
+  }, {
+    sync: [
+      "aiProviders",
+      "aiSystemPrompt",
+      "aiInitialQuickPrompts",
+      "aiPresetPrompts",
+      "defaultModel",
+      "aiThinkingLevel"
+    ],
+    local: ["aiProviderKeys"]
+  });
 }
 
 function unbindStorageWatcher(): void {
-  if (!storageChangedHandler) {
+  if (!unwatchStorageKeys) {
     return;
   }
-  chrome.storage.onChanged.removeListener(storageChangedHandler);
-  storageChangedHandler = null;
+  unwatchStorageKeys();
+  unwatchStorageKeys = null;
 }
 
 // 跨模块共享状态（contextData / currentContextKey / providers / chatHistory /

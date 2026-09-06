@@ -7,6 +7,7 @@
 // 所有，存储区与 settings-store 同为 sync；本叶子按叶子纪律不 import core/*。
 
 import { registerDebugGate } from "./logging.js";
+import { watchStorageKeys } from "./watch-storage-keys.js";
 
 export function registerDebugLogGate(): void {
   // 宿主差异容忍：storage 不可用（如仅 stub runtime 的测试环境）时直接返回，
@@ -21,9 +22,8 @@ export function registerDebugLogGate(): void {
   }).catch(() => {
     // 读失败维持缺省关：调试日志是诊断辅助，不该为它抛未处理拒绝。
   });
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "sync" && changes.enableDebugLogs) {
-      enabled = Boolean(changes.enableDebugLogs.newValue);
-    }
-  });
+  // 键过滤收口 shared/watch-storage-keys seam（R3）：只认 sync 区 enableDebugLogs。
+  watchStorageKeys((changes) => {
+    enabled = Boolean(changes.enableDebugLogs.newValue);
+  }, { sync: ["enableDebugLogs"] });
 }
