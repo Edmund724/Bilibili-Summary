@@ -5,6 +5,7 @@
   "description": "在 B 站视频页抓取字幕，预览后复制或下载。",
   "permissions": [
     "storage",
+    "unlimitedStorage",
     "scripting",
     "tabs",
     "offscreen",
