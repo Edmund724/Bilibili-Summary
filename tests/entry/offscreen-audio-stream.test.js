@@ -3,7 +3,7 @@
 // 与 tests/asr/pipeline.test.js 的 fake fetch 惯例一致）。
 // 覆盖：fMP4 增量流产出与 adtsFromFmp4 一致、主 URL 失败换备用、abort 中途
 // 静默退出（reader.cancel 且不产段）、全部失败抛「音频下载失败」、非 fMP4
-// 兜底整段 raw 交出。
+// 显式报错（无全量解码兜底）。
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -180,11 +180,9 @@ describe("streamAudioSegments", () => {
     expect(response._reader.cancel).toHaveBeenCalled();
   });
 
-  it("非 fMP4 兜底：整段 raw 一次交出", async () => {
+  it("非 fMP4 显式报错：仅支持 fMP4 音轨（无全量解码兜底）", async () => {
     const pcm = new Uint8Array(1000).fill(0x55);
     stubFetch({ getResponses: [() => okStreamResponse([pcm.subarray(0, 400), pcm.subarray(400)])] });
-    const items = await collect(streamAudioSegments(["u"], () => false));
-    expect(items.length).toBe(1);
-    expect(items[0].raw).toEqual(pcm);
+    await expect(collect(streamAudioSegments(["u"], () => false))).rejects.toThrow(/fMP4/);
   });
 });

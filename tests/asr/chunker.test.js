@@ -235,7 +235,7 @@ describe("makeDecodedBuffer 契约适配", () => {
   });
 
   it("未适配的裸数组（重构回归点）→ 校验抛「采样率 undefined」而非静默零切片", () => {
-    // 模拟用户报错路径：decodeTo16kMono 返回裸 Float32Array，若绕过适配
+    // 模拟用户报错路径：解码产出的裸 Float32Array，若绕过适配
     // 直接喂给 validateDecodedAudio，必须抛显式错误而不是产出空切片。
     const bare = new Float32Array(16000);
     expect(() => validateDecodedAudio(bare)).toThrow(/解码结果时长为零/);
