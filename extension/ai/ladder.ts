@@ -185,16 +185,19 @@ export async function runLadderChat(
       estimatedTokens: plan.estimatedTokens
     });
     if (guard.shouldPrompt) {
-      // 等待用户确认期间暂停空闲超时计时，确认后重新武装。
+      // 等待用户成本确认期间暂停空闲超时计时。
       pauseIdleTimeout?.();
       const confirmed = Boolean(await askCostGuard(port, guard.message));
       if (!confirmed) {
         port.postMessage({ type: "stopped", reason: "已取消" });
         return;
       }
-      onActivity?.();
     }
 
+    // 编排期间整体暂停空闲超时：Map-Reduce 全部为非流式 chatCompletion，段调用
+    // 期间没有任何流式活动可重挂 90 秒窗口，慢模型单段超窗会误杀整个运行（根治
+    // [90s-idle] 诊断）。进度仍逐段回吐；真正挂死由用户「停止」兜底。
+    pauseIdleTimeout?.();
     await orchestrateMapReduce({
       provider,
       context: msg.context || {},
@@ -203,9 +206,8 @@ export async function runLadderChat(
       signal,
       thinkingLevel: msg.thinkingLevel,
       onProgress: function (notice: string) {
-        // 进度回吐 + 每段完成重挂空闲超时（覆盖下一段模型调用）
+        // 进度回吐；不重挂空闲超时（本路径计时已整体暂停，见上）。
         port.postMessage({ type: "notice", data: notice });
-        onActivity?.();
       }
     });
     return;
@@ -229,6 +231,8 @@ export async function runLadderChat(
     if (!(e as { overflow?: boolean }).overflow) {
       throw e;
     }
+    // 编排期间整体暂停空闲超时（语义同上方 map-reduce 主路径）。
+    pauseIdleTimeout?.();
     await orchestrateMapReduce({
       provider,
       context: msg.context || {},
@@ -237,9 +241,8 @@ export async function runLadderChat(
       signal,
       thinkingLevel: msg.thinkingLevel,
       onProgress: function (notice: string) {
-        // 进度回吐 + 每段完成重挂空闲超时（覆盖下一段模型调用）
+        // 进度回吐；不重挂空闲超时（本路径计时已整体暂停，见上）。
         port.postMessage({ type: "notice", data: notice });
-        onActivity?.();
       }
     });
   }
