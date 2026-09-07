@@ -14,8 +14,8 @@
   display: none;
   padding: 20px 22px;
   box-sizing: border-box;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--boc-reader-surface, #fff);
+  border: 1px solid var(--boc-reader-border, #e5e7eb);
   border-radius: 18px;
   box-shadow: 0 28px 60px rgba(15, 23, 42, 0.16);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue",
@@ -48,7 +48,7 @@
   margin: 0;
   font-size: 18px;
   line-height: 1.15;
-  color: #0f172a;
+  color: var(--boc-reader-text, #0f172a);
   word-break: break-word;
 }
 
@@ -56,7 +56,7 @@
 .boc-reading-status {
   font-size: 16px;
   line-height: 1.5;
-  color: #6b7280;
+  color: var(--boc-reader-muted, #6b7280);
 }
 
 .boc-reading-meta {
@@ -85,13 +85,13 @@
 }
 
 .boc-reading-actions button {
-  border: 1px solid #e5e7eb;
-  background: #fff;
+  border: 1px solid var(--boc-reader-border, #e5e7eb);
+  background: var(--boc-reader-surface, #fff);
   border-radius: 999px;
   min-height: 36px;
   padding: 0 14px;
   font-size: 15px;
-  color: #1f2937;
+  color: var(--boc-reader-text, #1f2937);
   box-sizing: border-box;
   cursor: pointer;
 }
@@ -102,12 +102,12 @@
   justify-content: center;
   width: 34px;
   height: 34px;
-  border: 1px solid #e5e7eb;
-  background: #fff;
+  border: 1px solid var(--boc-reader-border, #e5e7eb);
+  background: var(--boc-reader-surface, #fff);
   border-radius: 8px;
   cursor: pointer;
   padding: 0;
-  color: #1f2937;
+  color: var(--boc-reader-text, #1f2937);
 }
 
 .boc-reading-icon-btn svg {
@@ -117,14 +117,16 @@
 }
 
 .boc-reading-icon-btn:hover {
-  background: #f3f4f6;
-  border-color: #d1d5db;
+  background: var(--boc-reader-surface-2, #f3f4f6);
+  border-color: var(--boc-reader-border, #d1d5db);
 }
 
+/* 主题切换按钮点按反馈（ui-renderer 300ms 即摘）：accent-soft 软底 + accent 字，
+ * 深浅两主题同源 token */
 .boc-reading-icon-btn.is-active {
-  background: #eff6ff;
-  border-color: #2563eb;
-  color: #2563eb;
+  background: var(--boc-reader-accent-soft, #eff6ff);
+  border-color: var(--boc-reader-accent, #2563eb);
+  color: var(--boc-reader-accent, #2563eb);
 }
 
 .boc-reading-select-sm {
@@ -132,15 +134,15 @@
   padding: 0 6px;
   font-size: 14px;
   border-radius: 6px;
-  border: 1px solid #e5e7eb;
-  background: #fff;
-  color: #1f2937;
+  border: 1px solid var(--boc-reader-border, #e5e7eb);
+  background: var(--boc-reader-surface, #fff);
+  color: var(--boc-reader-text, #1f2937);
   cursor: pointer;
 }
 
 .boc-reading-select-sm:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: var(--boc-reader-accent, #2563eb);
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
 }
 
@@ -335,7 +337,7 @@
   gap: 10px;
   align-items: start;
   padding: 6px 8px;
-  color: #111827;
+  color: var(--boc-reader-text, #111827);
   position: relative;
   /* 视口外条目跳过布局：估计高度按默认字号单行取 44px（视图内实际内边距
    * 10px×2 + max(时间 pill 13.5px×1.5+2px, 文本列 16px×1.5)≈44px），auto 让
@@ -381,7 +383,7 @@
 .boc-reading-empty {
   padding: 12px 4px;
   font-size: 16px;
-  color: #94a3b8;
+  color: var(--boc-reader-faint, #94a3b8);
 }
 
 @media (max-width: 1100px) {
@@ -413,7 +415,9 @@
   }
 }
 
-/* 主题 token 属阅读表：引用方（gate 段）随表同挂同摘，无跨表串色 */
+/* 主题 token 属阅读表：引用方（gate 段）随表同挂同摘，无跨表串色。
+ * 上方基础段的同名规则也吃同一批 token（带 fallback 写法），此处只保留
+ * 基础段覆盖不到的排版修正。 */
 #boc-reading-view,
 #boc-reading-view .boc-reading-meta,
 #boc-reading-view .boc-reading-status,
@@ -441,9 +445,6 @@
 
 #boc-reading-view .boc-reading-actions button,
 #boc-reading-view .boc-reading-select {
-  border: 1px solid var(--boc-reader-border);
-  background: var(--boc-reader-surface);
-  color: var(--boc-reader-text);
   box-shadow: none;
 }
 

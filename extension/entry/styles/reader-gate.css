@@ -44,7 +44,7 @@ body[data-boc-reader-mode="1"] #boc-reading-view[data-boc-digest-float="1"] {
   height: min(76vh, 860px);
   border-radius: 18px;
   box-shadow: 0 28px 60px rgba(15, 23, 42, 0.16);
-  background: #fff;
+  background: var(--boc-reader-surface, #fff);
   pointer-events: auto;
 }
 
