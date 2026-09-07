@@ -26,7 +26,7 @@
 //（阅读壳 restore 档先按 DOM 实况收敛失同步状态，再走与点击完全相同的进入链）。
 //
 // 自愈调度（arch-slim-2/09 收口）：自查节拍 800ms 单源 shared/self-heal.js 的
-// SELF_HEAL_INTERVAL_MS（与 reader/digest-host.ts 的重锚节拍同源）。阅读壳打开
+// SELF_HEAL_INTERVAL_MS。阅读壳打开
 // 且完好期间按钮恒被守卫摘除、自查只会空跑 isReaderShellIntact 的 DOM 查询，
 // interval 降频至 PAUSED_INTERVAL_MS 兜底（恢复事件丢失时按钮延迟上限 2s）；
 // 视图关闭（exitReaderShell 派发 READER_CLOSED_EVENT 窗口事件，不建静态
@@ -55,7 +55,7 @@ const SETTLE_DELAY_MS = 1200;
 const PLAYER_POLL_MS = 200;
 const PLAYER_WAIT_TIMEOUT_MS = 15000;
 // 定时自查间隔：B 站重渲染 / SPA 换页把节点带走后靠它补回（注入幂等）。
-// 单源 shared/self-heal.js（与 digest-host 重锚节拍同一口径）。
+// 单源 shared/self-heal.js（digest-host 的面板重锚节拍独立，不复用本常量）。
 const REINJECT_INTERVAL_MS = SELF_HEAL_INTERVAL_MS;
 // 暂停期兜底节拍：阅读壳打开且完好时按钮恒被摘除，自查只剩空跑 DOM 查询，
 // 降频至此（不是全停——恢复事件丢失时按钮最迟一个兜底 tick 补回，风险上限

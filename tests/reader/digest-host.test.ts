@@ -2,7 +2,7 @@
 //
 // 覆盖：锚点优先级命中与变量写入（贴栏占「锚点左缘 → 视口右界」整条右侧，
 // 下限 380px；纵向钳进一屏）、隐藏副本跳过、播放器贴右缘降级、浮层降级
-// （属性而非变量）、窄窗浮层、800ms 自查重锚、close 拆除与变量清除。
+// （属性而非变量）、窄窗浮层、2s 自查重锚、close 拆除与变量清除。
 //（digest-only-ui：面板宽度档机制退役，贴栏宽度下限定死 380px。）
 //
 // 注意：setup.js 给 Element.prototype.getBoundingClientRect 打了「恒返回
@@ -339,7 +339,7 @@ describe("digest-host 重算时机", () => {
     vi.restoreAllMocks();
   });
 
-  it("800ms 自查：锚点节点被换掉后重锚到新节点", async () => {
+  it("2s 自查：锚点节点被换掉后重锚到新节点", async () => {
     vi.useFakeTimers();
     await loadModules();
     const old = mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
@@ -352,9 +352,41 @@ describe("digest-host 重算时机", () => {
 
     // 自查换锚后经 rAF 应用；rAF 换成同步跑，保证断言前落地。
     runRafSynchronously();
+    // 旧 800ms 节拍不再自查：801ms 时锚点已换但变量仍是旧值（top 80）。
     vi.advanceTimersByTime(801);
+    expect(vars(readingView()).top).toBe("80px");
+    // 2s 拍到：重锚到新节点（top 100）。
+    vi.advanceTimersByTime(1200);
 
     expect(vars(readingView()).top).toBe("100px");
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("2s 自查一拍一搜：自查拍内 findDigestAnchor 恰一次（锚点 rect 只量一次）", async () => {
+    vi.useFakeTimers();
+    await loadModules();
+    const anchor = mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
+    digestHost.openDigestHost();
+    expect(vars(readingView()).width).toBe("400px");
+
+    // 只统计本次自查拍：open 首拍的搜索/量测已在断言前消费。
+    const rectSpy = vi.spyOn(anchor, "getBoundingClientRect");
+    const querySpy = vi.spyOn(document, "querySelector");
+    runRafSynchronously();
+    vi.advanceTimersByTime(2001);
+
+    // 一拍一搜：自查找到锚点并量一次 rect，结果复用进 applyDigestRect，
+    // 应用侧不再 findDigestAnchor 一遍、不再重复量 rect（旧实现同一拍
+    // 会搜两次、量两次）。
+    expect(querySpy).toHaveBeenCalledTimes(1);
+    expect(rectSpy).toHaveBeenCalledTimes(1);
+    expect(vars(readingView())).toEqual({
+      left: "1520px",
+      top: "80px",
+      width: "400px",
+      height: "688px"
+    });
     vi.useRealTimers();
     vi.restoreAllMocks();
   });

@@ -17,12 +17,11 @@
 // 的写组是四个 CSS 变量与一个浮层属性，快照结构独立。
 //
 // 为什么不用 MutationObserver：弹幕每飘一条都是变更事件，白烧 CPU（见
-// ui/digest-button.ts 头注）；SPA 换页换掉锚点节点的场景由 800ms 定时自查
-// 覆盖，节拍单源 shared/self-heal.js（arch-slim-2/09，与 digest-button 的
-// 补回自查同源，原两处注释互引口径却各持 800ms 字面量）。
+// ui/digest-button.ts 头注）；SPA 换页换掉锚点节点的场景由 2s 定时自查
+// 覆盖（节拍与拆单源的理由见 REANCHOR_INTERVAL_MS 处注释，与 digest-button
+// 的按钮自愈相互独立，不复用 shared/self-heal.js 的 800ms 常量）。
 
 import { findReaderPlayerHost } from "../bilibili/video-probe.js";
-import { SELF_HEAL_INTERVAL_MS } from "../shared/self-heal.js";
 // #boc-reading-view 的 id 单源（arch-slim-2/03）：reader/state.js 的 id 表就是
 // 为此存在，本模块四处手抄字面量收口到 ids.readingView。
 import { ids } from "./state.js";
@@ -53,8 +52,12 @@ const PINNED_MIN_HEIGHT = 240;
 // 右栏折叠断点校准后再定）。
 const FLOAT_VIEWPORT_MIN_WIDTH = 1000;
 // 定时自查间隔：SPA 换页把锚点节点换掉后靠它重锚（不用 MutationObserver，
-// 理由见文件头注；单源 shared/self-heal.js）。
-const REANCHOR_INTERVAL_MS = SELF_HEAL_INTERVAL_MS;
+// 理由见文件头注）。有意不再沿用 shared/self-heal.js 的 800ms（按钮自愈
+// 节拍，仍是其唯一消费者）：面板跑位是「降级表现」，滚动/resize 的 rAF
+// 合帧与 ResizeObserver 自带重锚（applyDigestRect 每拍比对换锚），此拍只在
+// 「用户完全不动 + 无 observer 事件」期间兜底自愈，与按钮「功能失效恢复」
+// 的语义本就独立，不必同档——兜底延迟上限放宽到 2s。
+const REANCHOR_INTERVAL_MS = 2000;
 
 // 贴栏宽度下限：定死 380px。
 
@@ -102,8 +105,8 @@ export function closeDigestHost(): void {
     window.cancelAnimationFrame(layoutRafId);
     layoutRafId = 0;
   }
-  window.removeEventListener("resize", scheduleDigestLayout);
-  window.removeEventListener("scroll", scheduleDigestLayout);
+  window.removeEventListener("resize", requestDigestLayout);
+  window.removeEventListener("scroll", requestDigestLayout);
   lastSnapshot = null;
   const readingView = document.getElementById(ids.readingView);
   if (!readingView) {
@@ -118,49 +121,59 @@ export function closeDigestHost(): void {
 // ===== 重算机制 =====
 
 function bindDigestHostListeners(): void {
-  window.addEventListener("resize", scheduleDigestLayout);
-  window.addEventListener("scroll", scheduleDigestLayout, { passive: true });
+  // 事件监听走零参入口 requestDigestLayout：Event 实参由它丢弃，且具名函数
+  // 保证 add/remove 拿到同一引用（箭头每次新建，remove 永不命中、监听泄漏）。
+  window.addEventListener("resize", requestDigestLayout);
+  window.addEventListener("scroll", requestDigestLayout, { passive: true });
 }
 
-// 事件路径的合帧入口：置脏标志（rafId 非 0 即有未消费请求），一帧至多跑
-// 一次「读→算→写」。
-function scheduleDigestLayout(): void {
+// 事件路径入口：丢弃 Event 实参，转调合帧入口（不带 finding 的纯重算）。
+function requestDigestLayout(): void {
+  scheduleDigestLayout();
+}
+
+// rAF 合帧入口：置脏标志（rafId 非 0 即有未消费请求），一帧至多跑一次
+// 「读→算→写」。finding 为自查拍（checkReanchor）搜到的锚点与 rect，原样
+// 透传给本帧的 applyDigestRect（同拍复用，不重搜）；事件路径不传 finding，
+// 一帧内的重复请求合并为一帧（rAF 只认 fn 引用，不认形参）。
+function scheduleDigestLayout(finding?: AnchorFinding): void {
   if (layoutRafId) {
     return;
   }
-  layoutRafId = window.requestAnimationFrame(runDigestLayout);
+  layoutRafId = window.requestAnimationFrame(() => runDigestLayout(finding));
 }
 
-function runDigestLayout(): void {
+function runDigestLayout(finding?: AnchorFinding): void {
   layoutRafId = 0;
   // 阅读视图节点已被移除（扩展根被清理/测试 teardown）时静默丢弃本帧：
   // 没有可写变量/属性的对象。
   if (!document.getElementById(ids.readingView)) {
     return;
   }
-  applyDigestRect();
+  applyDigestRect(finding);
 }
 
-// 800ms 自查：锚点节点被 B 站换掉（SPA 换页/重渲染）时重锚。判据是「当前
-// 观察的锚点不再有效」（节点摘除或 rect 不再合格），此时若观察对象还挂在
-// 旧节点上就先换观察对象再重算；观察对象仍有效则只需例行重算（滚动时
-// fixed 定位要跟滚）。自查与事件路径共用 rAF 合帧。
+// 2s 自查：锚点节点被 B 站换掉（SPA 换页/重渲染）时重锚。自查只做一次
+// 搜索（锚点与 rect 一并得到），经 rAF 合帧把结果交给 applyDigestRect 复用
+//（一拍一搜：自查路径全拍 findDigestAnchor 恰一次、rect 恰一次），换观察
+// 对象的判断收在 applyDigestRect——自查自身不换锚，只触发合帧。
 function checkReanchor(): void {
   if (!reanchorTimer) {
     return;
   }
-  const anchor = findDigestAnchor();
-  if (anchor !== observedAnchor) {
-    observeDigestAnchor(anchor);
-  }
-  scheduleDigestLayout();
+  scheduleDigestLayout(findDigestAnchor() ?? undefined);
 }
 
 // ===== 锚点与形态计算 =====
 
+// findDigestAnchor 的返回：命中的锚点与其筛选时量得的 rect（rect 一并给出，
+// 调用方复用、不重复量）；全落空返回 null。
+type AnchorFinding = { anchor: Element; rect: DOMRect } | null;
+
 // 按优先级取第一个有效的右栏锚点：存在、rect.width >= 280 且 rect.right
-// 未超出视口。隐藏副本（width 0）与滚出视口的候选都被跳过。
-function findDigestAnchor(): Element | null {
+// 未超出视口。隐藏副本（width 0）与滚出视口的候选都被跳过。rect 随命中
+// 一并返回（筛选时已量），调用方复用、不再重复读。
+function findDigestAnchor(): AnchorFinding {
   for (const selector of ANCHOR_SELECTORS) {
     const candidate = document.querySelector(selector);
     if (!candidate) {
@@ -168,7 +181,7 @@ function findDigestAnchor(): Element | null {
     }
     const rect = candidate.getBoundingClientRect();
     if (rect.width >= ANCHOR_MIN_WIDTH && rect.right <= window.innerWidth) {
-      return candidate;
+      return { anchor: candidate, rect };
     }
   }
   return null;
@@ -185,20 +198,25 @@ function observeDigestAnchor(anchor: Element | null): void {
   }
 }
 
-// 读→算→写一拍。所有路径（open/事件合帧/自查）最终都到这里。
-function applyDigestRect(): void {
+// 读→算→写一拍。所有路径（open/事件合帧/自查）最终都到这里，形态计算与
+// 写组只有这一条路径。finding 为空即事件路径（rAF 合帧/初始化），函数自查
+// 锚点；自查路径（checkReanchor）传入其拍内已找到的锚点与 rect（搜索时
+// 一并量得），跳过 findDigestAnchor 与重复 rect 读。观察对象的换锚判断在
+// 此单点收口，两条路径同样过这段。
+function applyDigestRect(finding?: AnchorFinding): void {
   const readingView = document.getElementById(ids.readingView);
   if (!readingView) {
     return;
   }
 
-  const anchor = findDigestAnchor();
+  const found = finding ?? findDigestAnchor();
+  const anchor = found?.anchor ?? null;
   if (anchor !== observedAnchor) {
     observeDigestAnchor(anchor);
   }
 
   // 锚点命中且视口够宽：贴栏形态，宽度下限定死 380px。
-  const anchorRect = anchor?.getBoundingClientRect();
+  const anchorRect = found?.rect;
   if (anchorRect && window.innerWidth >= FLOAT_VIEWPORT_MIN_WIDTH) {
     const rect = clampAnchorRect(anchorRect);
     applyPinnedRect(readingView, rect);

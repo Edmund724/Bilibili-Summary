@@ -1,11 +1,13 @@
 // extension/shared/self-heal.ts
 // 自愈调度共享常量（arch-slim-2/09 单源收口）。
 //
-// SELF_HEAL_INTERVAL_MS：content 侧两类「定时自查自愈」的共同节拍——
-//   - ui/digest-button.ts 的按钮补回自查（原 REINJECT_INTERVAL_MS 本地字面量）；
-//   - reader/digest-host.ts 的面板重锚自查（原 REANCHOR_INTERVAL_MS 本地字面量）。
-// 两处此前注释互相引用同一口径、却各持一份 800ms 字面量，收口为本常量。
-// 修改节拍请只改这里（两处注释都指向本文件）。
+// SELF_HEAL_INTERVAL_MS：content 侧按钮「定时自查自愈」的节拍——
+// ui/digest-button.ts 的按钮补回自查（原 REINJECT_INTERVAL_MS 本地字面量）。
+// 它此前与 reader/digest-host.ts 的面板重锚自查共用本常量（原两处注释互引
+// 同一口径、各持一份 800ms 字面量，收口于此）；面板重锚节拍后拆回 digest-host
+// 本地常量（2s，面板跑位是降级表现非功能失效，纯兜底拍语义独立，理由见
+// digest-host.ts 的 REANCHOR_INTERVAL_MS 处注释），本常量回归按钮自愈专用。
+// 修改按钮自查节拍请只改这里（digest-button 注释指向本文件）。
 //
 // READER_CLOSED_EVENT：阅读壳退出通知（window CustomEvent，无 detail）。
 // exitReaderShell 完成退出事务后派发（reader/shell.ts），ui/digest-button.ts
