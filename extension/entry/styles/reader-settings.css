@@ -6,7 +6,7 @@
  * 跟随；容器：#boc-reading-settings-panel 内嵌 #boc-reading-settings-host
  * （ui/ui-renderer 模板），规则全部以 #boc-reading-settings-panel 为前置，
  * 避免与宿主页面类名冲突。custom-select-* 为文档级裸类（custom-select.ts
- * 生成），仅被 settings-panel / provider-editor 消费。 */
+ * 生成），仅被 settings-panel / provider-editor 消费。
  *
  * ===== 控件规格速查（settings-ui-coherence 终局规格，01/02/03 定档） =====
  * 圆角四档 14/12/10/8：14 面板与 Modal → 12 弹层 → 10 卡片 → 8 框（输入/
