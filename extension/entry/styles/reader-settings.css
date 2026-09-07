@@ -131,10 +131,14 @@
   resize: vertical;
 }
 
-/* 系统提示词是长文案（多段结构化提示），默认 66px 两三行的高度不够用；
- * 其余短提示 textarea（AI 按钮快捷提示词）维持通用档。 */
+/* 系统提示词是长文案（多段结构化提示），默认 66px 两三行的高度不够用。 */
 #boc-reading-view .boc-reading-settings-host #aiSystemPrompt {
   min-height: 200px;
+}
+
+/* AI 按钮的快捷提示词同样按多行文案对待。 */
+#boc-reading-view .boc-reading-settings-host #playerAiQuickPrompt {
+  min-height: 132px;
 }
 
 #boc-reading-view .boc-reading-settings-host .boc-set-textarea::placeholder {
