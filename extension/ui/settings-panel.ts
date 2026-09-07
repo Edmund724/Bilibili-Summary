@@ -709,7 +709,7 @@ function bindSettingsEvents(host: HTMLElement): void {
   const elements = collectElements(host);
 
   if (elements.downloadFormat) {
-    initCustomSelect(elements.downloadFormat, "custom-select-wrapper boc-set-custom-select");
+    initCustomSelect(elements.downloadFormat, "custom-select-wrapper");
   }
 
   setAsrDeleteHandler(async (providerId) => {

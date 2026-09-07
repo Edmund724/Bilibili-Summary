@@ -7,6 +7,16 @@
  * （ui/ui-renderer 模板），规则全部以 #boc-reading-settings-panel 为前置，
  * 避免与宿主页面类名冲突。custom-select-* 为文档级裸类（custom-select.ts
  * 生成），仅被 settings-panel / provider-editor 消费。 */
+ *
+ * ===== 控件规格速查（settings-ui-coherence 终局规格，01/02/03 定档） =====
+ * 圆角四档 14/12/10/8：14 面板与 Modal → 12 弹层 → 10 卡片 → 8 框（输入/
+ * 下拉/图标按钮/弹层选项）。形状语言：pill = 文字动作按钮；8px = 一切「框」。
+ * 字号三档：16-700 分区标题 | 15px 控件与按钮文字（含行内、Modal、下拉选项、
+ * 复选与单选标签）| 14px 次级文字（提示/字段名/状态/空状态/错误/附属信息）。
+ * 控件高 32 一律（嵌在框内的图标 toggle 保持 24）；图标两档：行删 16 /
+ * chevron 8（24 视框 stroke 3 折 1px 视觉）；间距四档 6 / 8 / 12 / 14。
+ * 焦点态、弹层卡片、选项行、输入框 box 各只此一份声明，改一处即改全部。
+ * 本表按控件族组织，不按区块组织；新增控件先归族再落规则。 */
 
 /* ===== 侧边栏设置面板（digest-only-ui）：原独立 options 页的设置项 =====
  * 原 pages/options.css 随 options 页删除，其全部设置项样式按「宿主容器 +
@@ -65,7 +75,7 @@
 
 #boc-reading-view .boc-reading-settings-host .boc-set-row {
   display: grid;
-  gap: 5px;
+  gap: 6px;
 }
 
 #boc-reading-view .boc-reading-settings-host .boc-set-label {
@@ -74,7 +84,9 @@
   color: var(--boc-reader-muted, #6f675c);
 }
 
-#boc-reading-view .boc-reading-settings-host .boc-set-input {
+/* 输入框 box 全表唯一一份：.boc-set-quick-prompts input 同度量并入本条。 */
+#boc-reading-view .boc-reading-settings-host .boc-set-input,
+#boc-reading-view .boc-reading-settings-host .boc-set-quick-prompts input {
   width: 100%;
   height: 32px;
   padding: 0 8px;
@@ -86,15 +98,27 @@
   font-size: 15px;
 }
 
+/* 焦点态全表唯一一份：outline 关掉默认环，accent 描边 + 2px soft 光环。
+ * 带前置与裸类混排合法，各选择器独立计优先级；新控件焦点态并入本组。 */
 #boc-reading-view .boc-reading-settings-host .boc-set-input:focus,
 #boc-reading-view .boc-reading-settings-host .boc-set-select:focus,
 #boc-reading-view .boc-reading-settings-host .boc-set-textarea:focus,
-#boc-reading-view .boc-reading-settings-host .boc-set-quick-prompts input:focus {
+#boc-reading-view .boc-reading-settings-host .boc-set-quick-prompts input:focus,
+#boc-reading-view .boc-reading-settings-host .fixed-property-type-button:focus,
+#boc-reading-view .boc-reading-settings-host .fixed-property-fields input:focus,
+#boc-reading-view .boc-reading-settings-host .note-section-fields input:focus,
+#boc-reading-view .boc-reading-settings-host .note-section-fields select:focus,
+#boc-reading-view .provider-editor-dialog input[type="text"]:focus,
+#boc-reading-view .provider-editor-dialog input[type="password"]:focus,
+#boc-reading-view .provider-editor-dialog select:focus,
+.custom-select-trigger:focus {
   outline: none;
   border-color: var(--boc-reader-accent, #fb7299);
   box-shadow: 0 0 0 2px var(--boc-reader-accent-soft, #fce0ea);
 }
 
+/* 原生 select 回退（自定义下拉未接管时）：#downloadFormat 在 initCustomSelect
+ * 接管前唯一的样式来源。 */
 #boc-reading-view .boc-reading-settings-host .boc-set-select {
   width: 100%;
   height: 32px;
@@ -171,24 +195,12 @@
 #boc-reading-view .boc-reading-settings-host .boc-set-field-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
-  gap: 6px 10px;
+  gap: 6px 8px;
 }
 
 #boc-reading-view .boc-reading-settings-host .boc-set-quick-prompts {
   display: grid;
-  gap: 7px;
-}
-
-#boc-reading-view .boc-reading-settings-host .boc-set-quick-prompts input {
-  width: 100%;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--boc-reader-border, #e7dfd4);
-  border-radius: 8px;
-  background: var(--boc-reader-card, #ffffff);
-  color: var(--boc-reader-text, #2b2620);
-  font: inherit;
-  font-size: 15px;
+  gap: 8px;
 }
 
 #boc-reading-view .boc-reading-settings-host .boc-set-actions {
@@ -239,7 +251,7 @@
 #boc-reading-view .boc-reading-settings-host .note-sections-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 #boc-reading-view .boc-reading-settings-host .fixed-properties-empty {
@@ -314,7 +326,6 @@
   appearance: none;
   -webkit-appearance: none;
   padding-right: 26px;
-  border-radius: 8px;
   background-image:
     linear-gradient(45deg, transparent 50%, var(--boc-reader-faint, #a39a8d) 50%),
     linear-gradient(135deg, var(--boc-reader-faint, #a39a8d) 50%, transparent 50%);
@@ -365,17 +376,10 @@
   stroke-linejoin: round;
 }
 
-#boc-reading-view .boc-reading-settings-host .fixed-property-type-button:focus,
-#boc-reading-view .boc-reading-settings-host .fixed-property-fields input:focus,
-#boc-reading-view .boc-reading-settings-host .note-section-fields input:focus,
-#boc-reading-view .boc-reading-settings-host .note-section-fields select:focus {
-  outline: none;
-  border-color: var(--boc-reader-accent, #fb7299);
-  box-shadow: 0 0 0 2px var(--boc-reader-accent-soft, #fce0ea);
-}
-
+/* 弹层卡片全表唯一一份（Q18：模型选择弹层与自定义下拉同源）。 */
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-menu,
-#boc-reading-view .provider-editor-host .ai-provider-model-dropdown {
+#boc-reading-view .provider-editor-host .ai-provider-model-dropdown,
+.custom-select-dropdown {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
@@ -394,9 +398,12 @@
   margin: 0;
 }
 
+/* 选项行全表唯一一份：button 型（类型/模型选项、下拉选项）与 li 型（下拉
+ * 选项、模型加载/提示项）共用度量，cursor: pointer 对 li 无害。 */
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-option,
 #boc-reading-view .provider-editor-host .ai-provider-model-option,
-#boc-reading-view .provider-editor-host .ai-provider-model-message {
+#boc-reading-view .provider-editor-host .ai-provider-model-message,
+.custom-select-option {
   width: 100%;
   min-height: 30px;
   border: 0;
@@ -410,18 +417,17 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-#boc-reading-view .boc-reading-settings-host .fixed-property-type-option {
   cursor: pointer;
 }
 
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-option:hover,
-#boc-reading-view .provider-editor-host .ai-provider-model-option:hover {
+#boc-reading-view .provider-editor-host .ai-provider-model-option:hover,
+.custom-select-option:hover {
   background: var(--boc-reader-surface-2, #f0e9df);
 }
 
-#boc-reading-view .provider-editor-host .ai-provider-model-option[data-selected="true"] {
+#boc-reading-view .provider-editor-host .ai-provider-model-option[data-selected="true"],
+.custom-select-option[data-selected="true"] {
   background: var(--boc-reader-accent-soft, #fce0ea);
   color: var(--boc-reader-accent, #fb7299);
 }
@@ -480,7 +486,7 @@
 #boc-reading-view .boc-reading-settings-host .asr-providers-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 #boc-reading-view .boc-reading-settings-host .ai-providers-empty {
@@ -668,10 +674,11 @@
 }
 
 /* 面板外部的 global document click 委托会关闭 type picker 菜单/模型下拉；
- * 弹出层需要盖过相邻卡片，堆叠上下文内 z-index 已够，此处补一个兜底。 */
+ * 弹出层需要盖过相邻卡片，堆叠上下文内 z-index 已够，此处补一个兜底。
+ * .custom-select-dropdown 为文档级裸类（无宿主前置），同属弹层族一并兜底。 */
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-menu[hidden],
 #boc-reading-view .provider-editor-host .ai-provider-model-dropdown[hidden],
-#boc-reading-view .boc-reading-settings-host .custom-select-dropdown[hidden] {
+.custom-select-dropdown[hidden] {
   display: none;
 }
 
@@ -700,12 +707,6 @@
   cursor: pointer;
 }
 
-.custom-select-trigger:focus {
-  outline: none;
-  border-color: var(--boc-reader-accent, #fb7299);
-  box-shadow: 0 0 0 2px var(--boc-reader-accent-soft, #fce0ea);
-}
-
 /* 箭头取类型选择器那套观感：8px 见方、faint 色、1px 描边——本 SVG 是 24 视框，
  * stroke-width 换算成 3 才与 12 视框的 1.5 等宽。SVG 上的 stroke-width 是演示
  * 属性，CSS 规则可直接覆盖。 */
@@ -721,55 +722,9 @@
   stroke-width: 3;
 }
 
-.asr-provider-row .custom-select-wrapper .custom-select-trigger {
-  padding: 4px 8px;
-}
-
-.custom-select-dropdown {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  min-width: 100%;
-  width: max-content;
-  max-width: 260px;
-  z-index: 30;
-  max-height: 320px;
-  overflow-y: auto;
-  padding: 6px;
-  border: 1px solid var(--boc-reader-border, #e7dfd4);
-  border-radius: 12px;
-  background: var(--boc-reader-card, #ffffff);
-  box-shadow: 0 10px 24px rgba(28, 25, 23, 0.12);
-  list-style: none;
-  margin: 0;
-}
-
-.custom-select-option {
-  width: 100%;
-  min-height: 30px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  padding: 4px 10px;
-  text-align: left;
-  font: inherit;
-  font-size: 15px;
-  color: var(--boc-reader-text, #2b2620);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-.custom-select-option:hover {
-  background: var(--boc-reader-surface-2, #f0e9df);
-}
-
-.custom-select-option[data-selected="true"] {
-  background: var(--boc-reader-accent-soft, #fce0ea);
-  color: var(--boc-reader-accent, #fb7299);
-}
-
+/* 隐藏 select（custom-select 接管后）：基础态裸类会被 #… .boc-set-select 与
+ * #… .provider-editor-dialog select 高优先级规则压掉尺寸/描边，宿主前置两条
+ * 把被压属性逐条覆盖回——隐藏不依赖 clip 兜底。 */
 .custom-select-hidden {
   position: absolute;
   width: 1px;
@@ -780,6 +735,18 @@
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+#boc-reading-view .boc-reading-settings-host .custom-select-hidden,
+#boc-reading-view .provider-editor-dialog .custom-select-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
 }
 
 /* ===== 平台编辑 Modal（provider-master-detail/01）：AI/ASR 平台的
@@ -903,14 +870,6 @@
   color: var(--boc-reader-text, #2b2620);
   min-width: 0;
   margin: 0;
-}
-
-#boc-reading-view .provider-editor-dialog input[type="text"]:focus,
-#boc-reading-view .provider-editor-dialog input[type="password"]:focus,
-#boc-reading-view .provider-editor-dialog select:focus {
-  outline: none;
-  border-color: var(--boc-reader-accent, #fb7299);
-  box-shadow: 0 0 0 2px var(--boc-reader-accent-soft, #fce0ea);
 }
 
 #boc-reading-view .provider-editor-dialog .ai-provider-model-wrapper .provider-editor-model {
