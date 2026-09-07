@@ -376,12 +376,21 @@ function assertHtmlReferences() {
   }
 }
 
-// ladder chunk 依赖守卫（arch-review-2026-09/04，照 build-content.js 的
+// ladder chunk 依赖守卫（arch-review-2026-09/04+05，照 build-content.js 的
 // reader 装载图守卫先例）：ladder chunk（ai/ladder.ts 所在 chunk）不得含
-// notes/render / subtitle/selection / core/validators——prompt 组装只消费
-// notes/section-lines 与 subtitle/chapters 两个窄叶子，render 依赖树一旦
-// 被静态 import 焊回即 fail fast。
-const LADDER_CHUNK_FORBIDDEN_INPUTS = ["notes/render.ts", "subtitle/selection.ts", "core/validators.ts"];
+// notes/render / subtitle/selection / core/validators（04：prompt 组装只消费
+// notes/section-lines 与 subtitle/chapters 两个窄叶子），也不得含
+// core/cache-lru / ai/segment-cache / subtitle/cache（05：段缓存宿主迁 SW，
+// offscreen 经 segment-cache-proxy 消息调用，存储层不进 chunk）。
+// 静态 import 一旦把这些模块焊回即 fail fast。
+const LADDER_CHUNK_FORBIDDEN_INPUTS = [
+  "notes/render.ts",
+  "subtitle/selection.ts",
+  "core/validators.ts",
+  "core/cache-lru.ts",
+  "ai/segment-cache.ts",
+  "subtitle/cache.ts"
+];
 
 function assertLadderChunkSlim(meta) {
   for (const [file, out] of Object.entries(meta.outputs)) {
@@ -394,7 +403,7 @@ function assertLadderChunkSlim(meta) {
     if (hit.length > 0) {
       console.error(
         `build.js: ladder chunk ${file} 含 ${hit.join(", ")}——` +
-          `prompt 组装的字幕段/小时位消费必须走 notes/section-lines 与 subtitle/chapters 窄叶子`
+          `prompt 组装走 notes/section-lines 与 subtitle/chapters 窄叶子；段缓存经 segment-cache-proxy 消息到 SW，存储层不进 chunk`
       );
       process.exit(1);
     }

@@ -3,22 +3,20 @@
 // 缺段时追问路径回落完整 Map-Reduce，竞态代价只是多一次模型调用）；小结盘仍是
 // await（复用语义依赖）；段盘写盘最终失败（{ok:false} / reject）汇入
 // notifyCacheWriteError 且不向上抛。
-// 段缓存模块整体 mock（可控 promise 锁时序），模型调用经 orchestrateMapReduce
-// 既有 chatCompletion 注入缝；段盘 promise 在编排结束后才手动 settle，若实现
-// 缺 .catch，vitest 会以 unhandled error 判本文件失败（用例 A/C 隐式覆盖）。
+// 段缓存经 orchestrateMapReduce 的 segmentCache 注入缝换成可控桩
+//（arch-review-2026-09/05：宿主迁 SW 后段缓存不再静态入 chunk，模块 mock 换
+// deps 桩），模型调用经既有 chatCompletion 注入缝；段盘 promise 在编排结束后
+// 才手动 settle，若实现缺 .catch，vitest 会以 unhandled error 判本文件失败
+//（用例 A/C 隐式覆盖）。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState, makeSubtitleBody } from "../setup.js";
 
 const segmentCache = vi.hoisted(() => ({
-  buildRawSegmentCacheKey: vi.fn(),
-  buildSegmentSummaryCacheKey: vi.fn(),
-  loadSegmentSummary: vi.fn(),
-  saveSegmentSummary: vi.fn(),
-  saveRawSegments: vi.fn()
+  loadSummary: vi.fn(),
+  saveSummary: vi.fn(),
+  saveRaw: vi.fn()
 }));
-
-vi.mock("../../extension/ai/segment-cache.js", () => segmentCache);
 
 let mod;
 
@@ -29,13 +27,11 @@ async function importModules() {
 }
 
 beforeEach(async () => {
-  // clearMocks 只清调用记录不清实现，这里统一重设默认行为：键位透传段序号、
+  // clearMocks 只清调用记录不清实现，这里统一重设默认行为：
   // 小结缓存未命中、两类写盘成功
-  segmentCache.buildRawSegmentCacheKey.mockImplementation((_context, index) => `boc_lvs_raw_key_${index}`);
-  segmentCache.buildSegmentSummaryCacheKey.mockImplementation((_context, index) => `boc_lvs_summary_key_${index}`);
-  segmentCache.loadSegmentSummary.mockResolvedValue(null);
-  segmentCache.saveSegmentSummary.mockResolvedValue({ ok: true });
-  segmentCache.saveRawSegments.mockResolvedValue({ ok: true });
+  segmentCache.loadSummary.mockResolvedValue(null);
+  segmentCache.saveSummary.mockResolvedValue({ ok: true });
+  segmentCache.saveRaw.mockResolvedValue({ ok: true });
   await importModules();
 });
 
@@ -97,7 +93,7 @@ describe("原始段盘 fire-and-forget（#10）", () => {
 
     const events = [];
     const deferreds = [];
-    segmentCache.saveRawSegments.mockImplementation((_key, items) => {
+    segmentCache.saveRaw.mockImplementation(({ segments: items }) => {
       const d = makeDeferred();
       deferreds.push(d);
       events.push(`rawsave:start:${items.length}`);
@@ -115,7 +111,7 @@ describe("原始段盘 fire-and-forget（#10）", () => {
     });
 
     const port = makePort();
-    const orchestration = mod.orchestrateMapReduce({ provider: makeProvider(), context: makeContext(), plan, port, chatCompletion: chatImpl });
+    const orchestration = mod.orchestrateMapReduce({ provider: makeProvider(), context: makeContext(), plan, port, chatCompletion: chatImpl, segmentCache });
 
     // 段盘全部挂起期间：五个分段小结的模型调用应已全部发出（fire-and-forget 生效）
     await flushMicrotasks();
@@ -142,7 +138,7 @@ describe("原始段盘 fire-and-forget（#10）", () => {
   it("用例B：小结盘仍 await——saveSegmentSummary resolve 前编排不结算", async () => {
     const plan = await makePlan();
     const deferreds = [];
-    segmentCache.saveSegmentSummary.mockImplementation(() => {
+    segmentCache.saveSummary.mockImplementation(() => {
       const d = makeDeferred();
       deferreds.push(d);
       return d.promise;
@@ -150,7 +146,7 @@ describe("原始段盘 fire-and-forget（#10）", () => {
     const chatImpl = vi.fn(async (input) => (isSegmentCall(input) ? "小结。" : "# 视频笔记：《测试视频》\n完整笔记正文。"));
 
     const port = makePort();
-    const orchestration = mod.orchestrateMapReduce({ provider: makeProvider(), context: makeContext(), plan, port, chatCompletion: chatImpl });
+    const orchestration = mod.orchestrateMapReduce({ provider: makeProvider(), context: makeContext(), plan, port, chatCompletion: chatImpl, segmentCache });
 
     // 首波三段（并发 3）模型调用完成、小结盘全部挂起：成稿未开始、无 done/token 回吐
     await flushMicrotasks();
@@ -176,17 +172,17 @@ describe("原始段盘 fire-and-forget（#10）", () => {
     const chatImpl = vi.fn(async (input) => (isSegmentCall(input) ? "小结。" : "# 视频笔记：《测试视频》\n完整笔记正文。"));
 
     // 变体一：写盘最终失败返回 {ok:false}（现状契约路径）
-    segmentCache.saveRawSegments.mockResolvedValue({ ok: false });
+    segmentCache.saveRaw.mockResolvedValue({ ok: false });
     const port1 = makePort();
-    const result1 = await mod.orchestrateMapReduce({ provider: makeProvider(), context: makeContext(), plan, port: port1, chatCompletion: chatImpl });
+    const result1 = await mod.orchestrateMapReduce({ provider: makeProvider(), context: makeContext(), plan, port: port1, chatCompletion: chatImpl, segmentCache });
     expect(result1.aborted).toBe(false);
     expect(result1.draft).toBe("# 视频笔记：《测试视频》\n完整笔记正文。");
     expect(cacheWriteNotices(port1)).toHaveLength(1);
 
     // 变体二：写盘 reject（防御路径）——同样汇入、不向上抛、无 unhandled rejection
-    segmentCache.saveRawSegments.mockRejectedValue(new Error("quota"));
+    segmentCache.saveRaw.mockRejectedValue(new Error("quota"));
     const port2 = makePort();
-    const result2 = await mod.orchestrateMapReduce({ provider: makeProvider(), context: makeContext(), plan, port: port2, chatCompletion: chatImpl });
+    const result2 = await mod.orchestrateMapReduce({ provider: makeProvider(), context: makeContext(), plan, port: port2, chatCompletion: chatImpl, segmentCache });
     expect(result2.aborted).toBe(false);
     expect(result2.draft).toBe("# 视频笔记：《测试视频》\n完整笔记正文。");
     expect(cacheWriteNotices(port2)).toHaveLength(1);

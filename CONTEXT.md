@@ -37,7 +37,7 @@ _Avoid_: 补零/不补零双约定并存、各处手写 withHours 启发式、�
 _Avoid_: 落账、提交、写入字幕、手抄接受序列
 
 **原始字幕缓存**:
-按时间戳/章节切好的原始字幕段，可随取随用；仅在压缩摘要之外的细节追问时按需检索注入。
+按时间戳/章节切好的原始字幕段，可随取随用；仅在压缩摘要之外的细节追问时按需检索注入。宿主注记（arch-review-2026-09/05）：storage 真实宿主是 SW，offscreen（Map-Reduce/追问链）经 `segment-cache` 消息族读写——offscreen 侧唯一出站点 `ai/segment-cache-proxy.ts`，SW 端 `ai/segment-cache-handler.ts` 直调 segment-cache 单源（键位装配在 SW 完成）。
 代码名：`ai/segment-cache.js`（`boc_lvs_raw_*`）/ `ai/raw-retrieval.js`
 _Avoid_: 长记忆、向量库
 

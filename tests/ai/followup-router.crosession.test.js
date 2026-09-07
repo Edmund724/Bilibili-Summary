@@ -43,11 +43,25 @@ function createMemoryStorage() {
   return { map, local };
 }
 
+// 段缓存宿主迁 SW（arch-review-2026-09/05）后，resolveFollowupContext 的缺省
+// loadStoredSegments 走消息代理——测试把 chrome.runtime.sendMessage 路由到真实
+// SW handler（createSegmentCacheHandler），跨会话回退走真实消息与真实键位装配。
 async function importModules() {
   vi.resetModules();
   resetModuleState();
   storage = createMemoryStorage();
-  vi.stubGlobal("chrome", { storage: { local: storage.local } });
+  const handler = (await import("../../extension/ai/segment-cache-handler.js")).createSegmentCacheHandler();
+  vi.stubGlobal("chrome", {
+    storage: { local: storage.local },
+    runtime: {
+      sendMessage: vi.fn((message) => {
+        if (message?.type === "segment-cache") {
+          return new Promise((resolve) => handler(message, null, resolve));
+        }
+        return Promise.resolve({ ok: true });
+      })
+    }
+  });
   segCache = await import("../../extension/ai/segment-cache.js");
   router = await import("../../extension/ai/followup-router.js");
 }

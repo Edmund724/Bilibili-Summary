@@ -49,13 +49,13 @@ describe("lastAssistantContent", () => {
 
 describe("loadSegmentSummaries", () => {
   it("按段序加载非空小结，注入 loader 生效", async () => {
-    const loader = vi.fn(async (key) => (String(key).endsWith("_1") ? "小结一" : null));
+    const loader = vi.fn(async ({ segmentIndex }) => (segmentIndex === 1 ? "小结一" : null));
     const summaries = await loadSegmentSummaries({ context, plan, loadSummary: loader });
     expect(loader).toHaveBeenCalledTimes(5);
     expect(summaries).toEqual(["小结一"]);
   });
 
-  it("缺省 loader 命中段缓存（无预置数据 → 空）", async () => {
+  it("缺省 loader 走段缓存消息代理（无 SW 回路 → 未命中 → 空）", async () => {
     const summaries = await loadSegmentSummaries({ context, plan });
     expect(summaries).toEqual([]);
   });

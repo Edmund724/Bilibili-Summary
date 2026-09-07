@@ -3,39 +3,36 @@
 // Map-Reduce，改走「压缩摘要（从段缓存加载的分段小结 + 上一轮成稿笔记）+
 // 命中时间戳/章节/关键词注入的原始段」+ 单次调用，token 随追问近乎常数。
 // 首轮 / 尚未成稿（无笔记或无分段小结）→ 返回 null，交给上层跑完整 Map-Reduce。
-// 纯逻辑 + 注入的 loader，无 DOM/chrome 直接依赖（默认 loader 走 segment-cache）。
+// 纯逻辑 + 注入的 loader（段缓存宿主在 SW，缺省 loader 走 segment-cache-proxy
+// 消息代理；arch-review-2026-09/05），无 DOM 依赖。
 
 import { hasFinalNote, buildFollowupSubtitleMarkdown } from "./followup-context.js";
 import { retrieveRawSegments, type RawSegment } from "./raw-retrieval.js";
 import { formatSegmentItem } from "./map-reduce.js";
-import {
-  buildSegmentSummaryCacheKey,
-  segmentCacheKeyFields,
-  loadSegmentSummary as loadSegmentSummaryFromCache,
-  loadStoredRawSegments as loadStoredRawSegmentsFromCache
-} from "./segment-cache.js";
+import { segmentCacheProxy } from "./segment-cache-proxy.js";
 import type { BudgetPlan, BudgetPlanSegment } from "./types.js";
 
 interface LoadSegmentSummariesInput {
   context?: Record<string, unknown>;
   plan?: { segments?: BudgetPlanSegment[] } | null;
-  loadSummary?: (key: string) => Promise<string | null>;
+  // 小结读取缝（arch-review-2026-09/05）：缺省经 segmentCacheProxy 消息到 SW
+  // （段缓存宿主），测试注入可控桩。
+  loadSummary?: (input: { context?: Record<string, unknown>; segmentIndex?: number | string }) => Promise<string | null>;
 }
 
 /**
  * 从段缓存按段顺序加载全部分段小结（跳过 null/空，保持段序）。
- * loader 可注入以便单测；缺省用 segment-cache 的真实加载器。
+ * loader 可注入以便单测；缺省用段缓存消息代理（宿主 SW，键位在 SW 装配）。
  */
 export async function loadSegmentSummaries({
   context = {},
   plan = null,
-  loadSummary = loadSegmentSummaryFromCache
+  loadSummary = (input) => segmentCacheProxy.loadSummary(input)
 }: LoadSegmentSummariesInput = {}): Promise<string[]> {
   const segments = Array.isArray(plan?.segments) ? plan.segments : [];
   const out: string[] = [];
   for (const segment of segments) {
-    const key = buildSegmentSummaryCacheKey(context, segment?.index);
-    const summary = await loadSummary(key);
+    const summary = await loadSummary({ context, segmentIndex: segment?.index });
     if (typeof summary === "string" && summary.trim().length > 0) {
       out.push(summary);
     }
@@ -95,7 +92,9 @@ interface ResolveFollowupContextInput {
   history?: unknown[];
   userPrompt?: string;
   loadSummaries?: typeof loadSegmentSummaries;
-  loadStoredSegments?: typeof loadStoredRawSegmentsFromCache;
+  // 跨会话原始段读取缝（arch-review-2026-09/05）：缺省经 segmentCacheProxy
+  // 消息到 SW，测试注入可控桩。
+  loadStoredSegments?: (input: { context?: Record<string, unknown> }) => Promise<unknown[]>;
 }
 
 /**
@@ -116,7 +115,7 @@ export async function resolveFollowupContext({
   history = [],
   userPrompt = "",
   loadSummaries = loadSegmentSummaries,
-  loadStoredSegments = loadStoredRawSegmentsFromCache
+  loadStoredSegments = (input) => segmentCacheProxy.loadStoredRaw(input)
 }: ResolveFollowupContextInput = {}): Promise<Record<string, unknown> | null> {
   if (plan?.mode !== "map-reduce") {
     return null;
@@ -130,18 +129,11 @@ export async function resolveFollowupContext({
     return null;
   }
 
-  // 段来源：内存优先，空缺时跨会话回退（仅此处触达段缓存）。
+  // 段来源：内存优先，空缺时跨会话回退（仅此处触达段缓存，经消息代理到 SW）。
   const inMemorySegments = Array.isArray(plan?.segments) ? plan.segments : [];
   let segments: BudgetPlanSegment[] = inMemorySegments;
   if (segments.length === 0) {
-    const fields = segmentCacheKeyFields(context);
-    const stored = await loadStoredSegments({
-      bvid: String(fields.bvid || ""),
-      cid: String(fields.cid || ""),
-      subtitleId: String(fields.subtitleId || ""),
-      subtitleUrl: String(fields.subtitleUrl || ""),
-      lang: String(fields.lang || "")
-    });
+    const stored = await loadStoredSegments({ context });
     if (Array.isArray(stored) && stored.length > 0) {
       segments = stored as BudgetPlanSegment[];
     }

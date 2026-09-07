@@ -247,24 +247,32 @@ export type ResolveAiProviderResponse = {
   error?: string;
 };
 
-// ===== offscreen storage 桥 =====
+// ===== offscreen 段缓存消息族 =====
 // 平台事实（chrome.offscreen 官方文档）：offscreen 文档仅支持 chrome.runtime，
-// 无 chrome.storage——Map-Reduce（跑在 offscreen）经 cache-lru/segment-cache
-// 的缓存读写会抛「chrome.storage.local 不可用」，读路径静默当 miss。本桥把
-// get/set/remove 转发到 SW 的真实 storage：垫片安装器见 core/storage-bridge.ts
-// installStorageLocalBridge（offscreen 启动时安装），SW 端 handler 同文件工厂。
-export type StorageLocalBridgeMessage = {
-  type: "storage-local-bridge";
-  op: "get" | "set" | "remove";
-  // get：null（全量枚举）/ string / string[]；remove：string | string[]
-  keys?: string | string[] | null;
-  // set：键值对整体覆写
-  entries?: Record<string, unknown>;
+// 无 chrome.storage。段缓存（ai/segment-cache.js 的 boc_lvs_summary_* /
+// boc_lvs_raw_* 两族）宿主是 SW——offscreen 的 Map-Reduce / 追问链经本族消息
+// 读写（arch-review-2026-09/05，替下 storage-local-bridge 垫片），SW 端 handler
+// 直调 segment-cache 单源（键位装配也在 SW 完成，消息只带 context 字段）。
+export type SegmentCacheMessage = {
+  type: "segment-cache";
+  op: "load-summary" | "save-summary" | "save-raw" | "load-stored-raw";
+  // context 形字段（bvid/cid/selectedSubtitleId/selectedSubtitleUrl/subtitleLang），
+  // SW 端经 segmentCacheKeyFields 归一为键位字段
+  context?: Record<string, unknown>;
+  segmentIndex?: number | string;
+  // unknown 透传：budgetScaleSuffix 的 Number() 归一在 SW 的 segment-cache 单源
+  // 完成，与迁移前直连调用的口径逐字一致
+  budgetScale?: unknown;
+  // save-summary 的载荷 / save-raw 的原始段条目
+  summary?: string;
+  segments?: unknown[];
 };
-export type StorageLocalBridgeResponse = {
+export type SegmentCacheResponse = {
   ok: boolean;
-  // get 的回包：键值对（缺失的键不出现）
-  data?: Record<string, unknown>;
+  // load-summary 回包：小结文本（未命中为 null）
+  summary?: string | null;
+  // load-stored-raw 回包：按段序排列的落盘原始段（无命中为空数组）
+  storedSegments?: unknown[];
   error?: string;
 };
 
@@ -346,7 +354,7 @@ export type BackgroundMessage =
   | AsrProvidersSaveMessage
   | AsrProvidersDeleteMessage
   | GetAsrRuntimeConfigMessage
-  | StorageLocalBridgeMessage
+  | SegmentCacheMessage
   | OffloadTaskMessage;
 
 export type BackgroundMessageType = BackgroundMessage["type"];
@@ -356,7 +364,7 @@ export type BackgroundMessageType = BackgroundMessage["type"];
 export type OffscreenRuntimeRequest =
   | ResolveAiProviderMessage
   | GetAsrRuntimeConfigMessage
-  | StorageLocalBridgeMessage;
+  | SegmentCacheMessage;
 
 // ===== offscreen document 接收的 port 消息 =====
 
@@ -427,7 +435,7 @@ export type ResponseOf<M> = M extends ReaderEnterMessage ? ReaderEnterResponse
   : M extends AsrProvidersSaveMessage ? AsrProvidersSaveResponse
   : M extends AsrProvidersDeleteMessage ? AsrProvidersDeleteResponse
   : M extends GetAsrRuntimeConfigMessage ? GetAsrRuntimeConfigResponse
-  : M extends StorageLocalBridgeMessage ? StorageLocalBridgeResponse
+  : M extends SegmentCacheMessage ? SegmentCacheResponse
   : M extends OffloadTaskMessage ? OffloadTaskResponse
   : never;
 

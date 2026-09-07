@@ -7,10 +7,63 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState, makeSubtitleBody } from "../setup.js";
 
 let mod;
+let segmentCacheLoop;
+
+// 段缓存 SW 回路（arch-review-2026-09/05）：段缓存宿主迁 SW，orchestrateMapReduce
+// 的缺省 segmentCache 是消息代理——测试环境把 chrome.runtime.sendMessage 路由到
+// 真实 SW handler（createSegmentCacheHandler → segment-cache 单源 → 内存
+// storage），读写全链路走真实消息与真实键位装配。
+function createMemoryStorage() {
+  const map = new Map();
+  const local = {
+    get: vi.fn(async (keys) => {
+      if (keys === null || keys === undefined) {
+        return Object.fromEntries(map.entries());
+      }
+      const want = Array.isArray(keys) ? keys : [keys];
+      const out = {};
+      for (const k of want) {
+        if (map.has(k)) {
+          out[k] = map.get(k);
+        }
+      }
+      return out;
+    }),
+    set: vi.fn(async (items) => {
+      for (const [key, value] of Object.entries(items)) {
+        map.set(key, value);
+      }
+    }),
+    remove: vi.fn(async (keys) => {
+      const want = Array.isArray(keys) ? keys : [keys];
+      for (const k of want) {
+        map.delete(k);
+      }
+    })
+  };
+  return { map, local };
+}
+
+async function installSegmentCacheLoop() {
+  const storage = createMemoryStorage();
+  const handler = (await import("../../extension/ai/segment-cache-handler.js")).createSegmentCacheHandler();
+  const sendMessage = vi.fn((message) => {
+    if (message?.type === "segment-cache") {
+      return new Promise((resolve) => handler(message, null, resolve));
+    }
+    return Promise.resolve({ ok: true });
+  });
+  vi.stubGlobal("chrome", {
+    storage: { local: storage.local },
+    runtime: { sendMessage }
+  });
+  return { storage, sendMessage };
+}
 
 async function importModules() {
   vi.resetModules();
   resetModuleState();
+  segmentCacheLoop = await installSegmentCacheLoop();
   mod = await import("../../extension/ai/map-reduce.js");
 }
 
@@ -602,47 +655,14 @@ describe("presetId 穿线（概览 Map-Reduce 链 → 请求体）", () => {
 // arch-review-2026-09/03：溢出回落的预算档缓存隔离（_b50）编排级直测——
 // segment-cache 单测只锁 key 形状，本用例锁「串档即串内容」的端到端语义：
 // 常态档（scale=1）已落盘的小结绝不被 0.5 档重跑命中复用。
+//（arch-review-2026-09/05：读写经 beforeEach 接线的 segment-cache 消息回路
+// 落内存 storage，与生产同路径。）
 describe("溢出重跑预算档隔离：_b50 不串常态档内容", () => {
-  // 内存 Map 版 chrome.storage.local（与 segment-cache.test.js 同款夹具）：
-  // 编排级断言需要跨调用持久的真实读写。
-  function createMemoryStorage() {
-    const map = new Map();
-    const local = {
-      get: vi.fn(async (keys) => {
-        if (keys === null || keys === undefined) {
-          return Object.fromEntries(map.entries());
-        }
-        const want = Array.isArray(keys) ? keys : [keys];
-        const out = {};
-        for (const k of want) {
-          if (map.has(k)) {
-            out[k] = map.get(k);
-          }
-        }
-        return out;
-      }),
-      set: vi.fn(async (items) => {
-        for (const [key, value] of Object.entries(items)) {
-          map.set(key, value);
-        }
-      }),
-      remove: vi.fn(async (keys) => {
-        const want = Array.isArray(keys) ? keys : [keys];
-        for (const k of want) {
-          map.delete(k);
-        }
-      })
-    };
-    return { map, local };
-  }
-
   it("常态档已落盘小结不被 0.5 档重跑命中；两档 key 并存、内容各自", async () => {
-    // 本用例需要持久存储：重建模块图并把 chrome.storage 换成内存实现
-    vi.resetModules();
-    resetModuleState();
-    const storage = createMemoryStorage();
-    vi.stubGlobal("chrome", { storage: { local: storage.local } });
-    const mr = await import("../../extension/ai/map-reduce.js");
+    // 段缓存读写经消息回路落内存 storage（beforeEach 已接线）；本用例另取
+    // segment-cache（SW 侧模块）拼期望键位做断言
+    const storage = segmentCacheLoop.storage;
+    const mr = mod;
     const sc = await import("../../extension/ai/segment-cache.js");
 
     const provider = makeProvider();

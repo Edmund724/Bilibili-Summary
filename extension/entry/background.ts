@@ -27,8 +27,9 @@ import {
   createAiResolvedProviderHandler,
   withOkResponse
 } from "../core/provider-handlers.js";
-// offscreen storage 桥 SW 端 handler（offscreen 文档无 chrome.storage，缓存读写经此转发）
-import { createStorageLocalBridgeHandler } from "../core/storage-bridge.js";
+// offscreen 段缓存消息族 SW 端 handler（offscreen 文档无 chrome.storage，
+// 段缓存读写经消息直调 ai/segment-cache 单源——arch-review-2026-09/05）
+import { createSegmentCacheHandler } from "../ai/segment-cache-handler.js";
 // SW 静态图只进传输叶（arch-slim-2/04）：bgFetchJson/isBiliUrl 拆至 gateway-core，
 // 不经 gateway 拖入 state/video-probe/selection→cache 链。
 import { bgFetchJson, isBiliUrl } from "../bilibili/gateway-core.js";
@@ -299,11 +300,10 @@ const handleGetAsrRuntimeConfig = createAsrRuntimeConfigHandler({
   getAsrProviderKey: asrProviderStore.getKey
 });
 
-// offscreen storage 桥：offscreen 文档只有 chrome.runtime（平台限制），垫片把
-// 缓存域的 get/set/remove 转发到此处的真实 chrome.storage.local 执行。
-const handleStorageLocalBridge = createStorageLocalBridgeHandler({
-  storageLocal: chrome.storage.local
-});
+// offscreen 段缓存消息族：offscreen 文档只有 chrome.runtime（平台限制），
+// Map-Reduce / 追问链的段缓存读写经此 handler 直调 ai/segment-cache 落真实
+// chrome.storage.local（arch-review-2026-09/05，替下 storage-local-bridge 垫片）。
+const handleSegmentCache = createSegmentCacheHandler();
 
 // ===== 通用 offscreen 任务通道 =====
 
@@ -353,7 +353,7 @@ const messageHandlerTable = {
   "asr-providers-save": asrProviderHandlers.save,
   "asr-providers-delete": asrProviderHandlers.remove,
   "get-asr-runtime-config": handleGetAsrRuntimeConfig,
-  "storage-local-bridge": handleStorageLocalBridge,
+  "segment-cache": handleSegmentCache,
   "offload-task": handleOffloadTask
 } satisfies { [K in BackgroundMessageType]: MessageHandler<Msg<K>> };
 

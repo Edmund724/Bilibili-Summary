@@ -18,13 +18,7 @@ import { buildBudgetPlan, FINAL_OUTPUT_CHARS, SEGMENT_SUMMARY_CHARS, SEGMENT_INP
 import { chatCompletion } from "./completion.js";
 import { runMapBounded, DEFAULT_MAP_CONCURRENCY } from "./pool.js";
 import { shouldReduce, reduceSummaries } from "./reduce.js";
-import {
-  buildRawSegmentCacheKey,
-  buildSegmentSummaryCacheKey,
-  loadSegmentSummary,
-  saveSegmentSummary,
-  saveRawSegments
-} from "./segment-cache.js";
+import { segmentCacheProxy, type SegmentCacheOps } from "./segment-cache-proxy.js";
 import type { BudgetPlan, BudgetPlanSegment } from "./types.js";
 // port 回吐的消息联合单源在 chat/protocol.ts（ticket 08）：原「StreamChatEvent |
 // { type: string; data?: string; reason?: string }」手抄变体删除，改引协议联合。
@@ -130,6 +124,7 @@ interface SummarizeSegmentInput {
   signal?: AbortSignal | null;
   thinkingLevel?: string;
   chatCompletionImpl: ChatCompletionImpl;
+  segmentCache: SegmentCacheOps;
   notifyCacheWriteError: () => void;
   budgetScale?: number | unknown;
 }
@@ -139,6 +134,8 @@ interface SummarizeSegmentInput {
  * budgetScale：本轮预算档（默认 1）——小结缓存 key 按档隔离（防段边界漂移后命中
  * 错位小结）；原始段只按常态档（scale=1）落盘（供 followup 跨会话检索，检索侧
  * 永远按常态档切段，非常态档写入反而污染检索数据）。
+ * 段缓存读写经 segmentCache 注入缝（arch-review-2026-09/05：宿主迁 SW，缺省实现
+ * 是 segment-cache-proxy 消息代理；键位装配在 SW 的 segment-cache 单源完成）。
  * 返回小结字符串；中止（signal.aborted）时抛出标记 aborted 的错误，由上层统一收束。
  * 落盘经段缓存的 LRU 淘汰写入；淘汰后重试仍失败时经 notifyCacheWriteError 上浮
  * （编排层保证整个运行期只提示一次），不再中断编排。
@@ -151,14 +148,12 @@ async function summarizeSegment({
   signal,
   thinkingLevel,
   chatCompletionImpl,
+  segmentCache,
   notifyCacheWriteError,
   budgetScale = 1
 }: SummarizeSegmentInput): Promise<string> {
-  const rawKey = buildRawSegmentCacheKey(context, segment.index, budgetScale);
-  const summaryKey = buildSegmentSummaryCacheKey(context, segment.index, budgetScale);
-
   // 缓存命中直接复用，跳过 map 调用与无谓的原始段落盘（04 填空后生效）。
-  const cached = await loadSegmentSummary(summaryKey);
+  const cached = await segmentCache.loadSummary({ context, segmentIndex: segment.index, budgetScale });
   if (cached != null) {
     return cached;
   }
@@ -167,7 +162,8 @@ async function summarizeSegment({
   // fire-and-forget 不阻塞模型调用（追问用的按需缓存，缺段时追问路径回落完整
   // Map-Reduce）；淘汰后重试仍失败 → 上浮一次（编排层去重），不中断本段小结。
   if (budgetScale === 1) {
-    saveRawSegments(rawKey, segment.items || [])
+    segmentCache
+      .saveRaw({ context, segmentIndex: segment.index, budgetScale, segments: segment.items || [] })
       .then((savedRaw) => {
         if (savedRaw && savedRaw.ok === false && typeof notifyCacheWriteError === "function") {
           notifyCacheWriteError();
@@ -201,7 +197,7 @@ async function summarizeSegment({
   const trimmed = String(summary || "").trim();
   // 小结 ≤10k 保留（约 20%）；超出时尾部截断兜底（本票不做归并，靠此 clamp 保预算）
   const clamped = trimmed.length > SEGMENT_SUMMARY_CHARS ? trimmed.slice(0, SEGMENT_SUMMARY_CHARS) : trimmed;
-  const savedSummary = await saveSegmentSummary(summaryKey, clamped);
+  const savedSummary = await segmentCache.saveSummary({ context, segmentIndex: segment.index, budgetScale, summary: clamped });
   if (savedSummary && savedSummary.ok === false && typeof notifyCacheWriteError === "function") {
     notifyCacheWriteError();
   }
@@ -217,6 +213,9 @@ interface OrchestrateMapReduceInput {
   thinkingLevel?: string;
   onProgress?: (notice: string) => void;
   chatCompletion?: ChatCompletionImpl;
+  // 段缓存读写缝（arch-review-2026-09/05）：缺省 segmentCacheProxy（消息到 SW），
+  // 测试注入可控桩。
+  segmentCache?: SegmentCacheOps;
 }
 
 interface MapReduceResult {
@@ -242,7 +241,8 @@ export async function orchestrateMapReduce({
   signal,
   thinkingLevel,
   onProgress,
-  chatCompletion: chatCompletionImpl = chatCompletion as unknown as ChatCompletionImpl
+  chatCompletion: chatCompletionImpl = chatCompletion as unknown as ChatCompletionImpl,
+  segmentCache = segmentCacheProxy
 }: OrchestrateMapReduceInput): Promise<MapReduceResult> {
   const ctx = context || {};
   const post = (message: ChatPortMessage) => {
@@ -321,6 +321,7 @@ export async function orchestrateMapReduce({
         signal,
         thinkingLevel,
         chatCompletionImpl,
+        segmentCache,
         notifyCacheWriteError,
         budgetScale
       });
