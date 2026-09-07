@@ -598,3 +598,101 @@ describe("presetId 穿线（概览 Map-Reduce 链 → 请求体）", () => {
     }
   });
 });
+
+// arch-review-2026-09/03：溢出回落的预算档缓存隔离（_b50）编排级直测——
+// segment-cache 单测只锁 key 形状，本用例锁「串档即串内容」的端到端语义：
+// 常态档（scale=1）已落盘的小结绝不被 0.5 档重跑命中复用。
+describe("溢出重跑预算档隔离：_b50 不串常态档内容", () => {
+  // 内存 Map 版 chrome.storage.local（与 segment-cache.test.js 同款夹具）：
+  // 编排级断言需要跨调用持久的真实读写。
+  function createMemoryStorage() {
+    const map = new Map();
+    const local = {
+      get: vi.fn(async (keys) => {
+        if (keys === null || keys === undefined) {
+          return Object.fromEntries(map.entries());
+        }
+        const want = Array.isArray(keys) ? keys : [keys];
+        const out = {};
+        for (const k of want) {
+          if (map.has(k)) {
+            out[k] = map.get(k);
+          }
+        }
+        return out;
+      }),
+      set: vi.fn(async (items) => {
+        for (const [key, value] of Object.entries(items)) {
+          map.set(key, value);
+        }
+      }),
+      remove: vi.fn(async (keys) => {
+        const want = Array.isArray(keys) ? keys : [keys];
+        for (const k of want) {
+          map.delete(k);
+        }
+      })
+    };
+    return { map, local };
+  }
+
+  it("常态档已落盘小结不被 0.5 档重跑命中；两档 key 并存、内容各自", async () => {
+    // 本用例需要持久存储：重建模块图并把 chrome.storage 换成内存实现
+    vi.resetModules();
+    resetModuleState();
+    const storage = createMemoryStorage();
+    vi.stubGlobal("chrome", { storage: { local: storage.local } });
+    const mr = await import("../../extension/ai/map-reduce.js");
+    const sc = await import("../../extension/ai/segment-cache.js");
+
+    const provider = makeProvider();
+    const context = makeContext();
+    const plan = (await import("../../extension/ai/budgeter.js")).buildBudgetPlan({
+      body: context.subtitleBody,
+      chapters: []
+    });
+    const firstIndex = plan.segments[0].index;
+
+    // 第 1 轮：常态档 5 段全部成功，小结按无后缀 key 落盘
+    const { fetchMock: okFetch } = buildSequencedMock();
+    vi.stubGlobal("fetch", okFetch);
+    const run1 = await mr.orchestrateMapReduce({ provider, context, plan, port: makePort() });
+    expect(run1.aborted).toBe(false);
+    const scale1Key = sc.buildSegmentSummaryCacheKey(context, firstIndex, 1);
+    expect(scale1Key).not.toMatch(/_b\d+$/);
+    expect(storage.map.get(scale1Key)?.summary).toBe("小结一：事实A。");
+
+    // 第 2 轮：段小结全命中常态档缓存（合法同档复用，不调模型），成稿溢出 →
+    // 按 0.5 档整轮重跑（9 段）。重跑段若串档会命中常态档缓存、不调模型。
+    let noteCalls = 0;
+    const overflowFetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      const user = body.messages[body.messages.length - 1]?.content || "";
+      if (user.includes("连续片段")) {
+        const m = user.match(/第 (\d+)\//);
+        return jsonResponse({ choices: [{ message: { content: `收紧档小结${m ? Number(m[1]) : 1}。` } }] });
+      }
+      noteCalls += 1;
+      if (noteCalls === 1) {
+        return { ok: false, status: 400, text: async () => "maximum context length exceeded" };
+      }
+      return jsonResponse({ choices: [{ message: { content: "# 视频笔记：《测试视频》\n收紧档正文。" } }] });
+    });
+    vi.stubGlobal("fetch", overflowFetch);
+    const run2 = await mr.orchestrateMapReduce({ provider, context, plan, port: makePort() });
+
+    expect(run2.aborted).toBe(false);
+    // 成稿溢出 1 次 + 重跑 9 段全部调模型（未命中常态档缓存）+ 成稿 1 次 = 11。
+    expect(overflowFetch).toHaveBeenCalledTimes(11);
+
+    // 两档 key 并存、内容各自：常态档未被覆写，_b50 档是重跑产物
+    const b50Key = sc.buildSegmentSummaryCacheKey(context, firstIndex, 0.5);
+    expect(b50Key).toMatch(/_b50$/);
+    expect(storage.map.get(scale1Key)?.summary).toBe("小结一：事实A。");
+    expect(storage.map.get(b50Key)?.summary).toBe("收紧档小结1。");
+    // 成稿材料来自收紧档小结（不串常态档内容）
+    expect(run2.draft).toBe("# 视频笔记：《测试视频》\n收紧档正文。");
+    expect(run2.segmentSummaries).toContain("收紧档小结1。");
+    expect(run2.segmentSummaries).not.toContain("小结一：事实A。");
+  });
+});
