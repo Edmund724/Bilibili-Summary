@@ -107,7 +107,7 @@ describe("readFamilyKeys：索引驱动取该族该 bvid 的缓存键（读端�
       // 跨消费方共享同一份标志：subtitle 族条目缺失不再重复告警
       await expect(mod.readFamilyKeys("boc_subtitle_cache_", "BV1c")).resolves.toBeNull();
       expect(warnSpy).toHaveBeenCalledTimes(1);
-      expect(warnSpy).toHaveBeenCalledWith("[BOC] cache-lru index missing for family entry, fallback to full storage scan");
+      expect(warnSpy).toHaveBeenCalledWith("[BOC] cache-lru index missing for family=boc_lvs_raw_ bvid=BV1a, fallback to full storage scan");
     } finally {
       warnSpy.mockRestore();
     }

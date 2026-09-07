@@ -145,7 +145,7 @@ export async function readFamilyKeys(family: string, bvid: string, keyPrefix = "
   if (keys.length === 0) {
     if (!indexFallbackWarned) {
       indexFallbackWarned = true;
-      logWarn("[BOC] cache-lru index missing for family entry, fallback to full storage scan");
+      logWarn(`[BOC] cache-lru index missing for family=${family} bvid=${bvid}, fallback to full storage scan`);
     }
     return null;
   }
