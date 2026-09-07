@@ -41,6 +41,32 @@
   display: none;
 }
 
+/* ===== 设置展开态接管面板（2026-09 用户决议）=====
+ * 设置抽屉一开即独占面板：摘掉抽屉自身的圆角阴影与高度上限让它贴满面板壳，
+ * 隐藏底部 字幕/概览/AI 对话 标签条与三个 tab body（含内容，避免残留行）。
+ * 纯属性反应：[hidden] 由 renderReaderPanels 单点切换，无新状态类。
+ * 关闭抽屉即整体回落三 tab 形态。 */
+#boc-reading-view .boc-reading-settings-panel:not([hidden]) {
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+  margin: 0;
+  padding: 12px 16px 16px;
+}
+
+#boc-reading-view .boc-reading-settings-panel:not([hidden]) .boc-reading-settings-extension {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+#boc-reading-view .boc-reading-settings-panel:not([hidden]) ~ .boc-reading-tabs,
+#boc-reading-view .boc-reading-settings-panel:not([hidden]) ~ .boc-reading-tab-body {
+  display: none;
+}
+
 #boc-reading-view .boc-reading-settings-extension {
   margin-top: 10px;
   padding-top: 10px;
