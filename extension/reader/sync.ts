@@ -242,8 +242,9 @@ function scrollReadingSubtitleItemIntoView(node: HTMLElement) {
 //
 // reader 域的唯一定位入口：阅读视图内点击章节/字幕时间戳与侧栏时间戳 seek
 // 一律收敛到这里（此前侧栏路径在 message-handler 手抄了一份乱序版本——先
-// currentTime 后清暂停，currentTime 触发的 timeupdate 会在手动暂停标志未清时
-// 跑同步，吞掉一次跟随滚动，属真 bug 风险）。
+// currentTime 后清暂停，currentTime 引发的事件直连同步（P3 单路化前是
+// timeupdate，现由 seeked 承担）会在手动暂停标志未清时跑同步，吞掉一次跟随
+// 滚动，属真 bug 风险）。
 //
 // 规范序锁死（不得重排）：
 //   1) resetManualScrollPause                    清手动滚动暂停

@@ -39,3 +39,7 @@
 - LAYOUT 层收敛为 `video-bind.js + digest-host.js` 两域；reader 状态里的 `readingNativePageMode` 及消费分支删除。
 - `readerContentWidth` 语义为面板宽度档（旧整页主体宽度档位归一为 standard）：贴栏形态占满锚点左缘到视口右缘，档位宽作下限。
 - ADR-0004 的事实依据 2（main 节点搬移）失效，但 light DOM 结论对 Digest 面板继续成立；shadow 迁移的重开条件不变。
+
+## 修订（2026-09-07：面板重锚自查 800ms → 2s）
+
+「800ms 定时自查重锚」节拍降为 2s（`digest-host.ts` 的 `REANCHOR_INTERVAL_MS` 改本地常量）：核实事件路径（resize/scroll 的 rAF 合帧 + `applyDigestRect` 每拍锚点比对换锚）自带重锚后，定时自查只是「用户完全不动 + 无 observer 事件」期间的兜底，面板跑位是降级表现而非功能失效（与本 ADR「对抗面」一节的定性一致），2s 自愈可接受；按钮自愈（`shared/self-heal.ts` 800ms）是功能失效恢复，语义本就独立，不再共用单源常量。决策与验收记录见 `.scratch/tickets/arch-slim-4/issues/06-p2-digest-host-one-pass.md`。
