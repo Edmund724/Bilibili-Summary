@@ -88,7 +88,8 @@
 
 #boc-reading-view .boc-reading-settings-host .boc-set-input:focus,
 #boc-reading-view .boc-reading-settings-host .boc-set-select:focus,
-#boc-reading-view .boc-reading-settings-host .boc-set-textarea:focus {
+#boc-reading-view .boc-reading-settings-host .boc-set-textarea:focus,
+#boc-reading-view .boc-reading-settings-host .boc-set-quick-prompts input:focus {
   outline: none;
   border-color: var(--boc-reader-accent, #fb7299);
   box-shadow: 0 0 0 2px var(--boc-reader-accent-soft, #fce0ea);
@@ -145,7 +146,11 @@
   color: var(--boc-reader-faint, #a39a8d);
 }
 
-#boc-reading-view .boc-reading-settings-host .boc-set-check {
+/* 复选行统一：.boc-set-check（导出区等长标签）与 .mini-checkbox（笔记属性字段）
+ * 共用同一套标签度量与 accent 色——accent-color 不声明时控件回落浏览器默认蓝，
+ * 两区会一粉一蓝。单选框（.asr-provider-active）另有条款，取同一 token。 */
+#boc-reading-view .boc-reading-settings-host .boc-set-check,
+#boc-reading-view .boc-reading-settings-host .mini-checkbox {
   display: flex;
   align-items: flex-start;
   gap: 7px;
@@ -153,9 +158,11 @@
   font-size: 15px;
   line-height: 1.45;
   color: var(--boc-reader-text, #2b2620);
+  cursor: pointer;
 }
 
-#boc-reading-view .boc-reading-settings-host .boc-set-check input[type="checkbox"] {
+#boc-reading-view .boc-reading-settings-host .boc-set-check input[type="checkbox"],
+#boc-reading-view .boc-reading-settings-host .mini-checkbox input[type="checkbox"] {
   margin: 2px 0 0;
   accent-color: var(--boc-reader-accent, #fb7299);
   flex: 0 0 auto;
@@ -165,15 +172,6 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
   gap: 6px 10px;
-}
-
-#boc-reading-view .boc-reading-settings-host .mini-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  font-size: 14.5px;
-  color: var(--boc-reader-text, #2b2620);
 }
 
 #boc-reading-view .boc-reading-settings-host .boc-set-quick-prompts {
@@ -345,7 +343,7 @@
   background: var(--boc-reader-card, #ffffff);
   color: var(--boc-reader-text, #2b2620);
   font: inherit;
-  font-size: 14px;
+  font-size: 14.5px;
   font-weight: 400;
   cursor: pointer;
 }
@@ -699,6 +697,32 @@
   cursor: pointer;
 }
 
+.custom-select-trigger:focus {
+  outline: none;
+  border-color: var(--boc-reader-accent, #fb7299);
+  box-shadow: 0 0 0 2px var(--boc-reader-accent-soft, #fce0ea);
+}
+
+/* 箭头取类型选择器那套观感：8px 见方、faint 色、1px 描边——本 SVG 是 24 视框，
+ * stroke-width 换算成 3 才与 12 视框的 1.5 等宽。SVG 上的 stroke-width 是演示
+ * 属性，CSS 规则可直接覆盖。 */
+.custom-select-arrow {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--boc-reader-faint, #a39a8d);
+}
+
+.custom-select-arrow svg {
+  width: 8px;
+  height: 8px;
+  stroke-width: 3;
+}
+
+/* Modal 内的字段密度按 14.5px 走，与同表其余输入控件同值。 */
+.provider-editor-dialog .custom-select-trigger {
+  font-size: 14.5px;
+}
+
 .asr-provider-row .custom-select-wrapper .custom-select-trigger {
   font-size: 14.5px;
   padding: 4px 8px;
@@ -882,6 +906,14 @@
   color: var(--boc-reader-text, #2b2620);
   min-width: 0;
   margin: 0;
+}
+
+#boc-reading-view .provider-editor-dialog input[type="text"]:focus,
+#boc-reading-view .provider-editor-dialog input[type="password"]:focus,
+#boc-reading-view .provider-editor-dialog select:focus {
+  outline: none;
+  border-color: var(--boc-reader-accent, #fb7299);
+  box-shadow: 0 0 0 2px var(--boc-reader-accent-soft, #fce0ea);
 }
 
 #boc-reading-view .provider-editor-dialog .ai-provider-model-wrapper .provider-editor-model {
