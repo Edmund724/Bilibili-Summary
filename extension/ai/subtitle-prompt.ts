@@ -11,7 +11,7 @@
 //   的 markdown；body 为空时返回空串，由调用方决定占位文案（如「（暂无字幕）」）。
 
 import { formatClock } from "../shared/clock-text.js";
-import { buildSubtitleSectionLines, shouldShowHoursInNote } from "../notes/render.js";
+import { buildSubtitleSectionLines, shouldShowHoursInNote } from "../notes/section-lines.js";
 import type { ChapterItem, SubtitleBodyItem } from "./types.js";
 
 // 分段小结标注（承重协议，字面量勿改）：成稿材料（ai/map-reduce.ts 的

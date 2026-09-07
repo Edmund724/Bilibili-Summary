@@ -2,7 +2,7 @@ import { state, clipState } from "../core/state.js";
 import { formatLocalDate } from "../shared/utils.js";
 import { logWarn } from "../shared/logging.js";
 import { fetchHotComments } from "../bilibili/gateway.js";
-import { normalizeChapters } from "./selection.js";
+import { normalizeChapters } from "./chapters.js";
 import {
   buildMarkdown,
   buildSrt,
@@ -77,7 +77,7 @@ export function readVideoDescription(): string {
   return descNode?.textContent?.trim() || "";
 }
 
-// 归一化结果按「body 数组引用」缓存（WeakMap，照 selection.ts normalizeChapters
+// 归一化结果按「body 数组引用」缓存（WeakMap，照 chapters.ts normalizeChapters
 // 先例）：sync tick / 搜索 / 渲染每拍都拿同一 state.clip.subtitleBody 引用重复做
 // map→filter 新建数组，引用相同即零分配复用。前提：写路径一律经
 // clipState.setSubtitleBody(新数组) 整体替换引用，不原地修改。

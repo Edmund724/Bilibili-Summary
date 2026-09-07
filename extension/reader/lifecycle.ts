@@ -28,7 +28,7 @@ import {
 } from "../subtitle/core.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { buildSubtitleOptionViews } from "../subtitle/selection.js";
-import { shouldShowHoursInNote } from "../notes/render.js";
+import { shouldShowHoursInNote } from "../notes/section-lines.js";
 import { requestSubtitleRefresh, persistReaderSettingsThroughSeam } from "./reader-bus.js";
 import { logWarn } from "../shared/logging.js";
 // 候选02 分层惰性：链未装载 ⇒ refreshClip 未注册进 reader-bus seam。懒装载

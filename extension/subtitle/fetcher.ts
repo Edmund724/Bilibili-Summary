@@ -23,8 +23,8 @@ import { isReaderViewOpen } from "../reader/state.js";
 // 转写中间态呈现经它读取/订阅（content script 收不到自己的 runtime 广播）。
 import { publishSubtitleStatusPhase } from "../shared/subtitle-status-bus.js";
 import { readVideoTitle, readVideoAuthor, readUploadDate, readVideoDescription } from "./core.js";
+import { normalizeChapters } from "./chapters.js";
 import {
-  normalizeChapters,
   normalizeSubtitleTracks,
   pickPreferredSubtitle,
   sortSubtitleBodyByFrom,

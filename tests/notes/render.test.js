@@ -19,10 +19,14 @@ import {
   buildMarkdown,
   buildSrt,
   buildSubtitlePreview,
-  buildSubtitleSectionLines,
-  buildTxt,
-  shouldShowHoursInNote
+  buildTxt
 } from "../../extension/notes/render.js";
+// arch-review-2026-09/04：两函数已提取到窄叶子（prompt 字节冻结断言不变——
+// 同一份用例锁的是输出，不是居住地）。
+import {
+  buildSubtitleSectionLines,
+  shouldShowHoursInNote
+} from "../../extension/notes/section-lines.js";
 
 const body = (items) => items.map((item) => ({ from: 0, to: 5, content: "x", ...item }));
 

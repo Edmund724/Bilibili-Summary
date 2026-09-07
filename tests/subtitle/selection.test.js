@@ -1,15 +1,14 @@
-// subtitle/selection.js 直测（候选10 批1）：
+// subtitle/selection.js + subtitle/chapters.js 直测（候选10 批1）：
 // - normalizeChapters 按输入数组引用的 WeakMap 缓存（同引用复用同一结果对象，
-//   不同引用重新计算，去重/排序结果与原实现一致）；
+//   不同引用重新计算，去重/排序结果与原实现一致；arch-review-2026-09/04 起
+//   居住在 chapters.js 叶子）；
 // - sortSubtitleBodyByFrom 写入端稳定排序（findActiveSubtitleIndex 二分依赖的
 //   「subtitleBody 按 from 升序」不变量的来源）。
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { resetModuleState } from "../setup.js";
-import {
-  normalizeChapters,
-  sortSubtitleBodyByFrom
-} from "../../extension/subtitle/selection.js";
+import { normalizeChapters } from "../../extension/subtitle/chapters.js";
+import { sortSubtitleBodyByFrom } from "../../extension/subtitle/selection.js";
 
 beforeEach(() => {
   resetModuleState();

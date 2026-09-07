@@ -376,6 +376,31 @@ function assertHtmlReferences() {
   }
 }
 
+// ladder chunk 依赖守卫（arch-review-2026-09/04，照 build-content.js 的
+// reader 装载图守卫先例）：ladder chunk（ai/ladder.ts 所在 chunk）不得含
+// notes/render / subtitle/selection / core/validators——prompt 组装只消费
+// notes/section-lines 与 subtitle/chapters 两个窄叶子，render 依赖树一旦
+// 被静态 import 焊回即 fail fast。
+const LADDER_CHUNK_FORBIDDEN_INPUTS = ["notes/render.ts", "subtitle/selection.ts", "core/validators.ts"];
+
+function assertLadderChunkSlim(meta) {
+  for (const [file, out] of Object.entries(meta.outputs)) {
+    if (!file.endsWith(".js")) continue;
+    const inputs = Object.keys(out.inputs);
+    if (!inputs.some((input) => input.includes("ai/ladder.ts"))) continue;
+    const hit = LADDER_CHUNK_FORBIDDEN_INPUTS.filter((forbidden) =>
+      inputs.some((input) => input.includes(forbidden))
+    );
+    if (hit.length > 0) {
+      console.error(
+        `build.js: ladder chunk ${file} 含 ${hit.join(", ")}——` +
+          `prompt 组装的字幕段/小时位消费必须走 notes/section-lines 与 subtitle/chapters 窄叶子`
+      );
+      process.exit(1);
+    }
+  }
+}
+
 // 字节报表：raw = 模块图源文件磁盘字节合计（metafile.inputs 列表逐个 stat），
 // min = minified 产物字节。这是后续验收口径，输出保持固定列与固定顺序。
 function formatBytes(n) {
@@ -494,6 +519,7 @@ async function main() {
   assertManifestReferences();
   assertHtmlReferences();
   assertBackgroundBundleSize();
+  assertLadderChunkSlim(offscreenResult.metafile);
 
   // offscreen 拆分守卫：常驻文件必须仍含动态 import( 且至少产出一个动态
   // chunk——防止未来依赖变化把动态图又内联回单文件而无人察觉。

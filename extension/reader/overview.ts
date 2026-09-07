@@ -36,7 +36,7 @@ import { resolveActiveProvider } from "../ai/active-provider.js";
 // 装载——reader 装载图不拖整条 AI 管线（build-content 守卫钉住）。
 import { buildSubtitleSignature } from "../subtitle/cache.js";
 import type { AnalysisChapter, AnalysisQuote, OverviewAnalysis } from "../ai/analysis.js";
-import { shouldShowHoursInNote } from "../notes/render.js";
+import { shouldShowHoursInNote } from "../notes/section-lines.js";
 import { ids } from "./state.js";
 import { isReaderTranscribing } from "./transcribe-banner.js";
 import { jumpReadingTarget } from "./sync.js";
