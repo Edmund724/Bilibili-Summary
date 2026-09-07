@@ -9,6 +9,10 @@
 //     ts 为该视频最近一次写入时间戳，keys 为该 bvid 在该族下的全部缓存键
 //     （每次记录写入时合并去重更新）。旧格式条目（数值 ts，无 keys）在读端归一化
 //     兼容，无需迁移；
+//   - 读端原语 readFamilyKeys(family, bvid, keyPrefix)：消费方按索引定点取该族该
+//     bvid 的缓存键清单，条目缺失/无 keys/旧格式时回退 get(null) 全库前缀扫描，
+//     一次性 logWarn（跨消费方共享标志）与回退语义单源在原语内；存储读取本身
+//     留在消费方（segment-cache 拼段序 / subtitle 孤儿清理，读后处理各异）；
 //   - 淘汰候选键优先取索引键清单（不做 storage 存在性检查）；仅当索引整体缺失
 //     （LRU_INDEX_KEY 不存在/损坏 → 全族回退 get(null) 前缀扫描自愈）、或某族
 //     有条目但存在无 keys 的条目（旧格式/混合状态，键面不全 → 该族回退）时才
@@ -20,8 +24,10 @@
 // chrome.* 访问与既有测试模式一致：直接使用全局 chrome.storage.local，
 // 测试以 vi.stubGlobal("chrome", …) 注入内存实现（需支持 get(null) 全量枚举）。
 
-// LRU 索引键。
-export const LRU_INDEX_KEY = "boc_cache_lru_index";
+import { logWarn } from "../shared/logging.js";
+
+// LRU 索引键（模块私有；测试以字面量直读写索引键做 arrange/断言）。
+const LRU_INDEX_KEY = "boc_cache_lru_index";
 // 参与统一淘汰的缓存族前缀（全仓唯一注册处，arch-slim-2/08 起 analysis 两族
 // 收进注册、不再由 ai/analysis.ts 自行扩展名单）：
 //   - boc_lvs_raw_* / boc_lvs_summary_*：ai/segment-cache.ts 的原始字幕段 / 分段小结；
@@ -88,7 +94,7 @@ function requireStorageLocal(): chrome.storage.StorageArea {
 }
 
 // 读 LRU 索引：缺失 / 损坏 / 读失败 → {}（索引只是淘汰启发式元数据，允许丢）。
-export async function readLruIndex(): Promise<LruIndex> {
+async function readLruIndex(): Promise<LruIndex> {
   try {
     const result = await requireStorageLocal().get(LRU_INDEX_KEY);
     const index = result?.[LRU_INDEX_KEY];
@@ -115,9 +121,41 @@ function normalizeIndexEntry(value: unknown): LruIndexEntry | null {
   return null;
 }
 
+// 索引退化回退的一次性告警标志（模块级，跨消费方共享）：回退路径可能被每次追问
+// / 每次转写触发，只 logWarn 一次防刷屏，便于发现索引退化。
+let indexFallbackWarned = false;
+
+/**
+ * 读端原语：按 LRU 索引取该族该 bvid 的缓存键清单（keyPrefix 可选过滤），供消费方
+ * 定点批量读取（存储读取本身留在消费方，读后处理各异）。索引格式（family → bvid →
+ * {ts, keys} 二级结构 + 旧格式 normalize 兼容）的知识单源在本模块：条目缺失 / 无
+ * keys / 旧格式（normalize 后 keys 为空）时返回 null，消费方回退 get(null) 全库
+ * 前缀扫描自愈；回退时一次性 logWarn（跨消费方共享标志，防刷屏）。索引读失败按
+ * 缺失同路回退（索引是启发式元数据，允许丢）。
+ */
+export async function readFamilyKeys(family: string, bvid: string, keyPrefix = ""): Promise<string[] | null> {
+  let keys: string[];
+  try {
+    const index = await readLruIndex();
+    const familyEntry = index[family] && typeof index[family] === "object" ? index[family] : {};
+    keys = normalizeIndexEntry((familyEntry as Record<string, unknown>)[bvid])?.keys || [];
+  } catch {
+    keys = [];
+  }
+  if (keys.length === 0) {
+    if (!indexFallbackWarned) {
+      indexFallbackWarned = true;
+      logWarn("[BOC] cache-lru index missing for family entry, fallback to full storage scan");
+    }
+    return null;
+  }
+  const prefix = typeof keyPrefix === "string" ? keyPrefix : "";
+  return keys.filter((key) => !prefix || key.startsWith(prefix));
+}
+
 // 记录一次写入：family → bvid → { ts, keys }。cacheKeys 是本次写入的缓存键清单，
 // 合并（去重）进该 bvid 条目的 keys。失败上抛，由 writeWithEviction 统一处理。
-export async function recordCacheWrite(
+async function recordCacheWrite(
   family: string,
   bvid: string,
   timestamp = Date.now(),
@@ -337,6 +375,8 @@ export async function writeWithEviction({
 // ai/analysis.ts（boc_lvs_analysis_final_ / boc_lvs_analysis_ 两族）。
 // 本叶保持零 import：source key 推导（buildSubtitleSourceKey，属 subtitle 域）
 // 与失败日志（logError，拖 core/state）都经 options 注入，不反向依赖。
+// （readFamilyKeys 的回退告警经 shared/logging 的 logWarn——同为不拖 state/
+// chrome 的纯叶子，随 arch-slim-5/09 告警随原语单源收进本叶。）
 // ============================================================
 
 export type CacheSaveResult = EvictionResult | EvictionFailure;

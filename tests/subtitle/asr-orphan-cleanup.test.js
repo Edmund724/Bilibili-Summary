@@ -106,10 +106,14 @@ describe("clearStaleAsrSubtitleCache：只清同视频的过期 ASR 变体", () 
     const staleAsr = cache.getSubtitleCacheKey({ bvid: "BV1o", cid: "7", subtitleId: "asr:old:p:m:auto" });
     await storage.local.set({
       [keepKey]: { body: BODY, timestamp: 2 },
-      [staleAsr]: { body: BODY, timestamp: 1 }
+      [staleAsr]: { body: BODY, timestamp: 1 },
+      // 直写索引记录两键（原经 recordCacheWrite arrange，收私有后改为字面量键）
+      boc_cache_lru_index: {
+        boc_subtitle_cache_: {
+          BV1o: { ts: 10, keys: [keepKey, staleAsr] }
+        }
+      }
     });
-    const lru = await import("../../extension/core/cache-lru.js");
-    await lru.recordCacheWrite("boc_subtitle_cache_", "BV1o", 10, [keepKey, staleAsr]);
 
     const removed = await cache.clearStaleAsrSubtitleCache({ bvid: "BV1o", cid: "7", keepKey });
 
@@ -123,12 +127,10 @@ describe("clearStaleAsrSubtitleCache：只清同视频的过期 ASR 变体", () 
 
 describe("saveSubtitleToCache 与统一 LRU 的接线", () => {
   it("写入失败先淘汰重试：重试成功返回 { ok:true } 且旧视频被淘汰", async () => {
-    // 造出已满 3 个 + 1 最旧的族（BV1old 最旧，写入目标 BV1n 由 save 内部记录）
-    const lru = await import("../../extension/core/cache-lru.js");
-    await lru.recordCacheWrite("boc_subtitle_cache_", "BV1old", 1);
-    await lru.recordCacheWrite("boc_subtitle_cache_", "BV1m", 2);
-    await lru.recordCacheWrite("boc_subtitle_cache_", "BV1w", 3);
+    // 直写索引（旧格式条目，数值 ts）造出已满 3 个的族 + 最旧 BV1old
+    // （写入目标 BV1n 由 save 内部记录）
     await storage.local.set({
+      boc_cache_lru_index: { boc_subtitle_cache_: { BV1old: 1, BV1m: 2, BV1w: 3 } },
       boc_subtitle_cache_BV1old_1_id_x: { body: BODY, timestamp: 1 },
       boc_subtitle_cache_BV1m_1_id_x: { body: BODY, timestamp: 2 },
       boc_subtitle_cache_BV1w_1_id_x: { body: BODY, timestamp: 3 }

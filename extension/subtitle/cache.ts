@@ -1,15 +1,8 @@
 import { logWarn, logError } from "../shared/logging.js";
-import { parseBvidFromCacheKey, readLruIndex, writeWithEviction, type EvictionResult, type EvictionFailure } from "../core/cache-lru.js";
+import { parseBvidFromCacheKey, readFamilyKeys, writeWithEviction, type EvictionResult, type EvictionFailure } from "../core/cache-lru.js";
 import type { SubtitleTrack } from "../bilibili/gateway.js";
 // 类型专用导入（编译期擦除，无运行时 ai 边）：字幕条目形状归 ai/types 声明。
 import type { SubtitleBodyItem } from "../ai/types.js";
-
-interface LruIndexEntry {
-  ts: number;
-  keys: string[];
-}
-
-type LruFamilyEntry = Record<string, LruIndexEntry | number | unknown>;
 
 const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
 // ASR 变体 source key 前缀：fetcher 以 subtitleId "asr:<providerId>:<model>:<lang>"
@@ -88,24 +81,16 @@ interface AsrCacheCleanupOptions {
  * ASR 孤儿清理：删除同 (bvid, cid) 下除 keepKey 外的 ASR 变体缓存键
  * （不同 provider/model/language 的旧转写，键含 "id_asr:" source key）。
  * 平台字幕轨（id_/url_/lang_ 且非 asr:）不是孤儿，一律保留。
- * 枚举走 LRU 索引定点批量读取；索引缺失 / 该 bvid 无条目 / 条目无 keys 时
- * 回退 get(null) 前缀扫描（镜像 pruneToRecentVideos 的兜底模式）。
+ * 枚举走 core/cache-lru 的 readFamilyKeys 索引定点批量读取；条目缺失 /
+ * 无 keys / 旧格式时由原语回退 get(null) 前缀扫描（含一次性告警，见原语）。
  * 返回删除的键数组；失败 logWarn 并返回 []，不抛异常。
  */
 export async function clearStaleAsrSubtitleCache({ bvid, cid, keepKey = "" }: AsrCacheCleanupOptions): Promise<string[]> {
   try {
     const keyPrefix = `${CACHE_KEY_PREFIX}${bvid}_${cid}_${ASR_SOURCE_KEY_PREFIX}`;
-    const index = await readLruIndex();
-    const familyEntry = (index[CACHE_KEY_PREFIX] && typeof index[CACHE_KEY_PREFIX] === "object" ? index[CACHE_KEY_PREFIX] : {}) as LruFamilyEntry;
-    const bvidEntry = familyEntry[bvid] as LruIndexEntry | number | unknown;
-    const normalizedBvidEntry =
-      bvidEntry && typeof bvidEntry === "object" && Array.isArray((bvidEntry as LruIndexEntry).keys)
-        ? (bvidEntry as LruIndexEntry)
-        : null;
-    const all = normalizedBvidEntry && normalizedBvidEntry.keys.length > 0
-      ? await chrome.storage.local.get(
-          normalizedBvidEntry.keys.filter((key): key is string => typeof key === "string" && key.startsWith(keyPrefix))
-        )
+    const indexKeys = await readFamilyKeys(CACHE_KEY_PREFIX, bvid, keyPrefix);
+    const all = indexKeys
+      ? await chrome.storage.local.get(indexKeys)
       : await chrome.storage.local.get(null);
     const staleKeys = Object.keys(all || {}).filter(
       (key) => typeof key === "string" && key.startsWith(keyPrefix) && key !== keepKey

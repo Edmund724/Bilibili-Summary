@@ -5,9 +5,9 @@
 // （每族仅保留最近 3 个视频），淘汰后重试仍失败时 logError 并返回 { ok:false }
 // 供调用方按各自通道上浮一次；全程不抛异常。
 
-import { logError, logWarn } from "../shared/logging.js";
+import { logError } from "../shared/logging.js";
 import { buildSubtitleSourceKey } from "../subtitle/cache.js";
-import { createCacheFamily, readLruIndex } from "../core/cache-lru.js";
+import { createCacheFamily, readFamilyKeys } from "../core/cache-lru.js";
 import type { EvictionFailure, EvictionResult } from "../core/cache-lru.js";
 
 // 分段小结缓存键前缀。
@@ -169,15 +169,11 @@ interface LoadStoredRawSegmentsInput {
   lang?: string;
 }
 
-// 索引退化一次性告警标志（模块级，防刷屏）：回退路径可能被每次追问触发，
-// 只在首个 bvid 上 logWarn 一次，便于发现索引退化。
-let indexFallbackWarned = false;
-
 /**
  * 跨会话回退读取：按 (bvid, cid, 字幕轨 source key) 枚举已落盘的原始字幕段键，
  * 按段序返回与 plan.segments 同构的数组（{ index, from, to, items }）。
- * 枚举走 LRU 索引定点批量读取（单次往返）；索引缺失 / 该 bvid 无条目 / 条目无
- * keys 时回退 get(null) 前缀扫描（镜像 pruneToRecentVideos 的兜底模式）。
+ * 枚举走 core/cache-lru 的 readFamilyKeys 索引定点批量读取（单次往返）；条目缺失 /
+ * 无 keys / 旧格式时由原语回退 get(null) 前缀扫描（含一次性告警，见原语）。
  * from/to 由 items 首末项推导（对齐 budgeter.splitByBudget 的段边界语义）。
  * 缺 bvid/cid / 无命中 / 读失败 → []（回退只补空，绝不抛错）。
  */
@@ -188,18 +184,7 @@ export async function loadStoredRawSegments({ bvid, cid, subtitleId = "", subtit
     }
     const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
     const keyPrefix = `${RAW_SEGMENT_PREFIX}${bvid}_${cid}_${sourceKey}_`;
-    // 索引驱动：取该族该 bvid 条目的 keys 定点批量读取（代替 get(null) 全库扫描
-    // 与逐键串行 await）；条目无 keys（旧格式/缺失）时回退前缀扫描兜底。
-    const index = await readLruIndex();
-    const familyEntry = index[RAW_SEGMENT_PREFIX] && typeof index[RAW_SEGMENT_PREFIX] === "object" ? index[RAW_SEGMENT_PREFIX] : {};
-    const bvidEntry = (familyEntry as Record<string, unknown>)[bvid];
-    const indexKeys = Array.isArray((bvidEntry as { keys?: unknown })?.keys) && ((bvidEntry as { keys: unknown[] }).keys.length > 0)
-      ? (bvidEntry as { keys: unknown[] }).keys.filter((key): key is string => typeof key === "string" && key.startsWith(keyPrefix))
-      : null;
-    if (!indexKeys && !indexFallbackWarned) {
-      indexFallbackWarned = true;
-      logWarn(`[BOC] segment-cache index missing for bvid=${bvid}, fallback to full storage scan`);
-    }
+    const indexKeys = await readFamilyKeys(RAW_SEGMENT_PREFIX, bvid, keyPrefix);
     const all = indexKeys
       ? await chrome.storage.local.get(indexKeys)
       : await chrome.storage.local.get(null);

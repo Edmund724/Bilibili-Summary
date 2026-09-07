@@ -111,9 +111,8 @@ describe("loadStoredRawSegments：索引驱动批量读取（代替 get(null) �
     expect(restored.map((seg) => seg.index)).toEqual([0, 1, 2]);
     expect(restored[1]).toMatchObject({ index: 1, from: 5, to: 10, items: [{ from: 5, to: 10, content: "段1" }] });
     // 往返数：索引定点读 1 次 + 数据键单次批量 get 1 次（原实现为 get(null) + 逐键串行）
-    const lru = await import("../../extension/core/cache-lru.js");
     expect(storage.local.get.mock.calls.map(([k]) => k)).toEqual([
-      lru.LRU_INDEX_KEY,
+      "boc_cache_lru_index",
       expect.arrayContaining(keys)
     ]);
   });
