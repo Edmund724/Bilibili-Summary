@@ -57,6 +57,8 @@ import {
 import { normalizeMarkdownForSectionPaste } from "../notes/paste.js";
 // 对话内核（PR5a 已迁 chat 域）：零语义搬运的工厂 + 共享状态单例。
 import { createChatRuntime } from "../chat/chat-runtime.js";
+// offscreen 聊天端口名单源（chat/protocol.ts，ticket 08，原裸写字面量收口）。
+import { OFFSCREEN_CHAT_PORT_NAME } from "../chat/protocol.js";
 import { createSubtitleWaiter, isContextPending } from "../chat/subtitle-wait.js";
 import {
   NO_SUBTITLE_SEND_BLOCKED,
@@ -437,7 +439,7 @@ const chatRuntime = createChatRuntime({
       throw new Error("阅读模式已关闭，对话已中止。");
     }
     await sendRuntimeMessage({ type: "ensure-offscreen-chat" }).catch(() => null);
-    return chrome.runtime.connect({ name: "offscreen-chat" });
+    return chrome.runtime.connect({ name: OFFSCREEN_CHAT_PORT_NAME });
   }
 });
 

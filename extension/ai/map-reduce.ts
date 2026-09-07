@@ -25,7 +25,10 @@ import {
   saveSegmentSummary,
   saveRawSegments
 } from "./segment-cache.js";
-import type { BudgetPlan, BudgetPlanSegment, StreamChatEvent } from "./types.js";
+import type { BudgetPlan, BudgetPlanSegment } from "./types.js";
+// port 回吐的消息联合单源在 chat/protocol.ts（ticket 08）：原「StreamChatEvent |
+// { type: string; data?: string; reason?: string }」手抄变体删除，改引协议联合。
+import type { ChatPort, ChatPortMessage } from "../chat/protocol.js";
 
 // 单条字幕项渲染上限（防御性截断，避免个别超长项撑爆小结请求）。
 const MAX_ITEM_CHARS = 4000;
@@ -40,10 +43,6 @@ const NOTE_EDITOR_SYSTEM_PROMPT =
 const OVERFLOW_RETRY_BUDGET_SCALE = 0.5;
 const OVERFLOW_RETRY_NOTICE = "模型上下文不足，已自动调低单段素材量并重试";
 const OVERFLOW_STILL_MESSAGE = "该视频素材在调低分段量后仍超出模型上下文，请更换上下文窗口更大的模型后重试";
-
-interface ChatPort {
-  postMessage(message: StreamChatEvent | { type: string; data?: string; reason?: string }): void;
-}
 
 interface ChatCompletionImpl {
   (input: {
@@ -246,7 +245,7 @@ export async function orchestrateMapReduce({
   chatCompletion: chatCompletionImpl = chatCompletion as unknown as ChatCompletionImpl
 }: OrchestrateMapReduceInput): Promise<MapReduceResult> {
   const ctx = context || {};
-  const post = (message: StreamChatEvent | { type: string; data?: string; reason?: string }) => {
+  const post = (message: ChatPortMessage) => {
     if (port && typeof port.postMessage === "function") {
       port.postMessage(message);
     }

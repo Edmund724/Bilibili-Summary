@@ -38,6 +38,10 @@ import { renderMarkdown, splitMarkdownTail, stripThinkBlocks } from "../ui/markd
 import { linkifyAssistantTimestamps, type TimestampNavDeps } from "../ui/timestamp-nav.js";
 import type { ConversationStore } from "./conversation-store.js";
 import { chatSessionState } from "./chat-state.js";
+// offscreen → 宿主的出向 port 消息联合（ticket 08 单源，原本处手抄八分派）。
+// 注意：ChatPort 不从 protocol re-export——本侧消费的是 chrome.runtime.Port
+// 全视图（监听/断连半边），protocol 的 ChatPort 是生产侧 postMessage 窄视图。
+import type { ChatPortMessage } from "./protocol.js";
 
 const STREAM_SLOW_NOTICE_MS = 15000;
 
@@ -57,18 +61,7 @@ export interface ChatPort {
   };
 }
 
-// offscreen → sidepanel 的 port 消息协议（七分派）。reasoning/token/stream-reset/
-// done/stopped/error/notice/cost-guard 的载荷字段按分派分支收窄；所有分支都
-// 可携带 cachedContextKey（offscreen 单槽字幕体缓存的当前 key 回执）。
-export type ChatPortMessage =
-  | { type: "reasoning"; data?: unknown; cachedContextKey?: string }
-  | { type: "token"; data?: unknown; cachedContextKey?: string }
-  | { type: "stream-reset"; cachedContextKey?: string }
-  | { type: "done"; cachedContextKey?: string }
-  | { type: "stopped"; reason?: string; cachedContextKey?: string }
-  | { type: "error"; code?: string; error?: unknown; cachedContextKey?: string }
-  | { type: "notice"; data: string; cachedContextKey?: string }
-  | { type: "cost-guard"; data?: { message?: unknown }; cachedContextKey?: string };
+export type { ChatPortMessage };
 
 // chat-runtime 消费的最窄 store 面（会话身份守卫 + 在途一问一答持久化）
 export interface ChatRuntimeStore {
@@ -164,7 +157,7 @@ interface ThinkingDisplayState {
  *     getProviderId,                     // () => els.modelSelect.value
  *     getTimestampNavDeps,               // () => timestamp-nav deps object
  *     normalizeMarkdownForSectionPaste,  // (raw, baseLevel) => string
-   *     connectPort,                       // () => Promise<chrome.runtime.Port> (name "offscreen-chat"; 先 ensure offscreen 文档)
+   *     connectPort,                       // () => Promise<chrome.runtime.Port> (name OFFSCREEN_CHAT_PORT_NAME 即 "offscreen-chat"; 先 ensure offscreen 文档)
    *     confirmCostGuard,                  // (message) => boolean（可选；缺省 window.confirm。cost-guard 确认通道）
    *   }
  *

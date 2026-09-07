@@ -129,7 +129,3 @@ export type StreamChatEvent =
   | StreamDoneEvent
   | StreamStoppedEvent
   | StreamErrorEvent;
-
-export interface ChatPort {
-  postMessage(message: unknown): void;
-}

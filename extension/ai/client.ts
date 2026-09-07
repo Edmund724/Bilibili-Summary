@@ -9,7 +9,10 @@ import { buildMessages, clipSubtitleForContext } from "./context.js";
 import { buildBudgetPlan, estimateTokens, MATERIAL_BUDGET_CHARS } from "./budgeter.js";
 import { buildSubtitlePrompt } from "./subtitle-prompt.js";
 import { chatCompletion, makeOverflowError, validateProviderBasics } from "./completion.js";
-import type { AiContext, AiProvider, ChatPort, StreamChatEvent } from "./types.js";
+import type { AiContext, AiProvider, StreamChatEvent } from "./types.js";
+// 出向 port 协议单源（ticket 08）：port 回吐点经 ChatPortMessage 联合标注，
+// 裸 postMessage 字面量获得编译期约束（事件名 typo / 形状漂移编译被拒）。
+import type { ChatPort, ChatPortMessage } from "../chat/protocol.js";
 
 // 超预算回落时的提示文案：如实描述——本次单次调用不发，ladder 收到
 // overflow 标记错误后立即转 Map-Reduce 分段整理（对用户表现为进度逐段推进）。
@@ -91,13 +94,13 @@ export async function streamChat({ provider, context, userPrompt, history, port,
   try {
     validateProviderBasics(provider);
   } catch (error) {
-    port.postMessage({ type: "error", error: (error as Error).message });
+    port.postMessage({ type: "error", error: (error as Error).message } satisfies ChatPortMessage);
     return;
   }
 
   const subtitleResolution = resolveSubtitleForContext(context);
   if (subtitleResolution.notice) {
-    port.postMessage({ type: "notice", data: subtitleResolution.notice });
+    port.postMessage({ type: "notice", data: subtitleResolution.notice } satisfies ChatPortMessage);
   }
   if (subtitleResolution.overflowMarked) {
     // 超预算：仍先提示，再以 overflow 标记错误上抛供 ladder 转 Map-Reduce。
@@ -128,7 +131,7 @@ export async function streamChat({ provider, context, userPrompt, history, port,
       onStreamReset: () => {
         // 读流中断重试：通知渲染层清空本条消息缓冲，从头接收重试流。
         onActivity?.();
-        port.postMessage({ type: "stream-reset" });
+        port.postMessage({ type: "stream-reset" } satisfies ChatPortMessage);
       },
       onRetry: ({ attempt, maxRetries, kind, error }: { attempt: number; maxRetries: number; kind: string; error: Error }) => {
         if (kind === "stream") {
@@ -140,7 +143,7 @@ export async function streamChat({ provider, context, userPrompt, history, port,
           data: kind === "http"
             ? `${error.message}，正在重试...`
             : `连接中断，正在重新连接（${attempt}/${maxRetries}）...`
-        });
+        } satisfies ChatPortMessage);
       }
     });
   } catch (e) {
@@ -150,13 +153,13 @@ export async function streamChat({ provider, context, userPrompt, history, port,
     }
     if ((e as { aborted?: boolean })?.aborted || signal?.aborted) {
       // 中止收束：对齐旧 streamChat 的停止 UX，不串错误。
-      port.postMessage({ type: "stopped", reason: "已停止生成" });
+      port.postMessage({ type: "stopped", reason: "已停止生成" } satisfies ChatPortMessage);
       return;
     }
-    port.postMessage({ type: "error", error: String((e as { message?: unknown })?.message ?? e) });
+    port.postMessage({ type: "error", error: String((e as { message?: unknown })?.message ?? e) } satisfies ChatPortMessage);
     return;
   }
 
-  port.postMessage({ type: "done" });
+  port.postMessage({ type: "done" } satisfies ChatPortMessage);
   return { done: true };
 }

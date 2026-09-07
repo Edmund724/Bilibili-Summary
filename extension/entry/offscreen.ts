@@ -37,6 +37,12 @@ import type {
   ResolveAiProviderResponse
 } from "../shared/messaging-protocol.js";
 import type { ChatMsg } from "../ai/ladder.js";
+// 出向回吐协议单源（chat/protocol.ts，ticket 08）：聊天端口名常量收口两处
+// 裸写（本文件 onConnect 判定与宿主 connect），withCachedContextKey 包装的
+// postMessage 入参从 Record<string, unknown> 收为协议联合——下游
+// ladder/streamChat/map-reduce 构造的联合成员获得编译期约束。
+import { OFFSCREEN_CHAT_PORT_NAME } from "../chat/protocol.js";
+import type { ChatPortMessage } from "../chat/protocol.js";
 // 调试日志门三宿主接线（shared/logging 的 registerDebugGate 消费方）
 import { registerDebugLogGate } from "../shared/debug-log-gate.js";
 // offscreen storage 桥垫片（本 context 无 chrome.storage，缓存读写转发到 SW）
@@ -61,7 +67,7 @@ var STREAM_IDLE_TIMEOUT_MS = 90000;
 // port 断连会重置其 lastAcked，时序缝隙里漏网的缺失消息走 settle 的错误回执。
 const subtitleSlot = createSubtitleBodySlot();
 
-// 同一文档双通道存活计数：聊天（"offscreen-chat" 端口）用计数维护，
+// 同一文档双通道存活计数：聊天（OFFSCREEN_CHAT_PORT_NAME 端口）用计数维护，
 // 解码任务（"asr-decode" 端口）用存活端口集合维护——终态判定要排除
 // 本次任务的端口自身（done/error 时它还连着），集合比计数少一分监听
 // 注册时序依赖。asr-decode 任务终态后由 maybeCloseSelfAfterAsr 据此决定
@@ -121,7 +127,7 @@ chrome.runtime.onConnect.addListener((port) => {
     });
     return;
   }
-  if (!port || port.name !== "offscreen-chat") {
+  if (!port || port.name !== OFFSCREEN_CHAT_PORT_NAME) {
     return;
   }
   // 聊天通道计数：asr-decode 终态自关判定的输入（见 maybeCloseSelfAfterAsr）
@@ -157,7 +163,7 @@ chrome.runtime.onConnect.addListener((port) => {
     // 推进 lastAckedContextKey，后续追问省略 subtitleBody。包装只劫持
     // postMessage，端口事件监听不受影响；下游 ladder/streamChat/map-reduce
     // 只经 port.postMessage 回吐，包装对它们透明。
-    const ackedPort = withCachedContextKey(port, settled.contextKey!);
+    const ackedPort = withCachedContextKey<ChatPortMessage>(port, settled.contextKey!);
 
     try {
       abortActiveRequest();
@@ -305,13 +311,15 @@ function askCostGuard(port: PostMessagePort, message: string) {
 // 候选5：给 port 的出站消息统一附带 cachedContextKey（本侧单槽缓存当前确认
 // 持有的字幕体 key）。SP 从任意一条 chat 回执读它推进 lastAckedContextKey，
 // 后续追问省略 subtitleBody。只包装 postMessage 一个入口；事件监听器仍挂
-// 在原 port 上（本包装只作为下游回吐的发送通道）。
-function withCachedContextKey(port: PostMessagePort, contextKey: string) {
+// 在原 port 上（本包装只作为下游回吐的发送通道）。T 为协议出向联合
+//（chat/protocol.ts，ticket 08）：下游回吐点入参获得编译期约束；运行时只
+// 展开展开属性并附 cachedContextKey（联合上本就可选，附加不改变成员形状）。
+function withCachedContextKey<T extends ChatPortMessage>(port: PostMessagePort, contextKey: string) {
   return {
-    postMessage: (data: Record<string, unknown>) => {
+    postMessage: (data: T): void => {
       // 断连后的迟到回执由 safePostMessage 统一吞掉（口径单源，见
       // shared/messaging.js），否则会在 async 消息监听器里抛成 unhandled rejection。
-      safePostMessage(port, { ...data, cachedContextKey: contextKey });
+      safePostMessage(port, { ...data, cachedContextKey: contextKey } as T);
     }
   };
 }
