@@ -285,8 +285,8 @@
 
 #boc-reading-view .boc-reading-settings-host .fixed-property-remove svg,
 #boc-reading-view .boc-reading-settings-host .note-section-remove svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;
@@ -557,6 +557,8 @@
 }
 
 #boc-reading-view .provider-editor-host .ai-provider-model-toggle {
+  /* 24×24：嵌在 32px 输入框内的图标 toggle，不参与行级动作按钮高度档——
+   * 撑到 32 会顶破输入框内边距。 */
   position: absolute;
   right: 2px;
   top: 50%;
@@ -565,7 +567,7 @@
   width: 24px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
   color: var(--boc-reader-faint, #a39a8d);
   cursor: pointer;
@@ -580,10 +582,10 @@
 }
 
 #boc-reading-view .provider-editor-host .ai-provider-model-toggle svg {
-  width: 12px;
-  height: 12px;
+  width: 8px;
+  height: 8px;
   stroke: currentColor;
-  stroke-width: 2;
+  stroke-width: 3;
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -598,7 +600,7 @@
  * 的既有耦合随行内状态行退役一并收口） */
 #boc-reading-view .boc-reading-settings-host .provider-row-remove {
   width: 24px;
-  height: 30px;
+  height: 32px;
   flex: 0 0 auto;
   padding: 0;
   border: 0;
@@ -649,7 +651,8 @@
 
 #boc-reading-view .boc-reading-settings-host .add-property-btn {
   justify-self: start;
-  padding: 6px 10px;
+  height: 32px;
+  padding: 0 12px;
   border: 1px dashed var(--boc-reader-border, #e7dfd4);
   border-radius: 999px;
   background: transparent;
@@ -849,10 +852,10 @@
 /* 删除按钮（Modal 头部右侧，对齐参考截图的编辑页布局；用户拍板改为醒目
  * 警示底色）。红用固定警示色：token 表无红色语义，rgba 底在两主题下均不刺眼 */
 #boc-reading-view .provider-editor-delete {
-  height: 28px;
+  height: 32px;
   padding: 0 14px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 999px;
   background: rgba(217, 48, 37, 0.14);
   color: #d93025;
   font: inherit;
@@ -924,7 +927,7 @@
 }
 
 #boc-reading-view .provider-editor-test {
-  height: 30px;
+  height: 32px;
   width: 72px;
   flex: 0 0 auto;
   padding: 0;
@@ -976,7 +979,7 @@
   height: 32px;
   padding: 0 14px;
   border: 1px solid var(--boc-reader-border, #e7dfd4);
-  border-radius: 8px;
+  border-radius: 999px;
   background: transparent;
   color: var(--boc-reader-muted, #6f675c);
   font: inherit;
@@ -993,7 +996,7 @@
   height: 32px;
   padding: 0 16px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--boc-reader-accent, #fb7299);
   color: #fff;
   font: inherit;
@@ -1009,13 +1012,13 @@
 /* 行「编辑」按钮：打开 provider-editor Modal（01 引入，02 起为紧凑行主行内
  * 的正式编辑入口，与状态点/名称/（ASR）选用 radio 同排） */
 #boc-reading-view .boc-reading-settings-host .provider-row-edit {
-  height: 30px;
+  height: 32px;
   flex: 0 0 auto;
   padding: 0 12px;
   font-size: 15px;
   line-height: 1;
   border: 0;
-  border-radius: 8px;
+  border-radius: 999px;
   background: transparent;
   color: var(--boc-reader-muted, #6f675c);
   font-weight: 600;
