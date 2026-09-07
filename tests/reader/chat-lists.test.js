@@ -2,7 +2,7 @@
 // createReaderChatLists（对话 tab 三列表渲染 + 预设提示词插入）行为契约。
 // PR5 自 tests/sidepanel/sidepanel-lists.test.js 随重建迁移（tests/sidepanel/
 // 对应文件已迁走）：逻辑断言保真，DOM 壳换新——元素为 reader 的 readingChat*
-// 节点，class 名沿用 .chat-*（样式段随对话区并入 reader.css）。
+// 节点，class 名沿用 .chat-*（样式段在 styles/reader-chat.css，按需装载）。
 //
 // 覆盖：
 // - renderSuggestions：有平台/无历史/视频上下文时渲染建议 chip，点击填入输入框

@@ -26,6 +26,8 @@
 //   entry/styles/reader.css           阅读表（运行时挂载，随阅读模式）
 //   entry/styles/reader-gate.css      阅读表门控段（同上）
 //   entry/styles/player-ai.css        播放器 AI 表（随 ai/player-ai.js chunk）
+//   entry/styles/reader-settings.css  设置分区表（随 ui/settings-panel chunk 挂载）
+//   entry/styles/reader-chat.css      对话分区表（随对话域首次激活挂载）
 //   entry/content-bootstrap.iife.js  拷贝自 build-content.js 产物
 //   entry/content-main.mjs           拷贝自 build-content.js 产物
 //   entry/chunks/*.mjs               拷贝自 build-content.js 产物
@@ -71,6 +73,9 @@ const cssEntries = [
   // 设置分区表（arch-slim-4/04）：随 ui/settings-panel chunk 按需挂载
   //（shared/style-injector ensureReaderSettingsStyles），独立入口 minify。
   "entry/styles/reader-settings.css",
+  // 对话分区表（arch-slim-4/07）：随对话域首次激活按需挂载
+  //（shared/style-injector ensureReaderChatStyles），独立入口 minify。
+  "entry/styles/reader-chat.css",
 ];
 
 // 原样拷贝的文件（产物路径与源路径一致 → html/manifest 零改写）。

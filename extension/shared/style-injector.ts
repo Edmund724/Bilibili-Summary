@@ -1,6 +1,7 @@
 // 样式注入器（S3 分层）：阅读表（styles/reader.css + styles/reader-gate.css）、
-// 播放器 AI 表（styles/player-ai.css）与设置分区表（styles/reader-settings.css，
-// arch-slim-4/04）不再经 manifest 常驻注入，改由本模块在对应能力启用时挂载。
+// 播放器 AI 表（styles/player-ai.css）、设置分区表（styles/reader-settings.css，
+// arch-slim-4/04）与对话分区表（styles/reader-chat.css，arch-slim-4/07）不再经
+// manifest 常驻注入，改由本模块在对应能力启用时挂载。
 //
 // 挂载机制：<link rel="stylesheet" href="chrome.runtime.getURL(...)">。link
 // 挂进页面 DOM 后由页面渲染管线加载，属页面侧资源访问——三份样式表依赖
@@ -76,6 +77,23 @@ export function ensureReaderSettingsStyles(): void {
 
 export function whenReaderSettingsStylesReady(): Promise<void> {
   return readerSettingsReady ?? Promise.resolve();
+}
+
+// 对话分区表（arch-slim-4/07）：随对话域首次激活按需装载，不建 onload 门控
+//（1-2 帧无样式窗口只落在未激活的静默空态上）。挂载点两个：setReaderDigestTab
+// 的 chat 分支同步 ensure（盖住 tab 点击/解释卡/快捷动作全部入口），reader/
+// chat-tab.ts 模块顶层兜底（盖住未来入口）。与设置表同口径：exitReaderShell
+// 不摘除，数据留在浏览器样式缓存，二进宫免闪变。
+export function ensureReaderChatStyles(): void {
+  mountStyleLink("entry/styles/reader-chat.css");
+}
+
+export function removeReaderChatStyles(): void {
+  unmountStyleLink("entry/styles/reader-chat.css");
+}
+
+export function isReaderChatStylesMounted(): boolean {
+  return mounted.has("entry/styles/reader-chat.css");
 }
 
 function mountStyleLink(path: string): HTMLLinkElement {

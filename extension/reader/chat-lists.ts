@@ -2,8 +2,8 @@
 // extension/pages/sidepanel-lists.ts 重建；原 sidepanel 孪生模块已随侧边栏
 // 形态删除，本文件是对话 tab 三列表的唯一实现，逻辑改动不再需要与孪生同步，
 // 行为契约由 tests/reader/chat-lists.test.js 钉住。DOM 壳：元素经 deps 注入
-// reader 的 readingChat* id 节点，class 名沿用 .chat-*（样式段随对话区并入
-// reader.css，token 化三主题））。
+// reader 的 readingChat* id 节点，class 名沿用 .chat-*（样式段在 styles/
+// reader-chat.css，随对话域按需装载，token 化三主题））。
 //
 // 依赖方向（无环）：共享可变状态（../chat/chat-state）与 ai/conversation 纯辅助
 // 直接 import；DOM 元素、会话动作、预设 CRUD、布局回调、建议点击发送、

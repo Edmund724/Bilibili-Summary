@@ -19,6 +19,10 @@ import { logWarn } from "../shared/logging.js";
 // 阅读壳（工单 arch-slim/02）：关闭按钮的关闭链退化为退出事务委托
 //（URL 收敛 → closeReadingView → 摘阅读表，唯一实现在 reader/shell.ts）。
 import { exitReaderShell } from "../reader/shell.js";
+// 对话分区表（arch-slim-4/07）：切到对话 tab 的全部入口都先经
+// setReaderDigestTab("chat")，chat 分支同步挂载（reader/chat-tab.ts 模块顶层
+// 另兜底挂一次）；不建 onload 门控——无样式窗口只落在未激活的静默空态上。
+import { ensureReaderChatStyles } from "../shared/style-injector.js";
 // arch-slim-2/06 ui 按 tab 全量收口：三 tab 的模板段+绑定段同居各自域叶子，
 // 壳只组装与接线。叶子均为轻模块（ids 表 + reader-gate 转发助手，动态边在
 // 叶子依赖内部），不把 reader 重域/总结链拖进壳闭包：
@@ -116,7 +120,8 @@ export function buildUiHtml(): string {
 
 // ===== 统一 Digest 面板三标签（PR2） =====
 //
-// 标签切换是纯壳交互（class/aria/hidden 写入），不触碰 reader 域状态；
+// 标签切换是纯壳交互（class/aria/hidden 写入），不触碰 reader 域状态；唯一
+// 例外是对话 tab 的分区表挂载（arch-slim-4/07，见 setReaderDigestTab）。
 // active 态约定：tab 按钮 .is-active + aria-selected，tab body .is-active 且
 // 去 hidden（CSS 双通道：.boc-reading-tab-body:not(.is-active) 与 [hidden]
 // 都收敛为 display:none，防 UA 样式被作者 display 覆盖）。
@@ -129,6 +134,12 @@ const DIGEST_TAB_DEFS: Array<{ name: ReaderDigestTab; buttonId: string; bodyId: 
 ];
 
 export function setReaderDigestTab(tab: ReaderDigestTab): void {
+  // 对话分区表按需装载（arch-slim-4/07）：切到对话 tab 的三个入口（tab 点击 /
+  // 解释卡「去对话追问」/ player-ai 快捷动作）都先经本函数，同步挂载保证首开
+  // 即在场；ensure 内部 mounted Map 去重，重入零成本。
+  if (tab === "chat") {
+    ensureReaderChatStyles();
+  }
   for (const def of DIGEST_TAB_DEFS) {
     const button = document.getElementById(def.buttonId);
     const body = document.getElementById(def.bodyId);

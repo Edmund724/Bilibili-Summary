@@ -93,6 +93,13 @@ import { createReaderChatFeedback } from "./chat-notices.js";
 import { createReaderChatPopovers } from "./chat-popovers.js";
 import { setChatTabOutsideClickHandler } from "./chat-tab-bridge.js";
 import { setReaderDigestTab, openReaderSettingsPanel } from "../ui/ui-renderer.js";
+// 对话分区表模块顶兜底挂载（arch-slim-4/07，settings-panel.ts 顶挂载同款先例）：
+// 主点在 ui-renderer setReaderDigestTab 的 chat 分支（盖住现役三入口），此处盖
+// 住未来新入口——本模块被动态装载即样式在场；ensure 内部 mounted Map 去重。
+import { ensureReaderChatStyles } from "../shared/style-injector.js";
+
+ensureReaderChatStyles();
+
 import { ids } from "./state.js";
 // 时间戳跳转的进程内 seek（reader 域唯一定位入口，见 getTimestampNavDeps）。
 import { seekReadingTarget } from "./sync.js";
