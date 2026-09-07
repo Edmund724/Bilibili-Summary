@@ -117,6 +117,12 @@
   box-shadow: 0 0 0 2px var(--boc-reader-accent-soft, #fce0ea);
 }
 
+/* 错误态（裸类）：Q22 甲——段落位置校验失败时标在组件壳上（原生 select 已被
+ * clip 隐藏，直接标错会掉 1px 黑洞）；焦点态仍由上方单源叠加光环 */
+.custom-select-trigger.input-error {
+  border-color: var(--boc-reader-accent, #fb7299);
+}
+
 /* 原生 select 回退（自定义下拉未接管时）：#downloadFormat 在 initCustomSelect
  * 接管前唯一的样式来源。 */
 #boc-reading-view .boc-reading-settings-host .boc-set-select {
@@ -682,7 +688,7 @@
   display: none;
 }
 
-/* 自定义下拉通用样式（下载格式 / 语音转写平台预设） */
+/* 自定义下拉通用样式（下载格式 / Modal 预设 / 段落位置） */
 .custom-select-wrapper {
   position: relative;
   display: flex;

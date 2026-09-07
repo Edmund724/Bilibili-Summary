@@ -27,7 +27,7 @@ import {
 } from "../core/validators.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { watchStorageKeys } from "../shared/watch-storage-keys.js";
-import { initCustomSelect } from "./custom-select.js";
+import { closeAllCustomSelects, initCustomSelect } from "./custom-select.js";
 import {
   renderFixedPropertyRows,
   addFixedPropertyRow,
@@ -616,14 +616,19 @@ function applyValidationError(elements: SettingsElements, validation: SettingsVa
       const titleInput = row.querySelector<HTMLInputElement>(".note-section-title");
       const contentInput = row.querySelector<HTMLInputElement>(".note-section-content");
       const positionSelect = row.querySelector<HTMLSelectElement>(".note-section-position");
+      // 段落位置的 input-error 与焦点落在组件 trigger 上（Q22 甲）：select 已被
+      // custom-select 壳 clip 隐藏，直接标错/聚焦会掉进 1px 黑洞
+      const positionTrigger = row.querySelector<HTMLElement>(
+        ".note-section-field-position .custom-select-wrapper .custom-select-trigger"
+      );
       const noteSectionErrorNode = row.querySelector<HTMLElement>(".note-section-error");
-      if (titleInput || contentInput || positionSelect) {
+      if (titleInput || contentInput || positionTrigger) {
         if (titleInput && !String(titleInput.value || "").trim()) {
           titleInput.classList.add("input-error");
           titleInput.focus();
-        } else if (positionSelect && !NOTE_SECTION_POSITIONS.has(String(positionSelect.value || "").trim())) {
-          positionSelect.classList.add("input-error");
-          positionSelect.focus();
+        } else if (positionTrigger && positionSelect && !NOTE_SECTION_POSITIONS.has(String(positionSelect.value || "").trim())) {
+          positionTrigger.classList.add("input-error");
+          positionTrigger.focus();
         } else if (contentInput && validation.requireContent) {
           contentInput.classList.add("input-error");
           contentInput.focus();
@@ -761,9 +766,7 @@ function bindSettingsEvents(host: HTMLElement): void {
       });
     }
     if (!(event.target instanceof Element) || !event.target.closest(".custom-select-wrapper")) {
-      document.querySelectorAll<HTMLElement>(".custom-select-dropdown").forEach((dropdown) => {
-        dropdown.hidden = true;
-      });
+      closeAllCustomSelects();
     }
   });
   [elements.tags].forEach((input) => {

@@ -24,7 +24,7 @@ import { testAiProviderConnection } from "../ai/provider-test.js";
 import { testAsrConnection } from "../asr/provider-test.js";
 import { listAsrModels } from "../asr/provider-models.js";
 import { buildModelPickerField, wireModelPicker } from "./model-picker.js";
-import { initCustomSelect } from "./custom-select.js";
+import { closeAllCustomSelects, initCustomSelect } from "./custom-select.js";
 import { ids } from "../reader/state.js";
 import type { ProviderRowElement, ProviderRowItem, ProviderRowPreset } from "./provider-row.js";
 
@@ -479,7 +479,7 @@ function wireDialog(options: ProviderEditorOpenOptions): void {
     // toggle/trigger/option 自带开关逻辑，点在组件内不干扰
     if (!target.closest(".ai-provider-model-wrapper") && !target.closest(".custom-select-wrapper")) {
       host.querySelectorAll<HTMLElement>(".ai-provider-model-dropdown").forEach((d) => (d.hidden = true));
-      host.querySelectorAll<HTMLElement>(".custom-select-dropdown").forEach((d) => (d.hidden = true));
+      closeAllCustomSelects();
     }
     // 四个动作全部走这一条委托（按钮直连绑定曾在真实页面失效，close 是
     // 用户验证过的同源路径）；异常兜底在各 handler 内部落状态行

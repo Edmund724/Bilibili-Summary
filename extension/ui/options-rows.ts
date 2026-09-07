@@ -19,6 +19,7 @@ import {
   type NotePlaceholderSection
 } from "../core/validators.js";
 import { escapeHtml } from "../shared/string-utils.js";
+import { initCustomSelect } from "./custom-select.js";
 import {
   createProviderRow,
   TRASH_ICON_PATHS,
@@ -210,6 +211,14 @@ export function addNoteSectionRow(listNode: HTMLElement, emptyNode: HTMLElement,
     input.addEventListener("change", () => clearNoteSectionErrorState(row));
   });
 
+  // 段落位置换自定义下拉（ADR-0007）：三条重渲来路（loadSettings / 保存成功
+  // 回填 / + 添加段落）全部经本函数，在此一处接线；值仍落在原生 select，
+  // 收集链零改。幂等守卫保证重渲不会重复接管。
+  const positionSelect = row.querySelector<HTMLSelectElement>(".note-section-position");
+  if (positionSelect) {
+    initCustomSelect(positionSelect, "custom-select-wrapper");
+  }
+
   listNode.appendChild(row);
   updateNoteSectionEmptyState(listNode, emptyNode);
 }
@@ -241,6 +250,10 @@ export function collectNoteSectionRows(listNode: HTMLElement, { includeRow = fal
 export function clearNoteSectionErrors(listNode: HTMLElement): void {
   listNode.querySelectorAll(".note-section-title, .note-section-content, .note-section-position").forEach((input) => {
     input.classList.remove("input-error");
+  });
+  // 段落位置的 input-error 落在组件 trigger 上（Q22 甲），清错连带摘除
+  listNode.querySelectorAll<HTMLElement>(".note-section-row .custom-select-trigger").forEach((trigger) => {
+    trigger.classList.remove("input-error");
   });
   listNode.querySelectorAll<HTMLElement>(".note-section-error").forEach((node) => {
     node.hidden = true;
@@ -338,6 +351,10 @@ function clearFixedPropertyErrorState(row: HTMLElement): void {
 function clearNoteSectionErrorState(row: HTMLElement): void {
   row.querySelectorAll(".note-section-title, .note-section-content, .note-section-position").forEach((input) => {
     input.classList.remove("input-error");
+  });
+  // 段落位置的 input-error 落在组件 trigger 上（Q22 甲），清错连带摘除
+  row.querySelectorAll<HTMLElement>(".custom-select-trigger").forEach((trigger) => {
+    trigger.classList.remove("input-error");
   });
   const errorNode = row.querySelector(".note-section-error") as HTMLElement | null;
   if (errorNode) {
