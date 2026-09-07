@@ -376,7 +376,7 @@ export async function writeWithEviction({
 // 本叶保持零 import：source key 推导（buildSubtitleSourceKey，属 subtitle 域）
 // 与失败日志（logError，拖 core/state）都经 options 注入，不反向依赖。
 // （readFamilyKeys 的回退告警经 shared/logging 的 logWarn——同为不拖 state/
-// chrome 的纯叶子，随 arch-slim-5/09 告警随原语单源收进本叶。）
+// chrome 的纯叶子，随 arch-slim-4/09 告警随原语单源收进本叶。）
 // ============================================================
 
 export type CacheSaveResult = EvictionResult | EvictionFailure;
