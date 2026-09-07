@@ -127,17 +127,18 @@ function highlightItemNode(node: HTMLElement, needle: string): boolean {
   return true;
 }
 
-// 还原高亮：mark 换回文本节点并 normalize（相邻文本节点合并），列表恢复原文本
+// 还原高亮：mark 换回文本节点，循环结束后对列表整体 normalize 一次（递归合并
+// 所有后代相邻文本节点，与逐 mark normalize 行为等价）。逐 mark normalize 是
+// 全子树扫描，全量命中（1500+ mark）时退化为 O(n²)。
 function clearSearchHighlights(): void {
   const list = getSubtitleList();
   if (!list) {
     return;
   }
   list.querySelectorAll(`mark.${SEARCH_HIT_MARK_CLASS}`).forEach((mark) => {
-    const parent = mark.parentNode;
     mark.replaceWith(document.createTextNode(mark.textContent || ""));
-    parent?.normalize();
   });
+  list.normalize();
   list.querySelectorAll(`.${SEARCH_CURRENT_CLASS}`).forEach((node) => {
     node.classList.remove(SEARCH_CURRENT_CLASS);
   });
@@ -265,14 +266,31 @@ export function clearReadingSubtitleSearch(): void {
 // 批次回执（lifecycle 组装根把它注册进 batched-render 的 hook 槽）：搜索激活
 // 期间，新上屏的 [fromIndex, toIndex) 条目自动带高亮——已渲染集合与匹配集合
 // 的差集随每批收敛，最终与整段渲染等价。
+// matches 由全量 matchAll 顺序构建、天然按 itemIndex 升序——回执按批次区间
+// 二分取子集，不遍历 matchesByItem 全表（全量命中时全表 = 条目数量级）。
 export function handleReadingSubtitleRangeAppended(fromIndex: number, toIndex: number): void {
   if (!query || matches.length === 0) {
     return;
   }
-  for (const itemIndex of matchesByItem.keys()) {
-    if (itemIndex < fromIndex || itemIndex >= toIndex) {
+  // 二分定位首个 itemIndex >= fromIndex 的命中
+  let lo = 0;
+  let hi = matches.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (matches[mid].itemIndex < fromIndex) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  // 顺序走过区间：同一条目的多个命中相邻，按条目去重各打一次高亮
+  let lastItemIndex = -1;
+  for (let i = lo; i < matches.length && matches[i].itemIndex < toIndex; i += 1) {
+    const itemIndex = matches[i].itemIndex;
+    if (itemIndex === lastItemIndex) {
       continue;
     }
+    lastItemIndex = itemIndex;
     const node = getItemNode(itemIndex);
     if (node) {
       highlightItemNode(node, query);

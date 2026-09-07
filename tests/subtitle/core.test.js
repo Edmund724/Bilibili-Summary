@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { resetModuleState } from "../setup.js";
 import { state } from "../../extension/core/state.js";
-import { findActiveSubtitleIndex } from "../../extension/subtitle/core.js";
+import { findActiveSubtitleIndex, getReadingSubtitleItems } from "../../extension/subtitle/core.js";
 
 // 旧线性实现的快照基准（与重构前 core.js 逐字同语义）：
 // to 缺省/非法时视为 from + 2；命中返回条目索引，否则 -1。
@@ -207,5 +207,37 @@ describe("findActiveSubtitleIndex：重叠区间的已记录偏差（防御性�
     const index = findActiveSubtitleIndex(7.5);
     expect(index).toBe(2);
     expect(7.5).toBeLessThan(body[2].to);
+  });
+});
+
+// arch-review-2026-09/01 修3：getReadingSubtitleItems 按「body 数组引用」WeakMap
+// 缓存（normalizeChapters 先例）。写路径经 clipState.setSubtitleBody 整体替换
+// 引用、不原地改——同引用重复调用零分配复用，换引用即重建。
+describe("getReadingSubtitleItems：按引用缓存", () => {
+  it("同一 body 引用重复调用返回同一数组引用（不重建）", () => {
+    const body = [
+      { from: 0, to: 2, content: "甲" },
+      { from: 2, to: 4, content: "乙" }
+    ];
+    state.clip.setSubtitleBody(body);
+    const first = getReadingSubtitleItems();
+    const second = getReadingSubtitleItems();
+    expect(second).toBe(first);
+    // 显式传参同引用同样命中缓存
+    expect(getReadingSubtitleItems(body)).toBe(first);
+  });
+
+  it("body 整体替换后重建为新引用，内容口径不变", () => {
+    state.clip.setSubtitleBody([{ from: 0, to: 2, content: "甲" }]);
+    const first = getReadingSubtitleItems();
+    state.clip.setSubtitleBody([
+      { from: 0, to: 2, content: "甲" },
+      { from: 2, to: 4, content: "  " }, // 空内容被过滤
+      { from: 4, to: 6, content: "丙" }
+    ]);
+    const second = getReadingSubtitleItems();
+    expect(second).not.toBe(first);
+    expect(second.map((item) => item.content)).toEqual(["甲", "丙"]);
+    expect(second.map((item) => item.index)).toEqual([0, 2]);
   });
 });

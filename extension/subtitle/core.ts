@@ -77,8 +77,27 @@ export function readVideoDescription(): string {
   return descNode?.textContent?.trim() || "";
 }
 
+// 归一化结果按「body 数组引用」缓存（WeakMap，照 selection.ts normalizeChapters
+// 先例）：sync tick / 搜索 / 渲染每拍都拿同一 state.clip.subtitleBody 引用重复做
+// map→filter 新建数组，引用相同即零分配复用。前提：写路径一律经
+// clipState.setSubtitleBody(新数组) 整体替换引用，不原地修改。
+const readingSubtitleItemsCache = new WeakMap<object, ReadingSubtitleItem[]>();
+
 export function getReadingSubtitleItems(body: SubtitleBodyItemLike[] = state.clip.subtitleBody): ReadingSubtitleItem[] {
-  return (Array.isArray(body) ? body : [])
+  if (Array.isArray(body)) {
+    const cached = readingSubtitleItemsCache.get(body);
+    if (cached) {
+      return cached;
+    }
+    const items = buildReadingSubtitleItems(body);
+    readingSubtitleItemsCache.set(body, items);
+    return items;
+  }
+  return buildReadingSubtitleItems([]);
+}
+
+function buildReadingSubtitleItems(body: SubtitleBodyItemLike[]): ReadingSubtitleItem[] {
+  return body
     .map((item, index) => ({
       index,
       from: Number(item?.from || 0) || 0,
