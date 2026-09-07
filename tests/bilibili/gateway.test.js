@@ -12,10 +12,12 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
+  fetchHotCommentsWithLedger,
   fetchSubtitleBundle,
   fetchVideoMeta,
   isBiliUrl
 } from "../../extension/bilibili/gateway.js";
+import { clipState } from "../../extension/core/state.js";
 import { formatLocalDate } from "../../extension/shared/utils.js";
 
 // 假 transport：按 URL 子串路由到预设载荷/异常，并记录调用轨迹（供次数与顺序断言）
@@ -254,5 +256,71 @@ describe("isBiliUrl 边界", () => {
     expect(isBiliUrl("https://bilibili.com/x")).toBe(false);
     expect(isBiliUrl("not a url")).toBe(false);
     expect(isBiliUrl("//i0.hdslb.com/a.json")).toBe(false);
+  });
+});
+
+// fetchHotCommentsWithLedger（arch-review-2026-09/07 编排单源）：message-handler
+// 的 reader-get-hot-comments 与 context-assembly 缺省热评实现共用的
+// 「aid 判空 → fetchHotComments(20) → clipState 落账 → 失败降级空列表 + note」。
+// deps 全注入（ledger/aid/拉取替身），另有一条缺省 deps 接线对账（落账到真实
+// core/state 的 clipState）。
+describe("fetchHotCommentsWithLedger：热评编排单源", () => {
+  function makeDeps({ aid = "100", comments = [], fetchError = null } = {}) {
+    const ledger = { setHotComments: vi.fn() };
+    const deps = {
+      clipState: ledger,
+      getCurrentAid: vi.fn(() => aid),
+      fetchHotComments: vi.fn(async () => {
+        if (fetchError) throw fetchError;
+        return comments;
+      })
+    };
+    return { ledger, deps };
+  }
+
+  it("有 aid：fetchHotComments(20) 拉取 + 落账 comments + 返回 {comments}（无 note）", async () => {
+    const comments = [{ uname: "u", message: "m" }];
+    const { ledger, deps } = makeDeps({ comments });
+
+    const outcome = await fetchHotCommentsWithLedger(deps);
+
+    expect(deps.fetchHotComments).toHaveBeenCalledWith(20);
+    expect(ledger.setHotComments).toHaveBeenCalledWith(comments);
+    expect(outcome).toEqual({ comments });
+  });
+
+  it("无 aid：不拉取，落账清空 + 空列表 + note「无法获取视频 aid」", async () => {
+    const { ledger, deps } = makeDeps({ aid: "" });
+
+    const outcome = await fetchHotCommentsWithLedger(deps);
+
+    expect(deps.fetchHotComments).not.toHaveBeenCalled();
+    expect(ledger.setHotComments).toHaveBeenCalledWith([]);
+    expect(outcome).toEqual({ comments: [], note: "无法获取视频 aid" });
+  });
+
+  it("拉取失败：落账清空 + 空列表 + note 带错误 message（不抛错）", async () => {
+    const { ledger, deps } = makeDeps({ fetchError: new Error("网络错误") });
+
+    const outcome = await fetchHotCommentsWithLedger(deps);
+
+    expect(ledger.setHotComments).toHaveBeenCalledWith([]);
+    expect(outcome.comments).toEqual([]);
+    expect(outcome.note).toContain("网络错误");
+  });
+
+  it("缺省 deps：落账接线到 core/state 的 clipState", async () => {
+    const spy = vi.spyOn(clipState, "setHotComments").mockImplementation(() => {});
+    try {
+      const comments = [{ uname: "u", message: "m" }];
+      const outcome = await fetchHotCommentsWithLedger({
+        getCurrentAid: () => 100,
+        fetchHotComments: async () => comments
+      });
+      expect(spy).toHaveBeenCalledWith(comments);
+      expect(outcome).toEqual({ comments });
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

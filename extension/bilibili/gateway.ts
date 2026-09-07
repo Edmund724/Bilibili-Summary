@@ -1,7 +1,7 @@
 import { formatLocalDate } from "../shared/utils.js";
 import { toReadableText, isExtensionContextInvalidated, getErrorMessage } from "../shared/error-helpers.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
-import { state } from "../core/state.js";
+import { state, clipState } from "../core/state.js";
 import { getRuntimeVideoElement } from "./video-probe.js";
 import { isBiliUrl } from "./gateway-core.js";
 import type { JsonTransport } from "./gateway-core.js";
@@ -109,6 +109,43 @@ export async function fetchHotComments(count = 20): Promise<HotComment[]> {
   }
 
   return fetchHotCommentsJson(contentFetchJson, aid, safeCount);
+}
+
+// 热评编排单源（arch-review-2026-09/07）：「getCurrentAid 判空 → fetchHotComments(20)
+// → clipState.setHotComments 落账 → 失败降级空列表 + note」序列此前在
+// core/context-assembly 与 entry/message-handler 逐字手抄两份，此处收口。
+// message-handler 消费它包 sendResponse 外壳；context-assembly 缺省实现直接注入。
+// deps 可注入 ledger/aid/拉取替身（测试），缺省全部取本模块与 core/state 真身。
+export interface HotCommentsWithLedgerDeps {
+  clipState?: { setHotComments(comments: HotComment[]): void };
+  getCurrentAid?: () => number;
+  fetchHotComments?: (count: number) => Promise<HotComment[]>;
+}
+
+export interface HotCommentsWithLedgerOutcome {
+  comments: HotComment[];
+  // 降级说明（无 aid / 拉取失败）；成功路径缺省。
+  note?: string;
+}
+
+export async function fetchHotCommentsWithLedger(
+  deps: HotCommentsWithLedgerDeps = {}
+): Promise<HotCommentsWithLedgerOutcome> {
+  const ledger = deps.clipState || clipState;
+  const aidOf = deps.getCurrentAid || getCurrentAid;
+  const fetchComments = deps.fetchHotComments || fetchHotComments;
+  try {
+    if (!aidOf()) {
+      ledger.setHotComments([]);
+      return { comments: [], note: "无法获取视频 aid" };
+    }
+    const comments = await fetchComments(20);
+    ledger.setHotComments(comments);
+    return { comments };
+  } catch (error) {
+    ledger.setHotComments([]);
+    return { comments: [], note: getErrorMessage(error) };
+  }
 }
 
 // ===== gateway orchestration =====

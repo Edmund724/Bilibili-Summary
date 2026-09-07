@@ -17,9 +17,9 @@
 //      挂起发送、不发起 offscreen port；转写完成后（字幕体落账、签名变化）
 //      kick 补轮放行，发出去的是转写完成后的完整字幕上下文。
 //
-//   ④ 缺省热评实现（defaultFetchHotComments）：重演 message-handler
-//      reader-get-hot-comments 处理器语义——gateway 动态装载、getCurrentAid
-//      判定、clipState.setHotComments 落账、失败降级空列表。
+//   ④ 缺省热评实现：消费 gateway 的热评编排单源 fetchHotCommentsWithLedger
+//      （arch-review-2026-09/07 收口），把 comments 合并进快照；aid 判空/落账/
+//      失败降级的分支语义直测在 tests/bilibili/gateway.test.js。
 //
 // 写法参照 tests/sidepanel 现有手法：resetModules 后同纪元导入被测模块与
 // chat-state 单例并手动重置字段；deps 全注入（clip 受控快照/热评/定时器/port）。
@@ -28,26 +28,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
 import { normalizeMarkdownForSectionPaste } from "../../extension/notes/paste.js";
 
-const { gatewayMock, clipStateMock } = vi.hoisted(() => ({
+const { gatewayMock } = vi.hoisted(() => ({
   gatewayMock: {
-    getCurrentAid: vi.fn(),
-    fetchHotComments: vi.fn()
-  },
-  clipStateMock: {
-    setHotComments: vi.fn()
+    fetchHotCommentsWithLedger: vi.fn()
   }
 }));
 
 // 仅供缺省热评实现（④）命中的 mock；①②③ 注入自己的 fetchHotComments，
-// 不触达这两个模块。core/context-assembly 对 core/state / gateway 是动态 import
-//（缺省热评实现专属），chat-runtime 的静态 import 图不含 core/state.js
-//（sidepanel-payload 与 chat-state 对它是 type-only / 无依赖）。
+// 不触达该模块。core/context-assembly 对 gateway 是静态 import（07 收口后），
+// 编排分支语义由 gateway 直测承担，这里只留接缝形状。
 vi.mock("../../extension/bilibili/gateway.js", () => ({
-  getCurrentAid: gatewayMock.getCurrentAid,
-  fetchHotComments: gatewayMock.fetchHotComments
-}));
-vi.mock("../../extension/core/state.js", () => ({
-  clipState: clipStateMock
+  fetchHotCommentsWithLedger: gatewayMock.fetchHotCommentsWithLedger
 }));
 
 let createInProcessContextFetch;
@@ -202,9 +193,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 beforeEach(async () => {
   resetModuleState();
   document.body.innerHTML = "";
-  gatewayMock.getCurrentAid.mockReset();
-  gatewayMock.fetchHotComments.mockReset();
-  clipStateMock.setHotComments.mockReset();
+  gatewayMock.fetchHotCommentsWithLedger.mockReset();
   await importModules();
   chatSessionState.contextData = null;
   chatSessionState.currentContextKey = "";
@@ -392,9 +381,11 @@ describe("工单 08 短路三事（进程内直读路径）", () => {
 });
 
 // ===========================================================================
-// 缺省热评实现（defaultFetchHotComments）：message-handler 处理器语义对账
+// 缺省热评实现：gateway fetchHotCommentsWithLedger 单源的接缝消费
+// （编排分支语义直测在 tests/bilibili/gateway.test.js，这里只锁接缝形状：
+//  缺省实现调用单源、comments 合并进快照、降级空列表口径不变）
 // ===========================================================================
-describe("缺省热评实现（reader-get-hot-comments 处理器语义重演）", () => {
+describe("缺省热评实现（gateway 单源接缝）", () => {
   function makeBareFetch(clipRef) {
     return createInProcessContextFetch({
       clip: () => clipRef.current,
@@ -403,43 +394,26 @@ describe("缺省热评实现（reader-get-hot-comments 处理器语义重演）"
     });
   }
 
-  it("有 aid：fetchHotComments(20) 拉取 + clipState.setHotComments 落账 + 合并进快照", async () => {
-    gatewayMock.getCurrentAid.mockReturnValue("100");
+  it("成功：fetchHotCommentsWithLedger 的 comments 合并进快照", async () => {
     const comments = [{ uname: "u", message: "m" }];
-    gatewayMock.fetchHotComments.mockResolvedValue(comments);
+    gatewayMock.fetchHotCommentsWithLedger.mockResolvedValue({ comments });
     const clipRef = { current: makeClip() };
     const fetchContext = makeBareFetch(clipRef);
 
     const outcome = await fetchContext({ forceRefresh: true, ifSignature: "" });
 
-    expect(gatewayMock.fetchHotComments).toHaveBeenCalledWith(20);
-    expect(clipStateMock.setHotComments).toHaveBeenCalledWith(comments);
+    expect(gatewayMock.fetchHotCommentsWithLedger).toHaveBeenCalledTimes(1);
     expect(outcome.kind).toBe("payload");
     expect(outcome.payload.hotComments).toEqual(comments);
   });
 
-  it("无 aid：降级空列表 + clipState.setHotComments([])（不阻断全量路径）", async () => {
-    gatewayMock.getCurrentAid.mockReturnValue(null);
+  it("降级（{comments:[], note}）：快照热评空数组、不阻断全量路径（note 不进快照）", async () => {
+    gatewayMock.fetchHotCommentsWithLedger.mockResolvedValue({ comments: [], note: "无法获取视频 aid" });
     const clipRef = { current: makeClip() };
     const fetchContext = makeBareFetch(clipRef);
 
     const outcome = await fetchContext({ forceRefresh: true, ifSignature: "" });
 
-    expect(gatewayMock.fetchHotComments).not.toHaveBeenCalled();
-    expect(clipStateMock.setHotComments).toHaveBeenCalledWith([]);
-    expect(outcome.kind).toBe("payload");
-    expect(outcome.payload.hotComments).toEqual([]);
-  });
-
-  it("热评拉取失败：静默降级空列表 + 落账清空（不抛错、不阻断）", async () => {
-    gatewayMock.getCurrentAid.mockReturnValue("100");
-    gatewayMock.fetchHotComments.mockRejectedValue(new Error("网络错误"));
-    const clipRef = { current: makeClip() };
-    const fetchContext = makeBareFetch(clipRef);
-
-    const outcome = await fetchContext({ forceRefresh: true, ifSignature: "" });
-
-    expect(clipStateMock.setHotComments).toHaveBeenCalledWith([]);
     expect(outcome.kind).toBe("payload");
     expect(outcome.payload.hotComments).toEqual([]);
   });

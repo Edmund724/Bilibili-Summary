@@ -18,13 +18,15 @@
 // 见 ticket arch-slim-4/01。）
 //
 // 依赖方向（无环）：core/context-payload（形状/签名纯模块）+ ai/conversation
-//（contextRef 归一化纯函数）+ core/defaults；core/state 与 bilibili/gateway
-// 仅热评缺省实现的动态 import（不拖进消费方的静态模块图）。不 import chat/*——
+//（contextRef 归一化纯函数）+ core/defaults + bilibili/gateway（热评编排单源
+// fetchHotCommentsWithLedger，arch-review-2026-09/07 收口后静态注入，gateway 随
+// 本模块进入消费方静态图）。不 import chat/*——
 // 快照类型用 ai/types 的 AiContext（chat-state 的 ChatSessionContextSnapshot
 // 就是它的别名）——也不 import 组合根。生产消费方仅 reader/chat-tab.ts（对话
 // 组合根，按 ContextFetch 策略注入点与 resolveAiConversationRef 接缝接线）。
 import { buildAiContextRef } from "../ai/conversation.js";
 import type { AiContext } from "../ai/types.js";
+import { fetchHotCommentsWithLedger } from "../bilibili/gateway.js";
 import {
   createReaderContextPayload,
   computeContextStateSignature
@@ -71,35 +73,15 @@ export interface InProcessContextFetchDeps {
   clip?: () => Partial<ClipState>;
   settings?: () => Partial<Settings>;
   url?: () => string;
-  // 热评拉取（全量路径专用；返回 [] 视为降级）。缺省实现重演 message-handler
-  // 的 reader-get-hot-comments 处理器语义（见 defaultFetchHotComments）。
+  // 热评拉取（全量路径专用；返回 [] 视为降级）。缺省实现 = bilibili/gateway
+  // 的热评编排单源 fetchHotCommentsWithLedger（aid 判空 / clipState 落账 /
+  // 失败降级空列表），note 不上进快照。
   fetchHotComments?: () => Promise<unknown[]>;
 }
 
-// 缺省热评实现：重演 entry/message-handler.ts 的 reader-get-hot-comments
-// 处理器（gateway 动态装载、getCurrentAid 判定、clipState.setHotComments 落账、
-// 失败降级空列表）。动态 import 避免把 core/state 与 gateway 拖进本策略消费方
-//（对话组合根）的静态模块图。
+// 缺省热评实现：gateway 单源的 ContextFetch 适配（只取 comments）。
 async function defaultFetchHotComments(): Promise<unknown[]> {
-  // clipState 热评落账的引用（动态取自 core/state.js；装载失败时无从落账，
-  // 与降级语义一致）。
-  let clipState: (typeof import("./state.js"))["clipState"] | undefined;
-  try {
-    clipState = (await import("./state.js")).clipState;
-    const { getCurrentAid, fetchHotComments } = await import("../bilibili/gateway.js");
-    if (!getCurrentAid()) {
-      clipState.setHotComments([]);
-      return [];
-    }
-    const comments = await fetchHotComments(20);
-    clipState.setHotComments(comments);
-    return comments;
-  } catch {
-    // 装载/拉取失败时静默降级（落账清空），避免阻断主流程——与
-    // reader-get-hot-comments 处理器的 catch 口径一致
-    clipState?.setHotComments([]);
-    return [];
-  }
+  return (await fetchHotCommentsWithLedger()).comments;
 }
 
 // reader 与 content 同进程：直接读 state.clip + core/context-payload 组装，

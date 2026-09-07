@@ -161,24 +161,15 @@ function handleReaderClose(_message: Msg<"reader-close">, sendResponse: SendResp
 
 function handleReaderGetHotComments(_message: Msg<"reader-get-hot-comments">, sendResponse: SendResponse): boolean {
   // gateway 动态装载（候选02，见文件头 import 注）：本地 chunk 加载 ~10ms，
-  // 被热评网络往返掩盖。装载失败与「无法获取 aid」同型降级：空列表 + note。
+  // 被热评网络往返掩盖。编排单源在 gateway.fetchHotCommentsWithLedger
+  //（arch-review-2026-09/07：aid 判空 / clipState 落账 / 失败降级空列表 + note），
+  // 本处理器只包 sendResponse 外壳；装载失败与「无法获取 aid」同型降级。
   import("../bilibili/gateway.js")
-    .then(({ getCurrentAid, fetchHotComments }) => {
-      if (!getCurrentAid()) {
-        clipState.setHotComments([]);
-        sendResponse({ ok: true, comments: [], note: "无法获取视频 aid" });
-        return;
-      }
-      return fetchHotComments(20)
-        .then((hotComments) => {
-          clipState.setHotComments(hotComments);
-          sendResponse({ ok: true, comments: hotComments });
-        })
-        .catch((error) => {
-          clipState.setHotComments([]);
-          sendResponse({ ok: true, comments: [], note: String(error?.message || error) });
-        });
-    })
+    .then(({ fetchHotCommentsWithLedger }) =>
+      fetchHotCommentsWithLedger().then(({ comments, note }) => {
+        sendResponse(note ? { ok: true, comments, note } : { ok: true, comments });
+      })
+    )
     .catch((error) => {
       clipState.setHotComments([]);
       sendResponse({ ok: true, comments: [], note: String(error?.message || error) });
