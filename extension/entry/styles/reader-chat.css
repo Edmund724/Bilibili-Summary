@@ -73,16 +73,16 @@
  * 度量结果）只作 flex-basis 下限，不再被 232px 硬上限截断。 */
 .boc-reading-chat .chat-model-select {
   width: auto;
-  height: 28px;
+  height: 32px;
   flex: 1 1 auto;
   min-width: 92px;
   max-width: 100%;
   padding: 0 28px 0 12px;
   border: 1px solid var(--boc-reader-border, #e7dfd4);
-  border-radius: 999px;
+  border-radius: 8px;
   background: var(--boc-reader-card, #ffffff);
   font: inherit;
-  font-size: 14px;
+  font-size: 15px;
   color: var(--boc-reader-text, #2b2620);
   appearance: none;
   -webkit-appearance: none;

@@ -130,10 +130,10 @@
 }
 
 .boc-reading-select-sm {
-  min-height: 28px;
+  height: 32px;
   padding: 0 6px;
-  font-size: 14px;
-  border-radius: 6px;
+  font-size: 15px;
+  border-radius: 8px;
   border: 1px solid var(--boc-reader-border, #e5e7eb);
   background: var(--boc-reader-surface, #fff);
   color: var(--boc-reader-text, #1f2937);
@@ -455,25 +455,21 @@
 }
 
 #boc-reading-view .boc-reading-select {
-  min-height: 36px;
-  border-radius: 999px;
+  min-height: 32px;
+  border-radius: 8px;
   padding: 0 12px;
   width: auto;
   margin: 0;
 }
 
 /* 字幕 tab 工具条内的语言下拉（三开关退役后自设置面板移入，2026-09）：
- * 基础段仍走上面的主题 token（border/surface 底/text 字）；这里覆盖
- * select-sm 的圆角小框样式，与工具条 mini-btn 同形（radius 10px、紧凑
- * 高度），行内对齐由 flex 工具条的 align-items:center 保证。 */
+ * 形状/高度/字号走基础段统一框形态（8px / 32px / 15px，与设置页下拉一致）；
+ * 这里只留差异项：token 换色（border/card 底/muted 字）与 max-width 限宽，
+ * 行内对齐由 flex 工具条的 align-items:center 保证。 */
 #boc-reading-view .boc-reading-sub-toolbar .boc-reading-select-sm {
-  min-height: 0;
-  height: 31px;
-  border-radius: 10px;
   border-color: var(--boc-reader-border);
   background: var(--boc-reader-card);
   color: var(--boc-reader-muted);
-  font-size: 14px;
   max-width: 130px;
 }
 
