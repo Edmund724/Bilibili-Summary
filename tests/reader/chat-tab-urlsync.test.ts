@@ -21,7 +21,7 @@ import type { TestState } from "./reader-test-env.js";
 const { gatewayMock, gatewayCoreMock } = vi.hoisted(() => ({
   gatewayMock: {
     getCurrentAid: vi.fn(() => 0),
-    fetchHotComments: vi.fn(async () => [])
+    fetchHotComments: vi.fn(async (_count?: number) => [])
   },
   gatewayCoreMock: {
     bgFetchJson: vi.fn(),

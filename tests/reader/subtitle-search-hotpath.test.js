@@ -2,8 +2,8 @@
 //
 // - 修1：clearSearchHighlights 的 normalize 出循环——清除时对列表整体 normalize
 //   一次，不再每个 mark 各扫一次全子树（全量命中下 O(n²)）；
-// - 修2：批次回执 handleReadingSubtitleRangeAppended 按批次 index 区间取子集，
-//   不遍历整个 matchesByItem 全表。
+// - 修2：批次回执 handleReadingSubtitleRangeAppended 对有序 matches 数组二分
+//   取批次 index 区间子集，不遍历 matchesByItem 全表。
 //
 // 测试直驱 reader/subtitle-search.js 模块缝（不经完整 reader shell）：手工搭
 // 列表 DOM + state.clip.subtitleBody，行为断言与计数断言共享同一夹具。
@@ -82,8 +82,8 @@ describe("字幕搜索热路径（1500 条全量命中夹具）", () => {
     expect(itemText(TOTAL_ITEMS - 1).textContent).toBe(`第${TOTAL_ITEMS - 1}条含${KEYWORD}的句子`);
   });
 
-  it("修2：批次回执按区间取子集，不遍历 matchesByItem 全表", () => {
-    const { input } = buildFixture();
+  it("修2：批次回执按区间二分取子集，DOM 访问以区间宽为量级", () => {
+    const { input, list } = buildFixture();
     input.value = KEYWORD;
     search.refreshReadingSubtitleSearch({ scroll: false });
     expect(markCount()).toBe(TOTAL_ITEMS);
@@ -96,21 +96,9 @@ describe("字幕搜索热路径（1500 条全量命中夹具）", () => {
     }
     expect(itemText(from).querySelector("mark")).toBe(null);
 
-    // 统计回执期间对 Map 键的迭代次数（全表扫描 = TOTAL_ITEMS 次起步）
-    const originalKeys = Map.prototype.keys;
-    let iteratedKeys = 0;
-    vi.spyOn(Map.prototype, "keys").mockImplementation(function keys() {
-      const iterator = originalKeys.call(this);
-      return {
-        next() {
-          iteratedKeys += 1;
-          return iterator.next();
-        },
-        [Symbol.iterator]() {
-          return this;
-        }
-      };
-    });
+    // 统计回执期间对列表的 querySelector 调用：getItemNode 每处理一个区间
+    // 内条目定位一次；全表扫描形态的实现会是 TOTAL_ITEMS 次起步
+    const querySpy = vi.spyOn(list, "querySelector");
     try {
       search.handleReadingSubtitleRangeAppended(from, to);
     } finally {
@@ -123,7 +111,7 @@ describe("字幕搜索热路径（1500 条全量命中夹具）", () => {
     }
     expect(itemText(from).querySelector("mark").textContent).toBe(KEYWORD);
     expect(markCount()).toBe(TOTAL_ITEMS);
-    // 区间取子集：迭代量以区间宽度为量级，与全表规模无关
-    expect(iteratedKeys).toBeLessThanOrEqual((to - from) * 2);
+    // 区间取子集：恰为区间宽次定位，与全表规模无关
+    expect(querySpy).toHaveBeenCalledTimes(to - from);
   });
 });
