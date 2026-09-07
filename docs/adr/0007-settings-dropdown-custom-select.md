@@ -1,10 +1,10 @@
 # 设置页下拉选择器统一到 custom-select 组件，放弃原生 select
 
-设置页视觉统一（settings-ui-coherence 轮）收尾时，页面上还剩最后一个原生下拉「正文附加段落 - 段落位置」，它与已换壳的「下载格式」、Modal ASR 预设形成两族 affordance：原生一族渐变三角、自定义一族 chevron。我们决定：**设置页所有下拉选择器统一到 `custom-select` 组件**（`ui/custom-select.ts`），段落位置一并换壳；代价是原生 select 自带的键盘与读屏语义改由组件自担——listbox 键盘（↑/↓ 漫游不循环、Home/End、Enter/Space 开合与选中、Esc 归焦、Tab 穿行）+ ARIA（`aria-haspopup/expanded/controls`、`role=listbox/option`、`aria-selected`、roving tabindex），不做首字符 typeahead（选项都是 3~5 项短列表）。
+设置页视觉统一（settings-ui-coherence 轮）收尾时，页面上还剩最后一个原生下拉「正文附加段落 - 段落位置」，它与已换壳的「下载格式」、Modal ASR 预设形成两族 affordance：原生一族渐变三角、自定义一族 chevron。我们决定：**设置页所有下拉选择器统一到 `custom-select` 组件**（`ui/custom-select.ts`），段落位置一并换壳；代价是原生 select 自带的键盘与读屏语义改由组件自担——listbox 键盘（↑/↓ 漫游不循环、Home/End、Enter/Space 开合与选中、Esc 归焦、Tab 穿行）+ ARIA（`aria-haspopup/expanded/controls`、`role=listbox/option`、`aria-selected`，选项以程序化 focus 漫游），不做首字符 typeahead（选项都是 3~5 项短列表）。
 
 ## 考虑过的方案
 
-- **A1：接受两族并存**（原生 select 保留渐变三角，自定义下拉用 chevron）：省掉组件的 a11y 维护，但与本轮统一目的相反，且段落位置会成为页面上唯一键控体验不同的控件。
+- **A1：接受两族并存**（原生 select 保留渐变三角，自定义下拉用 chevron）：省掉组件的 a11y 维护，但与本轮统一目的相反，且段落位置会成为页面上唯一键控体验不同的控件。（原编号 A2 的「换组件」案即本文决议，不再作为备选列出。）
 - **A3：保留原生 select，用 CSS 把渐变三角重画成 chevron**：不引入组件维护成本，但两条细渐变拼出的 V 不可读，且渐变色只能写死 fallback——读不到 CSS 变量的 `background-image` 在深色档失配。
 
 ## 后果
