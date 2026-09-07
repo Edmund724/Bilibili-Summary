@@ -144,6 +144,31 @@ describe("播放同步与高亮", () => {
     expect(state.reader.readingActiveChapterIndex).toBe(1);
   });
 
+  it("sync tick 布局读取前置短路：稳态拍不读 rect，真实滚动拍恰读两次", () => {
+    state.reader.readingViewOpen = true;
+    shell.renderReadingView();
+    playerHost.bindReadingViewVideo(video);
+
+    const rectSpy = vi.spyOn(Element.prototype, "getBoundingClientRect");
+    // 首拍建立高亮与跟随基线（本身是一拍真实滚动），跑完清零计数
+    video.currentTime = 12;
+    sync.syncReadingViewPlayback();
+    expect(state.reader.readingActiveSubtitleIndex).toBe(1);
+    rectSpy.mockClear();
+
+    // 稳态拍：currentTime 未越过条目边界，shouldScroll 不通过 →
+    // 不进滚动函数、不发生任何强制布局读取
+    sync.syncReadingViewPlayback();
+    sync.syncReadingViewPlayback();
+    expect(rectSpy).not.toHaveBeenCalled();
+
+    // 真实滚动拍：切到第三句 → 列表容器 rect + 条目 rect 各一次
+    video.currentTime = 45;
+    sync.syncReadingViewPlayback();
+    expect(state.reader.readingActiveSubtitleIndex).toBe(2);
+    expect(rectSpy).toHaveBeenCalledTimes(2);
+  });
+
   it("播放稳态仅 interval 单路驱动：timeupdate 派发不触发同步（P3 单路化锁）", async () => {
     state.reader.readingViewOpen = true;
     shell.renderReadingView();
