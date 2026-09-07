@@ -91,7 +91,8 @@ describe("seekReadingTarget 规范序", () => {
 
     // currentTime 被赋值的瞬间，手动暂停必须已经清掉（规范序第 1 步先于第 3 步）
     expect(log).toEqual([{ pausedAtAssign: false, next: 12 }]);
-    // 跟随状态按规范序第 2 步落在 auto；timeupdate 驱动的同步以 auto 行为滚动
+    // 跟随状态按规范序第 2 步落在 auto；seek 后事件驱动（seeked 直连 + 尾部
+    // force 同步）以 auto 行为滚动
     expect(readingView.getAttribute("data-boc-reader-follow")).toBe("auto");
     expect(scrollToSpy).toHaveBeenCalledWith(expect.objectContaining({ behavior: "auto" }));
     expect(state.reader.readingActiveSubtitleIndex).toBe(1);
@@ -99,13 +100,14 @@ describe("seekReadingTarget 规范序", () => {
 
   it("未清暂停时同型同步会吞掉跟随滚动（回归对照：bug 形态可观察）", () => {
     // 对照组：手动暂停处于生效状态时，同步走 manual 分支——follow 保持 manual，
-    // 证明上面用例断言的 pausedAtAssign=false 确实是行为分岔点。
+    // 证明上面用例断言的 pausedAtAssign=false 确实是行为分岔点。原版派发
+    // timeupdate 驱动同步（P3 单路化后该事件不再监听），等价改派 seeked。
     const readingView = document.getElementById(ids.readingView) as HTMLElement;
     shell.noteManualReaderInteraction(5000);
     expect(scrollState.isManualScrollPaused()).toBe(true);
 
     video.currentTime = 12; // 直接赋值：此刻暂停未清
-    video.dispatchEvent(new Event("timeupdate"));
+    video.dispatchEvent(new Event("seeked"));
 
     expect(readingView.getAttribute("data-boc-reader-follow")).toBe("manual");
     expect(state.reader.readingActiveSubtitleIndex).toBe(1); // 高亮照切

@@ -129,19 +129,47 @@ describe("播放同步与高亮", () => {
     expect(state.reader.readingActiveChapterIndex).toBe(0);
   });
 
-  it("video timeupdate 事件驱动同步并切换字幕高亮", () => {
+  it("video seeked 事件驱动即时同步并切换字幕高亮（暂停态 seek 兜底）", () => {
     state.reader.readingViewOpen = true;
     shell.renderReadingView();
     playerHost.bindReadingViewVideo(video);
 
     video.currentTime = 35;
-    video.dispatchEvent(new Event("timeupdate"));
+    video.dispatchEvent(new Event("seeked"));
 
     const readingView = document.getElementById(ids.readingView) as HTMLElement;
     const activeSubtitle = readingView.querySelector(".boc-reading-item.is-active") as HTMLElement;
     expect(activeSubtitle.dataset.index).toBe("2");
     expect(state.reader.readingActiveSubtitleIndex).toBe(2);
     expect(state.reader.readingActiveChapterIndex).toBe(1);
+  });
+
+  it("播放稳态仅 interval 单路驱动：timeupdate 派发不触发同步（P3 单路化锁）", async () => {
+    state.reader.readingViewOpen = true;
+    shell.renderReadingView();
+    playerHost.bindReadingViewVideo(video);
+
+    video.currentTime = 12;
+    sync.syncReadingViewPlayback();
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
+    expect(state.reader.readingActiveSubtitleIndex).toBe(1);
+
+    // 稳态播放的 timeupdate（真实现 ≈4-5Hz）不再直连同步：若仍监听，35s 处
+    // 高亮会被切到第三句——高亮不动即「无额外 sync 调用」的负向锁。
+    video.currentTime = 35;
+    video.dispatchEvent(new Event("timeupdate"));
+    expect(state.reader.readingActiveSubtitleIndex).toBe(1);
+    const activeSubtitle = readingView.querySelector(".boc-reading-item.is-active") as HTMLElement;
+    expect(activeSubtitle.textContent).toContain("第二句");
+
+    // 跟随收敛到 250ms interval 单路：tick 到点即切高亮（此刻 timeupdate/seeked
+    // 均未派发，能驱动同步的只剩 interval；测试完即停，不留游离 tick）
+    sync.startReadingViewSync();
+    video.currentTime = 45;
+    await vi.waitFor(() => {
+      expect(state.reader.readingActiveSubtitleIndex).toBe(2);
+    });
+    sync.stopReadingViewSync();
   });
 
   it("停止同步：移除事件监听与定时器", () => {

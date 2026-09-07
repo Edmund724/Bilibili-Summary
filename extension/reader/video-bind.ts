@@ -1,8 +1,10 @@
 // Reader LAYOUT 层 · video-bind 域（自退役的 player-host.js 迁出）。
 //
 // 本文件只拥有「video 播放事件 ↔ 阅读视图同步」的绑定生命周期：
-//   - bindReadingViewVideo：把 timeupdate/seeked/loadedmetadata 经
-//     AbortController 绑到 video 上，事件回调经 ports.js 显式端口驱动 SYNC；
+//   - bindReadingViewVideo：把 seeked/loadedmetadata 经 AbortController 绑到
+//     video 上，事件回调经 ports.js 显式端口驱动 SYNC（播放稳态由 sync 的
+//     250ms tick 单路驱动——timeupdate 直连已随 P3 播放 sync 单路化删除，
+//     双路合计 ~8-9Hz 收敛为 interval 4Hz，seek/换轨即时响应由事件路保留）；
 //   - unbindReadingViewVideoSync：abort 即移除整组监听。
 //
 // B 形态收尾：player-host 整页接管随 Digest 面板形态退役，原绑定
@@ -21,7 +23,7 @@ import { getRuntimeVideoElement } from "../bilibili/video-probe.js";
 import { readerPorts } from "./ports.js";
 
 // 解绑 video 同步监听：AbortController 挂在元素上（__bocReadingSyncController），
-// abort 即移除整组 timeupdate/seeked/loadedmetadata 监听，无需再逐个
+// abort 即移除整组 seeked/loadedmetadata 监听，无需再逐个
 // removeEventListener 并 stash handler 引用。
 export function unbindReadingViewVideoSync(): void {
   const prev = state.reader.readingVideoEl;
@@ -58,7 +60,6 @@ export function bindReadingViewVideo(video: HTMLVideoElement | null = getRuntime
   };
   const controller = new AbortController();
   const { signal } = controller;
-  video.addEventListener("timeupdate", syncHandler, { signal });
   video.addEventListener("seeked", syncHandler, { signal });
   video.addEventListener("loadedmetadata", syncHandler, { signal });
   video.__bocReadingSyncController = controller;

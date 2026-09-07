@@ -86,7 +86,8 @@ export const readerPorts = {
   noteManualReaderInteraction(...args: unknown[]) {
     return requirePortMethod("noteManualReaderInteraction")(...args);
   },
-  // LAYOUT(video-bind) → SYNC：视频 timeupdate/seeked/loadedmetadata 驱动同步。
+  // LAYOUT(video-bind) → SYNC：视频 seeked/loadedmetadata 事件驱动同步
+  //（播放稳态由 sync 250ms tick 单路驱动，P3 单路化后不再监听 timeupdate）。
   syncReadingViewPlayback(...args: unknown[]) {
     return requirePortMethod("syncReadingViewPlayback")(...args);
   },
