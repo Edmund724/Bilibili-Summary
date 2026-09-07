@@ -23,7 +23,7 @@ export function toString(value: unknown): string {
 // 留守本模块的原因不变：core/settings-store.ts（后台设置归一化）静态依赖它，
 // 迁移会破坏后台 bundle 与其测试。
 export function normalizeReaderTheme(value: unknown): string {
-  return value === "dark" || value === "paper" ? value : "light";
+  return value === "dark" ? value : "light";
 }
 
 // ===== Download / AI normalizers =====

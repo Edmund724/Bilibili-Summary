@@ -66,6 +66,7 @@ describe("设置变更与 data-attribute", () => {
   });
 
   it("applyReadingViewPresentation：在视图/html/body 三处写 theme data-attribute", () => {
+    // 纸色档已退役：存量 "paper" 经 normalizeReaderTheme 静默归一为 light。
     presentation.hydrateReaderStateFromSettings({
       readerTheme: "paper"
     });
@@ -75,9 +76,27 @@ describe("设置变更与 data-attribute", () => {
     const htmlEl = document.documentElement;
     const bodyEl = document.body;
 
-    expect(readingView.dataset.theme).toBe("paper");
-    expect(htmlEl.dataset.bocReaderTheme).toBe("paper");
-    expect(bodyEl.dataset.bocReaderTheme).toBe("paper");
+    expect(readingView.dataset.theme).toBe("light");
+    expect(htmlEl.dataset.bocReaderTheme).toBe("light");
+    expect(bodyEl.dataset.bocReaderTheme).toBe("light");
+  });
+
+  it("applyReadingViewPresentation：header 主题按钮图标/文案随主题刷新", () => {
+    const themeButton = document.createElement("button");
+    themeButton.id = ids.readingThemeSelect;
+    document.body.appendChild(themeButton);
+
+    presentation.hydrateReaderStateFromSettings({ readerTheme: "dark" });
+    presentation.applyReadingViewPresentation();
+    expect(themeButton.title).toBe("主题：深色");
+    expect(themeButton.getAttribute("aria-label")).toBe("主题：深色");
+    const darkIconHtml = themeButton.innerHTML;
+
+    presentation.hydrateReaderStateFromSettings({ readerTheme: "light" });
+    presentation.applyReadingViewPresentation();
+    expect(themeButton.title).toBe("主题：浅色");
+    expect(themeButton.getAttribute("aria-label")).toBe("主题：浅色");
+    expect(themeButton.innerHTML).not.toBe(darkIconHtml);
   });
 
   it("updateReaderPreferences：变更主题并持久化到 chrome.runtime", () => {

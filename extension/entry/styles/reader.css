@@ -152,7 +152,7 @@
 /* ===== 统一 Digest 面板（PR2）：右侧面板壳 + 三标签 =====
  * 视口定位（fixed 右侧、全高卡片）在 reader-gate.css 门控段；这里只定义
  * 面板内部结构：header → tabs（pill 分段控件）→ tab-body。色值全部走
- * --boc-reader-* 主题 token（gate 段三主题定义），暗色主题自动跟随。 */
+ * --boc-reader-* 主题 token（gate 段两主题定义），暗色主题自动跟随。 */
 .boc-reading-digest-panel {
   min-height: 0;
   display: flex;
@@ -529,7 +529,7 @@
 }
 
 /* ===== PR3 字幕 tab：搜索工具条 / 转写横幅 / 跟随按钮 / 句上解释浮层 / 意图卡
- * 色值全部走 --boc-reader-* token（reader-gate.css 三主题定义），暗色自动跟随。
+ * 色值全部走 --boc-reader-* token（reader-gate.css 两主题定义），暗色自动跟随。
  * 视觉基准：prototype/unified-panel.html + final-字幕-解释.jpg / final-转写中.jpg */
 /* 窄容器（面板 300–460px）：放不下时按钮折到搜索框下一行 */
 .boc-reading-sub-toolbar {
@@ -964,7 +964,7 @@
 /* ===== PR4 概览 tab：章节 / 金句 =====
  * 视觉基准：prototype/final-概览.jpg——章节列表（时间戳 pill + 标题 +
  * 小结）→ 金句卡（白底 + 左 3px accent 边 + 右下角时间戳与 Copy 按钮）。
- * 色值全部走 --boc-reader-* token（gate 段三主题定义），暗色主题自动跟随；
+ * 色值全部走 --boc-reader-* token（gate 段两主题定义），暗色主题自动跟随；
  * 时间戳 pill 复用 .boc-reading-time 母题。
  *（digest-only-ui：概览顶部「总结」区块已删除，直接以章节开头。） */
 .boc-reading-overview {

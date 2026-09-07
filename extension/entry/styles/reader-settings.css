@@ -2,7 +2,7 @@
  * 自 reader.css 设置分区拆出（原 options 页设置项 + provider-editor Modal +
  * custom-select 组），随 ui/settings-panel chunk 按需装载（shared/style-injector
  * 的 ensureReaderSettingsStyles，settings-panel.ts 模块顶层挂载 + onload 门控）。
- * 颜色/边框走 --boc-reader-* token（reader-gate.css 三主题定义），深色/纸色自动
+ * 颜色/边框走 --boc-reader-* token（reader-gate.css 两主题定义），深色自动
  * 跟随；容器：#boc-reading-settings-panel 内嵌 #boc-reading-settings-host
  * （ui/ui-renderer 模板），规则全部以 #boc-reading-settings-panel 为前置，
  * 避免与宿主页面类名冲突。custom-select-* 为文档级裸类（custom-select.ts
@@ -11,7 +11,7 @@
 /* ===== 侧边栏设置面板（digest-only-ui）：原独立 options 页的设置项 =====
  * 原 pages/options.css 随 options 页删除，其全部设置项样式按「宿主容器 +
  * 行级构建器类」迁入本表。所有颜色/边框改走 --boc-reader-* token（gate 段
- * 三主题定义），深色/纸色自动跟随；数字/字符统一改用当前排版基准 14px 或
+ * 两主题定义），深色自动跟随；数字/字符统一改用当前排版基准 14px 或
  * 控件内 13px。容器：#boc-reading-settings-panel 内嵌
  * #boc-reading-settings-host（ui/ui-renderer 模板），其滚动链与右侧概览 tab
  * 相同（max-height: calc(100vh - 150px) + overflow-y:auto），规则全部以
@@ -825,7 +825,7 @@
 }
 
 /* 删除按钮（Modal 头部右侧，对齐参考截图的编辑页布局；用户拍板改为醒目
- * 警示底色）。红用固定警示色：token 表无红色语义，rgba 底在三主题下均不刺眼 */
+ * 警示底色）。红用固定警示色：token 表无红色语义，rgba 底在两主题下均不刺眼 */
 #boc-reading-view .provider-editor-delete {
   height: 28px;
   padding: 0 14px;

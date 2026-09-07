@@ -79,8 +79,8 @@ body[data-boc-reader-mode="1"] #boc-reading-view[data-boc-reader-follow="manual"
 
 /* ===== 主题 token =====
  * PR2 统一 Digest 面板按 prototype/direction-approved.md 定稿色板重排：
- * light（默认）= 暖白纸感底 + B 站粉 accent（#fb7299）；dark/paper 沿用各自
- * 底色，accent 换粉系可读变体（暗底用亮粉、纸底用深粉），暗色主题不破相。
+ * light（默认）= 暖白纸感底 + B 站粉 accent（#fb7299）；dark 沿用其底色，
+ * accent 换亮粉可读变体，暗色主题不破相（纸色档已随两档制退役删除）。
  * 新增 card（白卡片）/faint（三级文字）/accent-ink（accent 实底上的文字）/
  * pill-bg（分段控件底）/highlight（提示横幅底，PR3 转写横幅消费）。
  * 时间戳 pill 母题消费 accent-soft 底 + accent 字。 */
@@ -126,26 +126,6 @@ body[data-boc-reader-mode="1"][data-boc-reader-theme="dark"],
   --boc-reader-pill-bg: #1a2a46;
   --boc-reader-highlight: rgba(253, 238, 218, 0.1);
   --boc-reader-shadow: 0 18px 42px rgba(2, 6, 23, 0.42);
-}
-
-html[data-boc-reader-mode="1"][data-boc-reader-theme="paper"],
-body[data-boc-reader-mode="1"][data-boc-reader-theme="paper"],
-#boc-reading-view[data-theme="paper"] {
-  --boc-reader-page-bg: #efe8d7;
-  --boc-reader-surface: #fbf7ee;
-  --boc-reader-surface-2: #f4eddc;
-  --boc-reader-surface-3: #eee4ce;
-  --boc-reader-card: #fffcf4;
-  --boc-reader-border: rgba(180, 155, 112, 0.28);
-  --boc-reader-text: #3b3124;
-  --boc-reader-muted: #756653;
-  --boc-reader-faint: #93836c;
-  --boc-reader-accent: #e05587;
-  --boc-reader-accent-soft: rgba(251, 114, 153, 0.16);
-  --boc-reader-accent-ink: #ffffff;
-  --boc-reader-pill-bg: #f0e6d2;
-  --boc-reader-highlight: #fdeeda;
-  --boc-reader-shadow: 0 18px 40px rgba(112, 93, 64, 0.12);
 }
 
 /* 面板宽度：digest-only-ui 排版定稿，档位机制已退役——贴栏宽度下限定死

@@ -2,13 +2,13 @@
  * 自 reader.css 对话分区（.chat-* 全套）拆出，随对话域首次激活按需装载
  *（shared/style-injector 的 ensureReaderChatStyles，两个挂载点：ui-renderer
  * setReaderDigestTab("chat") 分支同步挂载 + reader/chat-tab.ts 模块顶层兜底，
- * 不建 onload 门控）。颜色/边框走 --boc-reader-* token（reader-gate.css 三主题
- * 定义），light/dark/paper 自动跟随。规则全部以 .boc-reading-chat 为唯一前缀
+ * 不建 onload 门控）。颜色/边框走 --boc-reader-* token（reader-gate.css 两主题
+ * 定义），light/dark 自动跟随。规则全部以 .boc-reading-chat 为唯一前缀
  *（chat-template.ts 模板根类），避免与宿主页面类名冲突。 */
 /* ===== PR5 AI 对话 tab：.chat-* 全套并入 reader 样式体系 =====
  * 视觉与 pages/sidepanel.css 同套（消息气泡/思考块/建议 chip/预设与历史
- * popover/输入区），色值全部换 --boc-reader-* token（gate 段三主题定义，
- * light/dark/paper 自动跟随，暗色不破相）；时间戳链接与引用卡沿用
+ * popover/输入区），色值全部换 --boc-reader-* token（gate 段两主题定义，
+ * light/dark 自动跟随，暗色不破相）；时间戳链接与引用卡沿用
  * .boc-reading-time pill 母题（accent-soft 底 + accent 字）。规则域收在
  * .boc-reading-chat 根内，避免与宿主页面类名冲突；内核（chat-runtime）产出的
  * .chat-msg* / .chat-thinking / .chat-stream-* 节点类名保持原样。 */

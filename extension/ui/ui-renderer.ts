@@ -2,6 +2,7 @@ import { state, uiState } from "../core/state.js";
 import { byId } from "../shared/dom-utils.js";
 import { escapeHtml } from "../shared/string-utils.js";
 import { READING_HEADER_ICONS } from "./reading-header-icons.js";
+import { themeButtonView } from "./theme-button.js";
 // PR5 AI 对话 tab 的二级惰性加载器（常驻轻叶子，动态边在 reader/lazy-chat-tab 内）：
 // 首次切到对话 tab / 解释卡片「去对话追问」触达时才装载对话组合根（reader/chat-tab.ts）。
 import { ensureReaderChatTab } from "../reader/lazy-chat-tab.js";
@@ -43,6 +44,7 @@ import { buildExplainPopHtml, buildExplainCardHostHtml, bindReadingExplainEvents
 import { buildOverviewTabBodyHtml, bindReadingOverviewEvents } from "../reader/overview-ui.js";
 
 export function buildUiHtml(): string {
+  const themeView = themeButtonView(state.reader.readingTheme);
   return `
     <section id="${ids.readingView}" aria-hidden="true" data-boc-reader-ready="0" aria-busy="true">
       <!-- 统一 Digest 面板（B 形态）：右栏面板壳，三标签 = 字幕 / 概览 /
@@ -58,8 +60,8 @@ export function buildUiHtml(): string {
                 <div id="${ids.readingMeta}" class="boc-reading-meta">bilibili.com</div>
               </div>
               <div class="boc-reading-actions">
-                <button id="${ids.readingThemeSelect}" type="button" class="boc-reading-icon-btn" title="主题" aria-label="切换主题">
-                  ${READING_HEADER_ICONS.theme}
+                <button id="${ids.readingThemeSelect}" type="button" class="boc-reading-icon-btn" title="主题：${themeView.title}" aria-label="主题：${themeView.title}">
+                  ${themeView.icon}
                 </button>
                 <button id="${ids.readingSettingsBtn}" type="button" class="boc-reading-icon-btn" title="设置" aria-label="设置">
                   ${READING_HEADER_ICONS.settings}
@@ -225,11 +227,9 @@ export function bindUiEvents(): void {
     exitReaderShell().catch((error) => logWarn("[BOC] close reading view failed", error));
   });
   readingThemeSelect.addEventListener("click", () => {
-    const themes = ["light", "dark", "paper"];
-    const current = state.reader.readingTheme || "light";
-    const nextIndex = (themes.indexOf(current) + 1) % themes.length;
+    const next = state.reader.readingTheme === "dark" ? "light" : "dark";
     withReader("reader theme switch", (reader) => {
-      reader.updateReaderPreferences({ readerTheme: themes[nextIndex] }, { persist: true });
+      reader.updateReaderPreferences({ readerTheme: next }, { persist: true });
       readingThemeSelect.classList.add("is-active");
       setTimeout(() => readingThemeSelect.classList.remove("is-active"), 300);
     });

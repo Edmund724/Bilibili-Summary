@@ -14,13 +14,15 @@
 // 摘要/简介」区块删除）：
 // 本层与 ui-renderer 的相关回调一律经 ensureReaderDomain() 装载后调用，避免为
 // 一次面板交互在常驻侧保留体积。
-// 函数体逐字搬自原文件对应分节，行为零变化。依赖全部为常驻叶子
-//（core/state、core/validators、shared/dom-utils、shared/string-utils、./ids）。
+// 函数体迁自原文件对应分节（apply 尾部另汇 header 主题按钮刷新）。依赖全部为轻叶子
+//（core/state、core/validators、shared/dom-utils、shared/string-utils、./ids、
+// ui/theme-button）。
 import { state } from "../core/state.js";
 import { type Settings } from "../core/defaults.js";
 import { getReaderElement } from "../shared/dom-utils.js";
 import { normalizeReaderTheme } from "../core/validators.js";
 import { ids } from "./state.js";
+import { refreshThemeButton } from "../ui/theme-button.js";
 import { READER_APPLY_FIELDS } from "./presentation-fields.js";
 
 // ===== 状态栏文案（自 player-host.js 迁入；sync/lifecycle 域内继续经本模块取用） =====
@@ -77,6 +79,9 @@ export function applyReadingViewPresentation() {
   }
   // 字幕/章节的 checkbox 同步与 .boc-reading-main 显隐已随三开关退役删除
   //（字幕常显，开关与 data 属性不再存在）。
+  // header 主题按钮（太阳/月亮）随之刷新：所有改主题路径（点击循环、进入阅读
+  // 模式、storage 跨页同步 watcher）都收敛到本函数，按钮单点跟随不另接线。
+  refreshThemeButton();
 }
 
 // updateReaderPreferences / persistReaderSettings / renderReaderPanels 已移回
