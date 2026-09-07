@@ -37,12 +37,25 @@ const { gatewayMock, gatewayCoreMock } = vi.hoisted(() => ({
   }
 }));
 
-// 热评缺省实现（defaultFetchHotComments）动态 import gateway：mock 保持确定性。
-// gateway 拆叶（arch-slim-2/04）：getCurrentAid/fetchHotComments 仍属 gateway，
-// bgFetchJson 已迁 gateway-core（经 ai/context-resolver 被对话链消费）。
+// 热评编排已收口为 gateway.fetchHotCommentsWithLedger（arch-review-2026-09/07），
+// context-assembly 静态 import——mock 保持确定性：接缝替身经 gatewayMock 的
+// getCurrentAid/fetchHotComments 重演单源形状（落账不在本文件断言面），
+// fetchHotComments 调用计数语义不变。
+// gateway 拆叶（arch-slim-2/04）：bgFetchJson 已迁 gateway-core（经
+// ai/context-resolver 被对话链消费）。
 vi.mock("../../extension/bilibili/gateway.js", () => ({
   getCurrentAid: gatewayMock.getCurrentAid,
-  fetchHotComments: gatewayMock.fetchHotComments
+  fetchHotComments: gatewayMock.fetchHotComments,
+  fetchHotCommentsWithLedger: async () => {
+    if (!gatewayMock.getCurrentAid()) {
+      return { comments: [], note: "无法获取视频 aid" };
+    }
+    try {
+      return { comments: await gatewayMock.fetchHotComments(20) };
+    } catch (error) {
+      return { comments: [], note: String((error as Error)?.message || error) };
+    }
+  }
 }));
 vi.mock("../../extension/bilibili/gateway-core.js", () => ({
   bgFetchJson: gatewayCoreMock.bgFetchJson,

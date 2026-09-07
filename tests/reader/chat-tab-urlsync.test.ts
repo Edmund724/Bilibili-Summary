@@ -8,7 +8,10 @@
 // closeChatSession（unbindGlobalTriggers 摘监听），保证断言不被旧纪元污染。
 //
 // 全量路径的可数代理：mock gateway.getCurrentAid 返回真值后，
-// defaultFetchHotComments 才会调用 gateway.fetchHotComments（默认恒 0 早退）。
+// fetchHotCommentsWithLedger 接缝替身才会调用 gateway.fetchHotComments
+//（默认恒 0 早退）。编排已收口为 gateway.fetchHotCommentsWithLedger
+//（arch-review-2026-09/07），context-assembly 静态 import——替身经
+// gatewayMock 两函数重演单源形状（落账不在本文件断言面），计数语义不变。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
@@ -26,11 +29,21 @@ const { gatewayMock, gatewayCoreMock } = vi.hoisted(() => ({
   }
 }));
 
-// gateway 拆叶（arch-slim-2/04）：getCurrentAid/fetchHotComments 仍属 gateway，
-// bgFetchJson 已迁 gateway-core（经 ai/context-resolver 被对话链消费）。
+// gateway 拆叶（arch-slim-2/04）：bgFetchJson 已迁 gateway-core（经
+// ai/context-resolver 被对话链消费）。
 vi.mock("../../extension/bilibili/gateway.js", () => ({
   getCurrentAid: gatewayMock.getCurrentAid,
-  fetchHotComments: gatewayMock.fetchHotComments
+  fetchHotComments: gatewayMock.fetchHotComments,
+  fetchHotCommentsWithLedger: async () => {
+    if (!gatewayMock.getCurrentAid()) {
+      return { comments: [], note: "无法获取视频 aid" };
+    }
+    try {
+      return { comments: await gatewayMock.fetchHotComments(20) };
+    } catch (error) {
+      return { comments: [], note: String((error as Error)?.message || error) };
+    }
+  }
 }));
 vi.mock("../../extension/bilibili/gateway-core.js", () => ({
   bgFetchJson: gatewayCoreMock.bgFetchJson,
