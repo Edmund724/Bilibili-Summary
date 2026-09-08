@@ -36,9 +36,14 @@ export function withOkResponse(
   sendResponse: SendResponse,
   toError: (error: unknown) => string = (error) => (error as Error).message
 ): void {
-  task
-    .then((payload) => sendResponse(payload))
-    .catch((error) => sendResponse({ ok: false, error: toError(error) }));
+  void (async () => {
+    try {
+      const payload = await task;
+      sendResponse(payload);
+    } catch (error) {
+      sendResponse({ ok: false, error: toError(error) });
+    }
+  })();
 }
 
 export interface ProviderMessageHandlersDeps {
@@ -63,7 +68,7 @@ export function createProviderMessageHandlers({
 }: ProviderMessageHandlersDeps): ProviderMessageHandlers {
   function list(_message: unknown, _sender: unknown, sendResponse: SendResponse): boolean {
     withOkResponse(
-      loadProviders().then((items) => ({ ok: true, providers: items })),
+      (async () => ({ ok: true, providers: await loadProviders() }))(),
       sendResponse
     );
     return true;
@@ -77,10 +82,11 @@ export function createProviderMessageHandlers({
       return false;
     }
     withOkResponse(
-      loadKeys().then((keys) => {
+      (async () => {
+        const keys = await loadKeys();
         const apiKey = String(keys[providerId] || "").trim();
         return { ok: true, apiKey };
-      }),
+      })(),
       sendResponse
     );
     return true;
@@ -89,7 +95,7 @@ export function createProviderMessageHandlers({
   function save(message: unknown, _sender: unknown, sendResponse: SendResponse): boolean {
     const msg = message as ProviderHandlersMessage;
     withOkResponse(
-      saveProviders(msg.providers || []).then((items) => ({ ok: true, providers: items })),
+      (async () => ({ ok: true, providers: await saveProviders(msg.providers || []) }))(),
       sendResponse
     );
     return true;
@@ -98,7 +104,10 @@ export function createProviderMessageHandlers({
   function remove(message: unknown, _sender: unknown, sendResponse: SendResponse): boolean {
     const msg = message as ProviderHandlersMessage;
     withOkResponse(
-      deleteProvider(String(msg.providerId || "")).then((items) => ({ ok: true, providers: items })),
+      (async () => ({
+        ok: true,
+        providers: await deleteProvider(String(msg.providerId || ""))
+      }))(),
       sendResponse
     );
     return true;
