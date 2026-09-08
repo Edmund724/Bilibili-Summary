@@ -129,21 +129,22 @@ function init(): void {
     if (!isPlayerAiLoaded()) {
       return;
     }
-    loadPlayerAi()
-      .then((playerAi) => {
+    (async () => {
+      try {
+        const playerAi = await loadPlayerAi();
         const api = playerAi as unknown as PlayerAiApi;
         if (options && options.resetRetry) {
           api.resetPlayerAiQuickActionRetryCount();
         }
         api.schedulePlayerAiQuickActionSync(delayMs);
-      })
-      .catch((error) => {
+      } catch (error) {
         logWarn("[BOC] player-ai sync via lazy loader failed", error);
-      });
+      }
+    })();
   }) as PlayerAiSyncHandler);
   bindNormalPageStateGuard();
   // 播放器 AI 按钮的 layout 监听与 observer 改由 startPlayerAiQuickAction
-  // 显式启动（见 getSettings().then 与 bindPlayerAiSettingsWatcher），
+  // 显式启动（见 init 的 getSettings 水合与 bindPlayerAiSettingsWatcher），
   // 默认关闭时不再无条件绑定。
   // URL 变化编排已搬到组合根（bindUrlChangeHandler）：监听 popstate/hashchange/
   // boc:urlchange 并按序编排；runtime.startUrlWatcher 由其内部调用，只负责
@@ -156,15 +157,21 @@ function init(): void {
   // true 时先把该键同步进 state.settings（sync 门控读它，与
   // bindPlayerAiSettingsWatcher 同款写法）再启动；完整设置仍由下方
   // getSettings 水合覆盖，读失败静默回退到慢路径。
-  chrome.storage.sync.get("enablePlayerAiQuickAction").then((data) => {
-    if (Boolean((data as { enablePlayerAiQuickAction?: unknown })?.enablePlayerAiQuickAction)) {
-      if (state.settings) {
-        state.settings.enablePlayerAiQuickAction = true;
+  (async () => {
+    try {
+      const data = await chrome.storage.sync.get("enablePlayerAiQuickAction");
+      if (Boolean((data as { enablePlayerAiQuickAction?: unknown })?.enablePlayerAiQuickAction)) {
+        if (state.settings) {
+          state.settings.enablePlayerAiQuickAction = true;
+        }
+        startPlayerAiQuickActionLazy();
       }
-      startPlayerAiQuickActionLazy();
+    } catch {
+      // 读失败静默回退到慢路径（getSettings 水合兜底）
     }
-  }).catch(() => {});
-  getSettings().then((settings) => {
+  })();
+  (async () => {
+    const settings = await getSettings();
     state.setSettings(settings);
     // 按设置显式启停：默认关闭（core/defaults.js enablePlayerAiQuickAction:
     // false）时不绑 layout 监听、不挂 observer，避免关闭态每帧空转 no-op。
@@ -175,28 +182,29 @@ function init(): void {
     } else {
       stopPlayerAiQuickActionLazy();
     }
-      if (shouldEnterReaderMode) {
-        // 候选03：阅读模式直达链接才惰性装载 UI 壳 + reader 呈现层，再进入重域。
-        // ensureUiReady 与 hydrate/apply 并发装载，壳构建完成后应用排版属性，
-        // 最后 enterReaderMode（其内部会再次 hydrate/apply，保证状态最终一致）。
-        ensureUiReady({ forceRecreate: true })
-          .then(() => hydrateReaderStateFromSettings(settings))
-          .then(() => applyReadingViewPresentation())
-          .then(() => ensureReaderDomain())
-          .then((reader) => reader.enterReaderMode())
-          .catch((error) => {
-            renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
-          });
+    if (shouldEnterReaderMode) {
+      // 候选03：阅读模式直达链接才惰性装载 UI 壳 + reader 呈现层，再进入重域。
+      // ensureUiReady 与 hydrate/apply 并发装载，壳构建完成后应用排版属性，
+      // 最后 enterReaderMode（其内部会再次 hydrate/apply，保证状态最终一致）。
+      try {
+        await ensureUiReady({ forceRecreate: true });
+        await hydrateReaderStateFromSettings(settings);
+        await applyReadingViewPresentation();
+        const reader = await ensureReaderDomain();
+        await reader.enterReaderMode();
+      } catch (error) {
+        renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
       }
-      // 两分支（阅读直达 / 非阅读模式）同样装载工具栏按钮模块：模块自管「等
-      // hydration 稳定 → 自查注入/摘除 → 定时自查 + 失同步自愈」生命周期，阅读
-      // 视图打开后由其自查守卫摘除按钮，无需在此 stop；阅读直达分支装载不为
-      // 按钮本身（阅读模式下自查守卫恒摘除），为视图失同步自愈与「关闭视图后
-      // 补回按钮」——启动失败文案写进隐藏面板用户看不见，没有自查就真只剩刷新。
-      loadDigestButton().catch((error) => {
-        logWarn("[BOC] digest-button module load failed", error);
-      });
+    }
+    // 两分支（阅读直达 / 非阅读模式）同样装载工具栏按钮模块：模块自管「等
+    // hydration 稳定 → 自查注入/摘除 → 定时自查 + 失同步自愈」生命周期，阅读
+    // 视图打开后由其自查守卫摘除按钮，无需在此 stop；阅读直达分支装载不为
+    // 按钮本身（阅读模式下自查守卫恒摘除），为视图失同步自愈与「关闭视图后
+    // 补回按钮」——启动失败文案写进隐藏面板用户看不见，没有自查就真只剩刷新。
+    loadDigestButton().catch((error) => {
+      logWarn("[BOC] digest-button module load failed", error);
     });
+  })();
 }
 
 // 播放器 AI 开关存放在 chrome.storage.sync：监听该键变更动态启停，设置切换
@@ -229,25 +237,23 @@ function bindPlayerAiSettingsWatcher(): void {
 // 加载器语义：模块未加载时 stop/remove 都是 no-op（按钮只可能由该模块创建，
 // 未加载 ⇒ 无残留），因此「关闭设置」分支只在已加载时才需要真正执行 stop。
 
-function startPlayerAiQuickActionLazy(): void {
-  loadPlayerAi()
-    .then((playerAi) => {
-      (playerAi as unknown as PlayerAiApi).startPlayerAiQuickAction();
-    })
-    .catch((error) => {
-      logWarn("[BOC] player-ai module load failed (quick action not started)", error);
-    });
+async function startPlayerAiQuickActionLazy(): Promise<void> {
+  try {
+    const playerAi = await loadPlayerAi();
+    (playerAi as unknown as PlayerAiApi).startPlayerAiQuickAction();
+  } catch (error) {
+    logWarn("[BOC] player-ai module load failed (quick action not started)", error);
+  }
 }
 
-function stopPlayerAiQuickActionLazy(): void {
+async function stopPlayerAiQuickActionLazy(): Promise<void> {
   if (!isPlayerAiLoaded()) {
     return;
   }
-  loadPlayerAi()
-    .then((playerAi) => {
-      (playerAi as unknown as PlayerAiApi).stopPlayerAiQuickAction();
-    })
-    .catch((error) => {
-      logWarn("[BOC] player-ai stop after lazy load failed", error);
-    });
+  try {
+    const playerAi = await loadPlayerAi();
+    (playerAi as unknown as PlayerAiApi).stopPlayerAiQuickAction();
+  } catch (error) {
+    logWarn("[BOC] player-ai stop after lazy load failed", error);
+  }
 }

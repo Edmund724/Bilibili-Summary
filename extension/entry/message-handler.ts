@@ -16,7 +16,7 @@ import {
 // 切进动态 chunk（详见 reader-seek-video-time 处理器）。
 
 // 总结链（fetcher/ui + notes/render）经加载器按需引入（候选02 分层惰性）：
-// 链内符号一律 ensureSummarizeChain().then((chain) => chain.xxx())。一键总结
+// 链内符号一律先 await ensureSummarizeChain() 再取用。一键总结
 // 热路径上的装载是本地 chunk 动态 import（~10ms），被消息往返掩盖。
 import { ensureSummarizeChain } from "../subtitle/lazy.js";
 // 候选03 常驻瘦身：setStatus 迁入 shared/ui-status.js（DOM 节点存在时写入，
@@ -118,19 +118,20 @@ function handleReaderShellEnter(
   sendResponse: SendResponse
 ): boolean {
   const intent = readerShellIntentByType[message.type];
-  ensureReaderShell()
-    .then((shell) => {
+  (async () => {
+    try {
+      const shell = await ensureReaderShell();
       if (message.type === "reader-enter-chat") {
         shell.enterReaderShell({ readerUrl: String(message.readerUrl || ""), intent, prompt: message.prompt ?? "" });
       } else {
         shell.enterReaderShell({ readerUrl: String(message.readerUrl || ""), intent });
       }
       sendResponse({ ok: true });
-    })
-    .catch((error) => {
+    } catch (error) {
       logWarn("[BOC] reading shell load failed", error);
       sendResponse({ ok: false, error: getErrorMessage(error) });
-    });
+    }
+  })();
   return true;
 }
 
@@ -139,12 +140,15 @@ function handleReaderShellEnter(
 // background（triggerReaderModeInTab）完成，此处只消费。
 function handlePlayerAiQuickActionChat(message: Msg<"player-ai-quick-action-chat">, sendResponse: SendResponse): boolean {
   const prompt = String(message.prompt || "").trim() || DEFAULT_PLAYER_AI_QUICK_PROMPT;
-  ensureUiReady()
-    .then(() => ensureReaderChatTab())
-    .then((chat) => chat.runQuickActionPrompt(prompt))
-    .catch((error) => {
+  (async () => {
+    try {
+      await ensureUiReady();
+      const chat = await ensureReaderChatTab();
+      await chat.runQuickActionPrompt(prompt);
+    } catch (error) {
       logWarn("[BOC] player-ai quick action chat failed", error);
-    });
+    }
+  })();
   sendResponse({ ok: true });
   return true;
 }
@@ -152,40 +156,46 @@ function handlePlayerAiQuickActionChat(message: Msg<"player-ai-quick-action-chat
 // 退出阅读壳（工单 arch-slim/02）：reader-close 处理器退化为退出事务委托
 //（URL 收敛 → closeReadingView → 摘阅读表都在 exitReaderShell 内）。
 function handleReaderClose(_message: Msg<"reader-close">, sendResponse: SendResponse): boolean {
-  ensureReaderShell()
-    .then((shell) => shell.exitReaderShell())
-    .then(() => sendResponse({ ok: true }))
-    .catch((error) => sendResponse({ ok: false, error: getErrorMessage(error) }));
+  (async () => {
+    try {
+      const shell = await ensureReaderShell();
+      await shell.exitReaderShell();
+      sendResponse({ ok: true });
+    } catch (error) {
+      sendResponse({ ok: false, error: getErrorMessage(error) });
+    }
+  })();
   return true;
 }
 
 function handleReaderGetHotComments(_message: Msg<"reader-get-hot-comments">, sendResponse: SendResponse): boolean {
-  // gateway 动态装载（候选02，见文件头 import 注）：本地 chunk 加载 ~10ms，
-  // 被热评网络往返掩盖。编排单源在 gateway.fetchHotCommentsWithLedger
-  //（arch-review-2026-09/07：aid 判空 / clipState 落账 / 失败降级空列表 + note），
-  // 本处理器只包 sendResponse 外壳；装载失败与「无法获取 aid」同型降级。
-  import("../bilibili/gateway.js")
-    .then(({ fetchHotCommentsWithLedger }) =>
-      fetchHotCommentsWithLedger().then(({ comments, note }) => {
-        sendResponse(note ? { ok: true, comments, note } : { ok: true, comments });
-      })
-    )
-    .catch((error) => {
+  (async () => {
+    try {
+      // gateway 动态装载（候选02，见文件头 import 注）：本地 chunk 加载 ~10ms，
+      // 被热评网络往返掩盖。编排单源在 gateway.fetchHotCommentsWithLedger
+      //（arch-review-2026-09/07：aid 判空 / clipState 落账 / 失败降级空列表 + note），
+      // 本处理器只包 sendResponse 外壳；装载失败与「无法获取 aid」同型降级。
+      const { fetchHotCommentsWithLedger } = await import("../bilibili/gateway.js");
+      const { comments, note } = await fetchHotCommentsWithLedger();
+      sendResponse(note ? { ok: true, comments, note } : { ok: true, comments });
+    } catch (error) {
       clipState.setHotComments([]);
-      sendResponse({ ok: true, comments: [], note: String(error?.message || error) });
-    });
+      sendResponse({ ok: true, comments: [], note: String((error as Error)?.message || error) });
+    }
+  })();
   return true;
 }
 
 function handleReaderSeekVideoTime(message: Msg<"reader-seek-video-time">, sendResponse: SendResponse): boolean {
-  // video-probe 动态装载（候选02，见文件头 import 注）：本地 chunk ~10ms，
-  // 被用户点击到执行的时间差掩盖；响应形状与搬迁前一致（ok/currentTime）。
-  // 候选06 seek 深入口：reader 开着时定位收敛为 reader 域单入口
-  // seekReadingTarget（规范序：清暂停 → 设跟随 → currentTime → 同步），
-  // resumePlayback:false = 暂停中不自动播放（与旧侧栏行为等价）；reader
-  // 未开时保持旧行为：只 seek 视频，正在播放才续播，不触碰 reader 状态。
-  import("../bilibili/video-probe.js")
-    .then(async ({ getRuntimeVideoElement }) => {
+  (async () => {
+    try {
+      // video-probe 动态装载（候选02，见文件头 import 注）：本地 chunk ~10ms，
+      // 被用户点击到执行的时间差掩盖；响应形状与搬迁前一致（ok/currentTime）。
+      // 候选06 seek 深入口：reader 开着时定位收敛为 reader 域单入口
+      // seekReadingTarget（规范序：清暂停 → 设跟随 → currentTime → 同步），
+      // resumePlayback:false = 暂停中不自动播放（与旧侧栏行为等价）；reader
+      // 未开时保持旧行为：只 seek 视频，正在播放才续播，不触碰 reader 状态。
+      const { getRuntimeVideoElement } = await import("../bilibili/video-probe.js");
       const video = getRuntimeVideoElement();
       if (!video) {
         sendResponse({ ok: false, error: "当前页面没有找到可联动的视频播放器。" });
@@ -212,10 +222,10 @@ function handleReaderSeekVideoTime(message: Msg<"reader-seek-video-time">, sendR
         video.play().catch(() => {});
       }
       sendResponse({ ok: true, currentTime: nextTime });
-    })
-    .catch((error) => {
+    } catch (error) {
       sendResponse({ ok: false, error: getErrorMessage(error) });
-    });
+    }
+  })();
   return true;
 }
 
@@ -280,22 +290,29 @@ export function bindUrlChangeHandler() {
     enforceNormalPageStateIfNeeded(nextUrl);
     // 候选03：UI 壳惰性构建。URL 变化后需要先确保壳存在，再执行依赖壳的逻辑
     //（resetClipState 会清空面板内容；阅读模式进入依赖阅读视图壳）。
-    ensureUiReady().then(() => {
+    (async () => {
+      await ensureUiReady();
       // 候选02：resetClipState 属总结链层，经 ensure 装载后执行。装载/执行失败
       // 记日志不中断编排（后续 reader 分支与状态提示仍需走到）。
-      ensureSummarizeChain()
-        .then((chain) => chain.resetClipState())
-        .catch((error) => {
-          logWarn("[BOC] clip state reset after URL change failed", error);
-        });
-    });
+      try {
+        const chain = await ensureSummarizeChain();
+        chain.resetClipState();
+      } catch (error) {
+        logWarn("[BOC] clip state reset after URL change failed", error);
+      }
+    })();
     // player-ai 按钮同步（原为同步调用）：懒加载后「已加载/加载中才请求」，
     // 未加载（快捷开关关闭态）跳过——player-ai start 自带初始 sync，开启后
     // 的 URL 变化自会恢复同步，行为等价。
     if (isPlayerAiLoaded()) {
-      loadPlayerAi()
-        .then((playerAi) => playerAi.schedulePlayerAiQuickActionSync())
-        .catch(() => {});
+      (async () => {
+        try {
+          const playerAi = await loadPlayerAi();
+          playerAi.schedulePlayerAiQuickActionSync();
+        } catch {
+          // 同步失败静默（与原 .catch(() => {}) 一致）
+        }
+      })();
     }
     const shouldEnterReaderMode = isReaderMode(nextUrl);
     if (!isReaderViewOpen() && shouldEnterReaderMode) {
@@ -305,47 +322,55 @@ export function bindUrlChangeHandler() {
       //（防反向覆盖 enterReaderMode 的「已就绪」文案），失败口径写状态栏。
       // arch-slim-2/09：shell 经 lazy-shell 动态装载，装载失败与进入失败同口径
       // 写状态栏（本地 chunk 装载 ~10ms，被跳转往返掩盖）。
-      ensureReaderShell()
-        .then((shell) =>
-          shell.enterReaderShellOnUrlNavigation({
+      (async () => {
+        try {
+          const shell = await ensureReaderShell();
+          await shell.enterReaderShellOnUrlNavigation({
             readerUrl: nextUrl,
             announce: () => renderReadingStatus("检测到阅读视图跳转，正在打开阅读模式..."),
             onEnterFailed: (error) => {
               renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
             }
-          })
-        )
-        .catch((error) => {
+          });
+        } catch (error) {
           logWarn("[BOC] reading shell load failed", error);
           renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
-        });
+        }
+      })();
       return;
     }
     if (isReaderViewOpen() || shouldEnterReaderMode) {
       // 走到本分支的前提是视图已开或正要进入阅读模式：前者满足「视图开 ⇒ 域
       // 已装载」不变式，后者已由上一分支发起装载，ensure 均命中同一 promise。
-      renderReadingStatus("检测到视频变化，正在自动刷新字幕...")
-        .catch(() => {})
-        .then(() => {
-          ensureReaderDomain()
-            .then((reader) => {
-              reader.waitForVideoMetadata().then(() => {
-                // 候选02：refreshClip 属总结链层，经 ensureSummarizeChain 装载后刷新。
-                ensureSummarizeChain()
-                  .then((chain) => chain.refreshClip())
-                  .catch((error) => {
-                    if (!isStaleRunError(error)) {
-                      renderReadingStatus(`自动刷新失败：${getErrorMessage(error)}`);
-                    }
-                  });
-              });
-            })
-            .catch((error) => {
+      (async () => {
+        // 播报失败不阻断后续刷新链（与原 .catch(() => {}) 一致）。
+        try {
+          await renderReadingStatus("检测到视频变化，正在自动刷新字幕...");
+        } catch {
+          // 播报失败静默
+        }
+        try {
+          const reader = await ensureReaderDomain();
+          // waitForVideoMetadata 的失败在原链上没有 catch 收口（静默、不写
+          // 状态栏），保持同型：浮空执行、不进外层错误口径。
+          (async () => {
+            await reader.waitForVideoMetadata();
+            // 候选02：refreshClip 属总结链层，经 ensureSummarizeChain 装载后刷新。
+            try {
+              const chain = await ensureSummarizeChain();
+              await chain.refreshClip();
+            } catch (error) {
               if (!isStaleRunError(error)) {
                 renderReadingStatus(`自动刷新失败：${getErrorMessage(error)}`);
               }
-            });
-        });
+            }
+          })();
+        } catch (error) {
+          if (!isStaleRunError(error)) {
+            renderReadingStatus(`自动刷新失败：${getErrorMessage(error)}`);
+          }
+        }
+      })();
       return;
     }
     setStatus("检测到页面变化，请点击“刷新抓取”加载当前视频字幕。");

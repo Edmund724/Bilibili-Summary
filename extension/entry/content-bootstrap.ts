@@ -61,11 +61,12 @@ export function startContentBootstrap(options: BootstrapOptions = {}): Bootstrap
 
   function loadContentMain(): Promise<unknown> {
     if (!mainPromise) {
-      // 外面包一层 Promise.resolve().then：getExtensionUrl 的同步异常（如
-      // 扩展上下文已失效）也统一进入 catch，维持「失败即清空」的可重试语义。
-      mainPromise = Promise.resolve()
-        .then(() => importMainModule(resolveMainModuleUrl(CONTENT_MAIN_MODULE_PATH)))
-        .catch((error) => {
+      // async IIFE 把 getExtensionUrl / importMainModule 的同步异常（如扩展上下文
+      // 已失效）也统一纳入 try/catch，维持「失败即清空」的可重试语义。
+      mainPromise = (async () => {
+        try {
+          return await importMainModule(resolveMainModuleUrl(CONTENT_MAIN_MODULE_PATH));
+        } catch (error) {
           // 失败清缓存：允许后续触发重试（例如扩展刚更新导致旧 chunk 404，
           // 重新触发加载即可恢复，不必刷新页面）。
           mainPromise = null;
@@ -80,7 +81,8 @@ export function startContentBootstrap(options: BootstrapOptions = {}): Bootstrap
             error
           );
           throw error;
-        });
+        }
+      })();
     }
     return mainPromise;
   }
