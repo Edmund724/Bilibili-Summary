@@ -10,8 +10,9 @@ import { logInfo, logWarn } from "../shared/logging.js";
 // #boc-reading-status 节点）
 import { setStatus } from "../shared/ui-status.js";
 
-// 播放器 AI 模块经加载器按需引入（候选4 分包）：默认关闭的设置对应的能力
-// 不再常驻，start/stop/sync 全部走 loadPlayerAi() 的动态 import。
+// 播放器 AI 模块经加载器按需引入（候选4 分包）：开关关闭态下该能力零装载，
+// start/stop/sync 全部走 loadPlayerAi() 的动态 import。默认开启（2026-09 起，
+// core/defaults.ts），分包收益保留给关闭态用户——关闭时 chunk 不下载。
 import { loadPlayerAi, isPlayerAiLoaded } from "../ai/lazy-player-ai.js";
 
 // Digest 工具栏按钮经加载器按需引入（统一 Digest 阅读模式 PR1）：非阅读模式
@@ -148,7 +149,7 @@ function init(): void {
   bindNormalPageStateGuard();
   // 播放器 AI 按钮的 layout 监听与 observer 改由 startPlayerAiQuickAction
   // 显式启动（见 init 的 getSettings 水合与 bindPlayerAiSettingsWatcher），
-  // 默认关闭时不再无条件绑定。
+  // 开关关闭态不再无条件绑定（默认开启，2026-09 起）。
   // URL 变化编排已搬到组合根（bindUrlChangeHandler）：监听 popstate/hashchange/
   // boc:urlchange 并按序编排；runtime.startUrlWatcher 由其内部调用，只负责
   // history 补丁与 boc:urlchange 广播。
@@ -177,8 +178,9 @@ function init(): void {
     try {
       const settings = await getSettings();
       state.setSettings(settings);
-      // 按设置显式启停：默认关闭（core/defaults.js enablePlayerAiQuickAction:
-      // false）时不绑 layout 监听、不挂 observer，避免关闭态每帧空转 no-op。
+      // 按设置显式启停：默认开启（2026-09 起，core/defaults.js
+      // enablePlayerAiQuickAction: true），进视频页即挂按钮；关闭态不绑 layout
+      // 监听、不挂 observer，避免关闭态每帧空转 no-op。
       // 懒加载语义：开启才触发模块加载；关闭时模块未加载即无任何残留可清理，
       // 加载过（isPlayerAiLoaded）才需要走 stop 收尾。
       if (settings.enablePlayerAiQuickAction) {

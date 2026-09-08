@@ -1,6 +1,7 @@
 // 候选4 守卫批：player-ai 显式启停生命周期。
-// - 设置关闭 → 不挂 observer、不绑 window layout 监听（默认 false 不启动）
-// - 设置开启 → observer 启动、layout 监听挂上；start 幂等
+// - 设置关闭 → 不挂 observer、不绑 window layout 监听（开关关闭态不启动）
+// - 设置开启（含 storage 未存键的默认开启，2026-09 起）→ observer 启动、
+//   layout 监听挂上；start 幂等
 // - stop → 宿主上的游标监听按同一引用摘除、retry 定时器清理、按钮移除
 // - storage.onChanged 里 enablePlayerAiQuickAction true→false→true 正确启停
 //
@@ -172,6 +173,26 @@ describe("player-ai 启停守卫", () => {
     expect(windowAddSpy.mock.calls.some(([type]) => type === "resize")).toBe(true);
     expect(windowAddSpy.mock.calls.some(([type]) => type === "pageshow")).toBe(true);
     expect(documentAddSpy.mock.calls.some(([type]) => type === "fullscreenchange")).toBe(true);
+  });
+
+  it("默认设置（storage 未存该键）→ AI 按钮随页面加载自动启动", async () => {
+    // 2026-09 起默认开启（core/defaults.ts enablePlayerAiQuickAction: true）：
+    // 存量安装的历史默认值 false 由安装/更新迁移一次性清位
+    //（entry/settings-migration.ts），这里锁「storage 无键 ⇒ 默认值生效 ⇒
+    // 慢路径自动 start」的进页可点契约。快路径读不到键直接跳过，交给慢路径。
+    expect(DEFAULT_SETTINGS.enablePlayerAiQuickAction).toBe(true);
+
+    const windowAddSpy = vi.spyOn(window, "addEventListener");
+    const state = await loadContentScript({});
+    // 未预热路径：start 经 loadPlayerAi().then 异步执行，显式等模块在位
+    const { loadPlayerAi } = await import("../../extension/ai/lazy-player-ai.js");
+    await loadPlayerAi();
+    await flushMicrotasks();
+
+    expect(state.settings.enablePlayerAiQuickAction).toBe(true);
+    expect(playerAiState.playerAiQuickActionObserver).not.toBeNull();
+    expect(playerAiState.playerAiQuickActionLayoutBound).toBe(true);
+    expect(windowAddSpy.mock.calls.some(([type]) => type === "resize")).toBe(true);
   });
 
   it("start 幂等：重复调用不重复绑 observer 与监听", async () => {
