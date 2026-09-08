@@ -22,7 +22,31 @@ export interface ModelSelectWidthEls {
 }
 
 let modelSelectMeasureCanvas: HTMLCanvasElement | null = null;
+let modelSelectWidthRafId = 0;
+let pendingModelSelectWidthEls: ModelSelectWidthEls | null = null;
 
+// rAF 合帧入口（P2-3，仓内 reader/digest-host.ts 的 scheduleDigestLayout 先例）：
+// resize 一帧内可触发多次，直接调用 updateModelSelectWidth 会让「读布局
+//（clientWidth/offsetWidth）→ 写内联 width」在每次事件上各跑一遍，反复强制
+// 布局。此处置脏 + 一帧至多跑一次，读写各发生一次。同帧重复调度以最后一次
+// 传入的 els 为准（rAF 只认 fn 引用，不认形参，故显式存最新 els）。
+export function scheduleModelSelectWidthUpdate(els: ModelSelectWidthEls): void {
+  pendingModelSelectWidthEls = els;
+  if (modelSelectWidthRafId) {
+    return;
+  }
+  modelSelectWidthRafId = window.requestAnimationFrame(() => {
+    modelSelectWidthRafId = 0;
+    const target = pendingModelSelectWidthEls;
+    pendingModelSelectWidthEls = null;
+    if (target) {
+      updateModelSelectWidth(target);
+    }
+  });
+}
+
+// 挂起帧无需显式作废：els 指向的壳元素随阅读模式常驻，帧回调执行时目标仍有效；
+// 会话关闭只是断流，不拆 DOM。
 export function updateModelSelectWidth(els: ModelSelectWidthEls): void {
   if (!els.modelSelect) {
     return;

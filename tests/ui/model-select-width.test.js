@@ -12,11 +12,19 @@
 // "Not implemented" 的控制台噪音； maxWidth 分支经 toolbar=null（232 默认上限）
 // 驱动（jsdom 无布局，clientWidth 恒 0，真实 toolbar 路径无可观测差异）。
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { measureTextWidth, updateModelSelectWidth } from "../../extension/chat/model-select-width.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  measureTextWidth,
+  scheduleModelSelectWidthUpdate,
+  updateModelSelectWidth
+} from "../../extension/chat/model-select-width.js";
 
 beforeEach(() => {
   vi.spyOn(window.HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 function makeSelect(optionText) {
@@ -64,5 +72,69 @@ describe("model-select-width", () => {
     const els = makeEls(); // 5×8 + 24 + 36 = 100
     updateModelSelectWidth(els);
     expect(els.modelSelect.style.width).toBe("100px");
+  });
+});
+
+// P2-3：resize 路径的 rAF 合帧。一帧内重复调度只落一帧，且写宽度发生在帧
+// 回调里（合帧期内不写样式）；结果与直接调用 updateModelSelectWidth 逐字一致。
+describe("scheduleModelSelectWidthUpdate（rAF 合帧）", () => {
+  function installFakeRaf() {
+    const pending = new Map();
+    let nextId = 0;
+    const original = window.requestAnimationFrame;
+    const originalCancel = window.cancelAnimationFrame;
+    window.requestAnimationFrame = (cb) => {
+      nextId += 1;
+      pending.set(nextId, cb);
+      return nextId;
+    };
+    window.cancelAnimationFrame = (id) => pending.delete(id);
+    return {
+      pending,
+      flush() {
+        const entries = [...pending.entries()];
+        entries.forEach(([id, cb]) => {
+          pending.delete(id);
+          cb(0);
+        });
+      },
+      restore() {
+        window.requestAnimationFrame = original;
+        window.cancelAnimationFrame = originalCancel;
+      }
+    };
+  }
+
+  it("一帧内多次调度只排一帧，帧回调才写宽度", () => {
+    const raf = installFakeRaf();
+    try {
+      const els = makeEls("AI");
+      scheduleModelSelectWidthUpdate(els);
+      scheduleModelSelectWidthUpdate(els);
+      scheduleModelSelectWidthUpdate(els);
+      expect(raf.pending.size).toBe(1);
+      expect(els.modelSelect.style.width).toBe(""); // 合帧期内不写
+
+      raf.flush();
+      expect(els.modelSelect.style.width).toBe("92px"); // 与同步调用同结果
+    } finally {
+      raf.restore();
+    }
+  });
+
+  it("同帧重复调度以最后一次传入的 els 为准", () => {
+    const raf = installFakeRaf();
+    try {
+      const first = makeEls("AI"); // 触底 92
+      const second = makeEls("x".repeat(30)); // 截断 232
+      scheduleModelSelectWidthUpdate(first);
+      scheduleModelSelectWidthUpdate(second);
+      raf.flush();
+
+      expect(first.modelSelect.style.width).toBe("");
+      expect(second.modelSelect.style.width).toBe("232px");
+    } finally {
+      raf.restore();
+    }
   });
 });

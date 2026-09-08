@@ -21,7 +21,7 @@
 // 模块纪元注意：chatSessionState 与组合根闭包都是模块级单例，beforeEach
 // resetModules 后同纪元导入；chrome.storage / runtime 消息按 type 路由 stub。
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { READER_MODE_URL, resetModuleState, setLocationUrl } from "../setup.js";
 import { mountPlayerChain } from "../helpers/reader-skeleton.js";
 import type { TestState } from "./reader-test-env.js";
@@ -414,6 +414,167 @@ describe("player-ai 快捷动作 seam（PR4b 概览笔记按钮同款）", () =>
     expect(ports).toHaveLength(1);
     const posted = ports[0].postMessage.mock.calls[0][0] as { prompt?: string };
     expect(posted.prompt).toBe("总结提示词");
+  });
+});
+
+describe("历史回放分片让出（P2-1：50ms 预算 + scheduler.yield/setTimeout 兜底）", () => {
+  const REPLAY_MESSAGES = [
+    { role: "user", content: "第一问" },
+    { role: "assistant", content: "第一答" },
+    { role: "user", content: "第二问" },
+    { role: "assistant", content: "第二答" },
+    { role: "user", content: "第三问" },
+    { role: "assistant", content: "第三答" }
+  ];
+
+  let nowSpy: ReturnType<typeof vi.spyOn> | null = null;
+
+  afterEach(() => {
+    nowSpy?.mockRestore();
+    nowSpy = null;
+  });
+
+  // 每条消息后都越过 50ms 预算：让出路径（jsdom 无 scheduler → setTimeout 0
+  // 兜底）逐条走一遍，把「一次同步 append」与「分片 append」的差异放大到可观测。
+  function forceYieldEveryMessage(): void {
+    let clock = 0;
+    nowSpy = vi.spyOn(performance, "now").mockImplementation(() => {
+      clock += 60;
+      return clock;
+    });
+  }
+
+  // 存档一条匹配当前上下文的会话（bvid/cid 与 seedReadyContext 一致），
+  // init 的 restoreLatest 命中后走历史回放路径。
+  function seedSavedConversation(messages = REPLAY_MESSAGES): void {
+    const chromeStub = window.chrome as unknown as {
+      storage: { local: { get: ReturnType<typeof vi.fn> } };
+    };
+    chromeStub.storage.local.get = vi.fn(async () => ({
+      boc_ai_conversations_v1: [
+        {
+          id: "conv-replay",
+          title: "测试视频",
+          contextKey: "video:BV1test000000|101",
+          contextTitle: "测试视频",
+          contextUrl: "https://www.bilibili.com/video/BV1test000000/",
+          isVideoContext: true,
+          createdAt: 1000,
+          updatedAt: 2000,
+          contextRef: {
+            bvid: "BV1test000000",
+            cid: "101",
+            url: "https://www.bilibili.com/video/BV1test000000/"
+          },
+          messages
+        }
+      ]
+    }));
+  }
+
+  it("按序分片渲染、内容不变，滚底只在全部上屏后发生一次", async () => {
+    seedReadyContext();
+    seedSavedConversation();
+    forceYieldEveryMessage();
+    const messages = document.getElementById(ids.readingChatMessages) as HTMLElement;
+    // 记录 scrollTop 写入次数：分片期间不应滚动，末尾统一收尾恰一次。
+    const scrollWrites: number[] = [];
+    let scrollTopValue = 0;
+    Object.defineProperty(messages, "scrollTop", {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollWrites.push(value);
+        scrollTopValue = value;
+      }
+    });
+
+    const chat = await lazyChat.ensureReaderChatTab();
+    await chat.ensureChatTabActivated();
+
+    // 分片证据：激活返回时回放尚未跑完（旧同步实现此处已全部上屏）。
+    const earlyCount = messages.querySelectorAll(".chat-msg").length;
+    expect(earlyCount).toBeGreaterThan(0);
+    expect(earlyCount).toBeLessThan(REPLAY_MESSAGES.length);
+
+    await waitFor(() => messages.querySelectorAll(".chat-msg").length === REPLAY_MESSAGES.length);
+    const rendered = [...messages.querySelectorAll(".chat-msg")];
+    expect(rendered.map((node) => node.className)).toEqual([
+      "chat-msg chat-msg-user",
+      "chat-msg chat-msg-assistant",
+      "chat-msg chat-msg-user",
+      "chat-msg chat-msg-assistant",
+      "chat-msg chat-msg-user",
+      "chat-msg chat-msg-assistant"
+    ]);
+    expect(rendered.map((node) => node.textContent?.trim())).toEqual([
+      "第一问",
+      "第一答",
+      "第二问",
+      "第二答",
+      "第三问",
+      "第三答"
+    ]);
+    // 全部上屏后才滚底（且恰一次）：末条 append 与收尾滚动之间还有一次让出，
+    // 故按 scrollWrites 计数等收尾落定，而不是按消息条数。
+    await waitFor(() => scrollWrites.length > 0);
+    expect(scrollWrites).toHaveLength(1);
+  });
+
+  it("回放让出期间发送：新消息等回放落定后追加在末尾（不插进中间）", async () => {
+    seedReadyContext();
+    seedSavedConversation();
+    forceYieldEveryMessage();
+
+    const chat = await lazyChat.ensureReaderChatTab();
+    await chat.ensureChatTabActivated();
+    const messages = document.getElementById(ids.readingChatMessages) as HTMLElement;
+
+    // 回放尚未完成（首片之后即让出）就回车发送
+    const input = document.getElementById(ids.readingChatInput) as HTMLTextAreaElement;
+    input.value = "回放中的新问题";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+
+    await waitFor(() => ports.length === 1 && ports[0].postMessage.mock.calls.length === 1);
+    await waitFor(() => messages.querySelectorAll(".chat-msg").length === REPLAY_MESSAGES.length + 2);
+    const texts = [...messages.querySelectorAll(".chat-msg")].map((node) => node.textContent?.trim());
+    expect(texts.slice(0, REPLAY_MESSAGES.length)).toEqual([
+      "第一问",
+      "第一答",
+      "第二问",
+      "第二答",
+      "第三问",
+      "第三答"
+    ]);
+    // 新用户消息在回放内容之后，助手占位紧随其后
+    expect(texts[REPLAY_MESSAGES.length]).toBe("回放中的新问题");
+    expect(texts[REPLAY_MESSAGES.length + 1]).toBe("");
+    const posted = ports[0].postMessage.mock.calls[0][0] as { prompt?: string; history?: unknown[] };
+    expect(posted.prompt).toBe("回放中的新问题");
+  });
+});
+
+describe("resize 合帧（P2-3：model-select 宽度重算走 rAF 而非同步）", () => {
+  it("resize 不同步写宽度，帧落定后按计算结果写入", async () => {
+    seedReadyContext();
+    const chat = await lazyChat.ensureReaderChatTab();
+    await chat.ensureChatTabActivated();
+
+    const modelSelect = document.getElementById(ids.readingChatModelSelect) as HTMLSelectElement;
+    modelSelect.style.width = "";
+
+    window.dispatchEvent(new Event("resize"));
+    window.dispatchEvent(new Event("resize"));
+    window.dispatchEvent(new Event("resize"));
+
+    // 合帧：帧回调执行前不写宽度（旧同步实现此处已是 92px）。
+    expect(modelSelect.style.width).toBe("");
+
+    await waitFor(() => modelSelect.style.width !== "");
+    // jsdom 无布局：toolbar 存在但 clientWidth 恒 0 → 上限触底 92，与直接
+    // 调用 updateModelSelectWidth 同结果（tests/ui/model-select-width.test.js
+    // 另锁「一帧至多一帧」的合帧计数）。
+    expect(modelSelect.style.width).toBe("92px");
   });
 });
 

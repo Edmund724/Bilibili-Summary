@@ -74,7 +74,7 @@ import {
   isPinnedContextTruthy,
   type NoSubtitleReason
 } from "../chat/tab-domain.js";
-import { updateModelSelectWidth } from "../chat/model-select-width.js";
+import { scheduleModelSelectWidthUpdate, updateModelSelectWidth } from "../chat/model-select-width.js";
 // reader 触发源与进程内相位（content script 收不到自己的 runtime 广播）。
 import { BOC_URL_CHANGE_EVENT } from "../core/url-watcher.js";
 import {
@@ -400,7 +400,7 @@ const lists = createReaderChatLists({
   deleteById: (id) => conversationStore.deleteById(id),
   removePresetPrompt: (index) => presets.removePresetPrompt(index),
   autosizeInput,
-  onSuggestionClick: () => chatRuntime.sendMessage(),
+  onSuggestionClick: () => void sendFromUi(),
   getSuggestionsNode: () => suggestionsNode,
   insertPresetPrompt: (prompt) => lists.insertPresetPrompt(prompt),
   hidePresetPopover: () => popovers.hidePresetPopover(),
@@ -716,6 +716,8 @@ async function consumeExplainIntentIfPending(): Promise<void> {
 async function sendViaInputBox(text: string): Promise<boolean> {
   els.input.value = text;
   autosizeInput();
+  // 回放让出期发送同样先等回放落定（否则新消息插进未完成回放的中间）。
+  await conversationReplayInFlight;
   // sendMessage 兑现即发送流程已出结果（subtitle-wait 挂起在其内部 await）。
   await chatRuntime.sendMessage();
   return els.input.value === "" || chatRuntime.hasPendingUserPrompt();
@@ -733,6 +735,14 @@ async function autoSendPrompt(text: string): Promise<boolean> {
   return sendViaInputBox(text);
 }
 
+// 发送闸（P2-1 回放期）：回放让出期间新消息若直接 append，会插进未完成回放的
+// 中间。所有 UI 发送入口（回车/建议 chip/解释意图自动发送）先 await 进行中的
+// 回放再交给 chatRuntime；无进行中回放时为无害 no-op。
+async function sendFromUi(): Promise<void> {
+  await conversationReplayInFlight;
+  await chatRuntime.sendMessage();
+}
+
 // ============================================================
 // bindEvents（元素级绑定；全局触发源见 bindGlobalTriggers）
 // ============================================================
@@ -741,7 +751,7 @@ function bindEvents(): void {
   els.input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
-      chatRuntime.sendMessage();
+      void sendFromUi();
     }
   });
   els.input.addEventListener("input", autosizeInput);
@@ -823,7 +833,8 @@ function bindEvents(): void {
 }
 
 function onWindowResize(): void {
-  updateModelSelectWidth(els);
+  // resize 路径读写交错（P2-3）：经 rAF 合帧，一帧至多跑一次「读布局 → 写宽度」。
+  scheduleModelSelectWidthUpdate(els);
 }
 
 // chip 点击的 reader 适配（sidepanel 版为 openCurrentContextUrl：chrome.tabs.update
@@ -910,7 +921,9 @@ function renderInitialState(): void {
     return;
   }
   if (chatSessionState.chatHistory.length) {
-    renderConversationMessages();
+    // 回放改为按预算分片让出（P2-1）：fire-and-forget——本函数保持同步返回，
+    // 首片同步上屏，其余在让出点续跑，末尾由 renderConversationMessages 统一收尾。
+    void renderConversationMessages();
     return;
   }
   if (chatSessionState.contextData.isVideoContext === false) {
@@ -922,6 +935,8 @@ function renderInitialState(): void {
 
 // 【迁移自 sidepanel.ts resetConversationView】消息区重建 + 建议区/预设列表刷新。
 function resetConversationView(stateHtml = ""): void {
+  // 清场即作废进行中的回放分片（P2-1）：过期分片不得写进重建后的消息区。
+  invalidateConversationReplay();
   updateChatLayoutState();
   els.messages.innerHTML = "";
   if (stateHtml) {
@@ -1010,7 +1025,48 @@ async function startNewConversation(): Promise<void> {
 // ============================================================
 // 消息区渲染（历史对话回放 → chat-runtime 渲染）
 // ============================================================
-function renderConversationMessages(): void {
+
+// 回放分片预算（P2-1）：单帧同步渲染上限 50ms——长会话（数百条 markdown +
+// 时间戳 linkify）一次性同步 append 会把主线程占满，期间输入/滚动全部卡住。
+// 超过预算即让出（scheduler.yield 优先，setTimeout 0 兜底），让浏览器处理
+// 输入与重绘后继续，末尾仍由本函数统一 scrollToBottom。
+const REPLAY_FRAME_BUDGET_MS = 50;
+
+// 回放世代号：每次重建消息区（重渲/清场）自增。让出点据此判定本轮是否已被
+// 更新的一轮取代（切会话、新消息上屏、resetConversationView 清场）——过期
+// 分片直接丢弃，不写进已重建的消息区，杜绝交错 append。
+let conversationReplayGeneration = 0;
+// 进行中的回放（让出点未落定时非 null）。发送路径先 await 它再 append：否则
+// 用户回放途中回车/建议 chip/解释意图自动发送会把新消息插进未完成回放的中间。
+let conversationReplayInFlight: Promise<void> | null = null;
+
+function invalidateConversationReplay(): void {
+  conversationReplayGeneration += 1;
+}
+
+// 让出主线程：优先 scheduler.yield（续跑排到队列前部），无 scheduler 的浏览器
+// 退回 setTimeout 0（续跑排到队尾，仅作兜底，语义仍是「先让浏览器喘一口气」）。
+function yieldToMainThread(): Promise<void> {
+  const schedulerApi = (globalThis as typeof globalThis & { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+  if (typeof schedulerApi?.yield === "function") {
+    return schedulerApi.yield();
+  }
+  return new Promise((resolve) => window.setTimeout(resolve, 0));
+}
+
+async function renderConversationMessages(): Promise<void> {
+  const task = runConversationReplay();
+  conversationReplayInFlight = task;
+  try {
+    await task;
+  } finally {
+    if (conversationReplayInFlight === task) {
+      conversationReplayInFlight = null;
+    }
+  }
+}
+
+async function runConversationReplay(): Promise<void> {
   updateChatLayoutState();
   els.messages.innerHTML = "";
   suggestionsNode = null;
@@ -1018,18 +1074,39 @@ function renderConversationMessages(): void {
     resetConversationView("");
     return;
   }
-  chatSessionState.chatHistory.forEach((message, index) => {
-    if (message.role === "user") {
-      chatRuntime.appendUserMessage(message.content, false);
+  invalidateConversationReplay();
+  const generation = conversationReplayGeneration;
+  const history = chatSessionState.chatHistory;
+  // 与原 forEach 同语义：只遍历开跑时的长度，渲染期间新追加的消息不在此列
+  //（流式写回走各自的 append 路径）。
+  const total = history.length;
+  let deadline = performance.now() + REPLAY_FRAME_BUDGET_MS;
+  for (let index = 0; index < total; index += 1) {
+    if (generation !== conversationReplayGeneration) {
       return;
     }
-    const node = document.createElement("div");
-    node.className = "chat-msg chat-msg-assistant";
-    chatRuntime.renderAssistantMessage(node, String(message.content || ""), {
-      userPrompt: findPreviousUserPrompt(index)
-    });
-    els.messages.appendChild(node);
-  });
+    const message = history[index];
+    if (message.role === "user") {
+      chatRuntime.appendUserMessage(message.content, false);
+    } else {
+      const node = document.createElement("div");
+      node.className = "chat-msg chat-msg-assistant";
+      chatRuntime.renderAssistantMessage(node, String(message.content || ""), {
+        userPrompt: findPreviousUserPrompt(index)
+      });
+      els.messages.appendChild(node);
+    }
+    if (performance.now() >= deadline) {
+      await yieldToMainThread();
+      if (generation !== conversationReplayGeneration) {
+        return;
+      }
+      deadline = performance.now() + REPLAY_FRAME_BUDGET_MS;
+    }
+  }
+  if (generation !== conversationReplayGeneration) {
+    return;
+  }
   chatRuntime.setAutoScroll(true);
   chatRuntime.scrollToBottom(true);
 }
@@ -1081,6 +1158,10 @@ async function ensureCurrentContextForSend(): Promise<boolean | string> {
     showConversationContextNotice(notice.message, 0, { openSettingsAction: notice.openSettings });
     return NO_SUBTITLE_SEND_BLOCKED;
   }
+  // 本函数内的 loadContextState 可能因上下文变化触发一轮新的历史回放
+  //（applyContextPayload → renderInitialState）；等它落定再返回，否则调用方
+  // 紧随的 appendUserMessage 会插进这轮回放的中间（P2-1）。
+  await conversationReplayInFlight;
   return true;
 }
 
