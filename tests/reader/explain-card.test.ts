@@ -3,6 +3,8 @@
 // 覆盖：
 // - 选区触发：在字幕句内选中词/句 → 浮层显示并记录条目；选区清空 → 隐藏；
 //   列表外（工具条）的选区不触发；
+// - 定位合帧：selectionchange 只排帧不当场定位，一帧内至多一次「读→写」，
+//   宽度走缓存（不回读 offsetWidth）；
 // - 点「解释」：面板内弹卡片（loading → ready 文本），不切 tab、不写待解释意图；
 // - 卡片「去对话追问」：写意图（含 selection）+ 三通道切到 AI 对话 tab；
 // - 卡片关闭（×/遮罩）与 closeReadingView 会话收尾；
@@ -46,6 +48,49 @@ let explainIntent: typeof import("../../extension/reader/explain-intent.js");
 let ensureReaderChatTab: typeof import("../../extension/reader/lazy-chat-tab.js").ensureReaderChatTab;
 let video: HTMLVideoElement;
 
+// fake rAF：选区定位已合帧（selectionchange 只排帧，一帧一次读→写），断言浮层
+// 状态前需要手动推帧。捕获回调 + 尊重 cancelAnimationFrame（与
+// tests/reader/subtitle-search.test.ts 同款）。
+let rafPending: Map<number, (time: number) => void>;
+let rafNextId: number;
+let originalRaf: typeof window.requestAnimationFrame;
+let originalCancelRaf: typeof window.cancelAnimationFrame;
+
+function installFakeRaf() {
+  rafPending = new Map();
+  rafNextId = 0;
+  originalRaf = window.requestAnimationFrame;
+  originalCancelRaf = window.cancelAnimationFrame;
+  window.requestAnimationFrame = (cb: (time: number) => void) => {
+    rafNextId += 1;
+    rafPending.set(rafNextId, cb);
+    return rafNextId;
+  };
+  window.cancelAnimationFrame = (id: number) => {
+    rafPending.delete(id);
+  };
+}
+
+// 执行当前已登记的一帧（回调内新登记的留到下一轮）
+function flushFrame() {
+  const entries = [...rafPending.entries()];
+  entries.forEach(([id, cb]) => {
+    rafPending.delete(id);
+    cb(0);
+  });
+}
+
+function flushAnimationFrames(maxRounds = 30) {
+  let rounds = 0;
+  while (rafPending.size > 0 && rounds < maxRounds) {
+    flushFrame();
+    rounds += 1;
+  }
+  if (rafPending.size > 0) {
+    throw new Error(`rAF queue did not drain after ${maxRounds} rounds`);
+  }
+}
+
 async function loadModules() {
   setLocationUrl(READER_MODE_URL);
   explainIntent = await import("../../extension/reader/explain-intent.js");
@@ -87,7 +132,8 @@ function seedSubtitleBody() {
   ];
 }
 
-// 在指定条目文本里选中一段（jsdom 不自动派发 selectionchange，手动补一发）
+// 在指定条目文本里选中一段（jsdom 不自动派发 selectionchange，手动补一发；
+// 定位已合帧，补发后推一帧让浮层落到 DOM）
 function selectInItem(index: number, text: string) {
   const item = subtitleItem(index);
   const textNode = item.querySelector(".boc-reading-text")?.firstChild as Text;
@@ -100,12 +146,14 @@ function selectInItem(index: number, text: string) {
   selection?.removeAllRanges();
   selection?.addRange(range);
   document.dispatchEvent(new Event("selectionchange"));
+  flushAnimationFrames();
 }
 
 function clearSelection() {
   const selection = document.getSelection();
   selection?.removeAllRanges();
   document.dispatchEvent(new Event("selectionchange"));
+  flushAnimationFrames();
 }
 
 function dispatchActionClick(action: string) {
@@ -121,6 +169,7 @@ beforeEach(async () => {
   aiMock.explainSelection.mockReset();
   aiMock.explainSelection.mockResolvedValue("这是模型给出的解释。");
   await loadModules();
+  installFakeRaf();
   uiRenderer.ensureUiReady({ forceRecreate: true });
   mountPlayerChain();
   video = document.querySelector("video") as HTMLVideoElement;
@@ -137,6 +186,8 @@ afterEach(async () => {
   } catch {
     // ignore
   }
+  window.requestAnimationFrame = originalRaf;
+  window.cancelAnimationFrame = originalCancelRaf;
   await new Promise((resolve) => setTimeout(resolve, 150));
   document.body.innerHTML = "";
   vi.restoreAllMocks();
@@ -152,6 +203,36 @@ describe("选区「解释」浮层", () => {
 
     clearSelection();
     expect(explainPop().hidden).toBe(true);
+  });
+
+  it("拖选合帧：selectionchange 不当场定位，一帧只跑一次读→写", () => {
+    const widthReads = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get");
+    const tabBodySubtitle = document.getElementById(ids.readingTabBodySubtitle) as HTMLElement;
+    const bodyRect = vi.spyOn(tabBodySubtitle, "getBoundingClientRect");
+
+    selectInItem(1, "传递信息的工具");
+    expect(explainPop().hidden).toBe(false);
+    // 定位帧用宽度缓存，读几何只发生在读相位（每帧一次 bodyRect + 一次 anchor
+    // rect），写相位（left/top/hidden）不再回读布局。
+    expect(widthReads).toHaveBeenCalledTimes(1);
+    expect(bodyRect).toHaveBeenCalledTimes(1);
+
+    // 同一帧内的多次选区变化合并成一次定位（拖选高频路径）
+    bodyRect.mockClear();
+    const item = subtitleItem(1);
+    const textNode = item.querySelector(".boc-reading-text")?.firstChild as Text;
+    const selection = document.getSelection();
+    [2, 4, 6].forEach((end) => {
+      const range = document.createRange();
+      range.setStart(textNode, 0);
+      range.setEnd(textNode, end);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+    expect(bodyRect).not.toHaveBeenCalled();
+    flushFrame();
+    expect(bodyRect).toHaveBeenCalledTimes(1);
   });
 
   it("列表外的选区不触发浮层", () => {
