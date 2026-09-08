@@ -291,7 +291,13 @@ export function bindUrlChangeHandler() {
     // 候选03：UI 壳惰性构建。URL 变化后需要先确保壳存在，再执行依赖壳的逻辑
     //（resetClipState 会清空面板内容；阅读模式进入依赖阅读视图壳）。
     (async () => {
-      await ensureUiReady();
+      // UI 壳装载失败不中断编排也不漏 unhandled rejection，记日志即止。
+      try {
+        await ensureUiReady();
+      } catch (error) {
+        logWarn("[BOC] UI shell ensure after URL change failed", error);
+        return;
+      }
       // 候选02：resetClipState 属总结链层，经 ensure 装载后执行。装载/执行失败
       // 记日志不中断编排（后续 reader 分支与状态提示仍需走到）。
       try {

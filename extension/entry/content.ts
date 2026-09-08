@@ -6,6 +6,9 @@ import { getSettings } from "../core/runtime.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { logInfo, logWarn } from "../shared/logging.js";
+// 状态栏降级写入器（getSettings 水合失败的外层兜底，与 reader 链共用
+// #boc-reading-status 节点）
+import { setStatus } from "../shared/ui-status.js";
 
 // 播放器 AI 模块经加载器按需引入（候选4 分包）：默认关闭的设置对应的能力
 // 不再常驻，start/stop/sync 全部走 loadPlayerAi() 的动态 import。
@@ -171,39 +174,45 @@ function init(): void {
     }
   })();
   (async () => {
-    const settings = await getSettings();
-    state.setSettings(settings);
-    // 按设置显式启停：默认关闭（core/defaults.js enablePlayerAiQuickAction:
-    // false）时不绑 layout 监听、不挂 observer，避免关闭态每帧空转 no-op。
-    // 懒加载语义：开启才触发模块加载；关闭时模块未加载即无任何残留可清理，
-    // 加载过（isPlayerAiLoaded）才需要走 stop 收尾。
-    if (settings.enablePlayerAiQuickAction) {
-      startPlayerAiQuickActionLazy();
-    } else {
-      stopPlayerAiQuickActionLazy();
-    }
-    if (shouldEnterReaderMode) {
-      // 候选03：阅读模式直达链接才惰性装载 UI 壳 + reader 呈现层，再进入重域。
-      // ensureUiReady 与 hydrate/apply 并发装载，壳构建完成后应用排版属性，
-      // 最后 enterReaderMode（其内部会再次 hydrate/apply，保证状态最终一致）。
-      try {
-        await ensureUiReady({ forceRecreate: true });
-        await hydrateReaderStateFromSettings(settings);
-        await applyReadingViewPresentation();
-        const reader = await ensureReaderDomain();
-        await reader.enterReaderMode();
-      } catch (error) {
-        renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
+    try {
+      const settings = await getSettings();
+      state.setSettings(settings);
+      // 按设置显式启停：默认关闭（core/defaults.js enablePlayerAiQuickAction:
+      // false）时不绑 layout 监听、不挂 observer，避免关闭态每帧空转 no-op。
+      // 懒加载语义：开启才触发模块加载；关闭时模块未加载即无任何残留可清理，
+      // 加载过（isPlayerAiLoaded）才需要走 stop 收尾。
+      if (settings.enablePlayerAiQuickAction) {
+        startPlayerAiQuickActionLazy();
+      } else {
+        stopPlayerAiQuickActionLazy();
       }
+      if (shouldEnterReaderMode) {
+        // 候选03：阅读模式直达链接才惰性装载 UI 壳 + reader 呈现层，再进入重域。
+        // ensureUiReady 与 hydrate/apply 并发装载，壳构建完成后应用排版属性，
+        // 最后 enterReaderMode（其内部会再次 hydrate/apply，保证状态最终一致）。
+        try {
+          await ensureUiReady({ forceRecreate: true });
+          await hydrateReaderStateFromSettings(settings);
+          await applyReadingViewPresentation();
+          const reader = await ensureReaderDomain();
+          await reader.enterReaderMode();
+        } catch (error) {
+          renderReadingStatus(`阅读视图启动失败：${getErrorMessage(error)}`);
+        }
+      }
+      // 两分支（阅读直达 / 非阅读模式）同样装载工具栏按钮模块：模块自管「等
+      // hydration 稳定 → 自查注入/摘除 → 定时自查 + 失同步自愈」生命周期，阅读
+      // 视图打开后由其自查守卫摘除按钮，无需在此 stop；阅读直达分支装载不为
+      // 按钮本身（阅读模式下自查守卫恒摘除），为视图失同步自愈与「关闭视图后
+      // 补回按钮」——启动失败文案写进隐藏面板用户看不见，没有自查就真只剩刷新。
+      loadDigestButton().catch((error) => {
+        logWarn("[BOC] digest-button module load failed", error);
+      });
+    } catch (error) {
+      // getSettings 水合拒绝的外层兜底（内层子链各有降级口径，不经此 catch）：
+      // 状态栏降级，避免 unhandled rejection。
+      setStatus(`设置加载失败：${getErrorMessage(error)}`);
     }
-    // 两分支（阅读直达 / 非阅读模式）同样装载工具栏按钮模块：模块自管「等
-    // hydration 稳定 → 自查注入/摘除 → 定时自查 + 失同步自愈」生命周期，阅读
-    // 视图打开后由其自查守卫摘除按钮，无需在此 stop；阅读直达分支装载不为
-    // 按钮本身（阅读模式下自查守卫恒摘除），为视图失同步自愈与「关闭视图后
-    // 补回按钮」——启动失败文案写进隐藏面板用户看不见，没有自查就真只剩刷新。
-    loadDigestButton().catch((error) => {
-      logWarn("[BOC] digest-button module load failed", error);
-    });
   })();
 }
 

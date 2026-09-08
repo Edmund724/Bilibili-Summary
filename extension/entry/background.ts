@@ -15,6 +15,7 @@ import { sendMessageToTab } from "../shared/tab-utils.js";
 import { getMergedSettings, normalizeSettings, saveSettings } from "../core/settings-store.js";
 // 调试日志门三宿主接线（shared/logging 的 registerDebugGate 消费方）
 import { registerDebugLogGate } from "../shared/debug-log-gate.js";
+import { logWarn } from "../shared/logging.js";
 import {
   aiProviderStore
 } from "../core/ai-provider-store.js";
@@ -372,7 +373,13 @@ const messageHandlers = new Map<BackgroundMessageType, BackgroundHandler>(
 //（arch-slim-3/04 收编，本文件经 import 消费）。
 
 chrome.runtime.onInstalled.addListener(async () => {
-  await initializeSettingsStorage();
+  try {
+    await initializeSettingsStorage();
+  } catch (error) {
+    // 安装/更新迁移失败不进 SW unhandled rejection，只记日志（下次安装/更新
+    // 会重试整段迁移）。
+    logWarn("[BOC] settings storage init on install/update failed", error);
+  }
 });
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
