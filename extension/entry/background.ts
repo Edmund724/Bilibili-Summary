@@ -15,6 +15,7 @@ import { sendMessageToTab } from "../shared/tab-utils.js";
 import { getMergedSettings, normalizeSettings, saveSettings } from "../core/settings-store.js";
 // 调试日志门三宿主接线（shared/logging 的 registerDebugGate 消费方）
 import { registerDebugLogGate } from "../shared/debug-log-gate.js";
+import { logWarn } from "../shared/logging.js";
 import {
   aiProviderStore
 } from "../core/ai-provider-store.js";
@@ -56,7 +57,7 @@ function handleGetSettings(_message: Msg<"get-settings">, _sender: MessageSender
   // 异步错误回包统一走 withOkResponse（arch-slim-2/03 单源）；同步错误回包
   // （缺参/拒绝处理等）保持处理器内直写。
   withOkResponse(
-    getMergedSettings().then((settings) => ({ ok: true, settings })),
+    (async () => ({ ok: true, settings: await getMergedSettings() }))(),
     sendResponse
   );
   return true;
@@ -64,7 +65,10 @@ function handleGetSettings(_message: Msg<"get-settings">, _sender: MessageSender
 
 function handleSaveSettings(message: Msg<"save-settings">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   withOkResponse(
-    saveSettings(message.settings || {}).then(() => ({ ok: true })),
+    (async () => {
+      await saveSettings(message.settings || {});
+      return { ok: true };
+    })(),
     sendResponse
   );
   return true;
@@ -86,16 +90,20 @@ function handleRequestProviderOrigins(message: Msg<"request-provider-origins">, 
     return false;
   }
   // chrome.permissions.request 仍是处理器内的第一个动作（手势不变式，见上方
-  // 注释）；拒绝文案带固定前缀，经 withOkResponse 的 toError 保持逐字一致。
+  // 注释）：async 函数体在首个 await 前同步执行，request 在其中同步发起、
+  // await 只落在其返回的 promise 上；拒绝文案带固定前缀，经 withOkResponse
+  // 的 toError 保持逐字一致。
   withOkResponse(
-    chrome.permissions.request({ origins }).then((granted) =>
-      granted
+    (async () => {
+      const requestTask = chrome.permissions.request({ origins });
+      const granted = await requestTask;
+      return granted
         ? { ok: true }
         : {
             ok: false,
             error: `未授权 ${origins.join("、")}，保存已中止：请重新点击「保存设置」并在弹窗中选择允许`
-          }
-    ),
+          };
+    })(),
     sendResponse,
     (error) => `申请域名权限失败：${(error as Error).message}`
   );
@@ -109,7 +117,7 @@ function handleRequestProviderOrigins(message: Msg<"request-provider-origins">, 
 // connectPort 自愈设计一致）。
 function handleEnsureOffscreenChat(_message: Msg<"ensure-offscreen-chat">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   withOkResponse(
-    ensureChatOffscreenDocument().then((ensured) => ({ ok: true, ensured })),
+    (async () => ({ ok: true, ensured: await ensureChatOffscreenDocument() }))(),
     sendResponse
   );
   return true;
@@ -224,7 +232,7 @@ function handleFetchJson(message: Msg<"fetch-json">, _sender: MessageSender, sen
   // withOkResponse 收口（arch-slim-2/03）：JSON 解析失败（200 但非 JSON 响应）
   // 时给用户稳定的可读文案，而非引擎原生 SyntaxError。
   withOkResponse(
-    bgFetchJson(url).then((data) => ({ ok: true, data })),
+    (async () => ({ ok: true, data: await bgFetchJson(url) }))(),
     sendResponse,
     (error) => (error instanceof SyntaxError ? "Invalid JSON response" : (error as Error).message)
   );
@@ -365,7 +373,13 @@ const messageHandlers = new Map<BackgroundMessageType, BackgroundHandler>(
 //（arch-slim-3/04 收编，本文件经 import 消费）。
 
 chrome.runtime.onInstalled.addListener(async () => {
-  await initializeSettingsStorage();
+  try {
+    await initializeSettingsStorage();
+  } catch (error) {
+    // 安装/更新迁移失败不进 SW unhandled rejection，只记日志（下次安装/更新
+    // 会重试整段迁移）。
+    logWarn("[BOC] settings storage init on install/update failed", error);
+  }
 });
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
