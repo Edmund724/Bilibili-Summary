@@ -132,18 +132,33 @@ import {
   updateReaderFollowState
 } from "./sync.js";
 
-function maybeRefreshReaderSubtitleInBackground() {
-  // 缓存命中须带视频身份校验：稍后再看列表内 SPA 换片若逃逸了 URL 监听
-  // （如轮询兜底的一个节拍内点了 Digest），state.clip 可能还停在上一个
-  // 视频——subtitleBody 非空但 bvid 与当前地址不符时按未抓取处理，重抓。
-  const cacheMatchesCurrentVideo =
+// 「本视频字幕已在手」判定（入口与元数据等待后各判一次，同一份语义）。
+// 缓存命中须带视频身份校验：稍后再看列表内 SPA 换片若逃逸了 URL 监听
+// （如轮询兜底的一个节拍内点了 Digest），state.clip 可能还停在上一个
+// 视频——subtitleBody 非空但 bvid 与当前地址不符时按未抓取处理，重抓。
+function hasSubtitleForCurrentVideo(): boolean {
+  return (
     state.clip.subtitleBody.length > 0 &&
     Boolean(state.clip.bvid) &&
-    state.clip.bvid === extractBvid(location.href);
-  if (cacheMatchesCurrentVideo) {
+    state.clip.bvid === extractBvid(location.href)
+  );
+}
+
+function maybeRefreshReaderSubtitleInBackground() {
+  if (hasSubtitleForCurrentVideo()) {
     return;
   }
   waitForVideoMetadata().then(() => {
+    // 元数据等待（最长 5 秒）期间字幕可能已被别处落账（对话侧发送前的主动
+    // 抓取、上一轮抓取落定）——落账后再起一轮只是白刷一次（refreshClip 内部
+    // 固定 forceRefresh 走网络重取），期间状态行停在「正在获取可用字幕...」而
+    // 字幕 tab 里已经是本视频字幕（用户报障「有字幕却显示在抓取」）。已有则
+    // 不再触发，但照旧对账重渲——subtitle-ready 通知可能丢，列表需要按当前
+    // state 投影一次（本函数末尾那条 reconcile 的同一收尾）。
+    if (hasSubtitleForCurrentVideo()) {
+      reconcileReaderAfterSubtitleFetch();
+      return;
+    }
     // arch-slim-2/03：ensureSummarizeChain 触达自 reader-bus seam 移到本调用方
     // （seam 恢复「只传话」）。装载失败保持原 seam 内的静默口径（仅 logWarn，
     // 不进错误状态栏）；refresh 本身的失败仍走下方既有 catch。

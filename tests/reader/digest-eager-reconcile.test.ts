@@ -90,6 +90,36 @@ describe("后台抓取落定后的对账收尾（通知丢失兜底）", () => {
     shell.closeReadingView();
   });
 
+  it("字幕在元数据等待期间落账（另一处先抓完）：不再起第二轮抓取，仍对账重渲", async () => {
+    // 用户报障形态：打开面板时字幕还没抓，后台抓取排在 waitForVideoMetadata
+    // 之后（最长 5 秒）；等待期间对话侧主动抓取已落账（字幕 tab 里已是本视频
+    // 字幕）。此时再起一轮只是白刷一次（refreshClip 固定 forceRefresh 走网络），
+    // 状态行重新停在「正在获取可用字幕...」，而列表里明明有字幕。
+    const readerBus = await import("../../extension/reader/reader-bus.js");
+    const refreshSpy = vi.fn(() => Promise.resolve());
+    readerBus.subscribeSubtitleRefresh(refreshSpy);
+
+    // 元数据未就绪 → waitForVideoMetadata 进入轮询（为「等待期间」造出窗口）
+    const video = document.querySelector("video") as HTMLVideoElement;
+    Object.defineProperty(video, "duration", { value: NaN, configurable: true });
+
+    await shell.enterReaderMode();
+
+    // 等待期间另一处落账（对话侧发送前的主动抓取）
+    state.clip.bvid = "BV1test000000";
+    state.clip.subtitleFetchState = "ready";
+    state.clip.subtitleBody = [{ from: 0, to: 10, content: "大家好" }];
+    Object.defineProperty(video, "duration", { value: 120, configurable: true });
+
+    // 对账重渲照旧发生（subtitle-ready 通知可能丢），但不再起第二轮抓取
+    await vi.waitFor(() => {
+      expect(document.querySelectorAll(".boc-reading-item").length).toBe(1);
+    });
+    expect(refreshSpy).not.toHaveBeenCalled();
+
+    shell.closeReadingView();
+  });
+
   it("refresh 落定时视图已关：跳过对账（重开时 enterReaderMode 自会渲染+触发）", async () => {
     const readerBus = await import("../../extension/reader/reader-bus.js");
     const refreshSpy = vi.fn(() => {
