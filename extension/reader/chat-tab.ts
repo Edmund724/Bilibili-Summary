@@ -1140,14 +1140,23 @@ function findPreviousUserPrompt(index: number): string {
 // 其余状态各有归属不重起一轮：loading 交给等待闸、ready 有字幕体、empty 走
 // 无字幕拦截、error 由用户「刷新抓取」重试（不改其现状）。非 BV 视频页不抓
 // （对话在非视频页仍可用，起跑只会换来一条「无法抓取字幕」的失败状态行）。
+// 判定读 state.clip（进程内权威状态）而非上下文快照：快照是「装配时刻的投影」
+//——createInProcessContextFetch 的载荷在拉热评之前组装（core/context-assembly），
+// 热评那次网络往返期间落账的字幕不在快照里。按快照判定会在「另一轮抓取刚好
+// 落账」时误判「还没抓」而多起一轮：这一轮把刚落账的抓取顶成 STALE_RUN，它的
+// 终态文案（状态行「抓取完成…」）随之丢失，状态行停在「正在获取可用字幕...」，
+// 而字幕列表已由前一轮填好、对话侧却还在等这轮多余抓取。
 // 返回 false 只在总结链装载失败（抓取没能起跑）时，调用方按上下文读取失败拦截。
 async function startSubtitleFetchIfNeeded(): Promise<boolean> {
-  if (!extractBvid(location.href)) {
+  const pageBvid = extractBvid(location.href);
+  if (!pageBvid) {
     return true;
   }
-  const snapshot = chatSessionState.liveContextData || chatSessionState.contextData;
-  const body = Array.isArray(snapshot?.subtitleBody) ? snapshot.subtitleBody : [];
-  if (body.length > 0 || snapshot?.subtitleFetchState !== "idle") {
+  const clipMatchesPage = String(state.clip.bvid || "") === pageBvid;
+  if (clipMatchesPage && state.clip.subtitleBody.length > 0) {
+    return true;
+  }
+  if (state.clip.subtitleFetchState !== "idle") {
     return true;
   }
   try {

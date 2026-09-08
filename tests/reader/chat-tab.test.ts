@@ -405,6 +405,46 @@ describe("发送前主动起跑字幕抓取（抓取未起跑的 idle 窗口不�
     expect(refreshSpy).not.toHaveBeenCalled();
     expect(ports).toHaveLength(1); // 非视频页对话照常发出
   });
+
+  it("快照落后于 state（另一轮抓取刚落账）：不重复起跑抓取，按最新 state 发送", async () => {
+    // 上下文载荷在拉热评之前组装（core/context-assembly），热评那次网络往返期间
+    // 落账的字幕不在快照里。若按快照判定就会多起一轮抓取——那一轮把刚落账的
+    // 抓取顶成 STALE_RUN，它的终态文案（状态行「抓取完成…」）随之丢失，状态行
+    // 停在「正在获取可用字幕...」而字幕列表其实已经填好（用户报障的形态）。
+    const readerBus = await import("../../extension/reader/reader-bus.js");
+    const refreshSpy = vi.fn(() => Promise.resolve());
+    readerBus.subscribeSubtitleRefresh(refreshSpy);
+
+    state.clip.title = "测试视频";
+    state.clip.bvid = "BV1test000000";
+    state.clip.cid = "101";
+    state.clip.subtitleFetchState = "idle";
+    state.clip.subtitleBody = [];
+
+    const chat = await lazyChat.ensureReaderChatTab();
+    await chat.ensureChatTabActivated();
+
+    // 让本轮全量装配读到「无字幕体 + idle」：签名对不上 → 走全量；载荷组装在
+    // 热评往返之前，字幕在这段往返里落账（另一轮抓取刚完成）。
+    if (chatSessionState.liveContextData) {
+      chatSessionState.liveContextData.signature = "stale-signature";
+    }
+    gatewayMock.getCurrentAid.mockReturnValueOnce(7100);
+    gatewayMock.fetchHotComments.mockImplementationOnce(async () => {
+      state.clip.subtitleFetchState = "ready";
+      state.clip.subtitleBody = [{ from: 0, to: 10, content: "大家好" }];
+      return [];
+    });
+
+    const input = document.getElementById(ids.readingChatInput) as HTMLTextAreaElement;
+    input.value = "总结一下";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+
+    await waitFor(() => ports.length === 1 && ports[0].postMessage.mock.calls.length === 1);
+    const posted = ports[0].postMessage.mock.calls[0][0] as { context?: { subtitleBody?: unknown[] } };
+    expect(refreshSpy).not.toHaveBeenCalled(); // 不重复起跑（旧判定在这里会起第二轮）
+    expect(posted.context?.subtitleBody).toHaveLength(1); // 发的是已落账的字幕
+  });
 });
 
 describe("断流收口（工单 08：关闭即断流，重开从会话历史恢复）", () => {
