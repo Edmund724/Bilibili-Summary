@@ -234,6 +234,25 @@ function buildSettingsHtml(): string {
   `;
 }
 
+// ===== 分区渲染隔离（interactions-in-complex-layouts 指南，M15）=====
+// .boc-set-group 是随抽屉滚动的自包含布局区：contain: layout style 把行增删/
+// 校验错误显示/保存重渲等分区内部变更的 style/layout 失效圈在分区内，不上溯
+// 阅读壳与宿主 B 站页面。
+// 不取 paint containment（r1 评审）：paint 会把后代裁剪到分区 padding box，
+// 而本面板弹层（fixed-property-type-menu / custom-select-dropdown，absolute
+// top:100%+6px）刻意溢出分区边界盖过相邻卡片（reader-settings.css 弹层族
+// 注释），末行之下只剩「+ 添加属性」按钮的高度，菜单必被分区底边截断——
+// 用户可见回归。也因此不走 content-visibility:auto：按 CSS Containment L2 /
+// MDN，cv:auto 恒含 paint containment（含屏上态），裁剪问题相同。
+// 经 TS 内联应用而非落 reader-settings.css 样式表：真实原因是样式表文件不在
+// 本任务 scope（M15 只放行 settings-panel 等五个文件）；内联也让应用时机与
+// 模板构建同处一地。仅首建调用一次，非每次交互。
+function applySectionContainment(host: HTMLElement): void {
+  host.querySelectorAll<HTMLElement>(".boc-set-group").forEach((group) => {
+    group.style.contain = "layout style";
+  });
+}
+
 // ===== 元素收集（模板渲染后按 id 取自宿主容器，id 与原 options 页保持一致，
 // options-rows / validators 的行级选择器直接复用） =====
 
@@ -290,6 +309,7 @@ export function renderReaderSettingsPanel(): void {
         return;
       }
       host.innerHTML = buildSettingsHtml();
+      applySectionContainment(host);
       bindSettingsEvents(host);
       host.dataset.bocSettingsRendered = "1";
       void loadSettings(collectElements(host));
@@ -749,7 +769,19 @@ function bindSettingsEvents(host: HTMLElement): void {
   elements.addAsrProviderBtn.addEventListener("click", () => void openProviderEditorById("asr", ""));
   setAiRowEditHandler((providerId) => void openProviderEditorById("ai", providerId));
   setAsrRowEditHandler((providerId) => void openProviderEditorById("asr", providerId));
+  // 外点关闭委托。快速通道（M15 INP）：监听器挂在 document 上，宿主页每一次
+  // 点击都会进来，常态是三类弹层全关——此时旧实现无条件做三轮扫描（固定属性
+  // 菜单 + Modal 模型下拉 + 自定义下拉，后两轮全文档）。先做一次合并存在性
+  // 检查，全关即返回；有开着的弹层才逐族收拢（写操作对已关弹层本就是 no-op，
+  // 行为零变化）。三类弹层都只在设置抽屉/编辑 Modal 打开期间存在。
   document.addEventListener("click", (event) => {
+    if (
+      !document.querySelector(
+        '.fixed-property-type-picker[data-open="true"], .ai-provider-model-dropdown:not([hidden]), .custom-select-dropdown:not([hidden])'
+      )
+    ) {
+      return;
+    }
     if (!(event.target instanceof Element) || !event.target.closest(".fixed-property-type-picker")) {
       elements.fixedPropertiesList.querySelectorAll<HTMLElement>(".fixed-property-type-picker").forEach((picker) => {
         picker.setAttribute("data-open", "false");
