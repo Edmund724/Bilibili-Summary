@@ -45,6 +45,7 @@ const SETTINGS_NORMALIZER_STEPS: NormalizerStep[] = [
   ["enablePlayerAiQuickAction", (m) => normalizeEnablePlayerAiQuickAction(m.enablePlayerAiQuickAction)],
   ["playerAiQuickPrompt", (m) => normalizePlayerAiQuickPrompt(m.playerAiQuickPrompt)],
   ["readerTheme", (m) => normalizeReaderTheme(m.readerTheme)],
+  ["readerThemeUserSet", (m) => m.readerThemeUserSet === true],
   ["fixedFrontmatterProperties", (m) => normalizeFixedFrontmatterProperties(m.fixedFrontmatterProperties)],
   ["notePlaceholderSections", (m) => normalizeNotePlaceholderSections(m.notePlaceholderSections)],
   ["aiSystemPrompt", (m) => normalizeAiSystemPrompt(m.aiSystemPrompt)],

@@ -59,16 +59,43 @@ afterEach(() => {
 describe("设置变更与 data-attribute", () => {
   it("hydrateReaderStateFromSettings：应用主题设置（三开关退役后只剩主题）", () => {
     presentation.hydrateReaderStateFromSettings({
-      readerTheme: "dark"
+      readerTheme: "dark",
+      readerThemeUserSet: true
     });
 
     expect(state.reader.readingTheme).toBe("dark");
   });
 
+  it("hydrateReaderStateFromSettings：未手动选过主题时按系统深浅定初始主题", () => {
+    const original = window.matchMedia;
+    window.matchMedia = vi.fn().mockReturnValue({ matches: true });
+    presentation.hydrateReaderStateFromSettings({ readerTheme: "light" });
+    expect(state.reader.readingTheme).toBe("dark");
+
+    window.matchMedia = vi.fn().mockReturnValue({ matches: false });
+    presentation.hydrateReaderStateFromSettings({ readerTheme: "light" });
+    expect(state.reader.readingTheme).toBe("light");
+
+    window.matchMedia = original;
+  });
+
+  it("hydrateReaderStateFromSettings：手动选过主题则不再跟随系统偏好", () => {
+    const original = window.matchMedia;
+    window.matchMedia = vi.fn().mockReturnValue({ matches: true });
+    presentation.hydrateReaderStateFromSettings({
+      readerTheme: "light",
+      readerThemeUserSet: true
+    });
+    expect(state.reader.readingTheme).toBe("light");
+
+    window.matchMedia = original;
+  });
+
   it("applyReadingViewPresentation：在视图/html/body 三处写 theme data-attribute", () => {
     // 纸色档已退役：存量 "paper" 经 normalizeReaderTheme 静默归一为 light。
     presentation.hydrateReaderStateFromSettings({
-      readerTheme: "paper"
+      readerTheme: "paper",
+      readerThemeUserSet: true
     });
     presentation.applyReadingViewPresentation();
 
@@ -86,13 +113,13 @@ describe("设置变更与 data-attribute", () => {
     themeButton.id = ids.readingThemeSelect;
     document.body.appendChild(themeButton);
 
-    presentation.hydrateReaderStateFromSettings({ readerTheme: "dark" });
+    presentation.hydrateReaderStateFromSettings({ readerTheme: "dark", readerThemeUserSet: true });
     presentation.applyReadingViewPresentation();
     expect(themeButton.title).toBe("主题：深色");
     expect(themeButton.getAttribute("aria-label")).toBe("主题：深色");
     const darkIconHtml = themeButton.innerHTML;
 
-    presentation.hydrateReaderStateFromSettings({ readerTheme: "light" });
+    presentation.hydrateReaderStateFromSettings({ readerTheme: "light", readerThemeUserSet: true });
     presentation.applyReadingViewPresentation();
     expect(themeButton.title).toBe("主题：浅色");
     expect(themeButton.getAttribute("aria-label")).toBe("主题：浅色");
@@ -139,7 +166,8 @@ describe("设置变更与 data-attribute", () => {
         callback?.({
           ok: true,
           settings: {
-            readerTheme: "dark"
+            readerTheme: "dark",
+            readerThemeUserSet: true
           }
         });
         return undefined;

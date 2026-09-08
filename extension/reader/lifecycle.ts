@@ -401,7 +401,10 @@ export function updateReaderPreferences(next: Partial<Record<string, unknown>>, 
   state.reader.setTheme(normalizeReaderTheme(next.readerTheme ?? state.reader.readingTheme));
   state.setSettings({
     ...state.settings,
-    readerTheme: state.reader.readingTheme
+    readerTheme: state.reader.readingTheme,
+    // header 按钮是唯一手动主题入口：落哨兵后，此后水合（启动/跨页同步）
+    // 不再按系统偏好覆盖用户选择。
+    readerThemeUserSet: true
   });
   applyReadingViewPresentation();
   renderReaderPanels();

@@ -72,6 +72,9 @@ export interface Settings {
   includeTimestampInBody: boolean;
   enableDebugLogs: boolean;
   readerTheme: string;
+  // 主题手动选择哨兵：header 按钮点击循环置 true（updateReaderPreferences），
+  // 从未手动选过则水合时按 prefers-color-scheme 定初始主题（不落盘）。
+  readerThemeUserSet: boolean;
   frontmatterFields: string[];
   fixedFrontmatterProperties: FixedFrontmatterProperty[];
   notePlaceholderSections: NotePlaceholderSection[];
@@ -96,6 +99,7 @@ export const DEFAULT_SETTINGS: Settings = {
   includeTimestampInBody: true,
   enableDebugLogs: false,
   readerTheme: "light",
+  readerThemeUserSet: false,
   frontmatterFields: [
     "title",
     "url",

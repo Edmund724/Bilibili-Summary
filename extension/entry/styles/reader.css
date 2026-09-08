@@ -32,7 +32,7 @@
    * 在此无落点：面板高度两端都是外部几何（贴栏 var 随滚动逐帧改写、浮层
    * min() 定长），无「定长→内在尺寸」边界，block-size 过渡会造成贴栏态
    * 跟滚动追帧回弹，故开合动画止于 opacity + display。 */
-  transition: opacity 0.2s ease, display 0.2s allow-discrete;
+  transition: opacity 0.35s var(--boc-reader-ease-spring, ease), display 0.35s allow-discrete;
 }
 
 /* 淡入起点：openReaderViewShell 同 tick 写 .open + ready=1，从 display:none
@@ -93,7 +93,7 @@
   flex: 0 0 auto;
   flex-wrap: nowrap;
   justify-content: flex-end;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.3s var(--boc-reader-ease-spring, ease);
 }
 
 .boc-reading-actions[data-boc-icon-hidden="1"] {
@@ -110,6 +110,26 @@
   #boc-reading-view {
     transition: none;
   }
+
+  /* 按压缩放与 tab 内容进场动画（transform 类）对减少动态用户关停；颜色/
+   * 背景类短过渡保留 */
+  .boc-reading-actions button:active,
+  .boc-reading-icon-btn:active,
+  .boc-reading-tab:active,
+  .boc-reading-item:active,
+  .boc-reading-search-nav:active,
+  .boc-reading-mini-btn:active,
+  .boc-reading-explain-btn:active,
+  .boc-reading-explain-card-close:active,
+  .boc-reading-chat-intent-cancel:active,
+  .boc-reading-ov-chapter:active,
+  .boc-reading-ov-quote:active {
+    transform: none;
+  }
+
+  .boc-reading-tab-body.is-active {
+    animation: none;
+  }
 }
 
 .boc-reading-actions button {
@@ -122,6 +142,11 @@
   color: var(--boc-reader-text, #1f2937);
   box-sizing: border-box;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+.boc-reading-actions button:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 .boc-reading-icon-btn {
@@ -136,6 +161,11 @@
   cursor: pointer;
   padding: 0;
   color: var(--boc-reader-text, #1f2937);
+  transition: transform 100ms ease-out;
+}
+
+.boc-reading-icon-btn:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 .boc-reading-icon-btn svg {
@@ -203,6 +233,19 @@
   align-items: center;
   padding: 14px 16px 10px;
   gap: 10px;
+  /* 半透明材质：surface 加 alpha 的 rgba（token，gate 段两主题定义）+
+   * blur/saturate 毛玻璃；面板壳自身 z-index 2147483646，与宿主页共存不受影响 */
+  background: var(--boc-reader-header-bg, var(--boc-reader-surface, #fdfbf7));
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* 减弱透明度：材质退回近实色（token 已在 gate 段覆盖），毛玻璃一并关停 */
+@media (prefers-reduced-transparency: reduce) {
+  .boc-reading-digest-panel .boc-reading-header {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 
 /* 状态行（「当前进度」等）与 header 内容左右对齐（digest-only-ui）：
@@ -235,7 +278,11 @@
   font-weight: 600;
   font-family: inherit;
   color: var(--boc-reader-muted, #6f675c);
-  transition: background 0.18s ease, color 0.18s ease;
+  transition: background 0.18s ease, color 0.18s ease, transform 100ms ease-out;
+}
+
+.boc-reading-tab:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 .boc-reading-tab:hover {
@@ -263,6 +310,22 @@
 .boc-reading-tab-body:not(.is-active),
 .boc-reading-tab-body[hidden] {
   display: none;
+}
+
+/* tab 切换内容进场（motion token：spring 0.3s）——显隐翻转的瞬间播放一次 */
+.boc-reading-tab-body.is-active {
+  animation: boc-tab-body-in 0.3s var(--boc-reader-ease-spring, ease);
+}
+
+@keyframes boc-tab-body-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 概览 / AI 对话 tab 的诚实占位卡（PR4/PR5 落地前不假装可用） */
@@ -386,11 +449,16 @@
   padding: 6px 8px;
   color: var(--boc-reader-text, #111827);
   position: relative;
+  transition: transform 100ms ease-out;
   /* 视口外条目跳过布局：估计高度按默认字号单行取 44px（视图内实际内边距
    * 10px×2 + max(时间 pill 13.5px×1.5+2px, 文本列 16px×1.5)≈44px），auto 让
    * 浏览器记住首次绘制后的实际尺寸，多行/调字号条目上屏后即用真实值。 */
   content-visibility: auto;
   contain-intrinsic-size: auto 44px;
+}
+
+.boc-reading-item:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 .boc-reading-item.is-active {
@@ -469,6 +537,8 @@
   font-size: 22px;
   color: var(--boc-reader-text);
   margin-top: 10px;
+  /* 大标题负字距（Apple 排版），正文走 --boc-reader-letter-spacing（0em） */
+  letter-spacing: -0.02em;
 }
 
 #boc-reading-view .boc-reading-meta,
@@ -648,6 +718,11 @@
   font-size: 14px;
   color: var(--boc-reader-muted, #6f675c);
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+.boc-reading-search-nav:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 .boc-reading-search-nav:hover:not(:disabled) {
@@ -670,6 +745,11 @@
   font-size: 14.5px;
   color: var(--boc-reader-muted, #6f675c);
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+.boc-reading-mini-btn:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 .boc-reading-mini-btn:hover {
@@ -785,6 +865,12 @@
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  /* 基态 transform 被 translateX(-50%) 占用，按压反馈改走亮度通道 */
+  transition: filter 100ms ease-out;
+}
+
+.boc-reading-follow-btn:active {
+  filter: brightness(0.92);
 }
 
 #boc-reading-view[data-boc-reader-follow="manual"] .boc-reading-follow-btn {
@@ -815,6 +901,11 @@
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.14);
+  transition: transform 100ms ease-out;
+}
+
+.boc-reading-explain-btn:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 .boc-reading-explain-btn:hover {
@@ -881,6 +972,11 @@
   font-size: 20px;
   line-height: 1.2;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+.boc-reading-explain-card-close:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 .boc-reading-explain-card-close:hover {
@@ -1000,6 +1096,11 @@
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+.boc-reading-chat-intent-cancel:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 .boc-reading-chat-intent-cancel:hover {
@@ -1078,6 +1179,11 @@
   font-family: inherit;
   color: inherit;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+.boc-reading-ov-chapter:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 .boc-reading-ov-chapter:hover {
@@ -1118,6 +1224,11 @@
   text-align: left;
   font-family: inherit;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+.boc-reading-ov-quote:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 .boc-reading-ov-quote:hover {

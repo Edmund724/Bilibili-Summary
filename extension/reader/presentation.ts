@@ -50,7 +50,22 @@ export function renderReadingStatus(text: string | number | null | undefined) {
 // 读取 readerChapterVisible / readerTranscriptVisible（其存储键已随开关删除）。
 
 export function hydrateReaderStateFromSettings(settings: Partial<Settings> = state.settings) {
+  // 用户从未手动选过主题（readerThemeUserSet=false）时按系统深浅定初始主题，
+  // 手动切换过则尊重存储选择。系统跟随只发生在水合期，不写回设置（用户日后
+  // 改系统偏好，下次水合重新跟随；matchMedia 在非浏览器环境缺失时回落浅色）。
+  if (settings?.readerThemeUserSet !== true) {
+    state.reader.setTheme(systemPrefersDark() ? "dark" : "light");
+    return;
+  }
   state.reader.setTheme(normalizeReaderTheme(settings?.readerTheme));
+}
+
+function systemPrefersDark(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
 }
 
 export function applyReadingViewPresentation() {

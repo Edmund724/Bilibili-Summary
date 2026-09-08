@@ -105,6 +105,15 @@ body[data-boc-reader-mode="1"],
   --boc-reader-subtitle-font-size: 16px;
   --boc-reader-subtitle-line-height: 1.5;
   --boc-reader-letter-spacing: 0em;
+  /* 动效 token：spring=临界阻尼无回弹（淡入/位移进场）；bounce=轻微回弹，
+   * 仅用于有动量感的进出场（面板弹入、播放器按钮滑入）；press=按压缩放档。 */
+  --boc-reader-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --boc-reader-ease-bounce: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --boc-reader-press-scale: 0.97;
+  /* 半透明材质底（reader header / 设置抽屉，backdrop-filter 消费方在
+   * reader.css / reader-settings.css）：surface 加 alpha 的 rgba，两主题各调。 */
+  --boc-reader-header-bg: rgba(253, 251, 247, 0.72);
+  --boc-reader-overlay-bg: rgba(253, 251, 247, 0.8);
   color: var(--boc-reader-text);
 }
 
@@ -126,6 +135,27 @@ body[data-boc-reader-mode="1"][data-boc-reader-theme="dark"],
   --boc-reader-pill-bg: #1a2a46;
   --boc-reader-highlight: rgba(253, 238, 218, 0.1);
   --boc-reader-shadow: 0 18px 42px rgba(2, 6, 23, 0.42);
+  --boc-reader-header-bg: rgba(15, 23, 42, 0.72);
+  --boc-reader-overlay-bg: rgba(15, 23, 42, 0.8);
+}
+
+/* ===== 减弱透明度 =====
+ * 半透明材质（header/设置抽屉）退回近实色：token 在此统一覆盖，消费方
+ * （reader.css / reader-settings.css）只需各自关掉 backdrop-filter。 */
+@media (prefers-reduced-transparency: reduce) {
+  html[data-boc-reader-mode="1"],
+  body[data-boc-reader-mode="1"],
+  #boc-reading-view {
+    --boc-reader-header-bg: #fdfbf7;
+    --boc-reader-overlay-bg: #fdfbf7;
+  }
+
+  html[data-boc-reader-mode="1"][data-boc-reader-theme="dark"],
+  body[data-boc-reader-mode="1"][data-boc-reader-theme="dark"],
+  #boc-reading-view[data-theme="dark"] {
+    --boc-reader-header-bg: #0f172a;
+    --boc-reader-overlay-bg: #0f172a;
+  }
 }
 
 /* 面板宽度：digest-only-ui 排版定稿，档位机制已退役——贴栏宽度下限定死

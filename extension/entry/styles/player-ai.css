@@ -20,7 +20,11 @@
   right: 14px;
   top: 50%;
   transform: translate(8px, -50%);
-  transition: opacity 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
+  /* 滑入用 bounce（轻微回弹，动量感）；token 定义在 reader-gate 阅读表，播放器
+   * 页无 data-boc-reader-mode 时走字面 fallback。opacity/background 色变短
+   * 过渡保持原样。 */
+  transition: opacity 0.18s ease, background-color 0.18s ease,
+    transform 0.3s var(--boc-reader-ease-bounce, cubic-bezier(0.34, 1.4, 0.64, 1));
   width: var(--boc-player-ai-action-hit-size, 28px);
   z-index: 30;
 }
@@ -77,8 +81,27 @@
   color: var(--boc-player-ai-action-hover-color, var(--boc-player-ai-action-color, currentColor));
 }
 
+#boc-player-ai-quick-action:active {
+  transform: scale(var(--boc-reader-press-scale, 0.97));
+}
+
 #boc-player-ai-quick-action:disabled {
   opacity: 0.62;
   cursor: wait;
   transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boc-player-ai-wrap {
+    /* 滑入位移对减少动态用户关停（显隐跳变即到位），opacity/色变保留 */
+    transition: opacity 0.18s ease, background-color 0.18s ease;
+  }
+
+  #boc-player-ai-quick-action {
+    transition: color 0.16s ease, opacity 0.16s ease;
+  }
+
+  #boc-player-ai-quick-action:active {
+    transform: none;
+  }
 }

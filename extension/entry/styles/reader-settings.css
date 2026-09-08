@@ -33,12 +33,29 @@
   overscroll-behavior: contain;
   border-radius: 14px;
   border: 1px solid var(--boc-reader-border, #e7dfd4);
-  background: var(--boc-reader-surface, #fdfbf7);
+  /* 半透明材质：overlay token（gate 段两主题定义）+ blur/saturate 毛玻璃，
+   * 与 reader header 同款（reduced-transparency 见文件尾降级块） */
+  background: var(--boc-reader-overlay-bg, var(--boc-reader-surface, #fdfbf7));
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
   padding: 12px 14px;
+  /* 开合过渡：淡入淡出走 spring（0.35s），display 经 allow-discrete 参与
+   *——hidden 翻转是纯属性切换（renderReaderPanels），淡出走完再隐、淡入
+   * 从 display:none 首帧起（起点由 @starting-style 提供），旧引擎瞬时显隐
+   *（与改造前行为一致）。 */
+  transition: opacity 0.35s var(--boc-reader-ease-spring, ease), display 0.35s allow-discrete;
 }
 
 #boc-reading-view .boc-reading-settings-panel[hidden] {
   display: none;
+  opacity: 0;
+  transition: opacity 0.2s ease, display 0.35s allow-discrete;
+}
+
+@starting-style {
+  #boc-reading-view .boc-reading-settings-panel:not([hidden]) {
+    opacity: 0;
+  }
 }
 
 /* ===== 设置展开态接管面板（2026-09 用户决议）=====
@@ -263,6 +280,11 @@
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+#boc-reading-view .boc-reading-settings-host .boc-set-save-btn:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 #boc-reading-view .boc-reading-settings-host .boc-set-save-btn:disabled {
@@ -336,6 +358,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: transform 100ms ease-out;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-remove:active,
+#boc-reading-view .boc-reading-settings-host .note-section-remove:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 #boc-reading-view .boc-reading-settings-host .fixed-property-remove:hover,
@@ -405,6 +433,11 @@
   font-size: 15px;
   font-weight: 400;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-type-button:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-label {
@@ -466,6 +499,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+#boc-reading-view .boc-reading-settings-host .fixed-property-type-option:active,
+#boc-reading-view .provider-editor-host .ai-provider-model-option:active,
+.custom-select-option:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-option:hover,
@@ -628,6 +668,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* 基态 transform 被 translateY(-50%) 占用，按压缩放并入同一 transform 链 */
+  transition: transform 100ms ease-out;
+}
+
+#boc-reading-view .provider-editor-host .ai-provider-model-toggle:active {
+  transform: translateY(-50%) scale(var(--boc-reader-press-scale, 1));
 }
 
 #boc-reading-view .provider-editor-host .ai-provider-model-toggle:hover {
@@ -665,6 +711,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: transform 100ms ease-out;
+}
+
+#boc-reading-view .boc-reading-settings-host .provider-row-remove:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 #boc-reading-view .boc-reading-settings-host .provider-row-remove:hover {
@@ -713,6 +764,11 @@
   font-size: 15px;
   font-weight: 400;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+#boc-reading-view .boc-reading-settings-host .add-property-btn:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 #boc-reading-view .boc-reading-settings-host .add-property-btn:hover {
@@ -752,6 +808,11 @@
   font: inherit;
   font-size: 15px;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+.custom-select-trigger:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 /* 箭头取类型选择器那套观感：8px 见方、faint 色、1px 描边——本 SVG 是 24 视框，
@@ -876,6 +937,11 @@
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+#boc-reading-view .provider-editor-delete:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 #boc-reading-view .provider-editor-delete:hover {
@@ -961,6 +1027,11 @@
   color: var(--boc-reader-accent, #fb7299);
   font-weight: 600;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+#boc-reading-view .provider-editor-test:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 #boc-reading-view .provider-editor-test:hover {
@@ -1007,6 +1078,11 @@
   font: inherit;
   font-size: 15px;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+#boc-reading-view .provider-editor-cancel:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 #boc-reading-view .provider-editor-cancel:hover {
@@ -1025,6 +1101,12 @@
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+/* save 的 hover 走亮度通道（下方 :hover filter），按压叠加缩放不冲突 */
+#boc-reading-view .provider-editor-save:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 #boc-reading-view .provider-editor-save:hover {
@@ -1045,9 +1127,51 @@
   color: var(--boc-reader-muted, #6f675c);
   font-weight: 600;
   cursor: pointer;
+  transition: transform 100ms ease-out;
+}
+
+#boc-reading-view .boc-reading-settings-host .provider-row-edit:active {
+  transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 #boc-reading-view .boc-reading-settings-host .provider-row-edit:hover {
   color: var(--boc-reader-text, #2b2620);
   background: var(--boc-reader-surface-2, #f0e9df);
+}
+
+/* ===== 减少动态 =====
+ * 开合过渡关 transform 类（本表开合只有 opacity + display，压成短 opacity）；
+ * 按压缩放对减少动态用户关停，颜色/背景类短过渡保留。 */
+@media (prefers-reduced-motion: reduce) {
+  #boc-reading-view .boc-reading-settings-panel {
+    transition: opacity 0.2s ease, display 0.35s allow-discrete;
+  }
+
+  #boc-reading-view .boc-reading-settings-host .boc-set-save-btn:active,
+  #boc-reading-view .boc-reading-settings-host .fixed-property-remove:active,
+  #boc-reading-view .boc-reading-settings-host .note-section-remove:active,
+  #boc-reading-view .boc-reading-settings-host .fixed-property-type-button:active,
+  #boc-reading-view .boc-reading-settings-host .fixed-property-type-option:active,
+  #boc-reading-view .provider-editor-host .ai-provider-model-option:active,
+  .custom-select-option:active,
+  .custom-select-trigger:active,
+  #boc-reading-view .provider-editor-host .ai-provider-model-toggle:active,
+  #boc-reading-view .boc-reading-settings-host .provider-row-remove:active,
+  #boc-reading-view .boc-reading-settings-host .add-property-btn:active,
+  #boc-reading-view .provider-editor-delete:active,
+  #boc-reading-view .provider-editor-test:active,
+  #boc-reading-view .provider-editor-cancel:active,
+  #boc-reading-view .provider-editor-save:active,
+  #boc-reading-view .boc-reading-settings-host .provider-row-edit:active {
+    transform: none;
+  }
+}
+
+/* ===== 减弱透明度 =====
+ * 抽屉材质退回近实色（token 已在 gate 段覆盖为实色），毛玻璃一并关停 */
+@media (prefers-reduced-transparency: reduce) {
+  #boc-reading-view .boc-reading-settings-panel {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
