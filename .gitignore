@@ -27,6 +27,7 @@ docs/agents/domain.md
 .agents
 .env
 .scratch/
+skills-lock.json
 
 # Generated reports / scratch outputs that may land in the root
 architecture-review-*.html
