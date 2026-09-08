@@ -29,7 +29,7 @@ import {
 import { escapeHtml } from "../shared/string-utils.js";
 import { buildSubtitleOptionViews } from "../subtitle/selection.js";
 import { shouldShowHoursInNote } from "../notes/section-lines.js";
-import { requestSubtitleRefresh, persistReaderSettingsThroughSeam } from "./reader-bus.js";
+import { requestSubtitleRefresh, persistReaderSettingsThroughSeam, requestUiCommand } from "./reader-bus.js";
 import { logWarn } from "../shared/logging.js";
 // 候选02 分层惰性：链未装载 ⇒ refreshClip 未注册进 reader-bus seam。懒装载
 // 触达自 seam 移到调用方（arch-slim-2/03），见 maybeRefreshReaderSubtitleInBackground。
@@ -59,10 +59,12 @@ import { openDigestHost, closeDigestHost } from "./digest-host.js";
 import { resetManualScrollPause, setProgrammaticScrollUntil } from "./state.js";
 // PR2 统一 Digest 面板：进入阅读模式时把右侧面板重置回默认「字幕」标签。
 // tab 切换是纯壳交互，实现在 ui/ui-renderer（bindUiEvents 的标签绑定同文件），
-// 本域只做打开时机上的重置调用（重渲 renderReadingView 不重置，避免打断用户）。
+// 本域只做打开时机上的重置触发（重渲 renderReadingView 不重置，避免打断用户）。
+// 工单 arch-review-2026-09/10 依赖反转：重置改经 reader-bus 的 reset-tabs 命令
+// 触达壳，本域不再静态 import ui-renderer（壳未装载时命令静默丢弃，与原
+// DOM 缺失时 setter 空转同形）。
 // PR5：对话 tab 的二级惰性装载/断流收口经 ./lazy-chat-tab 叶子触达
 //（本文件不静态依赖对话组合根；未装载 = 对话功能从未启用，清理 no-op）。
-import { resetReaderDigestTabs } from "../ui/ui-renderer.js";
 import { ensureReaderChatTab, isReaderChatTabLoaded } from "./lazy-chat-tab.js";
 // 候选06 端口半边：reader 域唯一显式端口的单点注册入口（见文件尾注册区）。
 import { registerReaderPorts } from "./ports.js";
@@ -228,8 +230,9 @@ export async function enterReaderMode() {
   hydrateReaderStateFromSettings(state.settings);
   applyReadingViewPresentation();
   // PR2：每次打开阅读视图都回到默认「字幕」标签（概览/AI 对话关闭前的停留
-  // 状态不跨会话保留；视图开着期间的重渲不打断用户所在标签）。
-  resetReaderDigestTabs();
+  // 状态不跨会话保留；视图开着期间的重渲不打断用户所在标签）。重置经
+  // reader-bus reset-tabs 命令触达 ui 壳（arch-review-2026-09/10 依赖反转）。
+  requestUiCommand("reset-tabs");
   await sleep(0);
   openReaderViewShell(readingView);
   renderReadingView();

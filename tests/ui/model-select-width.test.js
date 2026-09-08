@@ -1,6 +1,8 @@
 // tests/ui/model-select-width.test.js
-// ui/model-select-width.js（候选09 自 sidepanel.js 迁出的纯 UI 度量叶子）的小
-// 契约测试。jsdom 不带 canvas npm 包，HTMLCanvasElement.getContext 返回 null
+// model-select-width.js（候选09 自 sidepanel.js 迁出的纯 UI 度量叶子）的小
+// 契约测试。工单 arch-review-2026-09/10 起模块自 ui/ 搬入 chat/（断 chat → ui
+// 最后一条逻辑边），本测试留守 tests/ui/ 不随迁（scope 之外），仅改 import。
+// jsdom 不带 canvas npm 包，HTMLCanvasElement.getContext 返回 null
 // （已实测：打印 "Not implemented" 通知但不抛错），恰好覆盖模块内既有的
 // 降级路径（!ctx → 每字符 8px 估算），据此守住三个关键不变量：
 // - 降级测宽下的期望宽度算式（文本 8px/字符 + "000" 24 + 36 装饰余量）；
@@ -11,7 +13,7 @@
 // 驱动（jsdom 无布局，clientWidth 恒 0，真实 toolbar 路径无可观测差异）。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { measureTextWidth, updateModelSelectWidth } from "../../extension/ui/model-select-width.js";
+import { measureTextWidth, updateModelSelectWidth } from "../../extension/chat/model-select-width.js";
 
 beforeEach(() => {
   vi.spyOn(window.HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
@@ -35,7 +37,7 @@ function makeEls(optionText) {
   return { modelSelect: makeSelect(optionText), toolbar: null, thinkingToggle: null, presetBtn: null };
 }
 
-describe("ui/model-select-width", () => {
+describe("model-select-width", () => {
   it("measureTextWidth：canvas 不可用时按每字符 8px 降级估算", () => {
     expect(measureTextWidth("000", { fontSize: "11px" })).toBe(24);
     expect(measureTextWidth("", { fontSize: "11px" })).toBe(0);

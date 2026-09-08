@@ -31,9 +31,9 @@ import {
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import type { GetSettingsResponse } from "../shared/messaging-protocol.js";
 import { escapeHtml } from "../shared/string-utils.js";
-import { updateModelSelectWidth } from "../ui/model-select-width.js";
+import { updateModelSelectWidth } from "./model-select-width.js";
 import { chatSessionState } from "./chat-state.js";
-import type { ModelSelectWidthEls } from "../ui/model-select-width.js";
+import type { ModelSelectWidthEls } from "./model-select-width.js";
 
 export const SELECTED_PROVIDER_KEY = "boc_ai_selected_provider";
 export const THINKING_LEVEL_KEY = "boc_ai_thinking_level";
