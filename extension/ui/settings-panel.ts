@@ -616,7 +616,7 @@ function applyValidationError(elements: SettingsElements, validation: SettingsVa
       const titleInput = row.querySelector<HTMLInputElement>(".note-section-title");
       const contentInput = row.querySelector<HTMLInputElement>(".note-section-content");
       const positionSelect = row.querySelector<HTMLSelectElement>(".note-section-position");
-      // 段落位置的 input-error 与焦点落在组件 trigger 上（Q22 甲）：select 已被
+      // 段落位置的错误态落在组件 trigger 上（Q22 甲）：select 已被
       // custom-select 壳 clip 隐藏，直接标错/聚焦会掉进 1px 黑洞
       const positionTrigger = row.querySelector<HTMLElement>(
         ".note-section-field-position .custom-select-wrapper .custom-select-trigger"
