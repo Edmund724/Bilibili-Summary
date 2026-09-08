@@ -24,7 +24,8 @@ import { ensureSummarizeChain } from "../subtitle/lazy.js";
 import { setStatus } from "../shared/ui-status.js";
 import { ensureUiReady } from "../ui/lazy-ui.js";
 
-// player-ai 经加载器按需引入（候选4 分包）：默认关闭的能力不再常驻。
+// player-ai 经加载器按需引入（候选4 分包）：开关关闭态不再常驻
+// （默认开启，2026-09 起）。
 // 「未加载」时按钮不可能存在，remove/sync 均可安全跳过（幂等不变量见
 // ai/lazy-player-ai.js 头注）。
 import { loadPlayerAi, isPlayerAiLoaded } from "../ai/lazy-player-ai.js";

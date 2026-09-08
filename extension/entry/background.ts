@@ -13,6 +13,8 @@ import {
 } from "../core/content-orchestration-wiring.js";
 import { sendMessageToTab } from "../shared/tab-utils.js";
 import { getMergedSettings, normalizeSettings, saveSettings } from "../core/settings-store.js";
+// 安装/更新一次性设置迁移（2026-09 AI 键默认开：存量显式 false 清位）
+import { applyPlayerAiQuickActionDefaultOnMigration } from "./settings-migration.js";
 // 调试日志门三宿主接线（shared/logging 的 registerDebugGate 消费方）
 import { registerDebugLogGate } from "../shared/debug-log-gate.js";
 import { logWarn } from "../shared/logging.js";
@@ -420,6 +422,9 @@ chrome.runtime.onMessage.addListener((rawMessage, rawSender, sendResponse: SendR
 
 async function initializeSettingsStorage() {
   const syncCurrent = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+  // 2026-09 AI 键默认开一次性迁移：存量显式 false 清位（清位后下方合并以新
+  // 默认 true 写回），旗标随本次全量写落盘（语义见 entry/settings-migration.ts）。
+  applyPlayerAiQuickActionDefaultOnMigration(syncCurrent);
   // 安装/更新迁移：合并结果先经 normalizeSettings 收口再落盘，存量 LEGACY
   // 默认提示词等旧值在此一次性改写为当前值，而不是每次读取时重复映射。
   await chrome.storage.sync.set(normalizeSettings({ ...DEFAULT_SETTINGS, ...syncCurrent }));

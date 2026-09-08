@@ -2,8 +2,10 @@
 // 加载器跟随被加载模块的目录，subtitle/lazy.ts 先例）。
 //
 // 为什么惰性：player-ai 只在设置 enablePlayerAiQuickAction 开启时才有职责
-// （挂 observer、layout 监听、播放器快捷按钮），而该设置默认关闭
-// （core/defaults.ts）。分包前它随单文件 bundle 常驻；分包后这里成为动态
+// （挂 observer、layout 监听、播放器快捷按钮）。该设置默认开启（2026-09 起，
+// core/defaults.ts；此前的默认 false 时代它对未开启用户从不出现），关闭态
+// 用户模块零装载、chunk 不下载——分包收益保留给关闭态。分包前它随单文件
+// bundle 常驻；分包后这里成为动态
 // import 边，esbuild 会把它连同其专属依赖切进 entry/chunks/，只在首次
 // start 需要时才下载。
 //

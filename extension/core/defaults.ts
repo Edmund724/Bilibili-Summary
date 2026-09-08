@@ -68,6 +68,10 @@ export interface Settings {
   includeDateInFilename: boolean;
   includeHotCommentsInNote: boolean;
   enablePlayerAiQuickAction: boolean;
+  // AI 键默认开迁移旗标（entry/settings-migration.ts）：true 表示存量显式
+  // false 已随迁移改写回默认 true 一次，此后用户显式关闭的值不再被安装/更新
+  // 迁移翻转。
+  aiBtnDefaultOnMigrated: boolean;
   playerAiQuickPrompt: string;
   includeTimestampInBody: boolean;
   enableDebugLogs: boolean;
@@ -94,7 +98,13 @@ export const DEFAULT_SETTINGS: Settings = {
   downloadFormat: "srt",
   includeDateInFilename: true,
   includeHotCommentsInNote: false,
-  enablePlayerAiQuickAction: false,
+  // 2026-09 起默认开启：AI 键与 digest 按钮一样进视频页即可见可点（此前默认
+  // false，按钮对未手动开启的用户从不出现——设置门控挂载语义本身不变，见
+  // content.ts 的启停接线与 ai/player-ai.ts 的 sync 门控）。存量显式 false 由
+  // 安装/更新迁移一次性清位（entry/settings-migration.ts），此后用户显式关闭
+  // 的值不再被后续更新翻转。
+  enablePlayerAiQuickAction: true,
+  aiBtnDefaultOnMigrated: false,
   playerAiQuickPrompt: DEFAULT_PLAYER_AI_QUICK_PROMPT,
   includeTimestampInBody: true,
   enableDebugLogs: false,
