@@ -278,12 +278,12 @@
   min-width: 0;
 }
 
+/* 思考块（2026-09 用户决议：去掉左竖条与卡片底，改 DeepSeek 式干净形态）：
+ * 无背景无边框，标题行 = 线性思考图标 + 文案 + 折叠箭头，正文左缘与标题文案
+ * 对齐（图标 14 + gap 6 = 20px）。行为不变：正文仍 200px 内滚，折叠态仍收成
+ * 一行「思考过程」。 */
 .boc-reading-chat .chat-thinking {
-  margin-bottom: 8px;
-  padding: 8px 10px;
-  border-left: 3px solid var(--boc-reader-faint, #a39a8d);
-  background: var(--boc-reader-surface, #fdfbf7);
-  border-radius: 8px;
+  margin-bottom: 10px;
   color: var(--boc-reader-muted, #6f675c);
   font-size: 14px;
   line-height: 1.6;
@@ -291,20 +291,42 @@
 }
 
 .boc-reading-chat .chat-thinking-label {
-  display: block;
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
   margin-bottom: 4px;
+  color: var(--boc-reader-muted, #6f675c);
+}
+
+.boc-reading-chat .chat-thinking-icon {
+  display: inline-flex;
+  flex: none;
   color: var(--boc-reader-faint, #a39a8d);
 }
 
+.boc-reading-chat .chat-thinking-icon svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
 .boc-reading-chat .chat-thinking-text {
+  padding-left: 20px;
   white-space: pre-wrap;
   max-height: 200px;
   overflow-y: auto;
+  /* 内滚保留（用户决议 乙），但滚动条退回细淡一档：默认粗灰条在无卡片底的
+   * 思考块里最显眼，与「干干净净」相悖。标准属性（reader.css 的三滚动容器
+   * 共用规则在 @supports not (scrollbar-color: auto) 内，本元素不在其列，
+   * 且 reader.css 不得再含 chat-* 标记）。 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--boc-reader-faint, #a39a8d) transparent;
 }
 
 /* 思考流结束后的折叠态：收成一行「思考过程 ▸」，点击展开回看（当轮有效，
- * 思考不落盘）；折叠/展开箭头经 ::after 呈现，无需 JS 维护。 */
+ * 思考不落盘）；折叠/展开箭头经 ::after 呈现，无需 JS 维护，间距由标题行的
+ * flex gap 给。 */
 .boc-reading-chat .chat-thinking-collapsible .chat-thinking-label {
   cursor: pointer;
   user-select: none;
@@ -312,7 +334,6 @@
 
 .boc-reading-chat .chat-thinking-collapsible .chat-thinking-label::after {
   content: "▾";
-  margin-left: 6px;
   font-weight: 400;
 }
 

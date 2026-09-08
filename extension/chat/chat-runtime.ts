@@ -490,6 +490,12 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   // =========================================================================
   // createThinkingNode / collapseThinking — 思考节点生命周期
   // =========================================================================
+  // 思考块标题图标（2026-09 用户决议）：线性四角星，与 ui/icons.ts 的
+  // sparkles 同族（24 视框 / stroke 1.8 / currentColor，14px 渲染描边约 1px），
+  // 不引外部资源。纯装饰，随 svg 自带 aria-hidden。
+  const THINKING_ICON_SVG =
+    '<svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6l1.84 4.96 4.96 1.84-4.96 1.84L12 17.2l-1.84-4.96L5.2 10.4l4.96-1.84L12 3.6z"/></svg>';
+
   function createThinkingNode(assistantNode: HTMLDivElement | null): HTMLDivElement | null {
     if (!assistantNode) {
       return null;
@@ -498,7 +504,16 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     node.className = "chat-thinking";
     const label = document.createElement("span");
     label.className = "chat-thinking-label";
-    label.textContent = "思考中…";
+    // 图标与文案各占一个子节点：折叠态只改文案（见 collapseThinking），
+    // 直接写 label.textContent 会连图标一起清掉。
+    const icon = document.createElement("span");
+    icon.className = "chat-thinking-icon";
+    icon.innerHTML = THINKING_ICON_SVG;
+    const labelText = document.createElement("span");
+    labelText.className = "chat-thinking-label-text";
+    labelText.textContent = "思考中…";
+    label.appendChild(icon);
+    label.appendChild(labelText);
     const text = document.createElement("div");
     text.className = "chat-thinking-text";
     node.appendChild(label);
@@ -520,9 +535,9 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   // 思考不落盘，会话回放无思考内容）。
   function collapseThinking(thinking: Element): void {
     thinking.classList.add("chat-thinking-collapsible", "chat-thinking-collapsed");
-    const label = thinking.querySelector(".chat-thinking-label");
-    if (label) {
-      label.textContent = "思考过程";
+    const labelText = thinking.querySelector(".chat-thinking-label-text");
+    if (labelText) {
+      labelText.textContent = "思考过程";
     }
   }
 
