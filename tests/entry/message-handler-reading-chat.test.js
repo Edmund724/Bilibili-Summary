@@ -17,8 +17,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../extension/reader/lazy-reader.js", () => ({
-  ensureReaderDomain: vi.fn(),
-  isReaderDomainLoaded: vi.fn(() => false)
+  ensureReaderDomain: vi.fn()
 }));
 vi.mock("../../extension/reader/state.js", () => ({
   isReaderViewOpen: vi.fn(() => false),

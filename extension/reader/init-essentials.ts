@@ -1,10 +1,13 @@
 // reader 域启动接线（候选02 分层惰性：自 lifecycle.js 迁出的常驻微模块）。
 //
-// content.js init() 需要在启动同步执行的三个 reader 接线函数。它们本身只是
+// content.js init() 需要在启动同步执行的两个 reader 接线函数。它们本身只是
 // 「注册回调/全局钩子」的轻操作，但原先是 lifecycle.js 的导出——常驻侧为了
-// 这三口接线就得静态拖入整个 reader 域。本模块把注册路径留在常驻，把真正的
-// reader 域重活（debug 快照、presenter 通知处理）改成回调触发时经
-// ensureReaderDomain() 动态装载。
+// 这几口接线就得静态拖入整个 reader 域。本模块把注册路径留在常驻，把真正的
+// reader 域重活（debug 快照）改成回调触发时经 ensureReaderDomain() 动态装载。
+//
+// presenter 通知的订阅不在本模块（原 bindReaderPresenter 已随双实例缺陷修复
+// 搬进 reader/lifecycle.ts）：content 两轮构建把常驻底座在懒加载区重复一份，
+// reader-bus 有两个实例，常驻侧订阅收不到懒加载区发布的通知。
 //
 // 依赖全部为常驻叶子（core/state、shared/logging、./reader-bus、
 // ./presentation、./view-state、./lazy-reader、./presentation-fields 纯常量），
@@ -14,8 +17,7 @@ import { logWarn } from "../shared/logging.js";
 import { watchStorageKeys } from "../shared/watch-storage-keys.js";
 import {
   loadReaderSettingsThroughSeam,
-  requestPlayerAiSync,
-  subscribeReaderPresenter
+  requestPlayerAiSync
 } from "./reader-bus.js";
 // 候选03 常驻瘦身：hydrate / apply 已惰性化，只在阅读视图打开时才需要应用。
 import {
@@ -23,8 +25,7 @@ import {
   hydrateReaderStateFromSettings
 } from "./lazy-reader-presentation.js";
 import { isReaderViewOpen } from "./state.js";
-import { ensureReaderDomain, isReaderDomainLoaded } from "./lazy-reader.js";
-import type * as LifecycleModule from "./lifecycle.js";
+import { ensureReaderDomain } from "./lazy-reader.js";
 import type * as DebugSnapshotModule from "./debug-snapshot.js";
 // 候选06：监听键清单从呈现属性表派生（单一事实源 presentation-fields.js）。
 // 相对旧手抄清单的修正与保留：
@@ -91,37 +92,4 @@ export function bindSettingsWatcher() {
         logWarn("[BOC] failed to refresh settings after storage change", error);
       });
   }, { sync: READER_SETTINGS_WATCH_KEYS, local: READER_SETTINGS_WATCH_KEYS });
-}
-
-// reader-bus seam（presenter.ts 改名，arch-slim-2/03）的 reader 侧注册：fetcher（总结链层）发布数据变更通知时，
-// reader 域按需装载后处理。注册本身常驻；转发路径带两级门控——
-//   1. reader 域未装载且阅读视图未打开 ⇒ 跳过：视图未打开 ⇒ 旧处理器在本域内
-//      的动作（reset: 停同步/观察器/重试定时器——均未启动；subtitle-ready/
-//      rerender: 视图未开时处理体的 readingViewOpen 早退分支等价 no-op；
-//      status: 写隐藏状态栏文本，无行为消费方）等价于 no-op，避免为一次空通知
-//      拉起 ~50KB reader 域。
-//      不变式：视图打开 ⇒ enterReaderMode 已执行 ⇒ 域已装载，因此「未装载且
-//      视图未打开」恰好覆盖全部可跳过通知；视图开着（含测试直接装载 facade
-//      的路径）则放行走 ensure 装载。
-//   2. subtitle-ready/rerender 且视图未打开 ⇒ 与旧处理器的 readingViewOpen
-//      早退分支等价，跳过。（subtitle-ready 的发射自 2026-09 起 unconditional
-//      ——commit 事务不再按 isReaderViewOpen 截断，本门是唯一视图裁决点；
-//      抓取落定后的对账重渲在 lifecycle 侧兜住丢失轮次。）
-// 已装载（或视图打开）时经 ensureReaderDomain 转发，处理体在
-// lifecycle.handleReaderPresenterNotification（原 bindReaderPresenter 回调体
-// 原样搬移）。
-export function bindReaderPresenter() {
-  return subscribeReaderPresenter((kind: string, text?: unknown) => {
-    if (!isReaderDomainLoaded() && !isReaderViewOpen()) {
-      return;
-    }
-    if ((kind === "subtitle-ready" || kind === "rerender") && !isReaderViewOpen()) {
-      return;
-    }
-    ensureReaderDomain()
-      .then((reader) => ((reader as unknown) as typeof LifecycleModule).handleReaderPresenterNotification(kind, text as string | number | null | undefined))
-      .catch((error) => {
-        logWarn("[BOC] reader presenter dispatch failed", { kind, error });
-      });
-  });
 }

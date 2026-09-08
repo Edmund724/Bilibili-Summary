@@ -36,8 +36,7 @@ vi.mock("../../extension/ai/lazy-player-ai.js", () => ({
   isPlayerAiLoaded: mocks.isPlayerAiLoaded
 }));
 vi.mock("../../extension/reader/lazy-reader.js", () => ({
-  ensureReaderDomain: mocks.ensureReaderDomain,
-  isReaderDomainLoaded: vi.fn(() => false)
+  ensureReaderDomain: mocks.ensureReaderDomain
 }));
 vi.mock("../../extension/reader/lazy-chat-tab.js", () => ({
   ensureReaderChatTab: mocks.ensureReaderChatTab,

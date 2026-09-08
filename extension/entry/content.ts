@@ -29,8 +29,7 @@ import { ensureUiReady } from "../ui/lazy-ui.js";
 // 接线与页面状态守卫；设置水合/排版呈现/状态栏文案随阅读模式进入惰性装载。
 import {
   installReaderDebugHelpers,
-  bindSettingsWatcher,
-  bindReaderPresenter
+  bindSettingsWatcher
 } from "../reader/init-essentials.js";
 import { clearReaderModePageState, bindNormalPageStateGuard } from "../reader/state.js";
 import {
@@ -109,7 +108,6 @@ function init(): void {
 
   bindRuntimeEvents();
   bindSettingsWatcher();
-  bindReaderPresenter();
   // Reader settings persistence (sendRuntimeMessage, shared/messaging.js) and
   // loading (getSettings, core/runtime.js) are outside the reader domain;
   // reader-impl.js must not import them (import cycle), so content.js wires

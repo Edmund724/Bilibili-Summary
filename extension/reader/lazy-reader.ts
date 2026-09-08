@@ -20,10 +20,6 @@
 // 失败语义：加载失败清空缓存 promise，允许下次触发重试（例如扩展刚更新、
 // 旧 chunk 404 的过渡窗口内先失败、刷新后可恢复）。
 //
-// 「未装载」的语义约定（消费方依赖它做等价性跳过）：模块未加载 ⇒ 阅读视图
-// 从未打开 ⇒ reader-bus 通知的 reader 侧处理（停止同步/重渲染）在本域内的
-// 效果都是 no-op，消费方据此跳过装载（isReaderDomainLoaded）。
-
 interface ReaderDomain {
   enterReaderMode(): void;
   closeReadingView(): void;
@@ -38,10 +34,4 @@ const loader = createLazyLoader<ReaderDomain>(() => import("./index.js"));
 // 按需加载 reader/index.ts facade，同一文档内重复调用共享同一 promise。
 export function ensureReaderDomain(): Promise<ReaderDomain> {
   return loader.load();
-}
-
-// 模块是否已存在加载请求（含仍在加载中）。消费方用它区分「未装载可跳过」
-// 与「已装载需继续走异步路径」。
-export function isReaderDomainLoaded(): boolean {
-  return loader.isLoaded();
 }

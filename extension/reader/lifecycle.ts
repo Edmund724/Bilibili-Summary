@@ -29,15 +29,15 @@ import {
 import { escapeHtml } from "../shared/string-utils.js";
 import { buildSubtitleOptionViews } from "../subtitle/selection.js";
 import { shouldShowHoursInNote } from "../notes/section-lines.js";
-import { requestSubtitleRefresh, persistReaderSettingsThroughSeam, requestUiCommand } from "./reader-bus.js";
+import { requestSubtitleRefresh, persistReaderSettingsThroughSeam, requestUiCommand, subscribeReaderPresenter } from "./reader-bus.js";
 import { logWarn } from "../shared/logging.js";
 // 候选02 分层惰性：链未装载 ⇒ refreshClip 未注册进 reader-bus seam。懒装载
 // 触达自 seam 移到调用方（arch-slim-2/03），见 maybeRefreshReaderSubtitleInBackground。
 import { ensureSummarizeChain } from "../subtitle/lazy.js";
 
-// 候选02 分层惰性：启动接线（bindReaderPresenter / installReaderDebugHelpers /
-// bindSettingsWatcher）与启动期呈现（hydrate/apply/renderReadingStatus）在常驻
-// 微模块 ./init-essentials.js、./presentation.js；阅读视图打开后的交互呈现
+// 候选02 分层惰性：启动接线（installReaderDebugHelpers / bindSettingsWatcher）与
+// 启动期呈现（hydrate/apply/renderReadingStatus）在常驻微模块
+// ./init-essentials.js、./presentation.js；阅读视图打开后的交互呈现
 //（updateReaderPreferences/renderReaderPanels）属本域重活，
 // 自 presentation.js 移回此处（原 lifecycle.js 分节回归；renderReadingInfoPanel
 // 已随「视频摘要/简介」区块删除）。本文件只保留 reader 域
@@ -114,6 +114,19 @@ registerReaderPorts({
   syncReadingViewPlayback: syncReadingViewPlayback as (...args: unknown[]) => unknown,
   noteManualReaderInteraction: noteManualReaderInteraction as (...args: unknown[]) => unknown,
   flushReadingSubtitleToIndex: ensureReadingSubtitleRenderedUpTo as (...args: unknown[]) => unknown
+});
+
+// Presenter seam 的 reader 侧订阅（原常驻微模块 init-essentials 的
+// bindReaderPresenter，随双实例缺陷修复搬进本域）：content 两轮构建
+//（scripts/build-content.js）把常驻底座在懒加载区重复一份，reader-bus 因此有
+// 两个实例——常驻侧注册的订阅收不到懒加载区（fetcher/commit 发布）的通知，
+// 「抓取完成…」这类状态行文案永远写不进去（字幕已落账、状态行却停在
+// 「正在获取可用字幕...」的根因）。订阅移进发布方所在的懒加载区：域装载 ⇔
+// 阅读视图打开过，语义与原先「未装载且视图未打开则跳过」的门控等价，且通知
+// 不再跨实例丢失。函数声明有提升，此处注册即完整；payload 收窄成处理体的
+// 第二参形状（与搬移前 init-essentials 的转发一致）。
+subscribeReaderPresenter((kind, ...payload) => {
+  handleReaderPresenterNotification(kind, payload[0] as string | number | null | undefined);
 });
 
 // PR3 字幕 tab 的两处组装根单点接线（与上方端口注册同位）：
