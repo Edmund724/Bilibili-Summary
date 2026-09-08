@@ -94,6 +94,7 @@ let state;
 let gateway;
 let uiStatus;
 let commit;
+let readerBus;
 
 async function importEpoch() {
   fetcher = await import("../../extension/subtitle/fetcher.js");
@@ -101,6 +102,7 @@ async function importEpoch() {
   gateway = await import("../../extension/bilibili/gateway.js");
   uiStatus = await import("../../extension/shared/ui-status.js");
   commit = await import("../../extension/subtitle/commit.js");
+  readerBus = await import("../../extension/reader/reader-bus.js");
 
   gateway.fetchVideoMeta.mockReset();
   gateway.fetchSubtitleBundle.mockReset();
@@ -110,6 +112,7 @@ async function importEpoch() {
   commit.commitNoSubtitle.mockReset().mockResolvedValue(undefined);
   uiStatus.setStatus.mockReset();
   uiStatus.setMessage.mockReset();
+  readerBus.notifyReaderPresenter.mockReset();
 
   // meta 抓取成功（refreshClip 前置段），时长由 page-context 落 300
   gateway.fetchVideoMeta.mockResolvedValue({
@@ -161,8 +164,12 @@ describe("retryWithFreshBundle：签名 URL 失效重试链（经 refreshClip �
       })
     );
     // 成功收尾（fetchState/selectedUrl 由字幕接受事务落位，本文件 mock 了事务，
-    // 终态断言只看状态栏文案与事务入参）
-    expect(uiStatus.setStatus).toHaveBeenLastCalledWith("抓取完成，可以复制或下载字幕。");
+    // 终态断言只看状态栏文案与事务入参）。完成提示走 reader-bus "status" 通知
+    //（与渲染同通道），不再直写 setStatus。
+    expect(readerBus.notifyReaderPresenter).toHaveBeenLastCalledWith(
+      "status",
+      "抓取完成，可以复制或下载字幕。"
+    );
   });
 
   it("SUBTITLE_DURATION_MISMATCH 触发：时长不匹配的 body 落到重试，新 bundle 重载成功", async () => {
@@ -179,7 +186,10 @@ describe("retryWithFreshBundle：签名 URL 失效重试链（经 refreshClip �
     expect(gateway.fetchSubtitleBundle).toHaveBeenCalledTimes(2);
     expect(gateway.fetchSubtitleBody).toHaveBeenCalledTimes(2);
     expect(commit.acceptSubtitle).toHaveBeenCalledTimes(1);
-    expect(uiStatus.setStatus).toHaveBeenLastCalledWith("抓取完成，可以复制或下载字幕。");
+    expect(readerBus.notifyReaderPresenter).toHaveBeenLastCalledWith(
+      "status",
+      "抓取完成，可以复制或下载字幕。"
+    );
   });
 
   it("重试仍失败：只重试一次，原始错误上抛并由 refreshClip 错误路径收尾", async () => {
