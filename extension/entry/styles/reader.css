@@ -55,6 +55,23 @@
   pointer-events: none;
 }
 
+/* ===== 宿主页 reset 的标题/链接颜色压回 =====
+ * 阅读视图住在宿主页文档里（无 shadow DOM），bilibili 的全局 reset
+ *（s1.hdslb.com/.../jinkela/video/css/video.*.css）带两条无作用域元素选择器：
+ * `h1,h2,h3,h4,h5,h6{color:rgba(0,0,0,.85)}` 与 `a{color:#222}`。它们特异性
+ * 高于继承，永远压掉本视图从 token 继承来的颜色——深色主题下 markdown 标题
+ * 与链接因此变成深色底上的黑字（正文无匹配声明，继承正常，故只有标题/链接
+ * 中招）。用 `#id :where()` 提权压回：(1,0,0) 稳胜宿主 (0,0,1)，:where()
+ * 贡献 0 特异性、不改视图内既有规则的相对次序，选择器带 #id 作用域，
+ * 不外泄到宿主页其他元素。 */
+#boc-reading-view :where(h1, h2, h3, h4, h5, h6) {
+  color: var(--boc-reader-text, #2b2620);
+}
+
+#boc-reading-view :where(a) {
+  color: var(--boc-reader-accent, #fb7299);
+}
+
 .boc-reading-header {
   display: flex;
   align-items: flex-start;
