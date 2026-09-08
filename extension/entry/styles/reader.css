@@ -450,11 +450,13 @@
   color: var(--boc-reader-text, #111827);
   position: relative;
   transition: transform 100ms ease-out;
-  /* 视口外条目跳过布局：估计高度按默认字号单行取 44px（视图内实际内边距
-   * 10px×2 + max(时间 pill 13.5px×1.5+2px, 文本列 16px×1.5)≈44px），auto 让
-   * 浏览器记住首次绘制后的实际尺寸，多行/调字号条目上屏后即用真实值。 */
+  /* 视口外条目跳过布局（defer-rendering-heavy-content 指南模式）：估计高度
+   * 按默认字号单行取 44px（视图内实际内边距 10px×2 + max(时间 pill
+   * 13.5px×1.5+2px, 文本列 16px×1.5)≈44px），auto 让浏览器记住首次绘制后的
+   * 实际尺寸，多行/调字号条目上屏后即用真实值；宽度不占位（none：条目宽由
+   * 容器拉伸决定，与内容无关）。 */
   content-visibility: auto;
-  contain-intrinsic-size: auto 44px;
+  contain-intrinsic-size: auto none auto 44px;
 }
 
 .boc-reading-item:active {
@@ -1013,6 +1015,41 @@
 
 .boc-reading-explain-card-answer p:last-child {
   margin-bottom: 0;
+}
+
+/* 长解释屏外段落跳过渲染（M13，同 reader-chat 对话区的 c-v:auto 块级方案，
+ * defer-rendering-heavy-content 指南）：renderMarkdown 的块级输出逐块
+ * content-visibility: auto，只跳过滚动容器 .boc-reading-explain-card-content
+ * 视口外的块。占位按 15.5px × 1.75 行高单行 27px 估，标题/列表/表格/代码块
+ * 按浏览器默认排版的近似值；auto 让浏览器记住实际尺寸，回滚零跳动；宽度
+ * 不占位（块宽由容器拉伸决定）。不支持的引擎忽略整组声明（c-v:auto 无需
+ * fallback）；跳过的块仍可页内查找、可聚焦，无需 hidden="until-found"。 */
+.boc-reading-explain-card-answer p {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 27px;
+}
+
+.boc-reading-explain-card-answer h3,
+.boc-reading-explain-card-answer h4,
+.boc-reading-explain-card-answer h5 {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 56px;
+}
+
+.boc-reading-explain-card-answer ul,
+.boc-reading-explain-card-answer ol {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 52px;
+}
+
+.boc-reading-explain-card-answer pre {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 70px;
+}
+
+.boc-reading-explain-card-answer table {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 56px;
 }
 
 .boc-reading-explain-card-state {

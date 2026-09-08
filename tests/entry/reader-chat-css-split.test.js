@@ -78,3 +78,46 @@ describe("对话分区 CSS 拆分（arch-slim-4/07）", () => {
     expect(read(BUILD_JS).includes("entry/styles/reader-chat.css")).toBe(true);
   });
 });
+
+// 长回复屏外段落跳过渲染（M13，defer-rendering-heavy-content 指南）：
+// renderMarkdown 的块级输出（清单由 tests/ui/markdown-split-tail.test.js 钉住）
+// 逐块 content-visibility: auto + contain-intrinsic-size（auto 记忆实际尺寸、
+// none 不占宽度），只跳过滚动容器视口外的块。防倒退：规则被删或占位改回无
+// 记忆形式（滚动条跳动回归）时这里红。
+describe("长回复屏外段落跳过渲染（M13）", () => {
+  // renderMarkdown 块级目标集（块内结构标签 li/tr/td 等不适用——随父块整体跳过）
+  const BLOCKS = ["p", "h3", "h4", "h5", "ul", "ol", "pre", "table"];
+
+  // 顶层规则抽取：先剥注释（避免注释黏进 selector 片段），再取上个 } 到下个
+  // { 之间的文本为 selector 部（c-v 规则不嵌套在 at-rule 内），按逗号拆开精
+  // 确比对，body 须含 content-visibility: auto。
+  const findRule = (cssText, selector) =>
+    (cssText.replace(/\/\*[\s\S]*?\*\//g, "").match(/[^{}]+\{[^}]*\}/g) || []).find((rule) => {
+      const [head, body] = rule.split("{");
+      return (
+        head
+          .split(",")
+          .map((part) => part.trim())
+          .includes(selector) && body.includes("content-visibility: auto")
+      );
+    });
+
+  it("reader-chat.css 对话区 markdown 块级容器逐块 c-v:auto + auto 记忆占位", () => {
+    const css = read(CHAT_CSS);
+    for (const block of BLOCKS) {
+      const rule = findRule(css, `.boc-reading-chat .chat-msg-assistant ${block}`);
+      expect(rule, `chat 分区缺块级 c-v 规则: ${block}`).toBeTruthy();
+      expect(rule).toMatch(/contain-intrinsic-size: auto none auto \d+px;/);
+    }
+  });
+
+  it("reader.css 解释卡同步逐块 c-v:auto；概览条目统一为 auto 记忆 + none 宽占位", () => {
+    const css = read(READER_CSS);
+    for (const block of BLOCKS) {
+      const rule = findRule(css, `.boc-reading-explain-card-answer ${block}`);
+      expect(rule, `解释卡缺块级 c-v 规则: ${block}`).toBeTruthy();
+      expect(rule).toMatch(/contain-intrinsic-size: auto none auto \d+px;/);
+    }
+    expect(css).toMatch(/\.boc-reading-item \{[^}]*contain-intrinsic-size: auto none auto 44px;/s);
+  });
+});
