@@ -168,13 +168,15 @@ describe("noSubtitleReason 清除点", () => {
     expect(clipState.subtitleFetchState).toBe("ready");
     expect(clipState.subtitleBody).toEqual(SUBTITLE_BODY);
     expect(clipState.noSubtitleReason).toBe(null);
-    // 调用了 commit.acceptSubtitle（fetcher 不再手抄接受序列）
+    // 调用了 commit.acceptSubtitle（fetcher 不再手抄接受序列）；runId 随行
+    // 供事务提交前自检代次（M23 runId 协调）
     expect(acceptSubtitle).toHaveBeenCalledTimes(1);
     expect(acceptSubtitle).toHaveBeenCalledWith({
       body: unsortedBody,
       selectedSubtitleId: "track-1",
       selectedSubtitleUrl: "https://example.com/sub.json",
-      selectedSubtitleLang: "中文"
+      selectedSubtitleLang: "中文",
+      runId: 0
     });
     // 缓存命中不发网络请求
     expect(fetchBodyMock).not.toHaveBeenCalled();
@@ -194,7 +196,8 @@ describe("noSubtitleReason 清除点", () => {
       body: SUBTITLE_BODY,
       selectedSubtitleId: "track-1",
       selectedSubtitleUrl: "https://example.com/sub.json",
-      selectedSubtitleLang: "中文"
+      selectedSubtitleLang: "中文",
+      runId: 0
     });
     expect(fetchBodyMock).toHaveBeenCalledWith("https://example.com/sub.json");
   });
