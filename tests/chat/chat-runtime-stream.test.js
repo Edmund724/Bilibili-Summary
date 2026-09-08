@@ -1108,17 +1108,25 @@ describe("M14 增量：流式滚动瞬时化 / 思考文本滚动合帧 / flush 
     expect(textNode.scrollTop).toBe(1000);
   });
 
-  it("流式消息带 chat-msg-streaming 类（豁免 content-visibility），endStream 收口摘除", async () => {
-    const { deps, runtime } = await makeRuntime();
-    const node = assistantNode(deps);
+  it("流式消息带 chat-msg-streaming 类（豁免 content-visibility），下一次发送上屏时摘除上一条", async () => {
+    const { deps, runtime } = await makeRuntime("问题一");
+    const node1 = assistantNode(deps);
     const raf = holdRaf();
 
-    expect(node.classList.contains("chat-msg-streaming")).toBe(true);
-    feed(runtime, { type: "token", data: "正文" });
+    expect(node1.classList.contains("chat-msg-streaming")).toBe(true);
+    feed(runtime, { type: "token", data: "第一条正文" });
     runRafFrames(raf);
-    expect(node.classList.contains("chat-msg-streaming")).toBe(true);
+    expect(node1.classList.contains("chat-msg-streaming")).toBe(true);
+    // done 收口不摘除：流刚结束时切换 c-v 会让视口随估算占位高突变上跳
     feed(runtime, { type: "done" });
-    expect(node.classList.contains("chat-msg-streaming")).toBe(false);
+    expect(node1.classList.contains("chat-msg-streaming")).toBe(true);
+
+    // 下一次发送上屏（强制滚底同一时刻）才摘除上一条，新消息自带豁免
+    deps.input.value = "问题二";
+    await runtime.sendMessage();
+    const node2 = deps.messages.querySelectorAll(".chat-msg-assistant")[1];
+    expect(node1.classList.contains("chat-msg-streaming")).toBe(false);
+    expect(node2.classList.contains("chat-msg-streaming")).toBe(true);
   });
 
   it("flush 同步段抛错：catch 收口记 console.error，不产生 unhandled rejection", async () => {

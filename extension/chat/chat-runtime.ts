@@ -462,10 +462,18 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   // appendAssistantPlaceholder
   // =========================================================================
   function appendAssistantPlaceholder(): HTMLDivElement {
+    // 上一条消息的流式豁免（chat-msg-streaming）到此为止，回归历史消息的
+    // content-visibility 跳过渲染待遇。切换刻意放在新消息上屏、强制滚底的
+    // 同一时刻：高度重估算被发送动作掩盖。若在 endStream 切换，刚完成的
+    // 消息会在静止状态下从真实高度突变回估算占位高（c-v 记忆只在持有
+    // c-v 期间记录，首次施加拿不到），视口莫名上跳。
+    deps.messages
+      .querySelectorAll(".chat-msg-assistant.chat-msg-streaming")
+      .forEach((el) => el.classList.remove("chat-msg-streaming"));
     const node = document.createElement("div");
     // chat-msg-streaming：流式期间豁免 content-visibility 跳过渲染（M13，
     // 见 reader-chat.css）——正在输出的消息需要准确的实时高度，滚动跟随
-    // 才能落到真实底部；endStream 收口时摘除该类。
+    // 才能落到真实底部。
     node.className = "chat-msg chat-msg-assistant chat-msg-streaming";
     // 流式 token 累加器（原 dataset.raw）随占位节点初始化/重置，
     // 保证第二条消息不会串上上一条的流式文本。
@@ -805,8 +813,9 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     if (renderStep) {
       renderStep(node);
     }
-    // 流式结束：回归历史消息的 content-visibility 跳过渲染待遇
-    node.classList.remove("chat-msg-streaming");
+    // 注意：chat-msg-streaming 不在此摘除——流刚结束时切换 c-v 会让刚完成的
+    // 消息从真实高度突变回估算占位高（视口上跳）；摘除挪到下一次发送上屏时
+    //（appendAssistantPlaceholder），高度重估算被强制滚底掩盖。
     activeUserPrompt = "";
     if (activePort) {
       try { activePort.disconnect(); } catch {}
