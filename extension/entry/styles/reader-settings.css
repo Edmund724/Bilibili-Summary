@@ -144,9 +144,12 @@
   box-shadow: 0 0 0 2px var(--boc-reader-accent-soft, #fce0ea);
 }
 
-/* 错误态（裸类）：Q22 甲——段落位置校验失败时标在组件壳上（原生 select 已被
- * clip 隐藏，直接标错会掉 1px 黑洞）；焦点态仍由上方单源叠加光环 */
-.custom-select-trigger.input-error {
+/* 校验错误态（aria-invalid，指南 fallback 通道）：Q22 甲——段落位置校验失败
+ * 时标在组件壳上（原生 select 已被 clip 隐藏，直接标错会掉 1px 黑洞）；行级
+ * 条件规则（空行跳过的条件必填等）原生约束表达不了，由 settings-panel
+ * applyValidationError 落属性、options-rows 行监听修正即摘。焦点态仍由上方
+ * 单源叠加光环。 */
+.custom-select-trigger[aria-invalid="true"] {
   border-color: var(--boc-reader-accent, #fb7299);
 }
 
@@ -204,8 +207,8 @@
 }
 
 /* 复选行统一：.boc-set-check（导出区等长标签）与 .mini-checkbox（笔记属性字段）
- * 共用同一套标签度量与 accent 色——accent-color 不声明时控件回落浏览器默认蓝，
- * 两区会一粉一蓝。单选框（.asr-provider-active）并到同一套度量（Q19）。 */
+ * 共用同一套标签度量——accent 色由下方原生控件统一规则声明。单选框
+ *（.asr-provider-active）并到同一套度量（Q19）。 */
 #boc-reading-view .boc-reading-settings-host .boc-set-check,
 #boc-reading-view .boc-reading-settings-host .mini-checkbox {
   display: flex;
@@ -218,10 +221,18 @@
   cursor: pointer;
 }
 
+/* 原生控件主题色统一（brand-consistent-forms）：checkbox / radio / range 一律
+ * accent 色，单条声明覆盖全表，不引入自定义替代控件（accent-color 只着色这几
+ * 类原生控件）；各控件的 margin/flex 度量留在各自族规则。 */
+#boc-reading-view .boc-reading-settings-host input[type="checkbox"],
+#boc-reading-view .boc-reading-settings-host input[type="radio"],
+#boc-reading-view .boc-reading-settings-host input[type="range"] {
+  accent-color: var(--boc-reader-accent, #fb7299);
+}
+
 #boc-reading-view .boc-reading-settings-host .boc-set-check input[type="checkbox"],
 #boc-reading-view .boc-reading-settings-host .mini-checkbox input[type="checkbox"] {
   margin: 2px 0 0;
-  accent-color: var(--boc-reader-accent, #fb7299);
   flex: 0 0 auto;
 }
 
@@ -271,9 +282,13 @@
   color: var(--boc-reader-accent, #fb7299);
 }
 
-#boc-reading-view .boc-reading-settings-host input.input-error,
-#boc-reading-view .boc-reading-settings-host select.input-error,
-#boc-reading-view .boc-reading-settings-host textarea.input-error {
+/* 校验错误态（aria-invalid fallback 通道）：行级自定义规则（键名字符集 /
+ * 类型相关值格式 / 重复键等）无法用原生约束表达，保存校验失败由
+ * settings-panel.applyValidationError 落属性，修正输入即摘除。设置面板行
+ * 输入没有无条件必填约束（空行整体跳过），不走 :user-invalid。 */
+#boc-reading-view .boc-reading-settings-host input[aria-invalid="true"],
+#boc-reading-view .boc-reading-settings-host select[aria-invalid="true"],
+#boc-reading-view .boc-reading-settings-host textarea[aria-invalid="true"] {
   border-color: var(--boc-reader-accent, #fb7299);
 }
 
@@ -681,7 +696,6 @@
 
 #boc-reading-view .boc-reading-settings-host .asr-provider-active input[type="radio"] {
   margin: 0;
-  accent-color: var(--boc-reader-accent, #fb7299);
 }
 
 #boc-reading-view .boc-reading-settings-host .asr-fallback-checkbox {
@@ -903,6 +917,22 @@
   color: var(--boc-reader-text, #2b2620);
   min-width: 0;
   margin: 0;
+}
+
+/* 原生约束校验态（:user-valid / :user-invalid，Baseline 2023-11）：API 地址
+ * required+pattern、模型名 required、API Key 按 requiresKey/已存 Key 动态
+ * required（provider-editor.wireDialog 挂摘）。浏览器仅在用户提交过值（blur）
+ * 或尝试提交后才进入 :user-invalid，修正输入即自动恢复，无需 JS 摘除；
+ * :user-valid 复用 Key 状态点的成功绿作正向反馈。选择器与上方基础样式同
+ * 优先级、声明在后取胜；聚焦中的错误边框让位焦点光环（上方单源）。 */
+#boc-reading-view .provider-editor-dialog input[type="text"]:user-invalid,
+#boc-reading-view .provider-editor-dialog input[type="password"]:user-invalid {
+  border-color: var(--boc-reader-accent, #fb7299);
+}
+
+#boc-reading-view .provider-editor-dialog input[type="text"]:user-valid,
+#boc-reading-view .provider-editor-dialog input[type="password"]:user-valid {
+  border-color: #3fb950;
 }
 
 #boc-reading-view .provider-editor-dialog .ai-provider-model-wrapper .provider-editor-model {

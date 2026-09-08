@@ -602,7 +602,7 @@ function validateSettings(elements: SettingsElements, payload: SettingsFormPaylo
 function applyValidationError(elements: SettingsElements, validation: SettingsValidationResult): void {
   clearInputErrors(elements);
   if (validation?.field) {
-    validation.field.classList.add("input-error");
+    validation.field.setAttribute("aria-invalid", "true");
     validation.field.focus();
   }
   if (validation?.row) {
@@ -616,24 +616,27 @@ function applyValidationError(elements: SettingsElements, validation: SettingsVa
       const titleInput = row.querySelector<HTMLInputElement>(".note-section-title");
       const contentInput = row.querySelector<HTMLInputElement>(".note-section-content");
       const positionSelect = row.querySelector<HTMLSelectElement>(".note-section-position");
-      // 段落位置的 input-error 与焦点落在组件 trigger 上（Q22 甲）：select 已被
+      // 段落位置的错误态落在组件 trigger 上（Q22 甲）：select 已被
       // custom-select 壳 clip 隐藏，直接标错/聚焦会掉进 1px 黑洞
       const positionTrigger = row.querySelector<HTMLElement>(
         ".note-section-field-position .custom-select-wrapper .custom-select-trigger"
       );
       const noteSectionErrorNode = row.querySelector<HTMLElement>(".note-section-error");
       if (titleInput || contentInput || positionTrigger) {
+        // 错误态走 aria-invalid（reader-settings.css 校验态规则的 fallback 通道，
+        // 指南对原生约束表达不了的条件规则的推荐面）；焦点仍落组件 trigger
+        //（Q22 甲：select 已被 custom-select 壳 clip 隐藏，直接聚焦会掉进 1px 黑洞）
         if (titleInput && !String(titleInput.value || "").trim()) {
-          titleInput.classList.add("input-error");
+          titleInput.setAttribute("aria-invalid", "true");
           titleInput.focus();
         } else if (positionTrigger && positionSelect && !NOTE_SECTION_POSITIONS.has(String(positionSelect.value || "").trim())) {
-          positionTrigger.classList.add("input-error");
+          positionTrigger.setAttribute("aria-invalid", "true");
           positionTrigger.focus();
         } else if (contentInput && validation.requireContent) {
-          contentInput.classList.add("input-error");
+          contentInput.setAttribute("aria-invalid", "true");
           contentInput.focus();
         } else if (titleInput) {
-          titleInput.classList.add("input-error");
+          titleInput.setAttribute("aria-invalid", "true");
           titleInput.focus();
         }
         if (noteSectionErrorNode) {
@@ -644,13 +647,13 @@ function applyValidationError(elements: SettingsElements, validation: SettingsVa
         return;
       }
       if (keyInput && !String(keyInput.value || "").trim()) {
-        keyInput.classList.add("input-error");
+        keyInput.setAttribute("aria-invalid", "true");
         keyInput.focus();
       } else if (valueInput && !String(valueInput.value || "").trim()) {
-        valueInput.classList.add("input-error");
+        valueInput.setAttribute("aria-invalid", "true");
         valueInput.focus();
       } else if (keyInput) {
-        keyInput.classList.add("input-error");
+        keyInput.setAttribute("aria-invalid", "true");
         keyInput.focus();
       }
 
@@ -666,7 +669,7 @@ function applyValidationError(elements: SettingsElements, validation: SettingsVa
 
 function clearInputErrors(elements: SettingsElements): void {
   [elements.tags].forEach((input) => {
-    input?.classList.remove("input-error");
+    input?.removeAttribute("aria-invalid");
   });
   clearFixedPropertyErrors(elements.fixedPropertiesList);
   clearNoteSectionErrors(elements.noteSectionsList);
@@ -770,7 +773,7 @@ function bindSettingsEvents(host: HTMLElement): void {
     }
   });
   [elements.tags].forEach((input) => {
-    input?.addEventListener("input", () => input.classList.remove("input-error"));
+    input?.addEventListener("input", () => input.removeAttribute("aria-invalid"));
   });
   // ASR：总开关即时持久化
   elements.asrAutoFallback?.addEventListener("change", async () => {

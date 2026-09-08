@@ -14,7 +14,9 @@
 //   sanitizer 会剥掉换行（jsdom 与真实浏览器一致）；row 分支曾是真 bug
 //   （validators 返回的 row 是收集对象 {key,type,value,row}，产线把它当
 //   HTMLElement 调 querySelector → TypeError），已由 02 票修复并在此补
-//   行级落位断言（见文末与两票 Comments）。
+//   行级落位断言（见文末与两票 Comments）。行级错误态载体是 aria-invalid
+//   属性（M9 校验态现代化：原生约束表达不了的条件规则走指南 fallback 通道，
+//   CSS 侧 reader-settings.css 的 [aria-invalid="true"] 规则消费）。
 //
 // chrome.runtime.sendMessage 换装成按 type 分发的消息总线（sent 记录全部出站
 // 报文），loadSettings 是 fire-and-forget，mountPanel 用 vi.waitFor 等装载链
@@ -163,17 +165,17 @@ describe("applyValidationError：可达分支直测 + clearInputErrors 联动", 
     const fixedRow = host.querySelector("#fixedPropertiesList .fixed-property-row");
     const staleKey = fixedRow.querySelector(".fixed-property-key");
     const staleErrorNode = fixedRow.querySelector(".fixed-property-error");
-    staleKey.classList.add("input-error");
+    staleKey.setAttribute("aria-invalid", "true");
     staleErrorNode.hidden = false;
     staleErrorNode.textContent = "旧错误残留";
 
     fireClick(host.querySelector("#addNoteSectionBtn"));
     const noteRow = host.querySelector("#noteSectionsList .note-section-row");
     const staleTitle = noteRow.querySelector(".note-section-title");
-    staleTitle.classList.add("input-error");
+    staleTitle.setAttribute("aria-invalid", "true");
 
     const tags = host.querySelector("#tags");
-    tags.classList.add("input-error");
+    tags.setAttribute("aria-invalid", "true");
 
     fireClick(host.querySelector("#bocSettingsSaveBtn"));
 
@@ -183,11 +185,11 @@ describe("applyValidationError：可达分支直测 + clearInputErrors 联动", 
 
     // 联动：saveSettings 第一步 clearInputErrors 清掉全部旧错误态
     //（预置行 key/value 均空，validators 跳过空行，不阻断保存）
-    expect(tags.classList.contains("input-error")).toBe(false);
-    expect(staleKey.classList.contains("input-error")).toBe(false);
+    expect(tags.getAttribute("aria-invalid")).toBeNull();
+    expect(staleKey.getAttribute("aria-invalid")).toBeNull();
     expect(staleErrorNode.hidden).toBe(true);
     expect(staleErrorNode.textContent).toBe("");
-    expect(staleTitle.classList.contains("input-error")).toBe(false);
+    expect(staleTitle.getAttribute("aria-invalid")).toBeNull();
     expect(lastStatus(host).dataset.error).toBe("false");
     expect(sent.some((message) => message.type === "save-settings")).toBe(true);
   });
@@ -197,10 +199,10 @@ describe("applyValidationError：可达分支直测 + clearInputErrors 联动", 
     const host = await mountPanel();
 
     const tags = host.querySelector("#tags");
-    tags.classList.add("input-error");
+    tags.setAttribute("aria-invalid", "true");
     tags.dispatchEvent(new Event("input", { bubbles: true }));
 
-    expect(tags.classList.contains("input-error")).toBe(false);
+    expect(tags.getAttribute("aria-invalid")).toBeNull();
   });
 
   // 行级落位断言（arch-slim-2/02 补）：05 票发现的 row 级真 bug（validators
@@ -223,7 +225,7 @@ describe("applyValidationError：可达分支直测 + clearInputErrors 联动", 
 
     // 行内落位：key 输入框标错并聚焦，行内错误节点显示具体文案
     const keyInput = row.querySelector(".fixed-property-key");
-    expect(keyInput.classList.contains("input-error")).toBe(true);
+    expect(keyInput.getAttribute("aria-invalid")).toBe("true");
     expect(document.activeElement).toBe(keyInput);
     const errorNode = row.querySelector(".fixed-property-error");
     expect(errorNode.hidden).toBe(false);
@@ -249,9 +251,9 @@ describe("applyValidationError：可达分支直测 + clearInputErrors 联动", 
     fireClick(host.querySelector("#bocSettingsSaveBtn"));
 
     const valueInput = row.querySelector(".fixed-property-value");
-    expect(valueInput.classList.contains("input-error")).toBe(true);
+    expect(valueInput.getAttribute("aria-invalid")).toBe("true");
     expect(document.activeElement).toBe(valueInput);
-    expect(row.querySelector(".fixed-property-key").classList.contains("input-error")).toBe(false);
+    expect(row.querySelector(".fixed-property-key").getAttribute("aria-invalid")).toBeNull();
     const errorNode = row.querySelector(".fixed-property-error");
     expect(errorNode.hidden).toBe(false);
     expect(errorNode.textContent).toBe("请填写固定属性的属性值");
@@ -272,7 +274,7 @@ describe("applyValidationError：可达分支直测 + clearInputErrors 联动", 
     fireClick(host.querySelector("#bocSettingsSaveBtn"));
 
     const titleInput = row.querySelector(".note-section-title");
-    expect(titleInput.classList.contains("input-error")).toBe(true);
+    expect(titleInput.getAttribute("aria-invalid")).toBe("true");
     expect(document.activeElement).toBe(titleInput);
     const errorNode = row.querySelector(".note-section-error");
     expect(errorNode.hidden).toBe(false);

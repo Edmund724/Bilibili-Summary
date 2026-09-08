@@ -114,7 +114,7 @@ export function addFixedPropertyRow(listNode: HTMLElement, emptyNode: HTMLElemen
 
   row.querySelectorAll("input").forEach((input) => {
     input.addEventListener("input", () => {
-      input.classList.remove("input-error");
+      input.removeAttribute("aria-invalid");
       clearFixedPropertyErrorState(row);
     });
   });
@@ -151,10 +151,7 @@ export function collectFixedPropertyRows(listNode: HTMLElement, { includeRow = f
 
 export function clearFixedPropertyErrors(listNode: HTMLElement): void {
   listNode.querySelectorAll(".fixed-property-key, .fixed-property-value").forEach((input) => {
-    input.classList.remove("input-error");
-  });
-  listNode.querySelectorAll(".fixed-property-type-button").forEach((input) => {
-    input.classList.remove("input-error");
+    input.removeAttribute("aria-invalid");
   });
   listNode.querySelectorAll<HTMLElement>(".fixed-property-error").forEach((node) => {
     node.hidden = true;
@@ -249,11 +246,11 @@ export function collectNoteSectionRows(listNode: HTMLElement, { includeRow = fal
 
 export function clearNoteSectionErrors(listNode: HTMLElement): void {
   listNode.querySelectorAll(".note-section-title, .note-section-content, .note-section-position").forEach((input) => {
-    input.classList.remove("input-error");
+    input.removeAttribute("aria-invalid");
   });
-  // 段落位置的 input-error 落在组件 trigger 上（Q22 甲），清错连带摘除
+  // 段落位置的错误态落在组件 trigger 上（Q22 甲），清错连带摘除
   listNode.querySelectorAll<HTMLElement>(".note-section-row .custom-select-trigger").forEach((trigger) => {
-    trigger.classList.remove("input-error");
+    trigger.removeAttribute("aria-invalid");
   });
   listNode.querySelectorAll<HTMLElement>(".note-section-error").forEach((node) => {
     node.hidden = true;
@@ -338,8 +335,8 @@ function bindFixedPropertyValueEvents(row: HTMLElement): void {
 }
 
 function clearFixedPropertyErrorState(row: HTMLElement): void {
-  row.querySelectorAll(".fixed-property-key, .fixed-property-value, .fixed-property-type-button").forEach((input) => {
-    input.classList.remove("input-error");
+  row.querySelectorAll(".fixed-property-key, .fixed-property-value").forEach((input) => {
+    input.removeAttribute("aria-invalid");
   });
   const errorNode = row.querySelector(".fixed-property-error") as HTMLElement | null;
   if (errorNode) {
@@ -350,11 +347,11 @@ function clearFixedPropertyErrorState(row: HTMLElement): void {
 
 function clearNoteSectionErrorState(row: HTMLElement): void {
   row.querySelectorAll(".note-section-title, .note-section-content, .note-section-position").forEach((input) => {
-    input.classList.remove("input-error");
+    input.removeAttribute("aria-invalid");
   });
-  // 段落位置的 input-error 落在组件 trigger 上（Q22 甲），清错连带摘除
+  // 段落位置的错误态落在组件 trigger 上（Q22 甲），清错连带摘除
   row.querySelectorAll<HTMLElement>(".custom-select-trigger").forEach((trigger) => {
-    trigger.classList.remove("input-error");
+    trigger.removeAttribute("aria-invalid");
   });
   const errorNode = row.querySelector(".note-section-error") as HTMLElement | null;
   if (errorNode) {

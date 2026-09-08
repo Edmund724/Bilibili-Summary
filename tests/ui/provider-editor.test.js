@@ -566,3 +566,75 @@ describe("provider-editor：预设切换（Modal 内不代申请权限）", () =
     expect(dialog.querySelector(".provider-editor-apikey").value).toBe("");
   });
 });
+
+// M9 校验态现代化：字段级错误态不再走手写 input-error 类，改为原生约束
+//（required / pattern）+ reader-settings.css 的 :user-invalid/:user-valid
+// CSS 校验态——浏览器只在用户提交过值（blur）或尝试提交后才进入
+// :user-invalid，天然满足「仅在用户交互后展示错误」。这里锁定属性面：
+// 保存链报文语义与校验口径零改动（JS validators 仍是权威，上方用例覆盖）。
+describe("provider-editor：原生约束校验属性（:user-invalid CSS 校验态的属性面）", () => {
+  it("新增 AI（custom 预设）：baseUrl required+pattern、模型名 required、Key required", async () => {
+    const { host } = await mountPanel();
+    const { dialog } = await openEditor(host, "#addAiProviderBtn");
+
+    const baseUrl = dialog.querySelector(".provider-editor-baseurl");
+    expect(baseUrl.required).toBe(true);
+    expect(baseUrl.getAttribute("pattern")).toBe("https?://.+");
+    expect(dialog.querySelector(".provider-editor-model").required).toBe(true);
+    expect(dialog.querySelector(".provider-editor-apikey").required).toBe(true);
+  });
+
+  it("切换到免 Key 预设（ollama）：Key required 摘除，切回必填预设恢复", async () => {
+    const { host } = await mountPanel();
+    const { dialog } = await openEditor(host, "#addAiProviderBtn");
+    const select = dialog.querySelector(".provider-editor-preset");
+    const apikey = dialog.querySelector(".provider-editor-apikey");
+
+    select.value = "ollama";
+    select.dispatchEvent(new Event("change"));
+    expect(apikey.required).toBe(false);
+
+    select.value = "openai_compat";
+    select.dispatchEvent(new Event("change"));
+    expect(apikey.required).toBe(true);
+  });
+
+  it("编辑已存 Key 的平台：Key 不 required（空值沿用已存 Key）", async () => {
+    const aiItem = { id: "p1", presetId: "custom", name: "自定义", baseUrl: "https://api.example.com/v1", model: "gpt-4o-mini", requiresKey: true, enabled: true, hasSavedKey: true };
+    const { host } = await mountPanel({
+      "ai-providers-list": () => ({ ok: true, providers: [aiItem] })
+    });
+    const row = host.querySelector("#aiProvidersList .ai-provider-row");
+    const { dialog } = await openEditor(host, row.querySelector(".provider-row-edit"));
+
+    expect(dialog.querySelector(".provider-editor-apikey").required).toBe(false);
+  });
+
+  it("ASR Modal：baseUrl required+pattern、模型名 required 同样就位", async () => {
+    const { host } = await mountPanel();
+    const { dialog } = await openEditor(host, "#addAsrProviderBtn");
+
+    expect(dialog.querySelector(".provider-editor-baseurl").required).toBe(true);
+    expect(dialog.querySelector(".provider-editor-baseurl").getAttribute("pattern")).toBe("https?://.+");
+    expect(dialog.querySelector(".provider-editor-model").required).toBe(true);
+    expect(dialog.querySelector(".provider-editor-apikey").required).toBe(true);
+  });
+
+  it("可达性桥：blur/input 同步 aria-invalid 不抛错；jsdom 无 :user-invalid 判定时属性面保持干净", async () => {
+    const { host } = await mountPanel();
+    const { dialog } = await openEditor(host, "#addAiProviderBtn");
+    const baseUrl = dialog.querySelector(".provider-editor-baseurl");
+
+    // 有效值 input + blur：桥照常运行（Chrome 上 matches(":user-invalid") 为 false
+    // → 摘属性；jsdom 恒 false，负向路径一致）
+    baseUrl.value = "https://api.example.com/v1";
+    baseUrl.dispatchEvent(new Event("input", { bubbles: true }));
+    baseUrl.dispatchEvent(new FocusEvent("blur"));
+    expect(baseUrl.getAttribute("aria-invalid")).toBeNull();
+
+    // 非输入控件（dialog 本身、按钮）不进桥
+    expect(() => dialog.dispatchEvent(new FocusEvent("blur"))).not.toThrow();
+    expect(() => dialog.querySelector(".provider-editor-save").dispatchEvent(new Event("input", { bubbles: true }))).not.toThrow();
+    expect(dialog.querySelector(".provider-editor-save").getAttribute("aria-invalid")).toBeNull();
+  });
+});
