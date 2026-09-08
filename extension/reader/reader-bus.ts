@@ -28,6 +28,14 @@
 //     the reader domain delegates player-ai quick-action sync to a callback
 //     registered by content.js, because importing ai/player-ai.js would pull
 //     core/runtime.js (and thus an import cycle) into the reader graph.
+//   reader → ui 壳 (shell commands):
+//     reader 侧三处对 ui 壳交互的回头调（lifecycle enterReaderMode 的 tab 重置、
+//     explain-card「去对话追问」的切 tab + 激活、chat-tab 快捷动作定位与空态
+//     「前往设置」）改发具名命令 requestUiCommand(name, payload?)；ui-renderer
+//     在模块装载时经 subscribeUiCommand 注册单 handler 执行壳操作。reader 域
+//     从此不再静态 import ui/ui-renderer（arch-review-2026-09/10 依赖反向边
+//     清零），壳缺失（未装载/命令名未注册）时命令静默丢弃——与原先 DOM 缺失
+//     时 setter 空转同形。
 //
 // All payloads are read from the shared state at notification time, so the
 // callbacks need no arguments.
@@ -39,6 +47,7 @@ type SubtitleRefreshHandler = () => unknown;
 type SettingsPersistHandler = () => void;
 type SettingsLoadHandler = () => unknown;
 type PlayerAiSyncHandler = (delayMs?: number, options?: { resetRetry?: boolean }) => void;
+type UiCommandHandler = (name: string, payload?: unknown) => void;
 
 const readers: ReaderPresenterHandler[] = [];
 
@@ -167,5 +176,29 @@ export function requestPlayerAiSync(delayMs?: number, options?: { resetRetry?: b
     playerAiSyncHandler(delayMs, options);
   } catch (error) {
     logWarn("[BOC] player-ai sync handler failed", { error });
+  }
+}
+
+// Registers the ui-renderer callback that executes shell commands (tab
+// reset/switch, settings drawer). reader 域经 requestUiCommand 发命令而不静态
+// import ui-renderer（依赖反向边清零，arch-review-2026-09/10）；单 handler 槽，
+// 与 settings persist/load、player-ai sync 两个能力槽同形。
+let uiCommandHandler: UiCommandHandler | null = null;
+
+export function subscribeUiCommand(handler: UiCommandHandler) {
+  uiCommandHandler = typeof handler === "function" ? handler : null;
+}
+
+// 壳命令纯转发（fire-and-forget）：壳未装载（无 handler）或命令名未识别时静默
+// 丢弃——reader 域发命令早于壳装载是合法时序（原 ui-renderer setter 在 DOM 缺失
+// 时同样空转）。handler 内异常只记日志不上抛。
+export function requestUiCommand(name: string, payload?: unknown) {
+  if (!uiCommandHandler) {
+    return;
+  }
+  try {
+    uiCommandHandler(name, payload);
+  } catch (error) {
+    logWarn("[BOC] ui command handler failed", { name, error });
   }
 }

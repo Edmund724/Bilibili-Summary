@@ -1,13 +1,16 @@
-// model-select-width.ts — modelSelect 宽度度量（候选09 自 sidepanel.js 迁出）。
+// model-select-width.ts — modelSelect 宽度度量（候选09 自 sidepanel.js 迁出；
+// 工单 arch-review-2026-09/10 自 ui/ 搬入 chat/——三处消费全在 chat/reader 的
+// 对话链（chat/providers.ts、reader/chat-tab.ts），搬家的目的是断掉 chat → ui
+// 的最后一条逻辑边）。
 //
 // 纯 UI 度量叶子（零 import）：用离屏 canvas 按当前计算字体测量选中项文案宽，
 // 叠加 "000" 兜底宽 + 36px 装饰余量，再夹在 [92, toolbar 剩余宽度] 区间内，
 // 结果写回 select 的内联 width。canvas 不可用（getContext 返回 null）时退化为
 // 每字符 8px 估算，行为与迁出前一致。
 //
-// 依赖方向：无——侧面板（sidepanel.js）在 change/resize/渲染三个调用点传入
-// 其模块级 `els` 引用包（modelSelect/toolbar/thinkingToggle/presetBtn），本
-// 模块不反向依赖任何页面模块，可在 jsdom 下直接单测。
+// 依赖方向：无——消费方（对话组合根/providers 工厂）在 change/resize/渲染三个
+// 调用点传入其模块级 `els` 引用包（modelSelect/toolbar/thinkingToggle/presetBtn），
+// 本模块不反向依赖任何页面模块，可在 jsdom 下直接单测。
 
 // sidepanel 模块级 els 引用包中本模块关心的字段；均可缺省（缺省时走各自的
 // 兜底分支：无 modelSelect 直接返回，无 toolbar 用 232 默认上限）。

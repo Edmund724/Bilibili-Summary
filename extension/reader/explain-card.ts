@@ -11,8 +11,9 @@
 // 整句交给对话 tab 自动发送（用户在解释之后想继续追问时的正路）。
 //
 // 依赖方向：本模块属 reader 动态域（reader/index.js 聚合导出，ui-renderer 经
-// ensureReaderDomain 装载后调用），可静态依赖 ai 域与 ui 壳层 setter——与
-// reader/chat-tab.js 静态 import ui-renderer 的 setReaderDigestTab 同款先例。
+// ensureReaderDomain 装载后调用），可静态依赖 ai 域；对 ui 壳的「切对话 tab +
+// 激活」回头调经 reader-bus 的 requestUiCommand 命令通道反转（工单
+// arch-review-2026-09/10），本模块不再静态 import ui 壳。
 //
 // 竞态：一次只开一张卡；重复打开（换选区再点）先 abort 上一请求，runId 守卫
 // 丢弃过期回执。关闭阅读视图（lifecycle.closeReadingView）也走 close。
@@ -25,7 +26,7 @@ import { resolveActiveProvider } from "../ai/active-provider.js";
 import { logWarn } from "../shared/logging.js";
 import { ids } from "./state.js";
 import { setPendingExplainIntent } from "./explain-intent.js";
-import { setReaderDigestTab, activateReaderChatTab } from "../ui/ui-renderer.js";
+import { requestUiCommand } from "./reader-bus.js";
 
 type ExplainCardPhase = "loading" | "ready" | "error";
 
@@ -248,7 +249,8 @@ export function onReaderExplainCardClick(event: MouseEvent): void {
   if (action === "ask-chat") {
     // 意图契约（reader/explain-intent.ts）：selection 带上用户实际选中的片段，
     // 对话 tab 据此出「解释这个词」的提示词；卡片自身负责关（切 tab 后卡片在
-    // 字幕 tab 里，不关会残留）。
+    // 字幕 tab 里，不关会残留）。切 tab + 激活由壳经 set-tab:chat 命令统一做
+    //（arch-review-2026-09/10 依赖反转，壳内与 tab click 分支同款组合）。
     setPendingExplainIntent({
       from: card.from,
       content: card.line,
@@ -256,8 +258,7 @@ export function onReaderExplainCardClick(event: MouseEvent): void {
       createdAt: Date.now()
     });
     closeReaderExplainCard();
-    setReaderDigestTab("chat");
-    activateReaderChatTab();
+    requestUiCommand("set-tab:chat");
   }
 }
 

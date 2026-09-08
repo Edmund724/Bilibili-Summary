@@ -38,6 +38,10 @@ import { ensureReaderChatStyles } from "../shared/style-injector.js";
 //   - ui/reader-gate.ts：withReader/whenReaderReady 转发助手单源（壳与 tab
 //     叶子共用，禁止复制）。
 import { withReader } from "./reader-gate.js";
+// 壳命令通道（arch-review-2026-09/10 reader→ui 反转）：reader 域三处壳回头调
+//（lifecycle 重置 / explain-card 去对话追问 / chat-tab 快捷动作与「前往设置」）
+// 改发 reader-bus 命令，本壳注册 handler 执行——reader 域不再静态 import 本模块。
+import { subscribeUiCommand } from "../reader/reader-bus.js";
 import { buildChatTabBodyHtml } from "../reader/chat-template.js";
 import { buildSubtitleTabBodyHtml, bindSubtitleTabEvents } from "../reader/subtitle-tab-ui.js";
 import { buildExplainPopHtml, buildExplainCardHostHtml, bindReadingExplainEvents } from "../reader/explain-pop-ui.js";
@@ -169,10 +173,12 @@ export function resetReaderDigestTabs(): void {
 // PR5：AI 对话 tab 的二级惰性激活入口。首次切到对话 tab 时经
 // ensureReaderChatTab 装载组合根（reader/chat-tab.ts）并 init；已装载时为
 // 幂等的重开恢复 + 待解释意图消费。装载/激活失败只记日志（对话不可用不拖垮
-// 阅读视图其余两 tab）。
-export function activateReaderChatTab(): void {
+// 阅读视图其余两 tab）。consumeIntent 透传（arch-review-2026-09/10）：tab 点击
+// 与 explain-card「去对话追问」走默认 true；chat-tab 快捷动作经 set-tab:chat
+// 命令传 false（与快捷发送互不踩踏，不消费待解释意图）。
+export function activateReaderChatTab({ consumeIntent = true }: { consumeIntent?: boolean } = {}): void {
   ensureReaderChatTab()
-    .then((chat) => chat.ensureChatTabActivated())
+    .then((chat) => chat.ensureChatTabActivated({ consumeIntent }))
     .catch((error) => logWarn("[BOC] chat tab activate failed", error));
 }
 
@@ -184,6 +190,33 @@ export function openReaderSettingsPanel(): void {
   state.reader.setSettingsExpanded(true);
   withReader("reader panels render", (reader) => reader.renderReaderPanels());
 }
+
+// 壳命令通道 handler（arch-review-2026-09/10）：reader 域三处壳回头调改发
+// reader-bus 具名命令，本壳是唯一执行方。三命令：
+//   - "reset-tabs"：进入阅读模式重置回默认「字幕」tab（lifecycle.enterReaderMode）；
+//   - "set-tab:chat"：切到对话 tab + 激活——原 explain-card「去对话追问」与
+//     下方 tab click 分支的「setReaderDigestTab("chat") + activateReaderChatTab」
+//     重复组合收敛到此一处，reader 侧只发一次命令；payload.consumeIntent ===
+//     false 时透传（chat-tab 快捷动作路径不消费待解释意图）；
+//   - "open-settings"：打开侧边栏设置抽屉（chat-tab 空态「前往设置」与提示条
+//     onOpenSettings）。
+// 命令到达时壳必然已装载（本模块被装载才注册），但目标 DOM 缺失时各 setter
+// 空转，与原 reader 侧直调的行为同形。
+subscribeUiCommand((name, payload) => {
+  if (name === "set-tab:chat") {
+    setReaderDigestTab("chat");
+    const consumeIntent = (payload as { consumeIntent?: boolean } | null)?.consumeIntent !== false;
+    activateReaderChatTab({ consumeIntent });
+    return;
+  }
+  if (name === "open-settings") {
+    openReaderSettingsPanel();
+    return;
+  }
+  if (name === "reset-tabs") {
+    resetReaderDigestTabs();
+  }
+});
 
 export function bindUiEvents(): void {
   // digest-only-ui：A 形态经典侧栏面板已删除，模板不再包含旧壳节点
@@ -201,7 +234,8 @@ export function bindUiEvents(): void {
 
   // Digest 面板三标签切换（纯壳交互，见上方 setReaderDigestTab 注释）。
   // 切到 AI 对话 tab（PR5）：二级惰性激活对话组合根（首次装载 + 恢复路径 +
-  // 消费待解释意图，见 activateReaderChatTab）。
+  // 消费待解释意图，见 activateReaderChatTab）；「切 tab + 激活」组合与
+  // set-tab:chat 壳命令同款（arch-review-2026-09/10 收敛，命令执行在本文件）。
   // 切到概览 tab（PR4）：未生成则自动触发生成（idle 才触发，生成中复用进行中
   // promise，已生成不重跑）；reader 域交互按惯例经 ui/reader-gate 装载后转发。
   for (const def of DIGEST_TAB_DEFS) {

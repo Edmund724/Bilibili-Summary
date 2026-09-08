@@ -74,7 +74,7 @@ import {
   isPinnedContextTruthy,
   type NoSubtitleReason
 } from "../chat/tab-domain.js";
-import { updateModelSelectWidth } from "../ui/model-select-width.js";
+import { updateModelSelectWidth } from "../chat/model-select-width.js";
 // reader 触发源与进程内相位（content script 收不到自己的 runtime 广播）。
 import { BOC_URL_CHANGE_EVENT } from "../core/url-watcher.js";
 import {
@@ -92,7 +92,10 @@ import { createReaderChatLists } from "./chat-lists.js";
 import { createReaderChatFeedback } from "./chat-notices.js";
 import { createReaderChatPopovers } from "./chat-popovers.js";
 import { setChatTabOutsideClickHandler } from "./chat-tab-bridge.js";
-import { setReaderDigestTab, openReaderSettingsPanel } from "../ui/ui-renderer.js";
+// 壳命令通道（arch-review-2026-09/10 依赖反转）：快捷动作定位对话 tab 与空态
+// 「前往设置」改发 reader-bus 具名命令，由 ui-renderer 注册的 handler 执行——
+// 本文件不再静态 import ui/ui-renderer。
+import { requestUiCommand } from "./reader-bus.js";
 // 对话分区表模块顶兜底挂载（arch-slim-4/07，settings-panel.ts 顶挂载同款先例）：
 // 主点在 ui-renderer setReaderDigestTab 的 chat 分支（盖住现役三入口），此处盖
 // 住未来新入口——本模块被动态装载即样式在场；ensure 内部 mounted Map 去重。
@@ -285,8 +288,9 @@ const feedback = createReaderChatFeedback({
   setSuggestionsNode: (node) => {
     suggestionsNode = node;
   },
-  // digest-only-ui：提示条「前往设置」打开侧边栏设置抽屉（open-options 已删）
-  onOpenSettings: () => openReaderSettingsPanel()
+  // digest-only-ui：提示条「前往设置」打开侧边栏设置抽屉（open-options 已删；
+  // 经 reader-bus open-settings 命令由壳执行，arch-review-2026-09/10）
+  onOpenSettings: () => requestUiCommand("open-settings")
 });
 const {
   showConversationContextNotice,
@@ -632,8 +636,11 @@ export function closeChatSession(): void {
 // ============================================================
 
 export async function runQuickActionPrompt(prompt: string): Promise<boolean> {
-  // 定位/聚焦对话 tab（不触达字幕 tab 的滚动状态）。
-  setReaderDigestTab("chat");
+  // 定位/聚焦对话 tab（不触达字幕 tab 的滚动状态）。切 tab + 激活由壳经
+  // set-tab:chat 命令统一执行（arch-review-2026-09/10）；consumeIntent:false
+  // 透传给壳的激活入口——与快捷发送互不踩踏，不消费待解释意图。下方再显式
+  // await 激活：命令是 fire-and-forget，发送流程必须等装载/恢复落定。
+  requestUiCommand("set-tab:chat", { consumeIntent: false });
   // 首次调用完成装载；已装载时为幂等 no-op（不消费待解释意图——与快捷动作
   // 发送互不踩踏）。
   await ensureChatTabActivated({ consumeIntent: false });
@@ -810,7 +817,7 @@ function bindEvents(): void {
       // 关闭（与壳内 readingSettingsToggleBtn 的 stopPropagation 同一先例）。
       event.preventDefault();
       event.stopPropagation();
-      openReaderSettingsPanel();
+      requestUiCommand("open-settings");
     }
   });
 }
