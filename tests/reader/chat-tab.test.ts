@@ -309,6 +309,33 @@ describe("subtitle-wait kick 总线接线", () => {
     expect(asrNotice.hidden).toBe(true);
     await activation;
   });
+
+  it("有字幕视频抓取中等待：消息区显示抓取文案，不误报音频转写", async () => {
+    // 抓取中：subtitleFetchState loading + 字幕体为空，相位 idle（非转写）
+    state.clip.title = "测试视频";
+    state.clip.bvid = "BV1test000000";
+    state.clip.cid = "101";
+    state.clip.subtitleFetchState = "loading";
+    state.clip.subtitleBody = [];
+    explainIntent.setPendingExplainIntent({ from: 20, content: "抓取中句", createdAt: Date.now() });
+
+    const chat = await lazyChat.ensureReaderChatTab();
+    // 不 await 激活：发送卡在等待中，activate 到放行才落定（同上例时序）
+    const activation = chat.ensureChatTabActivated();
+
+    // 等待提示走消息区抓取文案；转写状态行不亮（无字幕/转写只属转写场景）
+    const messages = document.getElementById(ids.readingChatMessages) as HTMLElement;
+    await waitFor(() => Boolean(messages.querySelector(".chat-context-notice")));
+    expect(messages.querySelector(".chat-context-notice")?.textContent).toContain("正在抓取字幕");
+    expect((document.getElementById(ids.readingChatAsrNotice) as HTMLElement).hidden).toBe(true);
+
+    // 抓取完成 → 轮询放行（无相位广播可 kick，等一轮 4s 轮询），通知清理
+    state.clip.subtitleFetchState = "ready";
+    state.clip.subtitleBody = [{ from: 0, to: 10, content: "大家好" }];
+    await waitFor(() => ports.length === 1, { timeoutMs: 6000 });
+    expect(messages.querySelector(".chat-context-notice")).toBeNull();
+    await activation;
+  });
 });
 
 describe("断流收口（工单 08：关闭即断流，重开从会话历史恢复）", () => {
@@ -351,7 +378,10 @@ describe("断流收口（工单 08：关闭即断流，重开从会话历史恢�
     const messages = document.getElementById(ids.readingChatMessages) as HTMLElement;
     expect(messages.querySelector(".chat-center-error")).toBeNull();
     expect(messages.querySelector(".chat-suggestions")).not.toBe(null);
-    // 触发源重挂：相位总线又能驱动 asr 提示行
+    // 触发源重挂：相位总线又能驱动 asr 提示行（转写中判定要求字幕体为空，
+    // 临时切 loading 空体模拟转写窗口）
+    state.clip.subtitleFetchState = "loading";
+    state.clip.subtitleBody = [];
     statusBus.publishSubtitleStatusPhase("asr-transcribing");
     expect((document.getElementById(ids.readingChatAsrNotice) as HTMLElement).hidden).toBe(false);
     statusBus.publishSubtitleStatusPhase("idle");

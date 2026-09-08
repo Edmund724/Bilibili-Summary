@@ -77,10 +77,9 @@ import {
 import { scheduleModelSelectWidthUpdate, updateModelSelectWidth } from "../chat/model-select-width.js";
 // reader 触发源与进程内相位（content script 收不到自己的 runtime 广播）。
 import { BOC_URL_CHANGE_EVENT } from "../core/url-watcher.js";
-import {
-  getSubtitleStatusPhase,
-  subscribeSubtitleStatusPhase
-} from "../shared/subtitle-status-bus.js";
+import { subscribeSubtitleStatusPhase } from "../shared/subtitle-status-bus.js";
+// 转写中判定（与字幕 tab 横幅同源：相位 transcribing 且字幕体为空）。
+import { isReaderTranscribing } from "./transcribe-banner.js";
 // PR3 契约：待解释意图 peek/consume/clear（消费落在本组合根）。
 import {
   peekPendingExplainIntent,
@@ -153,19 +152,21 @@ let unsubscribeStatusBus: (() => void) | null = null;
 
 // 无字幕转写提示：本行只在转写相位（含等待发送期间）显示。原实现等待发送时在
 // 消息区另起一条 .chat-context-notice（「正在等待音频转写完成…」），与状态行
-// 「该视频无字幕，正在音频转写…」同屏重复——现按相位路由：转写相位下等待期并入
-// 本行切换为合并句（唯一提示），非转写相位的等待（字幕抓取进行中）沿用消息区
-// 通知（该场景状态行隐藏，无重复）。
+// 「该视频无字幕，正在音频转写…」同屏重复——现按等待原因路由：转写中的等待并入
+// 本行切换为合并句（唯一提示），仅字幕抓取中的等待走消息区通知（抓取文案，该
+// 场景状态行隐藏，无重复）。
 const ASR_TRANSCRIBING_NOTICE = "该视频无字幕，正在音频转写…";
 const ASR_WAITING_NOTICE = "该视频无字幕，正在音频转写，完成后自动开始总结…";
-const SUBTITLE_WAIT_NOTICE = "正在等待音频转写完成，完成后自动开始总结…";
+const SUBTITLE_FETCHING_NOTICE = "正在抓取字幕，完成后自动开始总结…";
 let asrWaitingActive = false;
 
 function updateAsrNotice(): void {
   if (!els.asrNotice) {
     return;
   }
-  els.asrNotice.hidden = getSubtitleStatusPhase() !== "asr-transcribing" && !asrWaitingActive;
+  // 转写判定与字幕 tab 横幅同源（isReaderTranscribing：相位 transcribing 且
+  // 字幕体为空——防御切视频后的相位残留压住有字幕视频的对话栏）。
+  els.asrNotice.hidden = !isReaderTranscribing() && !asrWaitingActive;
   els.asrNotice.textContent = asrWaitingActive ? ASR_WAITING_NOTICE : ASR_TRANSCRIBING_NOTICE;
 }
 
@@ -507,17 +508,17 @@ const subtitleWaiter = createSubtitleWaiter({
       pending: isContextPending(snapshot, { asrTranscribingActive: chatSessionState.asrTranscribingActive })
     };
   },
-  // 等待提示按相位路由：转写相位下并入转写状态行（合成一句，不另起消息区通知，
-  // 顺带清掉此前非转写相位等期待遇残留的消息区通知）；非转写相位（如字幕抓取
-  // 进行中状态行隐藏）沿用消息区通知，两者互斥不重复。
+  // 等待提示按原因路由：转写中的等待并入转写状态行（合成一句，不另起消息区
+  // 通知，顺带清掉此前抓取文案残留的消息区通知）；仅字幕抓取中的等待（状态行
+  // 隐藏）走消息区抓取文案，两者互斥不重复。
   showWaitingNotice: () => {
-    if (getSubtitleStatusPhase() === "asr-transcribing") {
+    if (isReaderTranscribing()) {
       asrWaitingActive = true;
       removeConversationContextNotice();
       updateAsrNotice();
       return;
     }
-    showConversationContextNotice(SUBTITLE_WAIT_NOTICE, 0);
+    showConversationContextNotice(SUBTITLE_FETCHING_NOTICE, 0);
   },
   removeNotice: () => {
     if (asrWaitingActive) {
