@@ -72,7 +72,7 @@ export function setupEnvironment() {
 // 上一条用例的注册/状态会随 globalThis 活到下一用例。
 export function clearSharedSlots() {
   delete globalThis.__BOC_CONTENT_SCRIPT_DISPATCHER__;
-  delete globalThis.__BOC_DEBUG_LOG_GATE__;
+  delete globalThis.__BOC_LOG_GATE__;
   delete globalThis.__BOC_READER_BUS__;
   delete globalThis.__BOC_STATE__;
   delete globalThis.__BOC_STYLE_INJECTOR__;

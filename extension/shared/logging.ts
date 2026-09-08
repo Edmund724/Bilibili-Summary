@@ -23,7 +23,12 @@ interface DebugGateSlot {
   gate: () => boolean;
 }
 
-const sharedGateSlot = ((globalThis as unknown as { __BOC_LOG_GATE__?: DebugGateSlot }).__BOC_LOG_GATE__ ??= {
+// 槽键命名约定（跨实例共享槽一律 `*_SLOT_KEY = "__BOC_...__"`）：
+// scripts/build-content.js 的 assertSharedSlotsInBothRegions 按此约定扫源码，
+// 断言每个槽键在常驻包与懒加载区产物里都出现。
+const DEBUG_GATE_SLOT_KEY = "__BOC_LOG_GATE__";
+
+const sharedGateSlot = ((globalThis as unknown as Record<string, DebugGateSlot | undefined>)[DEBUG_GATE_SLOT_KEY] ??= {
   gate: () => false
 });
 

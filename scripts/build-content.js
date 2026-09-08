@@ -345,6 +345,78 @@ function selfCheck() {
     process.exitCode = 1;
     return false;
   }
+  return assertSharedSlotsInBothRegions();
+}
+
+// 跨实例共享槽守卫（2026-09 双实例收口）：content 是两轮构建——常驻包（轮 A，
+// content-main.mjs）与懒加载区（轮 B，chunks/*）把共享底座各装一份实例，因此
+// 「跨实例共享的可变状态」必须挂 globalThis 槽，两侧才对齐到同一份
+//（先例 shared/messaging.ts 的页内分发槽；槽表/logging 门/state 单例/
+// style-injector 挂载记录依次见 reader/reader-bus.ts、shared/logging.ts、
+// core/state.ts、shared/style-injector.ts）。
+//
+// 本守卫按命名约定扫源码（`*_SLOT_KEY = "__BOC_...__"`），断言每个槽键在常驻包
+// 与至少一个懒加载区 chunk 里都出现——槽被树摇掉、或模块掉出某一轮构建时在此
+// 失败。新增跨实例状态照约定声明槽键即可自动纳入本守卫，不必改这里。
+const SLOT_KEY_DECLARATION = /\b[A-Z_]*SLOT_KEY\s*=\s*"(__BOC_[A-Z_]+__)"/g;
+
+function collectSlotKeys() {
+  const keys = new Map(); // key → 声明它的源文件（相对 extension/）
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      // 只扫源码：构建产物是 .mjs/.js，天然被排除；.d.ts 无运行时声明。
+      if (!entry.name.endsWith(".ts") || entry.name.endsWith(".d.ts")) {
+        continue;
+      }
+      const text = fs.readFileSync(full, "utf8");
+      for (const match of text.matchAll(SLOT_KEY_DECLARATION)) {
+        keys.set(match[1], path.relative(extensionRoot, full));
+      }
+    }
+  };
+  walk(extensionRoot);
+  return keys;
+}
+
+function assertSharedSlotsInBothRegions() {
+  const slotKeys = collectSlotKeys();
+  if (slotKeys.size === 0) {
+    console.error(
+      'Self-check failed: 未发现任何跨实例共享槽声明（*_SLOT_KEY = "__BOC_...__"）' +
+        "——约定见本函数头注，槽全没了意味着跨实例状态没挂共享槽"
+    );
+    process.exitCode = 1;
+    return false;
+  }
+  const mainText = fs.readFileSync(mainOutfile, "utf8");
+  const chunkTexts = fs.existsSync(chunksDir)
+    ? fs
+        .readdirSync(chunksDir)
+        .filter((file) => file.endsWith(".mjs"))
+        .map((file) => fs.readFileSync(path.join(chunksDir, file), "utf8"))
+    : [];
+  const missing = [];
+  for (const [key, source] of slotKeys) {
+    if (!mainText.includes(key)) {
+      missing.push(`${key}（${source}）不在常驻包 ${MAIN_MODULE_BASENAME}`);
+    } else if (!chunkTexts.some((text) => text.includes(key))) {
+      missing.push(`${key}（${source}）不在任何懒加载区 chunk`);
+    }
+  }
+  if (missing.length > 0) {
+    console.error(
+      "Self-check failed: 跨实例共享槽未两侧落位——两轮构建下共享底座在常驻包与" +
+        "懒加载区各一份实例，槽必须两侧都挂（shared/messaging.ts 先例）：\n  " +
+        missing.join("\n  ")
+    );
+    process.exitCode = 1;
+    return false;
+  }
   return true;
 }
 
