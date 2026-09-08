@@ -235,29 +235,21 @@ function buildSettingsHtml(): string {
 }
 
 // ===== 分区渲染隔离（interactions-in-complex-layouts 指南，M15）=====
-// .boc-set-group 是随抽屉滚动的自包含布局区：content-visibility: auto 给每个
-// 分区套上 style+layout containment（离屏时再叠 size+paint），行增删/校验错误
-// 显示/保存重渲等分区内部变更的 layout 失效被圈在分区内，不上溯阅读壳与宿主
-// B 站页面；离屏分区跳过渲染，抽屉首建与滚动更省。
-// contain-intrinsic-height 只定高——分区是 grid 拉伸块级，宽度不受 size
-// containment 影响，占位零宽度跳变；auto 前缀记住实际渲染高，占位 240px 只在
-// 首建未滚到处生效。
-// 降级：不支持 cv:auto 时手动 contain: layout style——只取屏上等价的
-// containment，不照抄指南的 `contain: layout style paint`：本面板弹层
-// （fixed-property-type-menu / custom-select-dropdown）刻意溢出分区边界盖过
-// 相邻卡片（reader-settings.css 弹层族注释），paint containment 会裁掉溢出。
+// .boc-set-group 是随抽屉滚动的自包含布局区：contain: layout style 把行增删/
+// 校验错误显示/保存重渲等分区内部变更的 style/layout 失效圈在分区内，不上溯
+// 阅读壳与宿主 B 站页面。
+// 不取 paint containment（r1 评审）：paint 会把后代裁剪到分区 padding box，
+// 而本面板弹层（fixed-property-type-menu / custom-select-dropdown，absolute
+// top:100%+6px）刻意溢出分区边界盖过相邻卡片（reader-settings.css 弹层族
+// 注释），末行之下只剩「+ 添加属性」按钮的高度，菜单必被分区底边截断——
+// 用户可见回归。也因此不走 content-visibility:auto：按 CSS Containment L2 /
+// MDN，cv:auto 恒含 paint containment（含屏上态），裁剪问题相同。
+// 经 TS 内联应用而非落 reader-settings.css 样式表：真实原因是样式表文件不在
+// 本任务 scope（M15 只放行 settings-panel 等五个文件）；内联也让应用时机与
+// 模板构建同处一地。仅首建调用一次，非每次交互。
 function applySectionContainment(host: HTMLElement): void {
-  const supportsContentVisibility =
-    typeof CSS !== "undefined" &&
-    typeof CSS.supports === "function" &&
-    CSS.supports("content-visibility", "auto");
   host.querySelectorAll<HTMLElement>(".boc-set-group").forEach((group) => {
-    if (supportsContentVisibility) {
-      group.style.contentVisibility = "auto";
-      group.style.containIntrinsicHeight = "auto 240px";
-    } else {
-      group.style.contain = "layout style";
-    }
+    group.style.contain = "layout style";
   });
 }
 
