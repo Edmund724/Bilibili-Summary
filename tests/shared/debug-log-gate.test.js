@@ -45,6 +45,23 @@ describe("shared/logging 调试门", () => {
     expect(infoSpy).toHaveBeenCalledTimes(1);
     infoSpy.mockRestore();
   });
+
+  it("门跨实例共享：常驻实例注册，懒加载区实例的 logWarn 也出声", async () => {
+    // 两轮构建（scripts/build-content.js）把 shared 底座在懒加载区重复一份：
+    // 门原先挂模块级变量，注册发生在常驻包实例（content.ts 的
+    // registerDebugLogGate），抓取链/reader/对话用的懒加载区那份看不到——
+    // 用户开了「调试日志」也捞不到 [BOC] 行。门改挂 globalThis 槽。
+    const resident = await import("../../extension/shared/logging.js");
+    resident.registerDebugGate(() => true);
+    vi.resetModules();
+    const lazy = await import("../../extension/shared/logging.js");
+    expect(lazy).not.toBe(resident);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    lazy.logWarn("[BOC] from lazy chunk");
+    expect(warnSpy).toHaveBeenCalledWith("[BOC] from lazy chunk");
+    warnSpy.mockRestore();
+  });
 });
 
 describe("shared/debug-log-gate 三宿主接线", () => {

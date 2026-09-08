@@ -49,17 +49,47 @@ type SettingsLoadHandler = () => unknown;
 type PlayerAiSyncHandler = (delayMs?: number, options?: { resetRetry?: boolean }) => void;
 type UiCommandHandler = (name: string, payload?: unknown) => void;
 
-const readers: ReaderPresenterHandler[] = [];
+// 槽表挂 globalThis 而非模块级变量：两轮构建（scripts/build-content.js）把常驻
+// 底座在轮 B 懒 chunk 区重复一份，本模块在 content-main 与 chunks/ 共享 chunk
+// 里各是一个实例，模块级槽在两侧互不通用。而本 seam 的两端本就分居两侧——
+// 能力槽（settings persist/load、player-ai sync）由常驻包注册（content.ts 能
+// 触达的只有常驻实例）、懒加载区的 reader 域消费，任一侧落在另一实例上，注册
+// 与调用就静默错开（阅读面板里改主题不落盘、player-ai 同步请求无人接收的
+// 根因）。隔离世界的 globalThis 在同一扩展的全部 content 模块间唯一，两侧经
+// 它对齐到同一份槽（与 shared/messaging.ts 的页内分发槽同款先例）。
+interface ReaderBusSlots {
+  readers: ReaderPresenterHandler[];
+  subtitleRefreshHandlers: SubtitleRefreshHandler[];
+  persistSettingsHandler: SettingsPersistHandler | null;
+  loadSettingsHandler: SettingsLoadHandler | null;
+  playerAiSyncHandler: PlayerAiSyncHandler | null;
+  uiCommandHandler: UiCommandHandler | null;
+}
 
-const subtitleRefreshHandlers: SubtitleRefreshHandler[] = [];
+const READER_BUS_SLOT_KEY = "__BOC_READER_BUS__";
 
-let persistSettingsHandler: SettingsPersistHandler | null = null;
-let loadSettingsHandler: SettingsLoadHandler | null = null;
+function readerBusSlots(): ReaderBusSlots {
+  const host = globalThis as unknown as Record<string, ReaderBusSlots | undefined>;
+  let slots = host[READER_BUS_SLOT_KEY];
+  if (!slots) {
+    slots = {
+      readers: [],
+      subtitleRefreshHandlers: [],
+      persistSettingsHandler: null,
+      loadSettingsHandler: null,
+      playerAiSyncHandler: null,
+      uiCommandHandler: null
+    };
+    host[READER_BUS_SLOT_KEY] = slots;
+  }
+  return slots;
+}
 
 export function subscribeReaderPresenter(handler: ReaderPresenterHandler) {
   if (typeof handler !== "function") {
     return () => {};
   }
+  const { readers } = readerBusSlots();
   if (readers.indexOf(handler) === -1) {
     readers.push(handler);
   }
@@ -76,7 +106,7 @@ export function subscribeReaderPresenter(handler: ReaderPresenterHandler) {
 // 历史上这里只转发 kind，第二参被丢弃、阅读视图永远显示默认文案。单参调用
 // （reset/rerender/无文案的 subtitle-ready）行为不变。
 export function notifyReaderPresenter(kind: string, ...payload: unknown[]) {
-  for (const handler of readers.slice()) {
+  for (const handler of readerBusSlots().readers.slice()) {
     try {
       handler(kind, ...payload);
     } catch (error) {
@@ -89,6 +119,7 @@ export function subscribeSubtitleRefresh(handler: SubtitleRefreshHandler) {
   if (typeof handler !== "function") {
     return () => {};
   }
+  const { subtitleRefreshHandlers } = readerBusSlots();
   if (subtitleRefreshHandlers.indexOf(handler) === -1) {
     subtitleRefreshHandlers.push(handler);
   }
@@ -109,7 +140,7 @@ export function subscribeSubtitleRefresh(handler: SubtitleRefreshHandler) {
 // ensure 总结链再调本函数）——本 seam 恢复「只传话」的窄形状，与其他三个
 // 能力槽（settings persist/load、player-ai sync）同形。
 export function requestSubtitleRefresh(): Promise<unknown> {
-  const handler = subtitleRefreshHandlers[0];
+  const handler = readerBusSlots().subtitleRefreshHandlers[0];
   if (!handler) {
     return Promise.resolve(undefined);
   }
@@ -125,15 +156,16 @@ export function requestSubtitleRefresh(): Promise<unknown> {
 // shared/messaging.js's sendRuntimeMessage. reader-impl.js calls
 // persistReaderSettingsThroughSeam() instead of importing sendRuntimeMessage.
 export function subscribeReaderSettingsPersist(handler: SettingsPersistHandler) {
-  persistSettingsHandler = typeof handler === "function" ? handler : null;
+  readerBusSlots().persistSettingsHandler = typeof handler === "function" ? handler : null;
 }
 
 export function persistReaderSettingsThroughSeam() {
-  if (!persistSettingsHandler) {
+  const handler = readerBusSlots().persistSettingsHandler;
+  if (!handler) {
     return;
   }
   try {
-    persistSettingsHandler();
+    handler();
   } catch (error) {
     logWarn("[BOC] reader settings persist handler failed", { error });
   }
@@ -143,15 +175,16 @@ export function persistReaderSettingsThroughSeam() {
 // core/runtime.js's getSettings (a Promise). reader-impl.js's settings-change
 // watcher delegates through here instead of importing getSettings.
 export function subscribeReaderSettingsLoad(handler: SettingsLoadHandler) {
-  loadSettingsHandler = typeof handler === "function" ? handler : null;
+  readerBusSlots().loadSettingsHandler = typeof handler === "function" ? handler : null;
 }
 
 export function loadReaderSettingsThroughSeam() {
-  if (!loadSettingsHandler) {
+  const handler = readerBusSlots().loadSettingsHandler;
+  if (!handler) {
     return Promise.resolve(null);
   }
   try {
-    return Promise.resolve(loadSettingsHandler());
+    return Promise.resolve(handler());
   } catch (error) {
     logWarn("[BOC] reader settings load handler failed", { error });
     return Promise.resolve(null);
@@ -162,18 +195,17 @@ export function loadReaderSettingsThroughSeam() {
 // button (ai/player-ai.js). reader-impl.js must not import ai/player-ai.js
 // (it would pull core/runtime.js back into the reader dependency graph), so
 // the debug helper and settings watcher delegate through this seam instead.
-let playerAiSyncHandler: PlayerAiSyncHandler | null = null;
-
 export function subscribePlayerAiSync(handler: PlayerAiSyncHandler) {
-  playerAiSyncHandler = typeof handler === "function" ? handler : null;
+  readerBusSlots().playerAiSyncHandler = typeof handler === "function" ? handler : null;
 }
 
 export function requestPlayerAiSync(delayMs?: number, options?: { resetRetry?: boolean }) {
-  if (!playerAiSyncHandler) {
+  const handler = readerBusSlots().playerAiSyncHandler;
+  if (!handler) {
     return;
   }
   try {
-    playerAiSyncHandler(delayMs, options);
+    handler(delayMs, options);
   } catch (error) {
     logWarn("[BOC] player-ai sync handler failed", { error });
   }
@@ -183,21 +215,20 @@ export function requestPlayerAiSync(delayMs?: number, options?: { resetRetry?: b
 // reset/switch, settings drawer). reader 域经 requestUiCommand 发命令而不静态
 // import ui-renderer（依赖反向边清零，arch-review-2026-09/10）；单 handler 槽，
 // 与 settings persist/load、player-ai sync 两个能力槽同形。
-let uiCommandHandler: UiCommandHandler | null = null;
-
 export function subscribeUiCommand(handler: UiCommandHandler) {
-  uiCommandHandler = typeof handler === "function" ? handler : null;
+  readerBusSlots().uiCommandHandler = typeof handler === "function" ? handler : null;
 }
 
 // 壳命令纯转发（fire-and-forget）：壳未装载（无 handler）或命令名未识别时静默
 // 丢弃——reader 域发命令早于壳装载是合法时序（原 ui-renderer setter 在 DOM 缺失
 // 时同样空转）。handler 内异常只记日志不上抛。
 export function requestUiCommand(name: string, payload?: unknown) {
-  if (!uiCommandHandler) {
+  const handler = readerBusSlots().uiCommandHandler;
+  if (!handler) {
     return;
   }
   try {
-    uiCommandHandler(name, payload);
+    handler(name, payload);
   } catch (error) {
     logWarn("[BOC] ui command handler failed", { name, error });
   }

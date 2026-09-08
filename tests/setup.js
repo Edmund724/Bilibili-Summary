@@ -72,6 +72,14 @@ export function resetModuleState() {
   setupEnvironment();
   history.replaceState({}, "", NORMAL_PAGE_URL);
 
+  // 跨实例共享槽（挂 globalThis，见 shared/messaging.ts 的页内分发槽、
+  // shared/logging.ts 的调试门、reader/reader-bus.ts 的槽表）：模块纪元重置时
+  // 一并清空——否则上一条用例注册的 handler/门会随 globalThis 活到下一用例，
+  // 与「resetModules 换干净纪元」的语义不符（注册表/门跨用例串味）。
+  delete globalThis.__BOC_CONTENT_SCRIPT_DISPATCHER__;
+  delete globalThis.__BOC_DEBUG_LOG_GATE__;
+  delete globalThis.__BOC_READER_BUS__;
+
   // jsdom 未实现 scrollIntoView；补一个空实现避免滚动路径抛错
   if (typeof Element !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {
     Element.prototype.scrollIntoView = () => {};
