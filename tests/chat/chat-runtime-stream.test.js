@@ -89,6 +89,12 @@ function holdRaf() {
   return vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
 }
 
+// 驱动当前已注册的全部 rAF 回调并清空记录（token flush 与思考滚动各自注册
+// 一帧，reasoning 先于 token 到达时思考帧占用前面的索引）
+function runRafFrames(raf) {
+  raf.mock.calls.splice(0).forEach((call) => call[0]());
+}
+
 function assistantNode(deps) {
   return deps.messages.querySelector(".chat-msg-assistant");
 }
@@ -338,7 +344,7 @@ describe("reasoning / thinking 展示", () => {
 
     // 首个 token 的帧渲染移除思考节点（与流式渲染行为一致）
     feed(runtime, { type: "token", data: "正文" });
-    raf.mock.calls[0][0]();
+    runRafFrames(raf);
     expect(node.querySelector(".chat-thinking")).toBeNull();
     expect(node.textContent).toContain("正文");
   });
@@ -374,7 +380,7 @@ describe("reasoning / thinking 展示", () => {
 
     // 第一条走完（token 使思考节点随首帧渲染移除）
     feed(runtime, { type: "token", data: "第一条回答" });
-    raf.mock.calls[0][0]();
+    runRafFrames(raf);
     feed(runtime, { type: "done" });
 
     // 第二条消息：思考累加器全新，不串上一条内容
@@ -397,7 +403,7 @@ describe("reasoning / thinking 展示", () => {
     // → done（终态重渲染）
     feed(runtime, { type: "reasoning", data: "第一轮思考" });
     feed(runtime, { type: "token", data: "第一轮正文" });
-    raf.mock.calls[0][0]();
+    runRafFrames(raf);
     feed(runtime, { type: "reasoning", data: null });
     feed(runtime, { type: "done" });
     const node1 = deps.messages.querySelectorAll(".chat-msg-assistant")[0];
@@ -432,7 +438,7 @@ describe("reasoning / thinking 展示", () => {
     // 第一条：token 首帧渲染（思考节点被移除）后 done——thinkingNode 已归 null
     feed(runtime, { type: "reasoning", data: "第一轮思考" });
     feed(runtime, { type: "token", data: "第一轮正文" });
-    raf.mock.calls[0][0]();
+    runRafFrames(raf);
     feed(runtime, { type: "done" });
 
     // 第二条消息：首帧 flush 前 reasoning 到达（同帧 token 尚未渲染）——
@@ -935,6 +941,96 @@ describe("流式 flush 长任务分片（帧预算耗尽让出主线程）", () 
     // 旧帧未回写 base：done 后全量文本 = 两帧合并，无丢字
     feed(runtime, { type: "done" });
     expect(chatSessionState.chatHistory[1]).toEqual({ role: "assistant", content: "第一帧第二帧" });
+  });
+});
+
+// ==========================================================================
+// M14 增量：流式滚动瞬时化 / 思考文本滚动合帧 / flush 异常收口
+// ==========================================================================
+describe("M14 增量：流式滚动瞬时化 / 思考文本滚动合帧 / flush 异常收口", () => {
+  it("流式 flush 滚动瞬时化：scrollTo({behavior:'instant'}) 覆盖 CSS smooth；自动滚动关闭时不触发", async () => {
+    const { deps, runtime } = await makeRuntime();
+    const raf = holdRaf();
+    const scrollToSpy = vi.fn();
+    deps.messages.scrollTo = scrollToSpy;
+
+    feed(runtime, { type: "token", data: "第一帧" });
+    raf.mock.calls[0][0]();
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: expect.any(Number), behavior: "instant" });
+
+    // 自动滚动关闭：早退，不触发 scrollTo（用户上翻浏览不被打断）
+    runtime.setAutoScroll(false);
+    scrollToSpy.mockClear();
+    feed(runtime, { type: "token", data: "第二帧" });
+    raf.mock.calls[1][0]();
+    expect(scrollToSpy).not.toHaveBeenCalled();
+  });
+
+  it("非流式路径（appendUserMessage / endStream 收尾）保留直写 scrollTop，不经 scrollTo", async () => {
+    const { deps, runtime } = await makeRuntime();
+    const raf = holdRaf();
+    const scrollToSpy = vi.fn();
+    deps.messages.scrollTo = scrollToSpy;
+
+    // appendUserMessage 强制滚动：直写 scrollTop（滚动节奏交给 CSS smooth）
+    deps.messages.scrollTop = 0;
+    runtime.appendUserMessage("新消息");
+    expect(deps.messages.scrollTop).toBe(deps.messages.scrollHeight);
+    expect(scrollToSpy).not.toHaveBeenCalled();
+
+    // flush 路径走 instant scrollTo；done 收尾（endStream）回到直写
+    feed(runtime, { type: "token", data: "正文" });
+    raf.mock.calls[0][0]();
+    expect(scrollToSpy).toHaveBeenCalledTimes(1);
+    feed(runtime, { type: "done" });
+    expect(scrollToSpy).toHaveBeenCalledTimes(1);
+    expect(deps.messages.scrollTop).toBe(deps.messages.scrollHeight);
+  });
+
+  it("思考文本滚动合帧：textContent 逐 token 同步（截断语义不变），scrollTop 按帧合批只滚一次", async () => {
+    const { deps, runtime } = await makeRuntime();
+    const node = assistantNode(deps);
+    const raf = holdRaf();
+
+    feed(runtime, { type: "reasoning", data: "第一段" });
+    const textNode = node.querySelector(".chat-thinking-text");
+    expect(textNode?.textContent).toBe("第一段");
+
+    // 同帧第二条增量：不再注册帧、不触发滚动读数
+    const getScrollHeight = vi.fn(() => 1234);
+    Object.defineProperty(textNode, "scrollHeight", { get: getScrollHeight, configurable: true });
+    feed(runtime, { type: "reasoning", data: "第二段" });
+    expect(node.querySelector(".chat-thinking-text")?.textContent).toBe("第一段第二段");
+    expect(getScrollHeight).not.toHaveBeenCalled();
+
+    // 帧回调：整个思考阶段累积的多条增量只做一次滚动
+    raf.mock.calls[0][0]();
+    expect(textNode.scrollTop).toBe(1234);
+    expect(getScrollHeight).toHaveBeenCalledTimes(1);
+  });
+
+  it("flush 同步段抛错：catch 收口记 console.error，不产生 unhandled rejection", async () => {
+    const { deps, runtime } = await makeRuntime();
+    const node = assistantNode(deps);
+    const raf = holdRaf();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // 注入点：flush 同步段末尾的 scrollToBottom 直写 scrollTop 抛错
+    Object.defineProperty(deps.messages, "scrollTop", {
+      get: () => 0,
+      set: () => {
+        throw new Error("scroll boom");
+      },
+      configurable: true
+    });
+
+    feed(runtime, { type: "token", data: "正文" });
+    raf.mock.calls[0][0]();
+    // 同步段抛错经 async promise 链进入 catch（微任务后记日志）
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(errorSpy).toHaveBeenCalledWith("[chat-runtime] 流式渲染 flush 失败：", expect.any(Error));
+    // 抛错点之前的渲染已完成（滚动位于 tail 渲染之后）
+    expect(node.querySelector(".chat-stream-tail")?.textContent).toContain("正文");
   });
 });
 

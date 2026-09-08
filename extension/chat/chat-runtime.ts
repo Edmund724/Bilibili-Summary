@@ -237,11 +237,25 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     deps.ui.setStreamingUiState(isStreaming, { stopping });
   }
 
-  function scrollToBottom(force = false): void {
+  // =========================================================================
+  // scrollToBottom
+  // =========================================================================
+  // instant=true（流式 flush 每帧一次）：显式 behavior:"instant" 覆盖 CSS
+  // scroll-behavior:smooth（reader-chat.css 对 .chat-messages 的设定），避免
+  // 流式期间每帧都重启一次平滑滚动动画。注意不能用 behavior:"auto"——按
+  // CSSOM View 规范它取 CSS scroll-behavior 值，CSS 是 smooth 时压不住。
+  // 非流式路径（appendUserMessage / endStream 收尾）直写 scrollTop，滚动
+  // 节奏交给 CSS（smooth）。jsdom 等无 Element.scrollTo 的环境退回直写。
+  function scrollToBottom(force = false, { instant = false }: { instant?: boolean } = {}): void {
     if (!force && !shouldAutoScrollMessages) {
       return;
     }
-    deps.messages.scrollTop = deps.messages.scrollHeight;
+    const target = deps.messages.scrollHeight;
+    if (instant && typeof deps.messages.scrollTo === "function") {
+      deps.messages.scrollTo({ top: target, behavior: "instant" });
+    } else {
+      deps.messages.scrollTop = target;
+    }
   }
 
   // =========================================================================
@@ -489,6 +503,28 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   const thinkingDisplayStates = new WeakMap<Element, ThinkingDisplayState>();
   const THINKING_TRUNCATION_SUFFIX = "\n…（思考内容过长，已截断显示）";
 
+  // 思考文本的滚动合帧（与 appendToken 的 rAF 合帧同款机制）：textContent
+  // 写入无布局成本，保持逐 token 同步（截断显示逐字节一致的既有语义）；
+  // scrollTop=scrollHeight 每次读 scrollHeight 都强制布局——按帧合批，同帧
+  // 多条增量只滚动一次。思考节点可能已被移除（token 首帧渲染即移除）：
+  // 回调对脱离节点写 scrollTop 为无害空操作，无需取消。
+  let thinkingScrollFrame = 0;
+
+  function scheduleThinkingScroll(textNode: Element): void {
+    if (thinkingScrollFrame) {
+      return;
+    }
+    const scroll = () => {
+      thinkingScrollFrame = 0;
+      textNode.scrollTop = textNode.scrollHeight;
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      thinkingScrollFrame = window.requestAnimationFrame(scroll);
+    } else {
+      thinkingScrollFrame = window.setTimeout(scroll, 16);
+    }
+  }
+
   function appendThinkingText(node: HTMLDivElement | null, text: unknown): void {
     if (!node) {
       return;
@@ -516,7 +552,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     } else {
       textNode.textContent = state.head;
     }
-    textNode.scrollTop = textNode.scrollHeight;
+    scheduleThinkingScroll(textNode);
   }
 
   // =========================================================================
@@ -658,18 +694,19 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
       const epoch = ++tokenFlushEpoch;
       const state = getTokenStreamState(node);
       const text = state.base + state.pending.join("");
+      // 50ms 长任务预算：deadline 取样在剥除/切分之前，让 stripThinkBlocks/
+      // splitMarkdownTail 的耗时也计入本帧预算，与「剥除/切分、稳定块与末块的
+      // renderMarkdown + innerHTML 重建都计入本帧同步工作」的注释一致。预算
+      // 耗尽先让出主线程（yieldToMain）再继续；恢复后校验代际（流被取消/收口，
+      // 或有更新的一帧已启动），不等即作废本帧——不渲染、不回写 base（其文本
+      // 已包含在新帧的 base + pending 里，不会丢）。预算检查保持同步：未触发
+      // 让出时 flush 在帧回调内同步完成（与旧的同步渲染时序一致）。
+      let deadline = performance.now() + STREAM_FRAME_BUDGET_MS;
+      const stale = () => epoch !== tokenFlushEpoch;
       // think 块先剥除再切分，保证未闭合的  ``` 不会横跨 stable/tail 切点
       // （renderMarkdown 内部的再 strip 是无害幂等）。
       const cleaned = stripThinkBlocks(text);
       const { stableText, tailText } = splitMarkdownTail(cleaned);
-      // 50ms 长任务预算：剥除/切分、稳定块与末块的 renderMarkdown + innerHTML
-      // 重建都计入本帧同步工作。预算耗尽先让出主线程再继续；恢复后校验代际
-      // （流被取消/收口，或有更新的一帧已启动），不等即作废本帧——不渲染、
-      // 不回写 base（其文本已包含在新帧的 base + pending 里，不会丢）。
-      // 预算检查保持同步：未触发让出时 flush 在帧回调内同步完成（与旧的
-      // 同步渲染时序一致）。
-      let deadline = performance.now() + STREAM_FRAME_BUDGET_MS;
-      const stale = () => epoch !== tokenFlushEpoch;
       ensureStreamContainers(node, state);
       // 首帧渲染即移除思考节点（与旧的整节点 innerHTML 覆盖行为一致）
       const thinking = node.querySelector(".chat-thinking");
@@ -701,14 +738,23 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
       if (cursor) {
         state.tailEl!.appendChild(cursor);
       }
-      scrollToBottom();
+      // 流式帧滚动瞬时化（见 scrollToBottom instant 分支：不逐帧重启 CSS
+      // 平滑滚动动画）
+      scrollToBottom(false, { instant: true });
       state.base = text;
       state.pending.length = 0;
     };
+    // flush 是 async：同步段（剥除/切分/渲染）的抛错经 promise 变 unhandled
+    // rejection，必须 catch 收口记日志（与仓内 console.error 惯例一致）。
+    const runFlush = () => {
+      flush().catch((err: unknown) => {
+        console.error("[chat-runtime] 流式渲染 flush 失败：", err);
+      });
+    };
     if (typeof window.requestAnimationFrame === "function") {
-      tokenFlushFrame = window.requestAnimationFrame(() => { void flush(); });
+      tokenFlushFrame = window.requestAnimationFrame(runFlush);
     } else {
-      tokenFlushFrame = window.setTimeout(() => { void flush(); }, 16);
+      tokenFlushFrame = window.setTimeout(runFlush, 16);
     }
   }
 
