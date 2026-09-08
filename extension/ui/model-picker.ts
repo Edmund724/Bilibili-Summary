@@ -77,7 +77,6 @@ export function wireModelPicker(
       return;
     }
 
-    modelInput.classList.remove("input-error");
     if (statusNode) {
       statusNode.textContent = "";
       statusNode.hidden = true;
@@ -152,7 +151,6 @@ export function wireModelPicker(
     if (modelInput && option.dataset.model) {
       (modelInput as HTMLInputElement).value = option.dataset.model;
     }
-    if (modelInput) modelInput.classList.remove("input-error");
     const dropdown = row.querySelector(".ai-provider-model-dropdown") as HTMLElement | null;
     if (dropdown) dropdown.hidden = true;
   });
