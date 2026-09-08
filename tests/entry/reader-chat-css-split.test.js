@@ -102,10 +102,12 @@ describe("长回复屏外段落跳过渲染（M13）", () => {
       );
     });
 
-  it("reader-chat.css 对话区 markdown 块级容器逐块 c-v:auto + auto 记忆占位", () => {
+  it("reader-chat.css 对话区 markdown 块级容器逐块 c-v:auto + auto 记忆占位（流式消息豁免）", () => {
     const css = read(CHAT_CSS);
     for (const block of BLOCKS) {
-      const rule = findRule(css, `.boc-reading-chat .chat-msg-assistant ${block}`);
+      // c-v 跳过渲染只施加在历史消息上：正在流式输出的消息
+      //（.chat-msg-streaming）豁免——估算占位高会让流式「滚到底」落点不准
+      const rule = findRule(css, `.boc-reading-chat .chat-msg-assistant:not(.chat-msg-streaming) ${block}`);
       expect(rule, `chat 分区缺块级 c-v 规则: ${block}`).toBeTruthy();
       expect(rule).toMatch(/contain-intrinsic-size: auto none auto \d+px;/);
     }

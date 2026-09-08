@@ -17,7 +17,6 @@ let createChatRuntime;
 let chatSessionState;
 
 const SLOW_NOTICE_TEXT = "模型响应较慢，可能正在思考，请稍候…";
-const THINKING_TRUNCATION_SUFFIX = "\n…（思考内容过长，已截断显示）";
 
 function makePort() {
   const listeners = { message: [], disconnect: [] };
@@ -327,7 +326,7 @@ describe("token 流式渲染（协议驱动）", () => {
 // reasoning / thinking 展示
 // ==========================================================================
 describe("reasoning / thinking 展示", () => {
-  it("reasoning 创建思考节点（思考中…标签）并流式累加；首个 token 渲染时移除", async () => {
+  it("reasoning 创建思考节点（思考中…标签）并流式累加；首个 token 渲染时折叠保留", async () => {
     const { deps, runtime } = await makeRuntime();
     const node = assistantNode(deps);
     const raf = holdRaf();
@@ -342,46 +341,74 @@ describe("reasoning / thinking 展示", () => {
     feed(runtime, { type: "reasoning", data: "再想" });
     expect(node.querySelector(".chat-thinking-text")?.textContent).toBe("先想再想");
 
-    // 首个 token 的帧渲染移除思考节点（与流式渲染行为一致）
+    // 首个 token 的帧渲染把思考盒折叠成「思考过程」行保留在消息内（不移除）
     feed(runtime, { type: "token", data: "正文" });
     runRafFrames(raf);
-    expect(node.querySelector(".chat-thinking")).toBeNull();
+    const folded = node.querySelector(".chat-thinking");
+    expect(folded).toBeTruthy();
+    expect(folded.classList.contains("chat-thinking-collapsible")).toBe(true);
+    expect(folded.classList.contains("chat-thinking-collapsed")).toBe(true);
+    expect(folded.querySelector(".chat-thinking-label")?.textContent).toBe("思考过程");
+    expect(folded.querySelector(".chat-thinking-text")?.textContent).toBe("先想再想");
     expect(node.textContent).toContain("正文");
   });
 
-  // 说明：第一条消息在 done 前喂了一个 token——reasoning 后不经 token 直接收尾
-  // 的话，跨消息的思考展示存在旧行为疑问（见任务报告，只记录不修）。
-  it("reasoning 超 4000 字符：显示为前 4000 字符 + 截断提示（逐字节一致）；跨消息不串内容", async () => {
+  it("思考折叠行点击可展开/收起回看（当轮有效）；流式期间点击不折叠", async () => {
+    const { deps, runtime } = await makeRuntime();
+    const node = assistantNode(deps);
+    const raf = holdRaf();
+
+    feed(runtime, { type: "reasoning", data: "想了很多" });
+    const thinking = node.querySelector(".chat-thinking");
+    // 流式期间未进入可折叠态：点击无事发生
+    thinking.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(thinking.classList.contains("chat-thinking-collapsed")).toBe(false);
+    expect(thinking.querySelector(".chat-thinking-label")?.textContent).toBe("思考中…");
+
+    // 正文首帧后折叠；点击展开回看 → 再点击收起
+    feed(runtime, { type: "token", data: "正文" });
+    runRafFrames(raf);
+    expect(thinking.classList.contains("chat-thinking-collapsed")).toBe(true);
+    thinking.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(thinking.classList.contains("chat-thinking-collapsed")).toBe(false);
+    expect(thinking.querySelector(".chat-thinking-text")?.textContent).toBe("想了很多");
+    thinking.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(thinking.classList.contains("chat-thinking-collapsed")).toBe(true);
+
+    // done 终态重渲染保留折叠行与文本
+    feed(runtime, { type: "done" });
+    const kept = node.querySelector(".chat-thinking");
+    expect(kept?.classList.contains("chat-thinking-collapsed")).toBe(true);
+    expect(kept?.querySelector(".chat-thinking-text")?.textContent).toBe("想了很多");
+  });
+
+  // 体验契约：思考内容不截断（旧实现 4000 字符上限 + 截断提示已移除），
+  // 全量累加进显示缓冲；缓冲按节点隔离，跨消息不串内容。
+  it("reasoning 超 4000 字符不截断：全量显示；跨消息不串内容", async () => {
     const { deps, runtime } = await makeRuntime("问题一");
     const node1 = assistantNode(deps);
     const raf = holdRaf();
 
-    // 逐块喂入：覆盖 4000 边界落在块中间、恰好 4000（不截断）、超 1 字符（截断）、持续溢出
+    // 逐块喂入超 4000 字符：每一步显示都等于全量累计
     const chunks = [
       "a".repeat(1500), // 累计 1500
       "b".repeat(2499), // 累计 3999
-      "c",              // 累计 4000：恰好到上限，仍不截断
-      "d",              // 累计 4001：截断，多出的 1 字符不进显示
-      "e".repeat(2500)  // 累计 6501：头缓冲冻结，只累加溢出
+      "c",              // 累计 4000（旧实现的上限点）
+      "d",              // 累计 4001
+      "e".repeat(2500)  // 累计 6501
     ];
     let total = "";
     for (const chunk of chunks) {
       feed(runtime, { type: "reasoning", data: chunk });
       total += chunk;
-      // 旧逻辑的期望输出：全量累计 > 4000 → 前 4000 字符 + 截断提示；否则全量
-      const expected = total.length > 4000 ? total.slice(0, 4000) + THINKING_TRUNCATION_SUFFIX : total;
-      expect(node1.querySelector(".chat-thinking-text")?.textContent).toBe(expected);
+      expect(node1.querySelector(".chat-thinking-text")?.textContent).toBe(total);
     }
 
-    // 头缓冲冻结在前 4000 字符，溢出部分不进显示
-    expect(node1.querySelector(".chat-thinking-text")?.textContent).toBe(
-      "a".repeat(1500) + "b".repeat(2499) + "c" + THINKING_TRUNCATION_SUFFIX
-    );
-
-    // 第一条走完（token 使思考节点随首帧渲染移除）
+    // 第一条走完（token 首帧折叠思考行，done 终态重渲染保留折叠行）
     feed(runtime, { type: "token", data: "第一条回答" });
     runRafFrames(raf);
     feed(runtime, { type: "done" });
+    expect(node1.querySelector(".chat-thinking-text")?.textContent).toBe(total);
 
     // 第二条消息：思考累加器全新，不串上一条内容
     deps.input.value = "问题二";
@@ -392,26 +419,32 @@ describe("reasoning / thinking 展示", () => {
   });
 
   // 回归：上一代收尾后到达的 reasoning 事件（某些实现以空 data 的 reasoning
-  // 收尾）不能再次附着到已移除的旧思考节点——必须在新消息的 activeAssistantNode
-  // 上新建节点，否则文本写进游离节点、屏幕上永远不显示。
-  it("跨消息 reasoning 收尾事件：在新回合的 assistant 节点上新建思考节点，不串进游离旧节点", async () => {
+  // 收尾）不能再次附着到已折叠的旧思考节点——必须在新消息的 activeAssistantNode
+  // 上新建节点，否则文本写进旧消息的思考盒、与本回合内容错位。
+  it("跨消息 reasoning 收尾事件：在新回合的 assistant 节点上新建思考节点，不串进旧节点", async () => {
     const { deps, runtime } = await makeRuntime("问题一");
     const raf = holdRaf();
 
-    // 第一条：reasoning → token（思考节点随首帧渲染移除）→ 收尾 reasoning
+    // 第一条：reasoning → token（思考盒随首帧渲染折叠保留）→ 收尾 reasoning
     //（真实时序：模型吐完思考后以空 data 的 reasoning 收尾，紧随 done 到达）
-    // → done（终态重渲染）
+    // → done（终态重渲染保留全部思考行，未折叠的一并折叠）
     feed(runtime, { type: "reasoning", data: "第一轮思考" });
     feed(runtime, { type: "token", data: "第一轮正文" });
     runRafFrames(raf);
     feed(runtime, { type: "reasoning", data: null });
     feed(runtime, { type: "done" });
     const node1 = deps.messages.querySelectorAll(".chat-msg-assistant")[0];
-    expect(node1.querySelector(".chat-thinking")).toBeNull();
+    // node1 留下两条折叠思考行：正文流前的「第一轮思考」+ 收尾 reasoning 新建的
+    const node1Thinkings = node1.querySelectorAll(".chat-thinking");
+    expect(node1Thinkings).toHaveLength(2);
+    node1Thinkings.forEach((thinking) => {
+      expect(thinking.classList.contains("chat-thinking-collapsed")).toBe(true);
+      expect(thinking.querySelector(".chat-thinking-label")?.textContent).toBe("思考过程");
+    });
 
     // 第二条消息：reasoning 必须新建节点，且附着在第二条的占位上——
     // 旧实现把「未创建」与「已结束」都折叠为 thinkingNode === null，
-    // 会把新回合的思考写进已脱离的旧节点
+    // 会把新回合的思考写进旧消息的节点
     deps.input.value = "问题二";
     await runtime.sendMessage();
     const node2 = deps.messages.querySelectorAll(".chat-msg-assistant")[1];
@@ -419,9 +452,9 @@ describe("reasoning / thinking 展示", () => {
     const node2Thinking = node2.querySelector(".chat-thinking");
     expect(node2Thinking).toBeTruthy();
     expect(node2Thinking.querySelector(".chat-thinking-text")?.textContent).toBe("");
-    // 旧节点不再被触碰（也没有游离新节点）
-    expect(node1.querySelector(".chat-thinking")).toBeNull();
-    expect(deps.messages.querySelectorAll(".chat-thinking")).toHaveLength(1);
+    // 旧消息的思考行不再被触碰（也没有游离新节点）
+    expect(node1.querySelectorAll(".chat-thinking")).toHaveLength(2);
+    expect(deps.messages.querySelectorAll(".chat-thinking")).toHaveLength(3);
 
     // 后续 reasoning 增量正常流进新节点
     feed(runtime, { type: "reasoning", data: "第二轮思考" });
@@ -430,12 +463,12 @@ describe("reasoning / thinking 展示", () => {
 
   // 回归：跨消息时若上一代「已结束思考、且 token 首帧已渲染」，新回合的
   // reasoning 必须新建思考节点（旧实现把「未创建」与「已结束」都折叠为
-  // thinkingNode === null，会把新回合的思考写进已脱离的旧节点）。
+  // thinkingNode === null，会把新回合的思考写进旧消息的节点）。
   it("跨消息思考重建：首帧 flush 前的 reasoning 在新回合新建节点（不依赖 thinkingNode 残留）", async () => {
     const { deps, runtime } = await makeRuntime("问题一");
     const raf = holdRaf();
 
-    // 第一条：token 首帧渲染（思考节点被移除）后 done——thinkingNode 已归 null
+    // 第一条：token 首帧渲染（思考盒折叠保留）后 done——thinkingNode 已归 null
     feed(runtime, { type: "reasoning", data: "第一轮思考" });
     feed(runtime, { type: "token", data: "第一轮正文" });
     runRafFrames(raf);
@@ -987,7 +1020,7 @@ describe("M14 增量：流式滚动瞬时化 / 思考文本滚动合帧 / flush 
     expect(deps.messages.scrollTop).toBe(deps.messages.scrollHeight);
   });
 
-  it("思考文本滚动合帧：textContent 逐 token 同步（截断语义不变），scrollTop 按帧合批只滚一次", async () => {
+  it("思考文本滚动合帧：textContent 逐 token 同步（全量不截断），scrollTop 按帧合批只滚一次", async () => {
     const { deps, runtime } = await makeRuntime();
     const node = assistantNode(deps);
     const raf = holdRaf();
@@ -1017,7 +1050,7 @@ describe("M14 增量：流式滚动瞬时化 / 思考文本滚动合帧 / flush 
     const raf = holdRaf();
 
     // 第一条：reasoning 注册滚动帧（calls[0]），故意不驱动——保持挂起；
-    // token 注册 flush 帧（calls[1]），只驱动它（思考节点随首帧渲染移除）
+    // token 注册 flush 帧（calls[1]），只驱动它（思考盒随首帧渲染折叠保留）
     feed(runtime, { type: "reasoning", data: "第一轮思考" });
     feed(runtime, { type: "token", data: "第一轮正文" });
     raf.mock.calls[1][0]();
@@ -1038,10 +1071,54 @@ describe("M14 增量：流式滚动瞬时化 / 思考文本滚动合帧 / flush 
     raf.mock.calls[2][0]();
     expect(textNode2.scrollTop).toBe(4321);
 
-    // 旧帧随后执行：只写已脱离的旧节点，不触碰新节点
+    // 旧帧随后执行：只写旧节点（折叠后仍挂在第一条消息内），不触碰新节点
     getScrollHeight2.mockClear();
     raf.mock.calls[0][0]();
     expect(getScrollHeight2).not.toHaveBeenCalled();
+  });
+
+  // 钉底契约：思考盒内用户上翻即停跟随（绝不拉回底部），回到底部附近
+  //（距底 ≤ 24px）恢复跟随——与外层消息容器同一套契约。
+  it("思考盒钉底契约：用户上翻即停跟随（绝不拉回），回到底部附近恢复", async () => {
+    const { deps, runtime } = await makeRuntime();
+    const node = assistantNode(deps);
+    const raf = holdRaf();
+
+    feed(runtime, { type: "reasoning", data: "第一段" });
+    const textNode = node.querySelector(".chat-thinking-text");
+    Object.defineProperty(textNode, "scrollHeight", { get: () => 1000, configurable: true });
+    Object.defineProperty(textNode, "clientHeight", { get: () => 200, configurable: true });
+
+    // 默认钉底：帧回调把 scrollTop 钉到 scrollHeight
+    raf.mock.calls[0][0]();
+    expect(textNode.scrollTop).toBe(1000);
+
+    // 用户上翻（scroll 事件，距底 > 24px）：停跟随，后续增量不拉回
+    textNode.scrollTop = 100;
+    textNode.dispatchEvent(new Event("scroll"));
+    feed(runtime, { type: "reasoning", data: "第二段" });
+    raf.mock.calls[1][0]();
+    expect(textNode.scrollTop).toBe(100);
+
+    // 用户回到底部附近（距底 ≤ 24px）：恢复跟随
+    textNode.scrollTop = 985;
+    textNode.dispatchEvent(new Event("scroll"));
+    feed(runtime, { type: "reasoning", data: "第三段" });
+    raf.mock.calls[2][0]();
+    expect(textNode.scrollTop).toBe(1000);
+  });
+
+  it("流式消息带 chat-msg-streaming 类（豁免 content-visibility），endStream 收口摘除", async () => {
+    const { deps, runtime } = await makeRuntime();
+    const node = assistantNode(deps);
+    const raf = holdRaf();
+
+    expect(node.classList.contains("chat-msg-streaming")).toBe(true);
+    feed(runtime, { type: "token", data: "正文" });
+    runRafFrames(raf);
+    expect(node.classList.contains("chat-msg-streaming")).toBe(true);
+    feed(runtime, { type: "done" });
+    expect(node.classList.contains("chat-msg-streaming")).toBe(false);
   });
 
   it("flush 同步段抛错：catch 收口记 console.error，不产生 unhandled rejection", async () => {
