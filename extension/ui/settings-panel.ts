@@ -234,6 +234,33 @@ function buildSettingsHtml(): string {
   `;
 }
 
+// ===== 分区渲染隔离（interactions-in-complex-layouts 指南，M15）=====
+// .boc-set-group 是随抽屉滚动的自包含布局区：content-visibility: auto 给每个
+// 分区套上 style+layout containment（离屏时再叠 size+paint），行增删/校验错误
+// 显示/保存重渲等分区内部变更的 layout 失效被圈在分区内，不上溯阅读壳与宿主
+// B 站页面；离屏分区跳过渲染，抽屉首建与滚动更省。
+// contain-intrinsic-height 只定高——分区是 grid 拉伸块级，宽度不受 size
+// containment 影响，占位零宽度跳变；auto 前缀记住实际渲染高，占位 240px 只在
+// 首建未滚到处生效。
+// 降级：不支持 cv:auto 时手动 contain: layout style——只取屏上等价的
+// containment，不照抄指南的 `contain: layout style paint`：本面板弹层
+// （fixed-property-type-menu / custom-select-dropdown）刻意溢出分区边界盖过
+// 相邻卡片（reader-settings.css 弹层族注释），paint containment 会裁掉溢出。
+function applySectionContainment(host: HTMLElement): void {
+  const supportsContentVisibility =
+    typeof CSS !== "undefined" &&
+    typeof CSS.supports === "function" &&
+    CSS.supports("content-visibility", "auto");
+  host.querySelectorAll<HTMLElement>(".boc-set-group").forEach((group) => {
+    if (supportsContentVisibility) {
+      group.style.contentVisibility = "auto";
+      group.style.containIntrinsicHeight = "auto 240px";
+    } else {
+      group.style.contain = "layout style";
+    }
+  });
+}
+
 // ===== 元素收集（模板渲染后按 id 取自宿主容器，id 与原 options 页保持一致，
 // options-rows / validators 的行级选择器直接复用） =====
 
@@ -290,6 +317,7 @@ export function renderReaderSettingsPanel(): void {
         return;
       }
       host.innerHTML = buildSettingsHtml();
+      applySectionContainment(host);
       bindSettingsEvents(host);
       host.dataset.bocSettingsRendered = "1";
       void loadSettings(collectElements(host));
@@ -749,7 +777,19 @@ function bindSettingsEvents(host: HTMLElement): void {
   elements.addAsrProviderBtn.addEventListener("click", () => void openProviderEditorById("asr", ""));
   setAiRowEditHandler((providerId) => void openProviderEditorById("ai", providerId));
   setAsrRowEditHandler((providerId) => void openProviderEditorById("asr", providerId));
+  // 外点关闭委托。快速通道（M15 INP）：监听器挂在 document 上，宿主页每一次
+  // 点击都会进来，常态是三类弹层全关——此时旧实现无条件做三轮扫描（固定属性
+  // 菜单 + Modal 模型下拉 + 自定义下拉，后两轮全文档）。先做一次合并存在性
+  // 检查，全关即返回；有开着的弹层才逐族收拢（写操作对已关弹层本就是 no-op，
+  // 行为零变化）。三类弹层都只在设置抽屉/编辑 Modal 打开期间存在。
   document.addEventListener("click", (event) => {
+    if (
+      !document.querySelector(
+        '.fixed-property-type-picker[data-open="true"], .ai-provider-model-dropdown:not([hidden]), .custom-select-dropdown:not([hidden])'
+      )
+    ) {
+      return;
+    }
     if (!(event.target instanceof Element) || !event.target.closest(".fixed-property-type-picker")) {
       elements.fixedPropertiesList.querySelectorAll<HTMLElement>(".fixed-property-type-picker").forEach((picker) => {
         picker.setAttribute("data-open", "false");

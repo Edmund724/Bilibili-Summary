@@ -294,3 +294,53 @@ describe("applyValidationError：可达分支直测 + clearInputErrors 联动", 
   //    /[\r\n]/.test(payload.tags) 恒为 false。该分支只能在注入 payload 层触达，
   //    属防御性代码。
 });
+
+describe("设置分区渲染隔离与外点关闭委托（M15 INP）", () => {
+  it("分区挂载即套 containment：content-visibility: auto + 高度占位", async () => {
+    installMessageBus();
+    const host = await mountPanel();
+
+    const groups = host.querySelectorAll(".boc-set-group");
+    expect(groups.length).toBeGreaterThan(0);
+    groups.forEach((group) => {
+      expect(group.style.contentVisibility).toBe("auto");
+      expect(group.style.containIntrinsicHeight).toBe("auto 240px");
+    });
+  });
+
+  it("外点关闭委托：类型菜单展开后点击面板外收起（守卫检查到开着弹层放行）", async () => {
+    installMessageBus();
+    const host = await mountPanel();
+
+    fireClick(host.querySelector("#addFixedPropertyBtn"));
+    const picker = host.querySelector(".fixed-property-type-picker");
+    const button = picker.querySelector(".fixed-property-type-button");
+    const menu = picker.querySelector(".fixed-property-type-menu");
+    // 类型按钮自身监听器 stopPropagation，document 外点委托不触发（组件自开）
+    fireClick(button);
+    expect(picker.dataset.open).toBe("true");
+    expect(menu.hidden).toBe(false);
+
+    // 点击设置分区之外（面板宿主上）→ 外点委托收起
+    fireClick(document.body);
+    expect(picker.dataset.open).toBe("false");
+    expect(menu.hidden).toBe(true);
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("常态快速通道：三类弹层全关时 document 点击零收起动作", async () => {
+    installMessageBus();
+    const host = await mountPanel();
+    const customSelect = await import("../../extension/ui/custom-select.js");
+    const spy = vi.spyOn(customSelect, "closeAllCustomSelects");
+
+    expect(
+      document.querySelector(
+        '.fixed-property-type-picker[data-open="true"], .ai-provider-model-dropdown:not([hidden]), .custom-select-dropdown:not([hidden])'
+      )
+    ).toBeNull();
+    fireClick(document.body);
+
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
