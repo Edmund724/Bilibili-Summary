@@ -116,6 +116,8 @@ interface TokenStreamState {
 interface ThinkingDisplayState {
   head: string;
   overflow: number;
+  // 挂起的滚动合帧 id（按节点隔离：0 = 无挂起帧）
+  scrollFrame: number;
 }
 
 /**
@@ -506,22 +508,23 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   // 思考文本的滚动合帧（与 appendToken 的 rAF 合帧同款机制）：textContent
   // 写入无布局成本，保持逐 token 同步（截断显示逐字节一致的既有语义）；
   // scrollTop=scrollHeight 每次读 scrollHeight 都强制布局——按帧合批，同帧
-  // 多条增量只滚动一次。思考节点可能已被移除（token 首帧渲染即移除）：
-  // 回调对脱离节点写 scrollTop 为无害空操作，无需取消。
-  let thinkingScrollFrame = 0;
-
-  function scheduleThinkingScroll(textNode: Element): void {
-    if (thinkingScrollFrame) {
+  // 多条增量只滚动一次。挂起帧标志存放在按 textNode 的 WeakMap 状态里
+  //（scrollFrame）：不同消息的思考节点互不阻挡——若用全局单标志，上一条
+  // 消息滚动帧挂起的 ≤16ms 窗口内新消息首条 reasoning 会漏掉滚动调度。
+  // 思考节点可能已被移除（token 首帧渲染即移除）：回调对脱离节点写
+  // scrollTop 为无害空操作，无需取消。
+  function scheduleThinkingScroll(textNode: Element, state: ThinkingDisplayState): void {
+    if (state.scrollFrame) {
       return;
     }
     const scroll = () => {
-      thinkingScrollFrame = 0;
+      state.scrollFrame = 0;
       textNode.scrollTop = textNode.scrollHeight;
     };
     if (typeof window.requestAnimationFrame === "function") {
-      thinkingScrollFrame = window.requestAnimationFrame(scroll);
+      state.scrollFrame = window.requestAnimationFrame(scroll);
     } else {
-      thinkingScrollFrame = window.setTimeout(scroll, 16);
+      state.scrollFrame = window.setTimeout(scroll, 16);
     }
   }
 
@@ -536,7 +539,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     const MAX_DISPLAY_CHARS = 4000;
     let state = thinkingDisplayStates.get(textNode);
     if (!state) {
-      state = { head: "", overflow: 0 };
+      state = { head: "", overflow: 0, scrollFrame: 0 };
       thinkingDisplayStates.set(textNode, state);
     }
     const chunk = String(text || "");
@@ -552,7 +555,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     } else {
       textNode.textContent = state.head;
     }
-    scheduleThinkingScroll(textNode);
+    scheduleThinkingScroll(textNode, state);
   }
 
   // =========================================================================

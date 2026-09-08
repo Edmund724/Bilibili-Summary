@@ -1009,6 +1009,41 @@ describe("M14 增量：流式滚动瞬时化 / 思考文本滚动合帧 / flush 
     expect(getScrollHeight).toHaveBeenCalledTimes(1);
   });
 
+  // 回归（挂起帧全局单标志）：上一条消息的思考滚动帧挂起的 ≤16ms 窗口内，
+  // 新消息首条 reasoning 到达——挂起标志必须按节点隔离，新节点能独立调度
+  // 滚动帧，否则新节点的滚动被旧帧挡掉。
+  it("跨消息思考滚动：旧消息滚动帧挂起期间，新消息思考节点独立调度互不影响", async () => {
+    const { deps, runtime } = await makeRuntime("问题一");
+    const raf = holdRaf();
+
+    // 第一条：reasoning 注册滚动帧（calls[0]），故意不驱动——保持挂起；
+    // token 注册 flush 帧（calls[1]），只驱动它（思考节点随首帧渲染移除）
+    feed(runtime, { type: "reasoning", data: "第一轮思考" });
+    feed(runtime, { type: "token", data: "第一轮正文" });
+    raf.mock.calls[1][0]();
+    feed(runtime, { type: "done" });
+    expect(raf.mock.calls).toHaveLength(2);
+
+    // 第二条消息首条 reasoning：旧帧仍挂起，新节点必须能独立注册滚动帧
+    deps.input.value = "问题二";
+    await runtime.sendMessage();
+    const node2 = deps.messages.querySelectorAll(".chat-msg-assistant")[1];
+    feed(runtime, { type: "reasoning", data: "第二轮思考" });
+    expect(raf.mock.calls).toHaveLength(3);
+
+    // 驱动新帧：新节点滚动生效（旧挂起帧不阻挡）
+    const textNode2 = node2.querySelector(".chat-thinking-text");
+    const getScrollHeight2 = vi.fn(() => 4321);
+    Object.defineProperty(textNode2, "scrollHeight", { get: getScrollHeight2, configurable: true });
+    raf.mock.calls[2][0]();
+    expect(textNode2.scrollTop).toBe(4321);
+
+    // 旧帧随后执行：只写已脱离的旧节点，不触碰新节点
+    getScrollHeight2.mockClear();
+    raf.mock.calls[0][0]();
+    expect(getScrollHeight2).not.toHaveBeenCalled();
+  });
+
   it("flush 同步段抛错：catch 收口记 console.error，不产生 unhandled rejection", async () => {
     const { deps, runtime } = await makeRuntime();
     const node = assistantNode(deps);
