@@ -66,19 +66,29 @@ export function setupEnvironment() {
   stubChromeApi();
 }
 
+// 跨实例共享槽（挂 globalThis，见 shared/messaging.ts 的页内分发槽、
+// shared/logging.ts 的调试门、reader/reader-bus.ts 的槽表、core/state.ts 的
+// 状态单例）：清空即「换干净槽」——否则上一条用例的注册/状态会随 globalThis
+// 活到下一用例。
+export function clearSharedSlots() {
+  delete globalThis.__BOC_CONTENT_SCRIPT_DISPATCHER__;
+  delete globalThis.__BOC_DEBUG_LOG_GATE__;
+  delete globalThis.__BOC_READER_BUS__;
+  delete globalThis.__BOC_STATE__;
+}
+
+// 每条用例前清一次（在文件自身的 beforeEach 之前跑）：即便某文件只调
+// vi.resetModules() 不走 resetModuleState，也不会把上一条用例的槽带进来。
+beforeEach(() => {
+  clearSharedSlots();
+});
+
 export function resetModuleState() {
   vi.resetModules();
   vi.useRealTimers();
   setupEnvironment();
   history.replaceState({}, "", NORMAL_PAGE_URL);
-
-  // 跨实例共享槽（挂 globalThis，见 shared/messaging.ts 的页内分发槽、
-  // shared/logging.ts 的调试门、reader/reader-bus.ts 的槽表）：模块纪元重置时
-  // 一并清空——否则上一条用例注册的 handler/门会随 globalThis 活到下一用例，
-  // 与「resetModules 换干净纪元」的语义不符（注册表/门跨用例串味）。
-  delete globalThis.__BOC_CONTENT_SCRIPT_DISPATCHER__;
-  delete globalThis.__BOC_DEBUG_LOG_GATE__;
-  delete globalThis.__BOC_READER_BUS__;
+  clearSharedSlots();
 
   // jsdom 未实现 scrollIntoView；补一个空实现避免滚动路径抛错
   if (typeof Element !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {

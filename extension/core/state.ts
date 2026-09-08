@@ -75,7 +75,7 @@ type ReaderSetters = {
 export type ReaderState = Readonly<ReaderBusinessState> & ReaderInternalState & ReaderSetters;
 type ReaderStateWritable = ReaderBusinessState & ReaderInternalState & ReaderSetters;
 
-const readerState: ReaderStateWritable = {
+const localReaderState: ReaderStateWritable = {
   readingViewOpen: false,
   readingTheme: "light",
   readingSettingsExpanded: false,
@@ -159,7 +159,7 @@ type ClipSetters = {
 export type ClipState = Readonly<ClipBusinessState> & ClipSetters;
 type ClipStateWritable = ClipBusinessState & ClipSetters;
 
-const clipState: ClipStateWritable = {
+const localClipState: ClipStateWritable = {
   currentUrl: typeof location !== "undefined" ? location.href : "",
   fetchRunId: 0,
   bvid: "",
@@ -252,7 +252,7 @@ type UiSetters = {
 export type UiState = Readonly<UiBusinessState> & UiSetters;
 type UiStateWritable = UiBusinessState & UiSetters;
 
-const uiState: UiStateWritable = {
+const localUiState: UiStateWritable = {
   uiEventsBound: false,
   runtimeEventsBound: false,
   settingsWatcherBound: false,
@@ -282,16 +282,47 @@ export interface State {
   setSettings(next: Settings): void;
 }
 
-const stateTarget: State = {
+const localState: State = {
   settings: { ...DEFAULT_SETTINGS },
-  readerState,
-  clipState,
-  uiState,
-  reader: readerState,
-  clip: clipState,
-  ui: uiState,
+  readerState: localReaderState,
+  clipState: localClipState,
+  uiState: localUiState,
+  reader: localReaderState,
+  clip: localClipState,
+  ui: localUiState,
   setSettings(next) { this.settings = next; }
 };
 
-export const state: State = stateTarget;
-export { clipState, uiState };
+// ===== 单例槽（content 双实例收口） =====
+//
+// 状态单例挂 globalThis 而非模块级：两轮构建（scripts/build-content.js）把常驻
+// 底座在轮 B 懒 chunk 区重复一份，本模块在 content-main 与 chunks/ 共享 chunk
+// 里各是一个实例——两份 state 各写各的，常驻侧（content.ts / message-handler /
+// ui-status）与懒加载区（fetcher / reader / 对话）看到的 clip/ui/reader 不是
+// 同一份，只靠「各自自洽」侥幸不出事（跨侧读取随时可能拿到空值：状态行文案、
+// 视图开关、fetchRunId 代次）。隔离世界的 globalThis 在同一扩展的全部 content
+// 模块间唯一，两侧对齐到同一份状态（与 shared/messaging.ts 的页内分发槽、
+// reader/reader-bus.ts 的槽表同款先例）。
+//
+// 初始值（clip.currentUrl 读 location）由先求值的实例——常驻包——创建；后求值
+// 的实例把自己那份本地对象丢弃、改用槽内对象，因此下面只导出槽内绑定，本地
+// 对象仅作为「第一个实例」的建槽材料（一次性小开销，换来声明体逐字不动）。
+interface StateBundle {
+  readerState: ReaderStateWritable;
+  clipState: ClipStateWritable;
+  uiState: UiStateWritable;
+  state: State;
+}
+
+const STATE_SLOT_KEY = "__BOC_STATE__";
+
+const stateBundle: StateBundle = ((globalThis as unknown as Record<string, StateBundle | undefined>)[STATE_SLOT_KEY] ??= {
+  readerState: localReaderState,
+  clipState: localClipState,
+  uiState: localUiState,
+  state: localState
+});
+
+export const state: State = stateBundle.state;
+export const clipState = stateBundle.clipState;
+export const uiState = stateBundle.uiState;
