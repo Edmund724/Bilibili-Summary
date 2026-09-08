@@ -32,10 +32,15 @@ function readerFromChunks(chunks) {
 
 // 假 fetch：按 method + url 分发。headOk=false 模拟 CDN 不支持 HEAD；
 // getResponses 为按 URL 顺序取用的响应工厂队列。
-function stubFetch({ headOk = true, contentLength = "1000", getResponses } = {}) {
+// headThrows：HEAD 直接抛网络错误（部分 CDN/中间层对 HEAD 断连，见下「HEAD
+// 抛网络错误」用例），区别于 headOk=false 的「HEAD 返回非 ok」。
+function stubFetch({ headOk = true, headThrows = false, contentLength = "1000", getResponses } = {}) {
   const factories = [...getResponses];
   const fetchMock = vi.fn(async (url, init) => {
     if (init?.method === "HEAD") {
+      if (headThrows) {
+        throw new TypeError("Failed to fetch");
+      }
       return {
         ok: headOk,
         headers: { get: () => contentLength }
@@ -144,6 +149,15 @@ describe("streamAudioSegments", () => {
 
     const items = await collect(streamAudioSegments(["u"], () => false));
     expect(items.map((item) => item.segment)).toEqual(adtsFromFmp4(synth, {}));
+  });
+
+  it("HEAD 抛网络错误不阻断下载：探大小只是尽力而为，走 GET 兜底", async () => {
+    // 部分 CDN/中间层对 HEAD 直接断连（fetch 抛 TypeError「Failed to fetch」），
+    // 而同一 URL 的 GET 正常。HEAD 只是「超长视频提前拒绝」的优化，失败必须
+    // 让位于 GET，不能让整个转写任务以「Failed to fetch」告终。
+    stubFetch({ headThrows: true, getResponses: [() => okStreamResponse([fixture])] });
+    const items = await collect(streamAudioSegments(["u"], () => false));
+    expect(items.map((item) => item.segment)).toEqual(adtsFromFmp4(fixture, asc));
   });
 
   it("主 URL GET 非 ok 换备用 URL 成功", async () => {

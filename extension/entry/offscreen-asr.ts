@@ -418,11 +418,20 @@ function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
   return out;
 }
 
-// HEAD 探大小：Content-Length 超上限直接拒绝（超长视频不下载不解码）
+// HEAD 探大小：Content-Length 超上限直接拒绝（超长视频不下载不解码）。
+// 探大小只是优化，失败一律让位于 GET：部分 CDN/中间层不支持 HEAD——既有实现
+// 只处理了「HEAD 返回非 ok」，但同一批环境里 HEAD 可能直接断连（fetch 抛
+// TypeError「Failed to fetch」）而同一 URL 的 GET 正常；那时异常会穿出本函数、
+// 终结整个转写任务（表现为「无字幕视频转写瞬间失败」）。异常与「非 ok」同义，
+// 都交给 GET 兜底。
 async function probeSize(url: string): Promise<void> {
-  const response = await fetch(url, { method: "HEAD" });
+  let response: Response;
+  try {
+    response = await fetch(url, { method: "HEAD" });
+  } catch {
+    return;
+  }
   if (!response.ok) {
-    // HEAD 非 ok：部分 CDN 不支持 HEAD，交给 GET 兜底
     return;
   }
   const length = Number(response.headers.get("Content-Length"));
