@@ -65,7 +65,10 @@ afterEach(() => {
 });
 
 describe("字幕搜索热路径（1500 条全量命中夹具）", () => {
-  it("修1：清除高亮只 normalize 列表一次，且文本逐字还原", () => {
+  // 两用例各自重建 1500 条 DOM 夹具（jsdom 下 O(n) 的 replaceChildren/normalize
+  // 实测量级 5-13s），在并发跑测试（多 worker 抢核）时贴近默认 10s 上限而随机
+  // 超时——与本改动无关的既有抖动。给显式余量，让 tests/reader 全量跑稳定。
+  it("修1：清除高亮只 normalize 列表一次，且文本逐字还原", { timeout: 30_000 }, () => {
     const { input } = buildFixture();
     input.value = KEYWORD;
     search.refreshReadingSubtitleSearch({ scroll: false });
@@ -82,7 +85,7 @@ describe("字幕搜索热路径（1500 条全量命中夹具）", () => {
     expect(itemText(TOTAL_ITEMS - 1).textContent).toBe(`第${TOTAL_ITEMS - 1}条含${KEYWORD}的句子`);
   });
 
-  it("修2：批次回执按区间二分取子集，DOM 访问以区间宽为量级", () => {
+  it("修2：批次回执按区间二分取子集，DOM 访问以区间宽为量级", { timeout: 30_000 }, () => {
     const { input, list } = buildFixture();
     input.value = KEYWORD;
     search.refreshReadingSubtitleSearch({ scroll: false });

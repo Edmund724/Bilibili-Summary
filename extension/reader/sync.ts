@@ -75,6 +75,23 @@ export function stopReadingViewSync() {
   unbindReadingViewVideoSync();
 }
 
+// P3-1：字幕 tab 可见性判定（tick 的滚动/高亮段开关）。判定通道与 CSS 显隐
+//（reader.css `.boc-reading-tab-body:not(.is-active)` / `[hidden]`、
+// reader-settings.css 设置抽屉展开时压掉三 tab body）一致：tab body 非 active、
+// 带 hidden 属性或设置抽屉展开即视为不可见。节点缺失（壳未建）按可见处理，
+// 保持旧行为与既有抛错路径不变。
+function isSubtitleTabVisible(): boolean {
+  const tabBody = document.getElementById(ids.readingTabBodySubtitle);
+  if (!tabBody) {
+    return true;
+  }
+  return (
+    tabBody.classList.contains("is-active") &&
+    !tabBody.hasAttribute("hidden") &&
+    !state.reader.readingSettingsExpanded
+  );
+}
+
 export function syncReadingViewPlayback(forceScroll = false) {
   if (!state.reader.readingViewOpen) {
     return;
@@ -87,16 +104,26 @@ export function syncReadingViewPlayback(forceScroll = false) {
   }
 
   const currentTime = Number(bound.currentTime || 0) || 0;
-  const subtitleIndex = findActiveSubtitleIndex(currentTime);
-  const chapterIndex = findActiveChapterIndex(currentTime);
-  // 三开关退役后自动滚动恒开：目标句变化即触发滚动（手动暂停只临时压制，
-  // 不改变“开着”语义）。forceScroll 由 seek/恢复跟随路径显式传入。
-  const shouldScroll =
-    forceScroll ||
-    subtitleIndex !== state.reader.readingActiveSubtitleIndex ||
-    chapterIndex !== state.reader.readingActiveChapterIndex;
+  // P3-1（efficient-background-processing：渲染不可见时暂停后台工作）：字幕
+  // tab 不可见（切到概览/AI 对话，或设置抽屉展开时三 tab body 被 CSS 压成
+  // display:none）时，高亮/滚动段对用户无呈现效果——整段跳过，省掉
+  // findActiveSubtitleIndex/findActiveChapterIndex 与高亮/滚动 DOM 写。索引状态
+  // 刻意不更新：切回字幕 tab 后的首拍索引必与旧值不同，shouldScroll 自然为真，
+  // 补上高亮与滚动（最多延迟一拍）。状态栏（面板 header，三 tab 常显）、跟随态
+  // 属性（#boc-reading-view，header「手动浏览中」标注常显）与转写横幅进度行与
+  // tab 无关，照常收敛。
+  if (isSubtitleTabVisible()) {
+    const subtitleIndex = findActiveSubtitleIndex(currentTime);
+    const chapterIndex = findActiveChapterIndex(currentTime);
+    // 三开关退役后自动滚动恒开：目标句变化即触发滚动（手动暂停只临时压制，
+    // 不改变“开着”语义）。forceScroll 由 seek/恢复跟随路径显式传入。
+    const shouldScroll =
+      forceScroll ||
+      subtitleIndex !== state.reader.readingActiveSubtitleIndex ||
+      chapterIndex !== state.reader.readingActiveChapterIndex;
 
-  setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll);
+    setActiveReadingItems(subtitleIndex, chapterIndex, shouldScroll);
+  }
   updateReaderFollowState();
   renderReadingStatus(`当前进度 ${formatClock(currentTime, { hours: "auto" })}`);
   // PR3：转写横幅随 tick 收敛（转写期间 onProgress 持续改写状态栏文本，进度行
