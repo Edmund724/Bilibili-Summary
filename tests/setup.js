@@ -68,13 +68,14 @@ export function setupEnvironment() {
 
 // 跨实例共享槽（挂 globalThis，见 shared/messaging.ts 的页内分发槽、
 // shared/logging.ts 的调试门、reader/reader-bus.ts 的槽表、core/state.ts 的
-// 状态单例）：清空即「换干净槽」——否则上一条用例的注册/状态会随 globalThis
-// 活到下一用例。
+// 状态单例、shared/style-injector.ts 的挂载记录）：清空即「换干净槽」——否则
+// 上一条用例的注册/状态会随 globalThis 活到下一用例。
 export function clearSharedSlots() {
   delete globalThis.__BOC_CONTENT_SCRIPT_DISPATCHER__;
   delete globalThis.__BOC_DEBUG_LOG_GATE__;
   delete globalThis.__BOC_READER_BUS__;
   delete globalThis.__BOC_STATE__;
+  delete globalThis.__BOC_STYLE_INJECTOR__;
 }
 
 // 每条用例前清一次（在文件自身的 beforeEach 之前跑）：即便某文件只调

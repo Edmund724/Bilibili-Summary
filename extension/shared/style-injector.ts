@@ -15,15 +15,37 @@
 // 幂等/防泄漏：挂载记录存 Map，重复挂同路径直接跳过；移除按引用摘 link 并
 // 从 Map 删除。移除不是「卸载语义」——数据留在浏览器样式缓存，重挂几乎零
 // 成本（这正是「关→开」二进宫无闪变的关键：样式数据已在内存，重挂即生效）。
+//
+// 挂载记录与设置表的 ready promise 挂 globalThis 而非模块级变量：两轮构建
+//（scripts/build-content.js）把常驻底座在轮 B 懒 chunk 区重复一份，本模块在
+// content-main 与 chunks/ 共享 chunk 里各是一个实例——挂载点本就分居两侧
+//（常驻 entry/content.ts 的直达阅读 URL 路径、懒加载区 reader/shell.ts 的进入
+// 事务），各记各的 Map 会让同一路径被注入两个 <link>，且一侧 removeReaderStyles
+// 摘不掉另一侧那个（退出阅读模式后样式表残留）。隔离世界的 globalThis 在同一
+// 扩展的全部 content 模块间唯一，两侧对齐到同一份记录（与 shared/messaging.ts
+// 的页内分发槽、reader/reader-bus.ts 的槽表、core/state.ts 的状态单例同款
+// 先例）。
 
-const mounted = new Map<string, HTMLLinkElement>();
+interface StyleInjectorSlots {
+  mounted: Map<string, HTMLLinkElement>;
+  // 设置分区表的首挂 ready promise（null = 尚未首挂）；同表跨实例共享，
+  // 后求值的实例经 whenReaderSettingsStylesReady 等的是同一份。
+  readerSettingsReady: Promise<void> | null;
+}
+
+const STYLE_SLOT_KEY = "__BOC_STYLE_INJECTOR__";
+
+function styleSlots(): StyleInjectorSlots {
+  const host = globalThis as unknown as Record<string, StyleInjectorSlots | undefined>;
+  return (host[STYLE_SLOT_KEY] ??= { mounted: new Map(), readerSettingsReady: null });
+}
 
 function getReaderStylePaths(): string[] {
   return ["entry/styles/reader.css", "entry/styles/reader-gate.css"];
 }
 
 export function isReaderStylesMounted(): boolean {
-  return getReaderStylePaths().every((path) => mounted.has(path));
+  return getReaderStylePaths().every((path) => styleSlots().mounted.has(path));
 }
 
 export function ensureReaderStyles(): void {
@@ -35,7 +57,7 @@ export function removeReaderStyles(): void {
 }
 
 export function isPlayerAiStylesMounted(): boolean {
-  return mounted.has("entry/styles/player-ai.css");
+  return styleSlots().mounted.has("entry/styles/player-ai.css");
 }
 
 export function ensurePlayerAiStyles(): void {
@@ -51,17 +73,16 @@ export function removePlayerAiStyles(): void {
 // 再渲染抽屉内容（~50ms 兜底超时），首帧零闪变；重挂命中 mounted Map 即时渲染。
 // 与 reader/player-ai 表不同：exitReaderShell 不摘除——设置表数据留在浏览器
 // 样式缓存，二进宫免闪变（同 reader 主表「link 数据在缓存」口径）。
-let readerSettingsReady: Promise<void> | null = null;
-
 export function ensureReaderSettingsStyles(): void {
   const path = "entry/styles/reader-settings.css";
-  const isFirstMount = !mounted.has(path);
+  const slots = styleSlots();
+  const isFirstMount = !slots.mounted.has(path);
   const link = mountStyleLink(path);
   if (!isFirstMount) {
     return;
   }
   // link 可能已缓存命中（load 已触发过或同步完成），readyState/监听双口径。
-  readerSettingsReady = new Promise<void>((resolve) => {
+  slots.readerSettingsReady = new Promise<void>((resolve) => {
     const done = () => resolve();
     if (link.sheet) {
       done();
@@ -76,7 +97,7 @@ export function ensureReaderSettingsStyles(): void {
 }
 
 export function whenReaderSettingsStylesReady(): Promise<void> {
-  return readerSettingsReady ?? Promise.resolve();
+  return styleSlots().readerSettingsReady ?? Promise.resolve();
 }
 
 // 对话分区表（arch-slim-4/07）：随对话域首次激活按需装载，不建 onload 门控
@@ -93,10 +114,11 @@ export function removeReaderChatStyles(): void {
 }
 
 export function isReaderChatStylesMounted(): boolean {
-  return mounted.has("entry/styles/reader-chat.css");
+  return styleSlots().mounted.has("entry/styles/reader-chat.css");
 }
 
 function mountStyleLink(path: string): HTMLLinkElement {
+  const { mounted } = styleSlots();
   let link = mounted.get(path);
   if (link) {
     return link;
@@ -111,6 +133,7 @@ function mountStyleLink(path: string): HTMLLinkElement {
 }
 
 function unmountStyleLink(path: string): void {
+  const { mounted } = styleSlots();
   const link = mounted.get(path);
   if (!link) {
     return;
