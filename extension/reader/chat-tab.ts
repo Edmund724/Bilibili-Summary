@@ -8,7 +8,9 @@
 // 补水、流式守卫在侧栏版被时序咬合得很紧（context-policy.ts :58-61 两个 pinned
 // 谓词的疑义记录仍在），按新 UI 心态重写必引入行为漂移（盘点报告风险 4）。
 //
-// 组装面（与 sidepanel.ts 同构，内核全部来自 ../chat/*）：
+// 组装面（与 sidepanel.ts 同构；内核链五件自 arch-review-2026-09/08 起收进
+// ../chat/tab-domain.ts 的 createChatTabDomain 单一深入口，本文件 chat 域
+// import 面 10→1）：
 //   conversation-store（pinned 补水的 context 解析 dep 接复合适配器：会话
 //     contextRef 与当前 clip 身份一致 → 进程内快照装配（工单 04 短路，零网络
 //     解析）；未命中走 ai/context-resolver 的 bgFetchJson 通道，content script
@@ -50,32 +52,28 @@ import { resolveThinkingProfile } from "../ai/thinking-profiles.js";
 import { formatClock } from "../shared/clock-text.js";
 import { sendRuntimeMessage } from "../shared/messaging.js";
 import { watchStorageKeys } from "../shared/watch-storage-keys.js";
-import {
-  resolveAiConversationContext,
-  resolveAiConversationPageRef
-} from "../ai/context-resolver.js";
 import { normalizeMarkdownForSectionPaste } from "../notes/paste.js";
-// 对话内核（PR5a 已迁 chat 域）：零语义搬运的工厂 + 共享状态单例。
-import { createChatRuntime } from "../chat/chat-runtime.js";
-// offscreen 聊天端口名单源（chat/protocol.ts，ticket 08，原裸写字面量收口）。
-import { OFFSCREEN_CHAT_PORT_NAME } from "../chat/protocol.js";
-import { createSubtitleWaiter, isContextPending } from "../chat/subtitle-wait.js";
+// 对话域单一深入口（arch-review-2026-09/08）：内核链五件（pinned 补水解析器 +
+// conversation-store + context-load（含内联 createInProcessContextFetch 进程内
+// 直读装配策略）+ chat-runtime）在 ../chat/tab-domain.ts 组装；chat 域其余出口
+//（状态单例、subtitle-wait、no-subtitle 文案、context-policy 谓词、offscreen
+// 端口名、presets/providers 工厂）统一经该门面转出——本文件的 chat 域 import
+// 面收敛为一处（10 → 1）。
 import {
+  CONTEXT_READ_FAILED_MESSAGE,
   NO_SUBTITLE_SEND_BLOCKED,
+  OFFSCREEN_CHAT_PORT_NAME,
   buildNoSubtitleNotice,
+  chatSessionState,
+  createChatTabDomain,
+  createPresetPrompts,
+  createProviderPrefs,
+  createSubtitleWaiter,
+  isContextPending,
   isNoSubtitleEmptyContext,
+  isPinnedContextTruthy,
   type NoSubtitleReason
-} from "../chat/no-subtitle.js";
-import { createConversationStore } from "../chat/conversation-store.js";
-import { chatSessionState } from "../chat/chat-state.js";
-import { createPresetPrompts } from "../chat/presets.js";
-import { createProviderPrefs } from "../chat/providers.js";
-import { createContextLoad } from "../chat/context-load.js";
-// AiContext 装配链唯一入口（工单 07 收口）：进程内直读策略 + pinned 补水身份
-// 短路，形状/校验/签名单源在 core/context-payload。
-import { createInProcessContextFetch, createInProcessPinnedContextResolver } from "../core/context-assembly.js";
-// 上下文加载失败文案：ensureCurrentContextForSend 的失败闸共用策略模块常量。
-import { CONTEXT_READ_FAILED_MESSAGE, isPinnedContextTruthy } from "../chat/context-policy.js";
+} from "../chat/tab-domain.js";
 import { updateModelSelectWidth } from "../ui/model-select-width.js";
 // reader 触发源与进程内相位（content script 收不到自己的 runtime 广播）。
 import { BOC_URL_CHANGE_EVENT } from "../core/url-watcher.js";
@@ -299,23 +297,41 @@ const {
   isMessagesNearBottom
 } = feedback;
 
+// 对话域内核链单一深入口（arch-review-2026-09/08）：pinned 补水解析器 +
+// conversation-store + context-load（含内联 createInProcessContextFetch）+
+// chat-runtime 在 ../chat/tab-domain.ts 组装——实例级硬边顺序 pinnedResolver →
+// store → contextLoad → runtime 在组装模块内保持，其余 30+ 处跨实例互引保持
+// 惰性箭头（回调执行时实例已存在）。本侧只注入 deps：壳 DOM 三件 + ui 门面
+//（ChatRuntimeUi 8 件回调）+ store 能力事件订阅 + contextLoad 渲染编排回调 +
+// storage + 状态 getter + runtime 传输/AI 回调（闭包连着本文件的页面级编排、
+// 触发源状态与 DOM）。
 // 会话状态（会话列表/当前会话/上下文）已收拢至 chatSessionState，store 直接
-// import 读写；deps 只剩上下文获取 dep、三个能力事件与 storage 抽象（工单 05
-// 渲染编排反转：store 自己编排渲染时机，本组合根只订阅结果——历史列表恒随
-// onConversationChanged 重渲，标志驱动 chip/popover/视图重建）。
-// pinned 补水的 context 解析（工单 04 身份短路）接在 resolveAiConversationRef
-// 的 purpose="context" 用途上：会话 contextRef 与当前 clip 一致 → 进程内快照
-// 装配（零网络解析、不重下字幕正文）；未命中（换视频/换分P/换轨/无页面）→
-// ai/context-resolver 的网络路径原样兜底。
-const resolveConversationContext = createInProcessPinnedContextResolver({
-  clip: () => state.clip,
-  settings: () => state.settings,
-  resolveNetwork: resolveAiConversationContext
-});
-const conversationStore = createConversationStore({
-  loadContextState: (opts) => contextLoad.loadContextState(opts),
-  resolveAiConversationRef: (contextRef, purpose) =>
-    purpose === "page" ? resolveAiConversationPageRef(contextRef) : resolveConversationContext(contextRef),
+// import 读写。能力事件三件（工单 05 渲染编排反转：store 自己编排渲染时机，
+// 本组合根只订阅结果）：
+//   - onConversationChanged：历史列表恒随事件重渲，change 标志（refreshContext-
+//     Chip / historyCleared / resetView）声明其余需要刷新的呈现面；
+//   - onStreamInterrupted：流式中删除当前会话 / 清空全部 / restoreLatest 无匹配
+//     时由 store 同步发出——断 port、清在途一问一答、清消息区并退出流式 UI 态
+//    （对应 restartChat 的清理动作，但不清会话状态——那由 store 自己做）。
+//     store 不直接 import chatRuntime，依赖方向由 tab-domain 组装；回调幂等
+//    （非流式时为无害空操作）。
+//   - onContextNotice：上下文补水提示生命周期（pending 展示 / clear 撤除 /
+//     error 展示）。
+const { runtime: chatRuntime, store: conversationStore, contextLoad } = createChatTabDomain({
+  messages: els.messages,
+  input: els.input,
+  contextChip: els.contextChip,
+  ui: {
+    setStreamingUiState,
+    showConversationContextNotice,
+    removeConversationContextNotice,
+    hidePresetPopover: () => popovers.hidePresetPopover(),
+    hideHistoryPopover: () => popovers.hideHistoryPopover(),
+    removeCenteredState,
+    removeSuggestions,
+    resetConversationView,
+    autosizeInput
+  },
   onConversationChanged: (change) => {
     lists.renderHistoryList();
     if (change.refreshContextChip) {
@@ -328,10 +344,6 @@ const conversationStore = createConversationStore({
       renderInitialState();
     }
   },
-  // 流式中删除当前会话 / 清空全部 / restoreLatest 无匹配时由 store 同步发出：
-  // 断 port、清在途一问一答、清消息区并退出流式 UI 态（对应 restartChat 的
-  // 清理动作，但不清会话状态——那由 store 自己做）。store 不直接 import
-  // chatRuntime，依赖方向由本文件组装；回调幂等（非流式时为无害空操作）。
   onStreamInterrupted: () => {
     chatRuntime.resetStreamState();
     resetConversationView();
@@ -346,8 +358,31 @@ const conversationStore = createConversationStore({
       showConversationContextError(notice.message);
     }
   },
-  storage: chrome.storage.local
+  renderHistoryList: () => lists.renderHistoryList(),
+  renderInitialState,
+  renderSuggestions: () => lists.renderSuggestions(),
+  restartChat,
+  storage: chrome.storage.local,
+  clip: () => state.clip,
+  settings: () => state.settings,
+  ensureCurrentContextForSend,
+  getProviderId: () => els.modelSelect.value,
+  getTimestampNavDeps,
+  normalizeMarkdownForSectionPaste,
+  // 发送前 ensure offscreen 文档再连端口：文档死亡后自愈重建（ensure 失败
+  // 不阻断 connect，维持历史行为，由连接结果兜底）。chrome.offscreen 仅扩展
+  // 上下文可用：content script 经 "ensure-offscreen-chat" 消息委托 background
+  // 幂等 ensure（sidepanel 直调同款自愈设计的 reader 通道）。关闭会话后不再
+  // 发起流（工单 08：关闭即断流，不做后台续跑）。
+  connectPort: async () => {
+    if (sessionClosed) {
+      throw new Error("阅读模式已关闭，对话已中止。");
+    }
+    await sendRuntimeMessage({ type: "ensure-offscreen-chat" }).catch(() => null);
+    return chrome.runtime.connect({ name: OFFSCREEN_CHAT_PORT_NAME });
+  }
 });
+const { loadContextState, updateContextChip } = contextLoad;
 
 // 三列表渲染（建议/预设/历史）+ 预设提示词插入。insertPresetPrompt /
 // hidePresetPopover / hideHistoryPopover 与本实例/popovers 实例互引，惰性
@@ -380,68 +415,10 @@ const popovers = createReaderChatPopovers({
   renderHistoryList: () => lists.renderHistoryList()
 });
 
-// 上下文状态加载（读当前页状态 → 按策略动作执行编排副作用）+ context chip。
-// 流式守卫判定惰性取 chatRuntime（回调执行时实例已存在）。
-// PR5：拉数据一段为 ContextFetch 策略注入——reader 与 content 同进程，用
-// createInProcessContextFetch 直读 state.clip（不走扩展页消息链；装配策略
-// 自工单 07 起收口在 core/context-assembly 的唯一装配链）。
-const contextLoad = createContextLoad({
-  fetchContext: createInProcessContextFetch({
-    clip: () => state.clip,
-    settings: () => state.settings
-  }),
-  contextChip: els.contextChip,
-  renderHistoryList: () => lists.renderHistoryList(),
-  renderInitialState,
-  renderSuggestions: () => lists.renderSuggestions(),
-  resetConversationView,
-  restartChat: (opts) => restartChat(opts),
-  restoreLatest: () => conversationStore.restoreLatest(),
-  isStreaming: () => chatRuntime.isStreaming(),
-  hasPendingUserPrompt: () => chatRuntime.hasPendingUserPrompt()
-});
-const { loadContextState, updateContextChip } = contextLoad;
-
-// chat 流状态机：自身流状态（activePort 等）与自动滚动标志（shouldAutoScroll-
-// Messages）都在 runtime 闭包内；会话状态读 chatSessionState；deps 只剩 DOM
-// 容器/元素引用、store 实例与 UI/transport 回调。
-const chatRuntime = createChatRuntime({
-  // ---- DOM 容器 / 元素引用（本文件模块级 `els`）----
-  messages: els.messages,
-  input: els.input,
-  // ---- conversation-store 窄接口（实例；isCurrent 为会话身份守卫的单一判定
-  // 点，chat-runtime finalize/stopped 持久化前调用）----
-  store: conversationStore,
-  // ---- UI 门面（布局 / UI 回调的纯分组，DOM 布局留在本组合根）----
-  ui: {
-    setStreamingUiState,
-    showConversationContextNotice,
-    removeConversationContextNotice,
-    hidePresetPopover: () => popovers.hidePresetPopover(),
-    hideHistoryPopover: () => popovers.hideHistoryPopover(),
-    removeCenteredState,
-    removeSuggestions,
-    resetConversationView,
-    autosizeInput
-  },
-  // ---- AI 域 / 上下文 / 传输辅助 ----
-  ensureCurrentContextForSend,
-  getProviderId: () => els.modelSelect.value,
-  getTimestampNavDeps,
-  normalizeMarkdownForSectionPaste,
-  // 发送前 ensure offscreen 文档再连端口：文档死亡后自愈重建（ensure 失败
-  // 不阻断 connect，维持历史行为，由连接结果兜底）。chrome.offscreen 仅扩展
-  // 上下文可用：content script 经 "ensure-offscreen-chat" 消息委托 background
-  // 幂等 ensure（sidepanel 直调同款自愈设计的 reader 通道）。关闭会话后不再
-  // 发起流（工单 08：关闭即断流，不做后台续跑）。
-  connectPort: async () => {
-    if (sessionClosed) {
-      throw new Error("阅读模式已关闭，对话已中止。");
-    }
-    await sendRuntimeMessage({ type: "ensure-offscreen-chat" }).catch(() => null);
-    return chrome.runtime.connect({ name: OFFSCREEN_CHAT_PORT_NAME });
-  }
-});
+// 上下文状态加载编排壳（../chat/context-load.ts）与 chat 流状态机
+//（../chat/chat-runtime.ts）均已收进上面的 createChatTabDomain 组装；本文件
+// 经解构消费 contextLoad（loadContextState / updateContextChip，见上）与
+// chatRuntime 实例方法。
 
 // 预设提示词 CRUD（deps 注入本文件的编排回调与 DOM 引用）。
 const presets = createPresetPrompts({
