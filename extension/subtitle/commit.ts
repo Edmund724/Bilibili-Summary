@@ -6,7 +6,12 @@
 // subtitleBody）→ fetchState="ready" → 清 noSubtitleReason → await
 // refreshDerivedContent()（笔记/SRT/TXT/预览派生）→ 通知 "subtitle-ready"
 //（发射无条件：视图门控的裁决权归 reader 侧 init-essentials 分派链，见
-// acceptSubtitle 内注）。历史上该序列在 fetcher.js（CC 缓存命中/网络新抓）与
+// acceptSubtitle 内注）。两个事务均支持可选 runId 代次自检（M23 runId 协调）：
+// 调用方传入自己的抓取代次时，写 state 前先与 clipState.fetchRunId 比对，代次
+// 已被 URL 变化递增/新一轮抓取推进则抛 STALE_RUN 让位——reset 与在飞提交的
+// 竞态由此收口在事务内（自检与首个 state 写入之间无 await，同步 reset 无法
+// 楔入）。asr/fallback 的收尾不传 runId（它有自己的 isStale 视频键门控，见
+// asr/fallback.ts），行为不变。历史上该序列在 fetcher.js（CC 缓存命中/网络新抓）与
 // asr/fallback.js（ASR 缓存命中/转写完成）手抄了 4 处，逆操作（无字幕出口）
 // 又在 subtitle/ui.js 的 applyNoSubtitleState + 两处调用点手抄——不变量的依据
 //（selection.js 的排序注释）活在第三个文件里。本模块收口后一处持有事务：
@@ -27,6 +32,7 @@ import type { NoSubtitleReason, SubtitleBodyItem } from "../core/state.js";
 import { sortSubtitleBodyByFrom } from "./selection.js";
 import { refreshDerivedContent } from "./core.js";
 import { notifyReaderPresenter } from "../reader/reader-bus.js";
+import { ensureRunActive } from "../shared/error-helpers.js";
 
 export interface CommitUiCallbacks {
   setStatus(message: string): void;
@@ -52,6 +58,10 @@ export interface AcceptSubtitleArgs {
   selectedSubtitleId: string;
   selectedSubtitleUrl: string;
   selectedSubtitleLang: string;
+  // 发起方抓取代次（可选，M23 runId 协调）：传入则提交前与 clipState.fetchRunId
+  // 比对，已被 URL 变化递增/新一轮抓取推进时抛 STALE_RUN 让位（旧视频字幕不
+  // 写进已重置的 state）。未传不校验（asr/fallback 收尾路径自有门控）。
+  runId?: number;
 }
 
 // 字幕接受（四个写入点的唯一实现）：幂等稳定排序在写 state 前完成——
@@ -64,8 +74,14 @@ export async function acceptSubtitle({
   body,
   selectedSubtitleId,
   selectedSubtitleUrl,
-  selectedSubtitleLang
+  selectedSubtitleLang,
+  runId
 }: AcceptSubtitleArgs): Promise<unknown[] | null | undefined> {
+  // runId 代次自检（可选）：守卫先于任何 state 写入，且与下方首个写入之间无
+  // await——同步的 resetClipState 无法楔入自检与提交之间。
+  if (runId !== undefined) {
+    ensureRunActive(runId, clipState.fetchRunId);
+  }
   const sortedBody = sortSubtitleBodyByFrom(body);
   clipState.setSelectedSubtitleId(selectedSubtitleId);
   clipState.setSelectedSubtitleUrl(selectedSubtitleUrl);
@@ -85,6 +101,9 @@ export async function acceptSubtitle({
 export interface CommitNoSubtitleArgs {
   noSubtitleReason?: NoSubtitleReason;
   asrResult?: string;
+  // 发起方抓取代次（可选，语义同 AcceptSubtitleArgs.runId）：传入则出口前
+  // 自检，代次已被推进时抛 STALE_RUN 让位，不再把「无字幕」写进新视频的 state。
+  runId?: number;
 }
 
 // 无字幕出口（逆事务，applyNoSubtitleState + 两处收尾段的唯一实现）：清空选中
@@ -100,9 +119,13 @@ export interface CommitNoSubtitleArgs {
 //
 // maybeRunAsrFallback → done 即 return 的守卫属抓取编排（fallback 内部已走
 // 接受事务收尾），留在 fetcher 的 finishNoSubtitle，不进本事务。
-export async function commitNoSubtitle({ noSubtitleReason, asrResult }: CommitNoSubtitleArgs = {}): Promise<void> {
+export async function commitNoSubtitle({ noSubtitleReason, asrResult, runId }: CommitNoSubtitleArgs = {}): Promise<void> {
   if (!commitUi) {
     throw new Error("字幕接受事务的 UI 回调未注入（configureCommitUi），无字幕出口拒绝执行。");
+  }
+  // runId 代次自检（可选，同 acceptSubtitle）：守卫先于任何 state 写入。
+  if (runId !== undefined) {
+    ensureRunActive(runId, clipState.fetchRunId);
   }
   clipState.setSelectedSubtitleId("");
   clipState.setSelectedSubtitleUrl("");

@@ -288,6 +288,14 @@ export function bindUrlChangeHandler() {
 
     clipState.setCurrentUrl(nextUrl);
     clipState.setCurrentClipSignature(nextSignature);
+    // runId 代次协调（finding resetClipState×refreshClip）：URL 已变即同步递增
+    // 抓取代次，旧 clip 的在飞 refreshClip 在下一次 ensureRunActive / 字幕接受
+    // 事务的 runId 自检（commit.acceptSubtitle）点让位，不再把旧视频字幕写进
+    // 已重置的 state。递增必须在本函数派生的任何异步工作（resetClipState 与
+    // 新视频 refreshClip 都在动态装载链之后才执行）之前同步完成——放进
+    // resetClipState 会让装载次序决定成败：新视频的 refreshClip 可能先起跑，
+    // 再被迟到的 reset 递增误杀，自动刷新静默失效。
+    clipState.setFetchRunId(clipState.fetchRunId + 1);
     enforceNormalPageStateIfNeeded(nextUrl);
     // 候选03：UI 壳惰性构建。URL 变化后需要先确保壳存在，再执行依赖壳的逻辑
     //（resetClipState 会清空面板内容；阅读模式进入依赖阅读视图壳）。

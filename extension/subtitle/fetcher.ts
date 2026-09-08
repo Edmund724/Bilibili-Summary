@@ -140,6 +140,13 @@ export async function tryLoadSubtitleCandidates(
 // "非转写中"提前放行空字幕。错误路径传 true 保留调用方随后覆写的 "error"
 //（见 refreshClip catch），其余调用方（message-handler 的 URL 变化等）默认
 // 全清，语义不变。
+// runId 代次协调（M23）：本函数不递增 fetchRunId——递增单点在 URL 变化编排
+//（entry/message-handler 的 handleUrlChange）感知签名变化处同步先行，早于本
+// reset 与新视频 refreshClip 各自的异步装载链（递增若放在这里，新视频的
+// refreshClip 可能先起跑再被迟到的递增误杀）。在飞 run 的让位由提交事务的
+// runId 自检（commit.acceptSubtitle / commitNoSubtitle）与各 ensureRunActive
+// 检查点承担。错误路径的 reset 不递增：本 run 已终态，不得顶掉并发中更新的
+// 同视频抓取。
 export function resetClipState({ keepFetchState = false }: { keepFetchState?: boolean } = {}): void {
   clipState.setBvid("");
   clipState.setAid("");
@@ -392,7 +399,10 @@ async function finishNoSubtitle(runId: number): Promise<void> {
   if (asrResult === "done") {
     return;
   }
-  await commitNoSubtitle({ asrResult });
+  // 无字幕出口逆事务随行 runId 自检（M23）：maybeRunAsrFallback 的 skip/empty
+  // 判定与出口提交之间隔着 await，reset/新抓取推进代次后不把「无字幕」写进
+  // 新视频的 state（STALE_RUN 上抛，refreshClip catch 静默吞掉）。
+  await commitNoSubtitle({ asrResult, runId });
 }
 
 // 签名 URL 失效重试（refreshClip 的 catch 路径）：字幕签名 URL 可能快速过期
@@ -471,12 +481,14 @@ export async function loadSubtitle(
         ensureRunActive(runId, state.clip.fetchRunId);
         // 字幕接受事务（commit.acceptSubtitle）：写 selected 三项 → ready →
         // 清原因 → 刷新派生 → 通知 reader，旧缓存条目可能无序，幂等稳定排序
-        // 由事务单点完成（「subtitleBody 按 from 升序」不变量）。
+        // 由事务单点完成（「subtitleBody 按 from 升序」不变量）。runId 随行：
+        // 事务提交前自检代次，reset/新抓取已推进时让位（M23 runId 协调）。
         await acceptSubtitle({
           body: cachedBody,
           selectedSubtitleId: subtitleId ? String(subtitleId) : state.clip.selectedSubtitleId,
           selectedSubtitleUrl: url,
-          selectedSubtitleLang: lang
+          selectedSubtitleLang: lang,
+          runId
         });
         return;
       }
@@ -509,12 +521,15 @@ export async function loadSubtitle(
 
   // 字幕接受事务（commit.acceptSubtitle）：body 已在上方落缓存前完成稳定排序
   //（事务内幂等再收口一次），写 selected 三项 → ready → 清原因 → 刷新派生 →
-  // 通知 reader 全部由事务单点负责。
+  // 通知 reader 全部由事务单点负责。runId 随行自检（M23）：网络抓取与提交间
+  // 隔着落缓存等 await，reset/新抓取推进代次后到站的旧 run 在事务门口让位，
+  // 旧视频字幕不写进已重置的 state。
   await acceptSubtitle({
     body,
     selectedSubtitleId: subtitleId ? String(subtitleId) : state.clip.selectedSubtitleId,
     selectedSubtitleUrl: url,
-    selectedSubtitleLang: lang
+    selectedSubtitleLang: lang,
+    runId
   });
 }
 
