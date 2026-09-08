@@ -16,6 +16,11 @@
 //（rAF 合帧 + 脏检查，思路源自旧 player-host 调度器）——digest-host
 // 的写组是四个 CSS 变量与一个浮层属性，快照结构独立。
 //
+// 附带职责（M19）：滚动起止的材质降级标记。面板贴栏时每帧随变量位移，
+// header/设置抽屉的 backdrop-filter 会逐帧重采样；滚动期间给视图节点挂
+// data-boc-digest-scrolling（CSS 侧摘掉毛玻璃），scrollend 或 150ms 静默
+// 兜底摘除。与 rAF 重算共用 scroll 监听、各自独立的收尾节拍。
+//
 // 为什么不用 MutationObserver：弹幕每飘一条都是变更事件，白烧 CPU（见
 // ui/digest-button.ts 头注）；SPA 换页换掉锚点节点的场景由 2s 定时自查
 // 覆盖（节拍与拆单源的理由见 REANCHOR_INTERVAL_MS 处注释，与 digest-button
@@ -64,6 +69,14 @@ const REANCHOR_INTERVAL_MS = 2000;
 const DIGEST_VAR_PREFIX = "--boc-digest-";
 const DIGEST_VARS = ["left", "top", "width", "height"] as const;
 const FLOAT_ATTR = "data-boc-digest-float";
+// 滚动进行中标记：贴栏态面板每帧随 --boc-digest-top 位移，header/设置抽屉的
+// backdrop-filter 跟着每帧重采样（M12 巡检 P2-2）。滚动期间摘掉毛玻璃、停下
+// 恢复——面板壳自身是不透明底，header/抽屉的 backdrop 只有面板底色，摘掉期间
+// 模糊结果无可见差异；静止态材质一字不动。规则在 reader.css / reader-settings.css。
+const SCROLLING_ATTR = "data-boc-digest-scrolling";
+// 滚动收尾兜底窗：scrollend（支持时）即时恢复材质，本定时器兜底——滚动事件
+// 每拍重置，滚动停止 150ms 内无 scrollend 也会恢复，不依赖引擎事件支持。
+const SCROLL_IDLE_TIMEOUT_MS = 150;
 
 // ===== 模块级生命周期状态（open/close 属主，幂等由 openDigestHost 守卫） =====
 
@@ -71,6 +84,8 @@ let reanchorTimer = 0;
 let resizeObserver: ResizeObserver | null = null;
 let observedAnchor: Element | null = null;
 let layoutRafId = 0;
+// 滚动进行中标记的定时收尾句柄（非 0 即标记已挂、收尾待跑）。
+let scrollIdleTimer = 0;
 // 上次写组快照：与本次计算结果全同则整组跳写，避免每个滚动事件的无谓样式
 // 失效（脏检查快照 lastSnapshot）。浮层分支记
 // floating: true，与贴栏分支互斥，形态切换天然强制重写。
@@ -106,7 +121,9 @@ export function closeDigestHost(): void {
     layoutRafId = 0;
   }
   window.removeEventListener("resize", requestDigestLayout);
-  window.removeEventListener("scroll", requestDigestLayout);
+  window.removeEventListener("scroll", onDigestScroll);
+  document.removeEventListener("scrollend", endDigestScroll);
+  endDigestScroll();
   lastSnapshot = null;
   const readingView = document.getElementById(ids.readingView);
   if (!readingView) {
@@ -124,12 +141,50 @@ function bindDigestHostListeners(): void {
   // 事件监听走零参入口 requestDigestLayout：Event 实参由它丢弃，且具名函数
   // 保证 add/remove 拿到同一引用（箭头每次新建，remove 永不命中、监听泄漏）。
   window.addEventListener("resize", requestDigestLayout);
-  window.addEventListener("scroll", requestDigestLayout, { passive: true });
+  window.addEventListener("scroll", onDigestScroll, { passive: true });
+  // scrollend 的派发目标：视口滚动打在 Document（按 CSSOM View 冒泡，Document
+  // 监听直接命中），元素内部滚动打在元素上且不冒泡——本模块只关心面板随页面
+  // 滚动位移的材质降级，元素内部滚动不移动面板，无需处理。旧引擎无此事件时
+  // 由滚动事件每拍重置的 150ms 定时器兜底收尾。
+  document.addEventListener("scrollend", endDigestScroll);
 }
 
 // 事件路径入口：丢弃 Event 实参，转调合帧入口（不带 finding 的纯重算）。
 function requestDigestLayout(): void {
   scheduleDigestLayout();
+}
+
+// 滚动事件路径：与合帧重算并行地挂/续「滚动进行中」标记（重算只关心 rect，
+// 材质降级只关心滚动起止，两者节拍独立）。标记由 scrollend 或 150ms 静默收尾。
+function onDigestScroll(): void {
+  markDigestScrolling();
+  requestDigestLayout();
+}
+
+// 挂标记并重置收尾定时器：每次滚动事件都续命，滚动一停定时器就落地恢复。
+// 视图节点缺失（未渲染/已清理）时静默跳过，不空转定时器。标记已在则不重写
+// 属性值——与写组的脏检查同理，避免滚动每拍触发无谓的样式失效。
+function markDigestScrolling(): void {
+  const readingView = document.getElementById(ids.readingView);
+  if (!readingView) {
+    return;
+  }
+  if (readingView.getAttribute(SCROLLING_ATTR) !== "1") {
+    readingView.setAttribute(SCROLLING_ATTR, "1");
+  }
+  if (scrollIdleTimer) {
+    window.clearTimeout(scrollIdleTimer);
+  }
+  scrollIdleTimer = window.setTimeout(endDigestScroll, SCROLL_IDLE_TIMEOUT_MS);
+}
+
+// 收尾：摘标记、停定时器。scrollend 与定时器、close 都走这里，幂等。
+function endDigestScroll(): void {
+  if (scrollIdleTimer) {
+    window.clearTimeout(scrollIdleTimer);
+    scrollIdleTimer = 0;
+  }
+  document.getElementById(ids.readingView)?.removeAttribute(SCROLLING_ATTR);
 }
 
 // rAF 合帧入口：置脏标志（rafId 非 0 即有未消费请求），一帧至多跑一次

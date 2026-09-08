@@ -248,6 +248,16 @@
   }
 }
 
+/* 滚动进行中关停毛玻璃（M19 / M12 巡检 P2-2）：贴栏态面板随 --boc-digest-top
+ * 逐帧位移，header 的 backdrop 跟着每帧重采样。digest-host 在滚动期间给
+ * #boc-reading-view 挂 data-boc-digest-scrolling，滚动停下（scrollend 或
+ * 150ms 静默兜底）摘除。面板壳自身是不透明底，header 的 backdrop 只有面板
+ * 底色，关停期间无可感差异；静止态材质与滚动恢复后一字不变。 */
+#boc-reading-view[data-boc-digest-scrolling="1"] .boc-reading-digest-panel .boc-reading-header {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 /* 状态行（「当前进度」等）与 header 内容左右对齐（digest-only-ui）：
  * header/tab-body 各自带 16px 水平内边距，而状态行原是撑满面板宽度的裸
  * block（文本左缘贴面板边缘），与 header 内容不在同一垂直线上——补同款

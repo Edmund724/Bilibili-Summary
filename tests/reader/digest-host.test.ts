@@ -12,6 +12,8 @@
 // innerHeight 用 jsdom 默认 768。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { resetModuleState, setLocationUrl } from "../setup.js";
 import { READER_MODE_URL } from "../setup.js";
 
@@ -405,6 +407,70 @@ describe("digest-host 重算时机", () => {
     expect(vars(readingView()).width).toBe("400px");
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+});
+
+// 滚动进行中材质降级（M19 / M12 巡检 P2-2）：贴栏态面板每帧随
+// --boc-digest-top 位移，header/设置抽屉的 backdrop-filter 跟着逐帧重采样。
+// digest-host 在滚动期间给 #boc-reading-view 挂 data-boc-digest-scrolling，
+// scrollend（或 150ms 静默兜底）摘除；CSS 侧由滚动属性关停毛玻璃。
+describe("digest-host 滚动进行中材质降级（M19）", () => {
+  const SCROLLING_ATTR = "data-boc-digest-scrolling";
+
+  it("scroll 事件挂标记，document 上的 scrollend（视口滚动）立即摘除", async () => {
+    await loadModules();
+    mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
+    digestHost.openDigestHost();
+
+    window.dispatchEvent(new Event("scroll"));
+    expect(readingView().getAttribute(SCROLLING_ATTR)).toBe("1");
+
+    document.dispatchEvent(new Event("scrollend"));
+    expect(readingView().getAttribute(SCROLLING_ATTR)).toBe(null);
+  });
+
+  it("无 scrollend 时 150ms 静默兜底摘除；滚动期间每拍续命不提前恢复", async () => {
+    vi.useFakeTimers();
+    await loadModules();
+    digestHost.openDigestHost();
+
+    window.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(100);
+    // 续命：100ms 时又滚了一拍，收尾窗口重新计时。
+    window.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(100);
+    expect(readingView().getAttribute(SCROLLING_ATTR)).toBe("1");
+
+    vi.advanceTimersByTime(60);
+    expect(readingView().getAttribute(SCROLLING_ATTR)).toBe(null);
+    vi.useRealTimers();
+  });
+
+  it("close 摘除标记并停摆收尾定时器（再推进时间也不复活）", async () => {
+    vi.useFakeTimers();
+    await loadModules();
+    digestHost.openDigestHost();
+    window.dispatchEvent(new Event("scroll"));
+    expect(readingView().getAttribute(SCROLLING_ATTR)).toBe("1");
+
+    digestHost.closeDigestHost();
+    const el = readingView();
+    expect(el.getAttribute(SCROLLING_ATTR)).toBe(null);
+
+    window.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(500);
+    expect(el.getAttribute(SCROLLING_ATTR)).toBe(null);
+    vi.useRealTimers();
+  });
+
+  it("CSS 侧消费滚动属性：header 与设置抽屉各有一条关停毛玻璃规则", () => {
+    const read = (rel: string) => readFileSync(resolve(process.cwd(), rel), "utf8");
+    const headerRule =
+      /#boc-reading-view\[data-boc-digest-scrolling="1"\]\s+\.boc-reading-digest-panel\s+\.boc-reading-header\s*\{[^}]*backdrop-filter:\s*none/s;
+    const settingsRule =
+      /#boc-reading-view\[data-boc-digest-scrolling="1"\]\s+\.boc-reading-settings-panel\s*\{[^}]*backdrop-filter:\s*none/s;
+    expect(read("extension/entry/styles/reader.css")).toMatch(headerRule);
+    expect(read("extension/entry/styles/reader-settings.css")).toMatch(settingsRule);
   });
 });
 
