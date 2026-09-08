@@ -41,6 +41,8 @@ export function bindReadingExplainEvents(): void {
   // 触发条件是「在字幕句里选中了词/句」，不再是 hover。选区变化经 document
   // selectionchange 单点委托（拖选/双击/键盘选区都覆盖），只在选区落在字幕列表
   // 内时显示浮层，并定位到选区下方；选区清空/移出列表/列表滚动时隐藏。
+  // 定位合帧到 rAF：拖选期间 selectionchange 高频触发，一帧内至多一次「读→写」
+  // 相位（事件相位只做无布局的选区判定与快照）。
   // 浮层挂在本 tab body（非列表滚动容器）内，不进 .boc-reading-item 的点击委托
   // 链——点「解释」不会触发点句跳转。
   const readingExplainPop = byId(ids.readingExplainPop);
@@ -50,7 +52,32 @@ export function bindReadingExplainEvents(): void {
   // 浮层显示时快照选区（条目索引 + 选中原文）：点「解释」时不再回读
   // window.getSelection()——彼时选区可能已被浏览器折叠，且快照语义更明确。
   let pendingExplainSelection: { itemIndex: string; selection: string } | null = null;
+  // 本帧待定位的选区快照（cloneRange——rAF 执行时选区可能已继续变化/折叠）；
+  // 两个帧句柄分别对应「定位/显形」与「显形后量宽」，hide 时一并取消。
+  let pendingExplainTarget: { item: HTMLElement; range: Range; selection: string } | null = null;
+  let showFrameId = 0;
+  let measureFrameId = 0;
+  // 宽度缓存：定位热路径绝不回读 offsetWidth（写 hidden 后立刻读会强制同步
+  // 布局）。首次显形的下一帧量一次（显形后布局已就绪，且该帧只读不写），此后
+  // 每次定位都用缓存值——按钮文案固定（「解释」），宽度在绑定期内不变。
+  const POP_WIDTH_FALLBACK = 96;
+  let popWidth = POP_WIDTH_FALLBACK;
+  let popWidthMeasured = false;
+  const cancelExplainPopFrames = () => {
+    if (showFrameId) {
+      window.cancelAnimationFrame(showFrameId);
+      showFrameId = 0;
+    }
+    if (measureFrameId) {
+      window.cancelAnimationFrame(measureFrameId);
+      measureFrameId = 0;
+    }
+    pendingExplainTarget = null;
+  };
   const hideExplainPop = () => {
+    // 先取消本帧待定位：「浮层已隐藏且尚无快照」也可能是刚排了一帧，走下面的
+    // 早退会漏掉取消，下一帧又把它显形。
+    cancelExplainPopFrames();
     // 热路径守卫：selectionchange 对页面任何输入框的选区变化都会触发，已隐藏时
     // 直接返回，避免每次敲键盘都写一遍 DOM。
     if (readingExplainPop.hidden && !pendingExplainSelection) {
@@ -69,19 +96,52 @@ export function bindReadingExplainEvents(): void {
     }
     return item.getBoundingClientRect();
   };
-  const showExplainPopForSelection = (item: HTMLElement, range: Range, selection: string) => {
+  // 显形 + 定位：本帧的「读→写」相位。读相位一次性取全部几何（body rect、
+  // 选区 rect），写相位一次性写 hidden/dataset/left/top——中间不再夹读，
+  // 因此不触发强制同步布局。浮层宽度取缓存值（首次显形下一帧才量）。
+  const placeExplainPop = (target: { item: HTMLElement; range: Range; selection: string }) => {
     const bodyRect = readingTabBodySubtitle.getBoundingClientRect();
-    const rect = explainAnchorRect(range, item);
-    pendingExplainSelection = { itemIndex: item.dataset.index || "", selection };
-    readingExplainPop.dataset.itemIndex = pendingExplainSelection.itemIndex;
-    // 先显形再量宽：浮层宽度随文案变化。水平位置 = 选区中点正下方居中
-    //（贴左右边界时收敛回 tab body 内），垂直位置 = 选区下缘留 4px。
-    readingExplainPop.hidden = false;
-    const popWidth = readingExplainPop.offsetWidth || 96;
+    const rect = explainAnchorRect(target.range, target.item);
+    // 水平位置 = 选区中点正下方居中（贴左右边界时收敛回 tab body 内），
+    // 垂直位置 = 选区下缘留 4px。
     const selectionCenter = Math.round(rect.left + rect.width / 2 - bodyRect.left);
     const maxLeft = Math.max(8, Math.round(bodyRect.width) - popWidth - 8);
-    readingExplainPop.style.left = `${Math.min(Math.max(8, selectionCenter - Math.round(popWidth / 2)), maxLeft)}px`;
-    readingExplainPop.style.top = `${Math.max(0, Math.round(rect.bottom - bodyRect.top) + 4)}px`;
+    const left = Math.min(Math.max(8, selectionCenter - Math.round(popWidth / 2)), maxLeft);
+    const top = Math.max(0, Math.round(rect.bottom - bodyRect.top) + 4);
+    pendingExplainSelection = { itemIndex: target.item.dataset.index || "", selection: target.selection };
+    readingExplainPop.dataset.itemIndex = pendingExplainSelection.itemIndex;
+    readingExplainPop.style.left = `${left}px`;
+    readingExplainPop.style.top = `${top}px`;
+    readingExplainPop.hidden = false;
+  };
+  const runExplainPopFrame = () => {
+    showFrameId = 0;
+    const target = pendingExplainTarget;
+    pendingExplainTarget = null;
+    if (!target) {
+      return;
+    }
+    placeExplainPop(target);
+    // 宽度校准帧：显形后布局已就绪，该帧只读不写，读 offsetWidth 是干净读。
+    // 量到后更新缓存供后续选区定位用（本帧位置用缓存值/fallback）。被 hide 取消
+    // 时不置位，下次显形重新排帧校准。
+    if (!popWidthMeasured && !measureFrameId) {
+      measureFrameId = window.requestAnimationFrame(() => {
+        measureFrameId = 0;
+        const measured = readingExplainPop.hidden ? 0 : readingExplainPop.offsetWidth;
+        if (measured) {
+          popWidth = measured;
+          popWidthMeasured = true;
+        }
+      });
+    }
+  };
+  const showExplainPopForSelection = (item: HTMLElement, range: Range, selection: string) => {
+    // 快照选区范围：rAF 执行时用户可能已拖到别处或折叠选区，届时 range 会失效。
+    pendingExplainTarget = { item, range: range.cloneRange(), selection };
+    if (!showFrameId) {
+      showFrameId = window.requestAnimationFrame(runExplainPopFrame);
+    }
   };
   const syncExplainPopWithSelection = () => {
     const selection = window.getSelection?.();
