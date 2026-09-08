@@ -99,6 +99,11 @@
   color: var(--boc-reader-muted, #6b7280);
 }
 
+/* 面板壳网格第 2 行（见 .boc-reading-digest-panel）；其他容器里该属性无效 */
+.boc-reading-status {
+  grid-row: 2;
+}
+
 .boc-reading-meta {
   margin-top: 8px;
 }
@@ -232,8 +237,16 @@
  * --boc-reader-* 主题 token（gate 段两主题定义），暗色主题自动跟随。 */
 .boc-reading-digest-panel {
   min-height: 0;
-  display: flex;
-  flex-direction: column;
+  /* 四行网格（header / status / tabs / tab-body）替代原 flex 列：设置抽屉与
+   * 标签区同占第 3–4 行（抽屉 span 两行），抽屉退出时两者重叠而非同时在流内
+   * 把 tab-body 挤扁再弹回（详见 reader-settings.css 开合过渡注释）。
+   * 原 flex 属性对网格项无效，行尺寸由 grid-template-rows 接管；三个
+   * tab-body 同占第 4 行（同一时刻只有一个 is-active 在显示）。 */
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  /* 显式单列：不写的话自动放置会把标签区排到第 2 列去避让跨行的抽屉
+   *（网格项不重叠），重叠语义随之失效。 */
+  grid-template-columns: 1fr;
   overflow: hidden;
   /* content-box 下 width:100% + 1px 边框两侧各溢 1px，贴栏态固定定位的
    * 溢出会顶出页面级横向滚动条（Modal 出现前的既有 2px 残留，一并收口） */
@@ -246,7 +259,7 @@
 }
 
 .boc-reading-digest-panel .boc-reading-header {
-  flex: 0 0 auto;
+  grid-row: 1;
   align-items: center;
   padding: 14px 16px 10px;
   gap: 10px;
@@ -285,7 +298,8 @@
 }
 
 .boc-reading-tabs {
-  flex: 0 0 auto;
+  grid-row: 3;
+  grid-column: 1;
   display: flex;
   gap: 4px;
   margin: 2px 14px 0;
@@ -323,7 +337,8 @@
 }
 
 .boc-reading-tab-body {
-  flex: 1;
+  grid-row: 4;
+  grid-column: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;

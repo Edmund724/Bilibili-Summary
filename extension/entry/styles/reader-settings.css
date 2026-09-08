@@ -29,6 +29,12 @@
  * #boc-reading-settings-panel 为前置，避免与宿主页面类名冲突。 */
 #boc-reading-view .boc-reading-settings-panel {
   max-height: calc(100vh - 150px);
+  /* 面板壳网格里的固定落位（第 3–4 行 = 标签条 + tab body，单列）：
+   * 两态都声明，退出淡出期间抽屉才留在原位与标签区重叠——若只写在
+   * :not([hidden]) 里，[hidden] 一翻转它就失去落位、被自动放置挤到新的
+   * 第 5 行，标签区反而瞬间弹动。 */
+  grid-row: 3 / 5;
+  grid-column: 1;
   overflow-y: auto;
   overscroll-behavior: contain;
   border-radius: 14px;
@@ -39,17 +45,20 @@
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   backdrop-filter: blur(20px) saturate(180%);
   padding: 12px 14px;
-  /* 开合过渡：淡入淡出走 spring（0.35s），display 经 allow-discrete 参与
-   *——hidden 翻转是纯属性切换（renderReaderPanels），淡出走完再隐、淡入
-   * 从 display:none 首帧起（起点由 @starting-style 提供），旧引擎瞬时显隐
-   *（与改造前行为一致）。 */
-  transition: opacity 0.35s var(--boc-reader-ease-spring, ease), display 0.35s allow-discrete;
+  /* 开合过渡（2026-09 用户决议：进出场同速同曲线）：淡入淡出统一 spring
+   * 0.2s，display 经 allow-discrete 参与同一时长——hidden 翻转是纯属性切换
+   *（renderReaderPanels），淡入从 display:none 首帧起（起点由 @starting-style
+   * 提供），淡出走完再隐，旧引擎瞬时显隐（与改造前行为一致）。
+   * 关闭不再「卡一下」的关键不在这条 transition，而在抽屉与标签区同占网格
+   * 第 3–4 行（见上）：淡出期间标签区已经按最终布局排好，抽屉在它上方淡走，
+   * 而不是留在流内把 tab body 挤到几十 px、等 display 延迟到点再弹回。 */
+  transition: opacity 0.2s var(--boc-reader-ease-spring, ease), display 0.2s allow-discrete;
 }
 
 #boc-reading-view .boc-reading-settings-panel[hidden] {
   display: none;
   opacity: 0;
-  transition: opacity 0.2s ease, display 0.35s allow-discrete;
+  transition: opacity 0.2s var(--boc-reader-ease-spring, ease), display 0.2s allow-discrete;
 }
 
 @starting-style {
@@ -62,10 +71,9 @@
  * 设置抽屉一开即独占面板：摘掉抽屉自身的圆角阴影与高度上限让它贴满面板壳，
  * 隐藏底部 字幕/概览/AI 对话 标签条与三个 tab body（含内容，避免残留行）。
  * 纯属性反应：[hidden] 由 renderReaderPanels 单点切换，无新状态类。
- * 关闭抽屉即整体回落三 tab 形态。 */
+ * 关闭抽屉即整体回落三 tab 形态（抽屉的网格落位在两态通用规则里，见上）。 */
 #boc-reading-view .boc-reading-settings-panel:not([hidden]) {
   max-height: none;
-  flex: 1 1 auto;
   min-height: 0;
   border-radius: 0;
   border: 0;
@@ -1144,7 +1152,7 @@
  * 按压缩放对减少动态用户关停，颜色/背景类短过渡保留。 */
 @media (prefers-reduced-motion: reduce) {
   #boc-reading-view .boc-reading-settings-panel {
-    transition: opacity 0.2s ease, display 0.35s allow-discrete;
+    transition: opacity 0.2s ease, display 0.2s allow-discrete;
   }
 
   #boc-reading-view .boc-reading-settings-host .boc-set-save-btn:active,
