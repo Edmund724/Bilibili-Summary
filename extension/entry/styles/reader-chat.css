@@ -464,6 +464,44 @@
   text-decoration: underline;
 }
 
+/* 长回复屏外段落跳过渲染（M13，defer-rendering-heavy-content 指南）：
+ * renderMarkdown 的块级输出（p/标题/列表/表格/代码块）逐块 content-visibility:
+ * auto——只跳过滚动容器 .chat-messages 视口外的块，长回复的流式渲染与滚动
+ * 开销只随可见块数走。占位高度按各块单行内容估算（15.5px × 1.45 行高
+ * ≈ 23px 一行），auto 让浏览器记住首次绘制后的实际尺寸，回滚到已渲染块
+ * 零跳动；宽度不占位（none：块宽由容器拉伸决定，与内容无关）。不支持的
+ * 引擎（Chrome <108）忽略整组声明按原样渲染——c-v:auto 无需 fallback（指
+ * 南）；跳过的块仍在可访问树内且参与页内查找（c-v:auto 语义），无需
+ * hidden="until-found"（那是 display:none 折叠内容才需要的机制，本面板无
+ * 此场景）；键盘 Tab 聚焦进入被跳过的块会强制其变为相关，顺序可达性保持。 */
+.boc-reading-chat .chat-msg-assistant p {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 23px;
+}
+
+.boc-reading-chat .chat-msg-assistant h3,
+.boc-reading-chat .chat-msg-assistant h4,
+.boc-reading-chat .chat-msg-assistant h5 {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 40px;
+}
+
+.boc-reading-chat .chat-msg-assistant ul,
+.boc-reading-chat .chat-msg-assistant ol {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 38px;
+}
+
+.boc-reading-chat .chat-msg-assistant pre {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 62px;
+}
+
+.boc-reading-chat .chat-msg-assistant table {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 48px;
+}
+
 .boc-reading-chat .chat-msg-cursor {
   display: inline-block;
   width: 5px;

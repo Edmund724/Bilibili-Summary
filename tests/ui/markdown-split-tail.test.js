@@ -74,4 +74,25 @@ describe("splitMarkdownTail", () => {
     expect(splitMarkdownTail("\n\n")).toEqual({ stableText: "", tailText: "\n\n" });
     expect(splitMarkdownTail(null)).toEqual({ stableText: "", tailText: "" });
   });
+
+  // M13（长回复屏外段落跳过渲染）：chat/解释卡样式对 renderMarkdown 块级输出
+  // 逐块应用 content-visibility: auto（reader-chat.css / reader.css），CSS 侧
+  // 规则清单只覆盖 p/h3-h5/ul/ol/pre/table 八种块容器。此测试钉住输出标签
+  // 清单——renderInline 只产行内标签，块级标签只出自 renderMarkdown 顶层分
+  // 支，若未来新增块级标签（如 hr/引用块），这里先红，提醒同步补 CSS 规则。
+  it("renderMarkdown 输出标签清单固定：块级容器仅为 c-v:auto 目标集八种", () => {
+    const html = renderMarkdown(
+      "# 一\n## 二\n### 三\n\n段落 **加粗** *斜体* `代码` [链接](https://example.com/a)\n\n- 甲\n- 乙\n\n1. 丙\n2. 丁\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n```js\nconst x = 1;\n```\n"
+    );
+    const tags = new Set(
+      [...html.matchAll(/<\/?([a-z][a-z0-9-]*)\b/g)].map((match) => match[1])
+    );
+    expect([...tags].sort()).toEqual(
+      [
+        "a", "code", "em", "strong", // 行内
+        "li", "thead", "tbody", "tr", "th", "td", // 块内结构
+        "p", "h3", "h4", "h5", "ul", "ol", "pre", "table" // c-v:auto 块级目标集
+      ].sort()
+    );
+  });
 });
