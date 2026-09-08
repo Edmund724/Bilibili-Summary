@@ -20,6 +20,29 @@
   box-shadow: 0 28px 60px rgba(15, 23, 42, 0.16);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue",
     Arial, sans-serif;
+  /* 容器查询宿主（size-aware-styling 指南）：面板内容排版按视图实际宽度分档
+   * ——贴栏档宽度由 digest-host 写 var（与视口宽度脱钩）、浮层档由 left+right
+   * 撑出，视口媒体查询判不了面板真实宽度。inline-size 容纳安全：两档的宽度
+   * 都不依赖内容横向尺寸（height: auto 的窄窗浮层只涉纵向，不受容纳约束）。 */
+  container-type: inline-size;
+  /* 开合过渡：淡入随 ready 门控翻转（opacity 0→1）呈现；display 经
+   * allow-discrete 参与过渡，关闭淡出走完再隐——exitReaderShell 在关闭同
+   * tick 摘阅读表的路径上淡出来不及呈现，以瞬时关闭呈现（可接受降级）。
+   * 尺寸插值（animate-to-intrinsic-sizes 的 calc-size()/interpolate-size 场景）
+   * 在此无落点：面板高度两端都是外部几何（贴栏 var 随滚动逐帧改写、浮层
+   * min() 定长），无「定长→内在尺寸」边界，block-size 过渡会造成贴栏态
+   * 跟滚动追帧回弹，故开合动画止于 opacity + display。 */
+  transition: opacity 0.2s ease, display 0.2s allow-discrete;
+}
+
+/* 淡入起点：openReaderViewShell 同 tick 写 .open + ready=1，从 display:none
+ * 首次渲染的元素没有 before-change 样式，过渡不会自发启动——@starting-style
+ * 提供首帧 opacity:0 才有淡入。不支持的引擎（Chrome <117）按瞬时显形呈现
+ * （即改造前行为）。 */
+@starting-style {
+  #boc-reading-view.open {
+    opacity: 0;
+  }
 }
 
 #boc-reading-view.open {
@@ -80,6 +103,11 @@
 
 @media (prefers-reduced-motion: reduce) {
   .boc-reading-actions {
+    transition: none;
+  }
+
+  /* 面板开合淡入淡出对减少动态用户一并关停（指南的安全底线） */
+  #boc-reading-view {
     transition: none;
   }
 }
@@ -287,38 +315,57 @@
 }
 
 /* 三个 tab 的滚动容器共用同一套细滚动条（字幕列表 / 概览 / AI 对话消息区）。
- * 显式定义 ::-webkit-scrollbar 让 Chrome 对容器改绘经典滚动条、常驻可见，
- * 不受系统 overlay 态影响；不设 scrollbar-width——Chrome 121+ 起标准属性
- * 非 auto 时会让 ::-webkit-scrollbar 整组失效，二者只能取其一。
- * thumb 用 faint（浅底上够可见），hover 加深为 muted；8px 槽内 2px 透明
- * 描边 + content-box 裁出 4px 圆角细条，与面板卡片圆角语言一致。 */
-.boc-reading-subtitle::-webkit-scrollbar,
-.boc-reading-overview::-webkit-scrollbar,
-.boc-reading-chat .chat-messages::-webkit-scrollbar {
-  width: 8px;
+ * 标准属性优先（customize-scrollbar-color-and-thickness 指南）：scrollbar-width
+ * + scrollbar-color 直接吃 --boc-reader-* 主题 token，两主题自动跟随。thumb
+ * 用 faint（浅底上够可见），hover 加深为 muted——标准属性没有 thumb 伪元素
+ * hover 态，取容器 hover 近似（指针进入滚动区即加深）。 */
+.boc-reading-subtitle,
+.boc-reading-overview,
+.boc-reading-chat .chat-messages {
+  scrollbar-width: thin;
+  scrollbar-color: var(--boc-reader-faint, #a39a8d) transparent;
 }
 
-.boc-reading-subtitle::-webkit-scrollbar-track,
-.boc-reading-overview::-webkit-scrollbar-track,
-.boc-reading-chat .chat-messages::-webkit-scrollbar-track {
-  background: transparent;
+.boc-reading-subtitle:hover,
+.boc-reading-overview:hover,
+.boc-reading-chat .chat-messages:hover {
+  scrollbar-color: var(--boc-reader-muted, #6f675c) transparent;
 }
 
-.boc-reading-subtitle::-webkit-scrollbar-thumb,
-.boc-reading-overview::-webkit-scrollbar-thumb,
-.boc-reading-chat .chat-messages::-webkit-scrollbar-thumb {
-  background: var(--boc-reader-faint, #a39a8d);
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background-clip: content-box;
-}
+/* 旧引擎降级（Chrome ≤120 无 scrollbar-color）：显式定义 ::-webkit-scrollbar
+ * 让 Chrome 对容器改绘经典滚动条、常驻可见，不受系统 overlay 态影响；8px 槽
+ * 内 2px 透明描边 + content-box 裁出 4px 圆角细条，与面板卡片圆角语言一致。
+ * 指南要求包 @supports not：支持标准属性的引擎跳过整块，避免两套机制打架
+ *（标准属性非 auto 会让 ::-webkit-scrollbar 整组失效，二者只能取其一）。 */
+@supports not (scrollbar-color: auto) {
+  .boc-reading-subtitle::-webkit-scrollbar,
+  .boc-reading-overview::-webkit-scrollbar,
+  .boc-reading-chat .chat-messages::-webkit-scrollbar {
+    width: 8px;
+  }
 
-.boc-reading-subtitle::-webkit-scrollbar-thumb:hover,
-.boc-reading-overview::-webkit-scrollbar-thumb:hover,
-.boc-reading-chat .chat-messages::-webkit-scrollbar-thumb:hover {
-  background: var(--boc-reader-muted, #6f675c);
-  border: 2px solid transparent;
-  background-clip: content-box;
+  .boc-reading-subtitle::-webkit-scrollbar-track,
+  .boc-reading-overview::-webkit-scrollbar-track,
+  .boc-reading-chat .chat-messages::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .boc-reading-subtitle::-webkit-scrollbar-thumb,
+  .boc-reading-overview::-webkit-scrollbar-thumb,
+  .boc-reading-chat .chat-messages::-webkit-scrollbar-thumb {
+    background: var(--boc-reader-faint, #a39a8d);
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+
+  .boc-reading-subtitle::-webkit-scrollbar-thumb:hover,
+  .boc-reading-overview::-webkit-scrollbar-thumb:hover,
+  .boc-reading-chat .chat-messages::-webkit-scrollbar-thumb:hover {
+    background: var(--boc-reader-muted, #6f675c);
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
 }
 .boc-reading-item {
   width: 100%;
@@ -386,6 +433,10 @@
   color: var(--boc-reader-faint, #94a3b8);
 }
 
+/* 视口媒体查询只留壳定位（浮层档的边距/贴顶）：排版窄档已上移到下方
+ * @container——面板贴栏宽度由 digest-host 写 var，与视口宽度脱钩，且旧
+ * 媒体查询里的排版规则（item 列宽/正文字号/标题字号）早被同表后段的
+ * #boc-reading-view 前缀覆盖规则压成死代码，一并删除。 */
 @media (max-width: 1100px) {
   #boc-reading-view {
     left: 12px;
@@ -393,25 +444,12 @@
     bottom: 12px;
     padding: 18px;
   }
-
-  .boc-reading-title {
-    font-size: 18px;
-  }
 }
 
 @media (max-width: 760px) {
   #boc-reading-view {
     top: 72px;
     height: auto;
-  }
-
-  .boc-reading-item {
-    grid-template-columns: 64px minmax(0, 1fr);
-    gap: 10px;
-  }
-
-  .boc-reading-text {
-    font-size: 15px;
   }
 }
 
@@ -518,6 +556,24 @@
   line-height: var(--boc-reader-subtitle-line-height);
   letter-spacing: var(--boc-reader-letter-spacing);
   color: var(--boc-reader-text);
+}
+
+/* 长总结内容区容器查询窄档（size-aware-styling 指南）：随面板实际内容宽
+ * 分档（须排在上方 #boc-reading-view 前缀规则之后，同特异性靠源序取胜）。
+ * 窄容器（贴栏下限 300px 一带）收紧标题与字幕行几何，给正文列让宽；字幕
+ * 正文字号不在此强设——--boc-reader-subtitle-font-size 是用户可调档，窄档
+ * 覆盖会与设置项打架。不支持容器查询的引擎无窄档（与既有宽档行为一致），
+ * 属安全降级。 */
+@container (max-width: 560px) {
+  #boc-reading-view .boc-reading-title {
+    font-size: 18px;
+  }
+
+  #boc-reading-view .boc-reading-item {
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px 8px;
+  }
 }
 
 /* 设置面板分组（窄容器适配） */
