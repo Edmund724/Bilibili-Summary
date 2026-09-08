@@ -159,6 +159,18 @@ describe("概览状态机与触发", () => {  it("无字幕：不触发生成，
     expect(overviewText()).toContain("概览等字幕就绪后自动生成");
   });
 
+  it("无字幕且字幕抓取中：loading 预期态文案，不误显「该视频没有可用字幕」", async () => {
+    seedClip();
+    state.clip.subtitleBody = [];
+    state.clip.subtitleFetchState = "loading";
+
+    await reader.triggerReaderOverviewGeneration();
+
+    expect(runOverviewMock).not.toHaveBeenCalled();
+    expect(overviewText()).toContain("字幕抓取中");
+    expect(overviewText()).not.toContain("该视频没有可用字幕");
+  });
+
   it("idle 触发 → 生成 → ready 渲染：章节/金句 + 上下文与 provider 入参正确", async () => {
     seedClip();
     runOverviewMock.mockResolvedValue(SAMPLE_ANALYSIS);

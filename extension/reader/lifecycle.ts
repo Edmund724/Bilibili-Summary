@@ -157,8 +157,26 @@ function maybeRefreshReaderSubtitleInBackground() {
         if (!isStaleRunError(error)) {
           renderReadingStatus(`字幕加载失败：${getErrorMessage(error)}`);
         }
-      });
+      })
+      .then(() => reconcileReaderAfterSubtitleFetch());
   });
+}
+
+// 抓取落定后的对账收尾：subtitle-ready/rerender 通知存在丢失形态（发射门控、
+// init-essentials 分派链 catch 吞错），一旦丢失，列表渲染与概览自动生成只剩
+// 切 tab 兜底——状态栏却照写「抓取完成」，出现「完成但无字幕」的面板态。这里
+// 在 fetch 落定后按当前 state 重投影一次：renderReadingView 是纯 state 投影
+// （幂等，通知未丢时重复执行无副作用）；字幕非空再触发概览生成（inflight +
+// generatedFor 身份去重，重复触发安全）。视图已关则跳过（重开时
+// enterReaderMode 自会按当前 state 渲染并触发）。
+function reconcileReaderAfterSubtitleFetch() {
+  if (!state.reader.readingViewOpen) {
+    return;
+  }
+  renderReadingView();
+  if (state.clip.subtitleBody.length > 0) {
+    triggerReaderOverviewGeneration();
+  }
 }
 
 // Presenter seam 通知的 reader 侧处理体（原 bindReaderPresenter 回调函数体

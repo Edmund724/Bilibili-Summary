@@ -4,8 +4,9 @@
 // 一段字幕成为当前视频生效字幕的六步序列——稳定排序（from 升序，读路径
 // findActiveSubtitleIndex 二分依赖）→ 写 state（selectedSubtitleId/Url/Lang +
 // subtitleBody）→ fetchState="ready" → 清 noSubtitleReason → await
-// refreshDerivedContent()（笔记/SRT/TXT/预览派生）→ reader 开启则通知
-// "subtitle-ready"。历史上该序列在 fetcher.js（CC 缓存命中/网络新抓）与
+// refreshDerivedContent()（笔记/SRT/TXT/预览派生）→ 通知 "subtitle-ready"
+//（发射无条件：视图门控的裁决权归 reader 侧 init-essentials 分派链，见
+// acceptSubtitle 内注）。历史上该序列在 fetcher.js（CC 缓存命中/网络新抓）与
 // asr/fallback.js（ASR 缓存命中/转写完成）手抄了 4 处，逆操作（无字幕出口）
 // 又在 subtitle/ui.js 的 applyNoSubtitleState + 两处调用点手抄——不变量的依据
 //（selection.js 的排序注释）活在第三个文件里。本模块收口后一处持有事务：
@@ -26,7 +27,6 @@ import type { NoSubtitleReason, SubtitleBodyItem } from "../core/state.js";
 import { sortSubtitleBodyByFrom } from "./selection.js";
 import { refreshDerivedContent } from "./core.js";
 import { notifyReaderPresenter } from "../reader/reader-bus.js";
-import { isReaderViewOpen } from "../reader/state.js";
 
 export interface CommitUiCallbacks {
   setStatus(message: string): void;
@@ -74,9 +74,11 @@ export async function acceptSubtitle({
   clipState.setSubtitleFetchState("ready");
   clipState.setNoSubtitleReason(null);
   await refreshDerivedContent();
-  if (isReaderViewOpen()) {
-    notifyReaderPresenter("subtitle-ready");
-  }
+  // 发射无条件：视图门控的裁决权归 reader 侧（init-essentials 分派链按
+  // readingViewOpen 跳过、lifecycle 处理体再按当前 state 投影）。这里按视图
+  // 开关截断通知会让「抓取完成时视图未开」的轮次永久丢通知，字幕列表停在
+  // 进入时的空态——落定后的对账重渲（lifecycle）依赖通知可达。
+  notifyReaderPresenter("subtitle-ready");
   return sortedBody;
 }
 
@@ -87,7 +89,7 @@ export interface CommitNoSubtitleArgs {
 
 // 无字幕出口（逆事务，applyNoSubtitleState + 两处收尾段的唯一实现）：清空选中
 // 三项 + body + 派生内容，fetchState 落 "empty"，写 noSubtitleReason，
-// reader 开启则通知（renderReadingView 落空态），skip 时状态栏落引导文案。
+// 通知（renderReadingView 落空态），skip 时状态栏落引导文案。
 //（digest-only-ui：经典侧栏面板的 preview DOM 与 renderMeta/renderSubtitleSelect
 // 回调已删除——无字幕出口对阅读视图的呈现收敛到 subtitle-ready 通知。）与接受互为逆：
 // 两者写齐同一组字段，任何时刻 state 不落在半事务态。
@@ -114,9 +116,8 @@ export async function commitNoSubtitle({ noSubtitleReason, asrResult }: CommitNo
   if (noSubtitleReason !== undefined) {
     clipState.setNoSubtitleReason(noSubtitleReason);
   }
-  if (isReaderViewOpen()) {
-    notifyReaderPresenter("subtitle-ready", "当前视频无字幕。");
-  }
+  // 发射无条件（同 acceptSubtitle）：裁决权归 reader 侧门控。
+  notifyReaderPresenter("subtitle-ready", "当前视频无字幕。");
   if (asrResult === "skip") {
     commitUi.setStatus(buildNoSubtitleStatusMessage());
   }

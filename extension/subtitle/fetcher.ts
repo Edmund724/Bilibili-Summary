@@ -259,8 +259,10 @@ export async function refreshClip(): Promise<void> {
     // fetchState/reason 已由 tryLoadSubtitleCandidates → loadSubtitle 内的
     // 字幕接受事务（commit.acceptSubtitle）落位（ready + 清原因），渲染也由
     // 事务内的 subtitle-ready 通知驱动（唯一 emit 点，此处补发即双渲染），
-    // 这里只做完成提示。
-    setStatus("抓取完成，可以复制或下载字幕。");
+    // 这里只做完成提示。提示走 reader-bus "status" 通知（与渲染同通道、由
+    // reader 侧同序收敛），不经 setStatus 直写——直写会绕过门控，在渲染缺席
+    // 时先行宣告成功（「抓取完成但显示无字幕」的文案半边）。
+    notifyReaderPresenter("status", "抓取完成，可以复制或下载字幕。");
   } catch (error) {
     await handleClipFetchError(error, runId);
   }

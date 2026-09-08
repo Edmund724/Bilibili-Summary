@@ -320,13 +320,24 @@ function buildOverviewBodyHtml(): string {
 }
 
 // 无字幕诚实空态（07 票决议：无字幕不触发、不放假数据）。转写进行中（字幕
-// tab 横幅同源判定）给出预期文案，与横幅「转写完成后字幕与概览将自动出现」一致。
+// tab 横幅同源判定）给出预期文案，与横幅「转写完成后字幕与概览将自动出现」
+// 一致；字幕抓取中（subtitleFetchState=loading，点 Digest 后台抓取未落定）
+// 同为预期态，不误显「该视频没有可用字幕」——字幕就绪后 subtitle-ready 通知
+// / 落定对账会自动触发生成。
 function buildEmptyStateHtml(): string {
   if (isReaderTranscribing()) {
     return `
       <div class="boc-reading-placeholder">
         <div class="boc-reading-placeholder-title">概览等字幕就绪后自动生成</div>
         <p class="boc-reading-placeholder-copy">音频转写完成后会自动生成章节与金句，期间可先在「字幕」页看视频。</p>
+      </div>
+    `;
+  }
+  if (state.clip.subtitleFetchState === "loading") {
+    return `
+      <div class="boc-reading-placeholder">
+        <div class="boc-reading-placeholder-title">字幕抓取中，就绪后自动生成概览</div>
+        <p class="boc-reading-placeholder-copy">章节与金句会在字幕就绪后自动出现，无需切换标签页。</p>
       </div>
     `;
   }

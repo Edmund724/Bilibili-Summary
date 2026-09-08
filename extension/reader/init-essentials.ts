@@ -97,13 +97,16 @@ export function bindSettingsWatcher() {
 // reader 域按需装载后处理。注册本身常驻；转发路径带两级门控——
 //   1. reader 域未装载且阅读视图未打开 ⇒ 跳过：视图未打开 ⇒ 旧处理器在本域内
 //      的动作（reset: 停同步/观察器/重试定时器——均未启动；subtitle-ready/
-//      rerender: 发布方本就按 isReaderViewOpen 门控；status: 写隐藏状态栏文本，
-//      无行为消费方）等价于 no-op，避免为一次空通知拉起 ~50KB reader 域。
+//      rerender: 视图未开时处理体的 readingViewOpen 早退分支等价 no-op；
+//      status: 写隐藏状态栏文本，无行为消费方）等价于 no-op，避免为一次空通知
+//      拉起 ~50KB reader 域。
 //      不变式：视图打开 ⇒ enterReaderMode 已执行 ⇒ 域已装载，因此「未装载且
 //      视图未打开」恰好覆盖全部可跳过通知；视图开着（含测试直接装载 facade
 //      的路径）则放行走 ensure 装载。
 //   2. subtitle-ready/rerender 且视图未打开 ⇒ 与旧处理器的 readingViewOpen
-//      早退分支等价，跳过。
+//      早退分支等价，跳过。（subtitle-ready 的发射自 2026-09 起 unconditional
+//      ——commit 事务不再按 isReaderViewOpen 截断，本门是唯一视图裁决点；
+//      抓取落定后的对账重渲在 lifecycle 侧兜住丢失轮次。）
 // 已装载（或视图打开）时经 ensureReaderDomain 转发，处理体在
 // lifecycle.handleReaderPresenterNotification（原 bindReaderPresenter 回调体
 // 原样搬移）。

@@ -3,7 +3,8 @@
 // 一段字幕成为当前视频生效字幕的唯一事务：稳定排序（from 升序，读路径
 // findActiveSubtitleIndex 二分依赖）→ 写 state（selectedSubtitleId/Url/Lang +
 // subtitleBody）→ fetchState="ready" → 清 noSubtitleReason → await
-// refreshDerivedContent() → reader 开启则通知 "subtitle-ready"。本套件在纯
+// refreshDerivedContent() → 通知 "subtitle-ready"（发射无条件，视图过滤归
+// reader 侧）。本套件在纯
 // state 级锁死这些不变量；无字幕出口（逆事务）与接受互为逆，同样锁清空完整性。
 //
 // mock 结构：refreshDerivedContent mock（派生刷新的调用/时序断言是本套件职责，
@@ -130,8 +131,10 @@ describe("acceptSubtitle：字幕接受事务", () => {
     });
   });
 
-  it("reader 开启 → 通知 subtitle-ready；关闭 → 不通知", async () => {
-    state.reader.setViewOpen(true);
+  it("通知发射无条件（视图门控裁决权归 reader 侧）：reader 关闭也通知 subtitle-ready", async () => {
+    // 视图未开时截断通知会让「抓取完成时视图未开」的轮次永久丢渲染；发射
+    // 改为无条件，视图过滤由 init-essentials 分派门与 lifecycle 处理体负责。
+    state.reader.setViewOpen(false);
     await acceptSubtitle({
       body: UNSORTED_BODY,
       selectedSubtitleId: "track-1",
@@ -140,7 +143,7 @@ describe("acceptSubtitle：字幕接受事务", () => {
     });
     expect(notifyReaderPresenter).toHaveBeenCalledWith("subtitle-ready");
 
-    state.reader.setViewOpen(false);
+    state.reader.setViewOpen(true);
     vi.mocked(notifyReaderPresenter).mockClear();
     await acceptSubtitle({
       body: UNSORTED_BODY,
@@ -148,7 +151,7 @@ describe("acceptSubtitle：字幕接受事务", () => {
       selectedSubtitleUrl: "https://example.com/sub.json",
       selectedSubtitleLang: "中文"
     });
-    expect(notifyReaderPresenter).not.toHaveBeenCalled();
+    expect(notifyReaderPresenter).toHaveBeenCalledWith("subtitle-ready");
   });
 
   it("幂等：已有序 body 再次接受，内容与顺序不变", async () => {
@@ -216,15 +219,15 @@ describe("commitNoSubtitle：无字幕出口（逆事务）", () => {
     expect(clipState.noSubtitleReason).toBe(null);
   });
 
-  it("reader 开启 → 通知 ('subtitle-ready', '当前视频无字幕。')；关闭 → 不通知", async () => {
-    state.reader.setViewOpen(true);
+  it("通知发射无条件（同接受事务）：reader 关闭也通知 ('subtitle-ready', '当前视频无字幕。')", async () => {
+    state.reader.setViewOpen(false);
     await commitNoSubtitle({ asrResult: "empty" });
     expect(notifyReaderPresenter).toHaveBeenCalledWith("subtitle-ready", "当前视频无字幕。");
 
-    state.reader.setViewOpen(false);
+    state.reader.setViewOpen(true);
     vi.mocked(notifyReaderPresenter).mockClear();
     await commitNoSubtitle({ asrResult: "empty" });
-    expect(notifyReaderPresenter).not.toHaveBeenCalled();
+    expect(notifyReaderPresenter).toHaveBeenCalledWith("subtitle-ready", "当前视频无字幕。");
   });
 
   it("asrResult=skip → 状态栏落引导文案；empty/error/缺省 → 不出文案", async () => {
