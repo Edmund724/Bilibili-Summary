@@ -112,12 +112,13 @@ interface TokenStreamState {
   tailEl: HTMLDivElement | null;
 }
 
-// 思考文本的截断显示状态（头缓冲 + 溢出计数）
+// 思考文本的显示状态（全量文本缓冲 + 按节点隔离的滚动合帧 + 钉底标志）
 interface ThinkingDisplayState {
-  head: string;
-  overflow: number;
+  text: string;
   // 挂起的滚动合帧 id（按节点隔离：0 = 无挂起帧）
   scrollFrame: number;
+  // 思考盒钉底标志：用户上翻即停跟随，回到底部附近恢复（与外层消息容器同契约）
+  pinned: boolean;
 }
 
 /**
@@ -460,7 +461,10 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   // =========================================================================
   function appendAssistantPlaceholder(): HTMLDivElement {
     const node = document.createElement("div");
-    node.className = "chat-msg chat-msg-assistant";
+    // chat-msg-streaming：流式期间豁免 content-visibility 跳过渲染（M13，
+    // 见 reader-chat.css）——正在输出的消息需要准确的实时高度，滚动跟随
+    // 才能落到真实底部；endStream 收口时摘除该类。
+    node.className = "chat-msg chat-msg-assistant chat-msg-streaming";
     // 流式 token 累加器（原 dataset.raw）随占位节点初始化/重置，
     // 保证第二条消息不会串上上一条的流式文本。
     resetTokenStreamState(node);
@@ -474,7 +478,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   }
 
   // =========================================================================
-  // createThinkingNode
+  // createThinkingNode / collapseThinking — 思考节点生命周期
   // =========================================================================
   function createThinkingNode(assistantNode: HTMLDivElement | null): HTMLDivElement | null {
     if (!assistantNode) {
@@ -489,37 +493,61 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     text.className = "chat-thinking-text";
     node.appendChild(label);
     node.appendChild(text);
+    // 折叠交互在思考流结束后生效（见 collapseThinking）：点击整行在
+    // 折叠/展开间切换；流式期间（不可折叠态）点击无事发生。
+    node.addEventListener("click", () => {
+      if (!node.classList.contains("chat-thinking-collapsible")) {
+        return;
+      }
+      node.classList.toggle("chat-thinking-collapsed");
+    });
     assistantNode.prepend(node);
     return node;
+  }
+
+  // 思考流结束（正文首帧渲染 / 终态重渲染）时把思考盒收成一行
+  //「思考过程 ▸」：正文成为视觉焦点；点击可展开回看（当轮有效——
+  // 思考不落盘，会话回放无思考内容）。
+  function collapseThinking(thinking: Element): void {
+    thinking.classList.add("chat-thinking-collapsible", "chat-thinking-collapsed");
+    const label = thinking.querySelector(".chat-thinking-label");
+    if (label) {
+      label.textContent = "思考过程";
+    }
   }
 
   // =========================================================================
   // appendThinkingText
   // =========================================================================
-  // 思考文本的流式累加器（原挂在 .chat-thinking-text 的 dataset.acc，每条增量
-  // 全量复制旧串，O(n²) 且无上限——纯自用累加器，无任何外部读取方）。
-  // 现改为 WeakMap 按节点存放"前 MAX_DISPLAY_CHARS 字符头缓冲 + 溢出计数"：
-  // 每条增量只复制能进头缓冲的部分，其余仅累加计数，总复制量 O(n)。
-  // 显示输出与旧逻辑逐字节一致：头缓冲 +（溢出时的截断提示）。
-  // 头缓冲/计数随 thinking 节点（每条消息新建）走，跨消息天然隔离重置。
+  // 思考文本的流式累加器：WeakMap 按节点存放全量文本（不截断——思考过程
+  // 完整可见是体验契约），每条增量只复制进缓冲一次，总复制量 O(n)。思考
+  // 内容不落盘（chatHistory 只存正文），缓冲随 thinking 节点（每条消息
+  // 新建）走，跨消息天然隔离重置。
   const thinkingDisplayStates = new WeakMap<Element, ThinkingDisplayState>();
-  const THINKING_TRUNCATION_SUFFIX = "\n…（思考内容过长，已截断显示）";
+  // 思考盒钉底恢复阈值：用户回滚到距底 24px 内视为「回到底部」，恢复跟随
+  const THINKING_NEAR_BOTTOM_PX = 24;
 
   // 思考文本的滚动合帧（与 appendToken 的 rAF 合帧同款机制）：textContent
-  // 写入无布局成本，保持逐 token 同步（截断显示逐字节一致的既有语义）；
-  // scrollTop=scrollHeight 每次读 scrollHeight 都强制布局——按帧合批，同帧
-  // 多条增量只滚动一次。挂起帧标志存放在按 textNode 的 WeakMap 状态里
-  //（scrollFrame）：不同消息的思考节点互不阻挡——若用全局单标志，上一条
-  // 消息滚动帧挂起的 ≤16ms 窗口内新消息首条 reasoning 会漏掉滚动调度。
-  // 思考节点可能已被移除（token 首帧渲染即移除）：回调对脱离节点写
-  // scrollTop 为无害空操作，无需取消。
+  // 写入无布局成本，保持逐 token 同步；scrollTop=scrollHeight 每次读
+  // scrollHeight 都强制布局——按帧合批，同帧多条增量只滚动一次。挂起帧
+  // 标志存放在按 textNode 的 WeakMap 状态里（scrollFrame）：不同消息的
+  // 思考节点互不阻挡——若用全局单标志，上一条消息滚动帧挂起的 ≤16ms
+  // 窗口内新消息首条 reasoning 会漏掉滚动调度。
+  // 钉底契约：pinned=false（用户在思考盒内上翻）时不写 scrollTop——绝不
+  // 把用户拉回底部。同一帧顺带让外层消息容器跟随（scrollToBottom 内部读
+  // shouldAutoScrollMessages，用户上翻外层时同样不打扰）。
+  // 思考节点流式结束后折叠保留在消息内（见 collapseThinking），不脱离
+  // DOM：挂起帧回调对它写 scrollTop 仍是无害空操作，无需取消。
   function scheduleThinkingScroll(textNode: Element, state: ThinkingDisplayState): void {
     if (state.scrollFrame) {
       return;
     }
     const scroll = () => {
       state.scrollFrame = 0;
-      textNode.scrollTop = textNode.scrollHeight;
+      if (state.pinned) {
+        textNode.scrollTop = textNode.scrollHeight;
+      }
+      scrollToBottom(false, { instant: true });
     };
     if (typeof window.requestAnimationFrame === "function") {
       state.scrollFrame = window.requestAnimationFrame(scroll);
@@ -536,25 +564,23 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     if (!textNode) {
       return;
     }
-    const MAX_DISPLAY_CHARS = 4000;
     let state = thinkingDisplayStates.get(textNode);
     if (!state) {
-      state = { head: "", overflow: 0, scrollFrame: 0 };
+      state = { text: "", scrollFrame: 0, pinned: true };
       thinkingDisplayStates.set(textNode, state);
+      // 用户上翻检测：离开底部即停钉底，回到底部附近恢复。程序性钉底
+      //（帧回调写 scrollTop=scrollHeight）触发的 scroll 事件落点即底部，
+      // 天然归为 pinned=true，无需区分事件来源。
+      textNode.addEventListener("scroll", () => {
+        const st = thinkingDisplayStates.get(textNode);
+        if (!st) {
+          return;
+        }
+        st.pinned = textNode.scrollTop + textNode.clientHeight >= textNode.scrollHeight - THINKING_NEAR_BOTTOM_PX;
+      });
     }
-    const chunk = String(text || "");
-    const space = Math.max(MAX_DISPLAY_CHARS - state.head.length, 0);
-    if (chunk.length <= space) {
-      state.head += chunk;
-    } else {
-      state.head += chunk.slice(0, space);
-      state.overflow += chunk.length - space;
-    }
-    if (state.overflow > 0) {
-      textNode.textContent = state.head + THINKING_TRUNCATION_SUFFIX;
-    } else {
-      textNode.textContent = state.head;
-    }
+    state.text += String(text || "");
+    textNode.textContent = state.text;
     scheduleThinkingScroll(textNode, state);
   }
 
@@ -711,11 +737,10 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
       const cleaned = stripThinkBlocks(text);
       const { stableText, tailText } = splitMarkdownTail(cleaned);
       ensureStreamContainers(node, state);
-      // 首帧渲染即移除思考节点（与旧的整节点 innerHTML 覆盖行为一致）
-      const thinking = node.querySelector(".chat-thinking");
-      if (thinking) {
-        thinking.remove();
-      }
+      // 正文首帧渲染 = 思考流结束：所有未折叠的思考盒（正常情况下一个；
+      // 收尾 reasoning 在 token 后到达时可能有第二个）收成「思考过程」行，
+      // 保留在消息内供点击回看——不再移除节点。
+      node.querySelectorAll(".chat-thinking:not(.chat-thinking-collapsible)").forEach(collapseThinking);
       // 稳定前缀只在增长时渲染一次；末块每帧重渲染
       if (state.stableText !== stableText) {
         if (performance.now() >= deadline) {
@@ -925,7 +950,17 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     if (!node) {
       return;
     }
+    // 思考行在终态重渲染中保留：仍流式打开的思考盒（如 token 后到达的收尾
+    // reasoning 未经正文帧）一并折叠，重挂载到正文之前。历史回放路径无思考
+    // 节点（思考不落盘），此处为无害空操作。
+    const thinkings = Array.from(node.querySelectorAll(".chat-thinking"));
+    thinkings.forEach((thinking) => {
+      if (!thinking.classList.contains("chat-thinking-collapsible")) {
+        collapseThinking(thinking);
+      }
+    });
     node.innerHTML = "";
+    thinkings.forEach((thinking) => node.appendChild(thinking));
     const cleanedRaw = stripThinkBlocks(raw);
     const pasteReadyRaw = deps.normalizeMarkdownForSectionPaste(cleanedRaw);
 
