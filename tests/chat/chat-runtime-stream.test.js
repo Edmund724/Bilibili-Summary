@@ -811,6 +811,134 @@ describe("sendMessage 无字幕拦截的提前返回", () => {
 });
 
 // ==========================================================================
+// 流式 flush 长任务分片：帧预算耗尽让出主线程（scheduler.yield / setTimeout 0）
+// ==========================================================================
+describe("流式 flush 长任务分片（帧预算耗尽让出主线程）", () => {
+  // 预算检查用 performance.now 判定：时钟每读一次推进 100ms（超过 50ms 预算），
+  // 让出点全部命中。（不能 mock 恒定值：deadline 取自同一次读数 +50，恒定值
+  // 永远追不上 deadline，预算判定永不命中）
+  function holdClockOverBudget() {
+    let t = 0;
+    return vi.spyOn(performance, "now").mockImplementation(() => (t += 100));
+  }
+
+  // 可手动放行的 scheduler.yield 替身（返回同一个 deferred promise）
+  function gateScheduler() {
+    let release;
+    const promise = new Promise((resolve) => { release = resolve; });
+    window.scheduler = { yield: vi.fn(() => promise) };
+    return {
+      yieldSpy: window.scheduler.yield,
+      release: () => release()
+    };
+  }
+
+  afterEach(() => {
+    delete window.scheduler;
+  });
+
+  it("帧预算耗尽：优先 scheduler.yield 让出主线程，让出后完成渲染并保留光标", async () => {
+    const { deps, runtime } = await makeRuntime();
+    const node = assistantNode(deps);
+    const raf = holdRaf();
+    const gate = gateScheduler();
+    holdClockOverBudget();
+
+    feed(runtime, { type: "token", data: "第一段\n\n第二段" });
+    raf.mock.calls[0][0]();
+
+    // 双容器已建（同步部分）但渲染延后：stable 让出点已挂起
+    expect(gate.yieldSpy).toHaveBeenCalledTimes(1);
+    expect(node.querySelector(".chat-stream-stable")?.innerHTML).toBe("");
+    expect(node.querySelector(".chat-stream-tail")?.innerHTML).toBe("");
+
+    // 放行：stable 渲染后预算仍耗尽，末块渲染前再次让出（共 2 次）
+    gate.release();
+    await vi.waitFor(() => {
+      expect(node.querySelector(".chat-stream-tail")?.textContent).toContain("第二段");
+    });
+    expect(gate.yieldSpy).toHaveBeenCalledTimes(2);
+    expect(node.querySelector(".chat-stream-stable")?.innerHTML).toBe(renderMarkdown("第一段"));
+    const tailEl = node.querySelector(".chat-stream-tail");
+    expect(tailEl.lastElementChild.className).toBe("chat-msg-cursor");
+
+    // base/pending 收口正常：done 后全量文本不丢
+    feed(runtime, { type: "done" });
+    expect(chatSessionState.chatHistory[1]).toEqual({ role: "assistant", content: "第一段\n\n第二段" });
+  });
+
+  it("scheduler.yield 不存在（Safari 等旧浏览器）：setTimeout(0) 兜底让出，渲染仍完成", async () => {
+    const { deps, runtime } = await makeRuntime();
+    const node = assistantNode(deps);
+    const raf = holdRaf();
+    // jsdom 无 Scheduler API 且本用例不注入：走 setTimeout(0) 兜底
+    expect(window.scheduler).toBeUndefined();
+    const setTimeoutSpy = vi.spyOn(window, "setTimeout");
+    holdClockOverBudget();
+
+    feed(runtime, { type: "token", data: "正文内容" });
+    raf.mock.calls[0][0]();
+    expect(node.querySelector(".chat-stream-tail")?.innerHTML).toBe("");
+
+    await vi.waitFor(() => {
+      expect(node.querySelector(".chat-stream-tail")?.textContent).toContain("正文内容");
+    });
+    expect(setTimeoutSpy.mock.calls.some(([, delay]) => delay === 0)).toBe(true);
+    expect(node.querySelector(".chat-msg-cursor")).toBeTruthy();
+  });
+
+  it("让出期间流收口（done）：恢复后旧帧作废，不向终态 DOM 回写流式容器", async () => {
+    const { deps, runtime, session } = await makeRuntime();
+    const node = assistantNode(deps);
+    const raf = holdRaf();
+    const gate = gateScheduler();
+    holdClockOverBudget();
+
+    feed(runtime, { type: "token", data: "半截回答" });
+    raf.mock.calls[0][0]();
+    expect(node.querySelector(".chat-stream-tail")?.innerHTML).toBe("");
+
+    // 挂起在让出点时 done 到达：终态渲染 + 收口（未 flush 的 pending 一并入全量）
+    feed(runtime, { type: "done" });
+    expect(node.querySelector(".chat-msg-assistant-body")?.innerHTML).toBe(renderMarkdown("半截回答"));
+    expect(session.port.disconnect).toHaveBeenCalled();
+
+    // 让出恢复：代际不匹配 → 旧帧作废，不重建 stable/tail、不回写历史
+    gate.release();
+    for (let i = 0; i < 6; i++) {
+      await Promise.resolve();
+    }
+    expect(node.querySelector(".chat-stream-stable")).toBeNull();
+    expect(node.querySelector(".chat-stream-tail")).toBeNull();
+    expect(chatSessionState.chatHistory[1]).toEqual({ role: "assistant", content: "半截回答" });
+  });
+
+  it("让出窗口内新 token 到达：旧帧作废、新帧渲染合并内容（pending 不丢）", async () => {
+    const { deps, runtime } = await makeRuntime();
+    const node = assistantNode(deps);
+    const raf = holdRaf();
+    const gate = gateScheduler();
+    holdClockOverBudget();
+
+    feed(runtime, { type: "token", data: "第一帧" });
+    raf.mock.calls[0][0](); // 旧帧：挂起在让出点
+    feed(runtime, { type: "token", data: "第二帧" });
+    raf.mock.calls[1][0](); // 新帧：同样挂起在让出点（预算仍耗尽）
+
+    // 放行：先恢复的旧帧作废（代际不匹配），新帧渲染合并后的完整内容
+    gate.release();
+    await vi.waitFor(() => {
+      expect(node.querySelector(".chat-stream-tail")?.textContent).toContain("第二帧");
+    });
+    expect(node.querySelector(".chat-stream-tail")?.textContent).toContain("第一帧");
+
+    // 旧帧未回写 base：done 后全量文本 = 两帧合并，无丢字
+    feed(runtime, { type: "done" });
+    expect(chatSessionState.chatHistory[1]).toEqual({ role: "assistant", content: "第一帧第二帧" });
+  });
+});
+
+// ==========================================================================
 // resetStreamState 对挂起流式渲染帧的清理
 // ==========================================================================
 describe("resetStreamState 对挂起流式渲染帧的清理", () => {

@@ -532,7 +532,17 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   // 长回复流式期间不再每帧全量 renderMarkdown + innerHTML 重建。光标 span
   // 每帧重接到 tail 尾部（tail 的 innerHTML 赋值会清掉它）。思考节点随首帧
   // 渲染移除（与旧的整节点 innerHTML 覆盖行为一致）。
+  //
+  // 长任务分片：剥除/切分与两次 renderMarkdown + innerHTML 重建都计入本帧的
+  // 同步工作，长 tail（未闭合围栏/超长表格）时是长任务。按 50ms 长任务预算
+  // 切片：预算耗尽先让出主线程（scheduler.yield 优先，setTimeout 0 兜底），
+  // 让浏览器处理挂起的输入与绘制后继续；flush 因此是 async，恢复点校验
+  // tokenFlushEpoch 代际，流被取消/收口或有更新一帧启动时本帧作废。
   let tokenFlushFrame = 0;
+  let tokenFlushEpoch = 0;
+
+  // 长任务预算（50ms，浏览器长任务阈值）：流式 flush 的同步工作超过预算即让出
+  const STREAM_FRAME_BUDGET_MS = 50;
 
   // 流式 token 累加器（原挂在 assistant 节点的 dataset.raw，每 token 全量
   // 拼接旧串，O(n²) 复制——全仓读取方仅同流的 flush / finalize / stopped）。
@@ -609,6 +619,8 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   }
 
   function cancelTokenFlush(): void {
+    // 无条件推进代际：挂起在让出点的 flush（tokenFlushFrame 已清零）也要作废
+    tokenFlushEpoch++;
     if (!tokenFlushFrame) {
       return;
     }
@@ -620,6 +632,19 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     tokenFlushFrame = 0;
   }
 
+  // 让出主线程（break-up-long-tasks 模式）：scheduler.yield 优先（让浏览器
+  // 处理输入/绘制且延续保持任务调度），Scheduler API 不存在（Safari 等旧
+  // 浏览器）时 setTimeout(0) 兜底。
+  function yieldToMain(): Promise<void> {
+    const scheduler = (window as Window & { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+    if (scheduler && typeof scheduler.yield === "function") {
+      return scheduler.yield();
+    }
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, 0);
+    });
+  }
+
   function appendToken(node: HTMLDivElement | null, token: unknown): void {
     if (!node) {
       return;
@@ -628,14 +653,23 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     if (tokenFlushFrame) {
       return;
     }
-    const flush = () => {
+    const flush = async () => {
       tokenFlushFrame = 0;
+      const epoch = ++tokenFlushEpoch;
       const state = getTokenStreamState(node);
       const text = state.base + state.pending.join("");
       // think 块先剥除再切分，保证未闭合的  ``` 不会横跨 stable/tail 切点
       // （renderMarkdown 内部的再 strip 是无害幂等）。
       const cleaned = stripThinkBlocks(text);
       const { stableText, tailText } = splitMarkdownTail(cleaned);
+      // 50ms 长任务预算：剥除/切分、稳定块与末块的 renderMarkdown + innerHTML
+      // 重建都计入本帧同步工作。预算耗尽先让出主线程再继续；恢复后校验代际
+      // （流被取消/收口，或有更新的一帧已启动），不等即作废本帧——不渲染、
+      // 不回写 base（其文本已包含在新帧的 base + pending 里，不会丢）。
+      // 预算检查保持同步：未触发让出时 flush 在帧回调内同步完成（与旧的
+      // 同步渲染时序一致）。
+      let deadline = performance.now() + STREAM_FRAME_BUDGET_MS;
+      const stale = () => epoch !== tokenFlushEpoch;
       ensureStreamContainers(node, state);
       // 首帧渲染即移除思考节点（与旧的整节点 innerHTML 覆盖行为一致）
       const thinking = node.querySelector(".chat-thinking");
@@ -644,8 +678,22 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
       }
       // 稳定前缀只在增长时渲染一次；末块每帧重渲染
       if (state.stableText !== stableText) {
+        if (performance.now() >= deadline) {
+          await yieldToMain();
+          deadline = performance.now() + STREAM_FRAME_BUDGET_MS;
+          if (stale()) {
+            return;
+          }
+        }
         state.stableText = stableText;
         state.stableEl!.innerHTML = renderMarkdown(stableText);
+      }
+      if (performance.now() >= deadline) {
+        await yieldToMain();
+        deadline = performance.now() + STREAM_FRAME_BUDGET_MS;
+        if (stale()) {
+          return;
+        }
       }
       // 先取光标引用再重写 tail（innerHTML 赋值会清掉 tail 内的旧光标）
       const cursor = node.querySelector(".chat-msg-cursor");
@@ -658,9 +706,9 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
       state.pending.length = 0;
     };
     if (typeof window.requestAnimationFrame === "function") {
-      tokenFlushFrame = window.requestAnimationFrame(flush);
+      tokenFlushFrame = window.requestAnimationFrame(() => { void flush(); });
     } else {
-      tokenFlushFrame = window.setTimeout(flush, 16);
+      tokenFlushFrame = window.setTimeout(() => { void flush(); }, 16);
     }
   }
 
