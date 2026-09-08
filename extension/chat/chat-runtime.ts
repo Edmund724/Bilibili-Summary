@@ -116,6 +116,8 @@ interface TokenStreamState {
 interface ThinkingDisplayState {
   head: string;
   overflow: number;
+  // 挂起的滚动合帧 id（按节点隔离：0 = 无挂起帧）
+  scrollFrame: number;
 }
 
 /**
@@ -237,11 +239,25 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     deps.ui.setStreamingUiState(isStreaming, { stopping });
   }
 
-  function scrollToBottom(force = false): void {
+  // =========================================================================
+  // scrollToBottom
+  // =========================================================================
+  // instant=true（流式 flush 每帧一次）：显式 behavior:"instant" 覆盖 CSS
+  // scroll-behavior:smooth（reader-chat.css 对 .chat-messages 的设定），避免
+  // 流式期间每帧都重启一次平滑滚动动画。注意不能用 behavior:"auto"——按
+  // CSSOM View 规范它取 CSS scroll-behavior 值，CSS 是 smooth 时压不住。
+  // 非流式路径（appendUserMessage / endStream 收尾）直写 scrollTop，滚动
+  // 节奏交给 CSS（smooth）。jsdom 等无 Element.scrollTo 的环境退回直写。
+  function scrollToBottom(force = false, { instant = false }: { instant?: boolean } = {}): void {
     if (!force && !shouldAutoScrollMessages) {
       return;
     }
-    deps.messages.scrollTop = deps.messages.scrollHeight;
+    const target = deps.messages.scrollHeight;
+    if (instant && typeof deps.messages.scrollTo === "function") {
+      deps.messages.scrollTo({ top: target, behavior: "instant" });
+    } else {
+      deps.messages.scrollTop = target;
+    }
   }
 
   // =========================================================================
@@ -489,6 +505,29 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   const thinkingDisplayStates = new WeakMap<Element, ThinkingDisplayState>();
   const THINKING_TRUNCATION_SUFFIX = "\n…（思考内容过长，已截断显示）";
 
+  // 思考文本的滚动合帧（与 appendToken 的 rAF 合帧同款机制）：textContent
+  // 写入无布局成本，保持逐 token 同步（截断显示逐字节一致的既有语义）；
+  // scrollTop=scrollHeight 每次读 scrollHeight 都强制布局——按帧合批，同帧
+  // 多条增量只滚动一次。挂起帧标志存放在按 textNode 的 WeakMap 状态里
+  //（scrollFrame）：不同消息的思考节点互不阻挡——若用全局单标志，上一条
+  // 消息滚动帧挂起的 ≤16ms 窗口内新消息首条 reasoning 会漏掉滚动调度。
+  // 思考节点可能已被移除（token 首帧渲染即移除）：回调对脱离节点写
+  // scrollTop 为无害空操作，无需取消。
+  function scheduleThinkingScroll(textNode: Element, state: ThinkingDisplayState): void {
+    if (state.scrollFrame) {
+      return;
+    }
+    const scroll = () => {
+      state.scrollFrame = 0;
+      textNode.scrollTop = textNode.scrollHeight;
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      state.scrollFrame = window.requestAnimationFrame(scroll);
+    } else {
+      state.scrollFrame = window.setTimeout(scroll, 16);
+    }
+  }
+
   function appendThinkingText(node: HTMLDivElement | null, text: unknown): void {
     if (!node) {
       return;
@@ -500,7 +539,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     const MAX_DISPLAY_CHARS = 4000;
     let state = thinkingDisplayStates.get(textNode);
     if (!state) {
-      state = { head: "", overflow: 0 };
+      state = { head: "", overflow: 0, scrollFrame: 0 };
       thinkingDisplayStates.set(textNode, state);
     }
     const chunk = String(text || "");
@@ -516,7 +555,7 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     } else {
       textNode.textContent = state.head;
     }
-    textNode.scrollTop = textNode.scrollHeight;
+    scheduleThinkingScroll(textNode, state);
   }
 
   // =========================================================================
@@ -532,7 +571,17 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   // 长回复流式期间不再每帧全量 renderMarkdown + innerHTML 重建。光标 span
   // 每帧重接到 tail 尾部（tail 的 innerHTML 赋值会清掉它）。思考节点随首帧
   // 渲染移除（与旧的整节点 innerHTML 覆盖行为一致）。
+  //
+  // 长任务分片：剥除/切分与两次 renderMarkdown + innerHTML 重建都计入本帧的
+  // 同步工作，长 tail（未闭合围栏/超长表格）时是长任务。按 50ms 长任务预算
+  // 切片：预算耗尽先让出主线程（scheduler.yield 优先，setTimeout 0 兜底），
+  // 让浏览器处理挂起的输入与绘制后继续；flush 因此是 async，恢复点校验
+  // tokenFlushEpoch 代际，流被取消/收口或有更新一帧启动时本帧作废。
   let tokenFlushFrame = 0;
+  let tokenFlushEpoch = 0;
+
+  // 长任务预算（50ms，浏览器长任务阈值）：流式 flush 的同步工作超过预算即让出
+  const STREAM_FRAME_BUDGET_MS = 50;
 
   // 流式 token 累加器（原挂在 assistant 节点的 dataset.raw，每 token 全量
   // 拼接旧串，O(n²) 复制——全仓读取方仅同流的 flush / finalize / stopped）。
@@ -609,6 +658,8 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
   }
 
   function cancelTokenFlush(): void {
+    // 无条件推进代际：挂起在让出点的 flush（tokenFlushFrame 已清零）也要作废
+    tokenFlushEpoch++;
     if (!tokenFlushFrame) {
       return;
     }
@@ -620,6 +671,19 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     tokenFlushFrame = 0;
   }
 
+  // 让出主线程（break-up-long-tasks 模式）：scheduler.yield 优先（让浏览器
+  // 处理输入/绘制且延续保持任务调度），Scheduler API 不存在（Safari 等旧
+  // 浏览器）时 setTimeout(0) 兜底。
+  function yieldToMain(): Promise<void> {
+    const scheduler = (window as Window & { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+    if (scheduler && typeof scheduler.yield === "function") {
+      return scheduler.yield();
+    }
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, 0);
+    });
+  }
+
   function appendToken(node: HTMLDivElement | null, token: unknown): void {
     if (!node) {
       return;
@@ -628,10 +692,20 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
     if (tokenFlushFrame) {
       return;
     }
-    const flush = () => {
+    const flush = async () => {
       tokenFlushFrame = 0;
+      const epoch = ++tokenFlushEpoch;
       const state = getTokenStreamState(node);
       const text = state.base + state.pending.join("");
+      // 50ms 长任务预算：deadline 取样在剥除/切分之前，让 stripThinkBlocks/
+      // splitMarkdownTail 的耗时也计入本帧预算，与「剥除/切分、稳定块与末块的
+      // renderMarkdown + innerHTML 重建都计入本帧同步工作」的注释一致。预算
+      // 耗尽先让出主线程（yieldToMain）再继续；恢复后校验代际（流被取消/收口，
+      // 或有更新的一帧已启动），不等即作废本帧——不渲染、不回写 base（其文本
+      // 已包含在新帧的 base + pending 里，不会丢）。预算检查保持同步：未触发
+      // 让出时 flush 在帧回调内同步完成（与旧的同步渲染时序一致）。
+      let deadline = performance.now() + STREAM_FRAME_BUDGET_MS;
+      const stale = () => epoch !== tokenFlushEpoch;
       // think 块先剥除再切分，保证未闭合的  ``` 不会横跨 stable/tail 切点
       // （renderMarkdown 内部的再 strip 是无害幂等）。
       const cleaned = stripThinkBlocks(text);
@@ -644,8 +718,22 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
       }
       // 稳定前缀只在增长时渲染一次；末块每帧重渲染
       if (state.stableText !== stableText) {
+        if (performance.now() >= deadline) {
+          await yieldToMain();
+          deadline = performance.now() + STREAM_FRAME_BUDGET_MS;
+          if (stale()) {
+            return;
+          }
+        }
         state.stableText = stableText;
         state.stableEl!.innerHTML = renderMarkdown(stableText);
+      }
+      if (performance.now() >= deadline) {
+        await yieldToMain();
+        deadline = performance.now() + STREAM_FRAME_BUDGET_MS;
+        if (stale()) {
+          return;
+        }
       }
       // 先取光标引用再重写 tail（innerHTML 赋值会清掉 tail 内的旧光标）
       const cursor = node.querySelector(".chat-msg-cursor");
@@ -653,14 +741,23 @@ export function createChatRuntime(deps: CreateChatRuntimeDeps) {
       if (cursor) {
         state.tailEl!.appendChild(cursor);
       }
-      scrollToBottom();
+      // 流式帧滚动瞬时化（见 scrollToBottom instant 分支：不逐帧重启 CSS
+      // 平滑滚动动画）
+      scrollToBottom(false, { instant: true });
       state.base = text;
       state.pending.length = 0;
     };
+    // flush 是 async：同步段（剥除/切分/渲染）的抛错经 promise 变 unhandled
+    // rejection，必须 catch 收口记日志（与仓内 console.error 惯例一致）。
+    const runFlush = () => {
+      flush().catch((err: unknown) => {
+        console.error("[chat-runtime] 流式渲染 flush 失败：", err);
+      });
+    };
     if (typeof window.requestAnimationFrame === "function") {
-      tokenFlushFrame = window.requestAnimationFrame(flush);
+      tokenFlushFrame = window.requestAnimationFrame(runFlush);
     } else {
-      tokenFlushFrame = window.setTimeout(flush, 16);
+      tokenFlushFrame = window.setTimeout(runFlush, 16);
     }
   }
 
