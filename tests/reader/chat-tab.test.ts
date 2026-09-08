@@ -338,6 +338,75 @@ describe("subtitle-wait kick 总线接线", () => {
   });
 });
 
+describe("发送前主动起跑字幕抓取（抓取未起跑的 idle 窗口不再发空上下文）", () => {
+  it("字幕体为空且抓取尚未起跑：主动触发一轮抓取，抓取落定前不发提示词", async () => {
+    // 用户报障形态：有字幕的视频点 AI 键，面板打开后的后台抓取还在等播放器
+    // 元数据（subtitleFetchState 仍是 idle、字幕体为空），等待闸判「非 pending」
+    // 直接放行 → 空字幕上下文发给模型，只能得到凭标题编造「无公开字幕」的总结。
+    const readerBus = await import("../../extension/reader/reader-bus.js");
+    let resolveFetch: () => void = () => {};
+    const refreshSpy = vi.fn(() => {
+      // refreshClip 的同步前缀：起跑即写 loading（首个 await 之前）
+      state.clip.subtitleFetchState = "loading";
+      return new Promise<void>((resolve) => {
+        resolveFetch = resolve;
+      });
+    });
+    readerBus.subscribeSubtitleRefresh(refreshSpy);
+
+    state.clip.title = "测试视频";
+    state.clip.bvid = "BV1test000000";
+    state.clip.cid = "101";
+    state.clip.subtitleFetchState = "idle";
+    state.clip.subtitleBody = [];
+
+    const chat = await lazyChat.ensureReaderChatTab();
+    const sent = chat.runQuickActionPrompt("整理这期视频的内容，输出结构化总结。");
+
+    // 发送路径主动起跑（本套件里 spy 是 reader-bus 的首个 handler）
+    await waitFor(() => refreshSpy.mock.calls.length === 1);
+    // 抓取挂起期间提示词不发：未开 port，等待提示走消息区抓取文案
+    const messages = document.getElementById(ids.readingChatMessages) as HTMLElement;
+    await waitFor(() => Boolean(messages.querySelector(".chat-context-notice")));
+    expect(messages.querySelector(".chat-context-notice")?.textContent).toContain("正在抓取字幕");
+    expect(ports).toHaveLength(0);
+
+    // 抓取落定 → kick 补轮放行（不必真等一轮 4s 轮询）
+    state.clip.subtitleFetchState = "ready";
+    state.clip.subtitleBody = [{ from: 0, to: 10, content: "大家好" }];
+    resolveFetch();
+    statusBus.publishSubtitleStatusPhase("asr-done");
+
+    await waitFor(() => ports.length === 1 && ports[0].postMessage.mock.calls.length === 1);
+    const posted = ports[0].postMessage.mock.calls[0][0] as {
+      prompt?: string;
+      context?: { subtitleBody?: unknown[] };
+    };
+    expect(posted.prompt).toContain("整理这期视频");
+    expect(posted.context?.subtitleBody).toHaveLength(1); // 发出的是抓取后的完整字幕
+    expect(await sent).toBe(true);
+  });
+
+  it("非视频页：不起跑抓取（对话仍可用，不落一条抓取失败状态行）", async () => {
+    const readerBus = await import("../../extension/reader/reader-bus.js");
+    const refreshSpy = vi.fn(() => Promise.resolve());
+    readerBus.subscribeSubtitleRefresh(refreshSpy);
+
+    setLocationUrl("https://www.bilibili.com/");
+    state.clip.title = "";
+    state.clip.bvid = "";
+    state.clip.cid = "";
+    state.clip.subtitleFetchState = "idle";
+    state.clip.subtitleBody = [];
+
+    const chat = await lazyChat.ensureReaderChatTab();
+    await chat.runQuickActionPrompt("整理这期视频的内容，输出结构化总结。");
+
+    expect(refreshSpy).not.toHaveBeenCalled();
+    expect(ports).toHaveLength(1); // 非视频页对话照常发出
+  });
+});
+
 describe("断流收口（工单 08：关闭即断流，重开从会话历史恢复）", () => {
   it("流式中关闭：断 port + 退出流式 UI 态；关闭后发送不再放行", async () => {
     seedReadyContext();

@@ -45,6 +45,8 @@
 
 import { state } from "../core/state.js";
 import { buildReaderModeUrl } from "../bilibili/reader-url.js";
+// 当前地址是否 BV 视频页（抓取起跑的前置闸；非视频页对话仍可用，只是不抓字幕）。
+import { extractBvid } from "../bilibili/video-id-shared.js";
 import { buildContextKey, doesTabMatchContextUrl } from "../ai/conversation.js";
 // 思考档位「关不掉」提示的判定入口（工单 03）：纯查表 resolver，host 推断 +
 // 模型名 taxonomy，无 DOM 依赖（后台路径同款判定天然不渲染提示）。
@@ -94,7 +96,11 @@ import { setChatTabOutsideClickHandler } from "./chat-tab-bridge.js";
 // 壳命令通道（arch-review-2026-09/10 依赖反转）：快捷动作定位对话 tab 与空态
 // 「前往设置」改发 reader-bus 具名命令，由 ui-renderer 注册的 handler 执行——
 // 本文件不再静态 import ui/ui-renderer。
-import { requestUiCommand } from "./reader-bus.js";
+import { requestSubtitleRefresh, requestUiCommand } from "./reader-bus.js";
+// 发送前主动起跑抓取的装载边（与 reader/lifecycle 同一条链：先 ensure 再经
+// reader-bus 发刷新请求）。本模块是动态 chunk，静态 import 本叶子不拖常驻图。
+import { ensureSummarizeChain } from "../subtitle/lazy.js";
+import { logWarn } from "../shared/logging.js";
 // 对话分区表模块顶兜底挂载（arch-slim-4/07，settings-panel.ts 顶挂载同款先例）：
 // 主点在 ui-renderer setReaderDigestTab 的 chat 分支（盖住现役三入口），此处盖
 // 住未来新入口——本模块被动态装载即样式在场；ensure 内部 mounted Map 去重。
@@ -1123,8 +1129,43 @@ function findPreviousUserPrompt(index: number): string {
   return "";
 }
 
+// 发送前主动起跑字幕抓取（finding 有字幕视频点 AI 键发出空上下文）：等待闸
+// （isContextPending）只认 subtitleFetchState === "loading"——面板打开后的后台
+// 抓取要等播放器元数据（最多 5 秒）才起跑，这段「还没开始抓」的窗口里状态是
+// idle，闸判定「非 pending」直接放行，字幕体为空就发给模型，只能得到凭标题
+// 编造「无公开字幕」的总结（截图形态：状态行还停在「正在获取可用字幕...」，
+// 对话里已经是一条无效回答）。这里在发送路径上补上抓取发起方：idle 且无字幕
+// 体时主动起跑一轮，随后的 wait() 首轮轮询必见 loading，提示词被挂住直到
+// 抓取落定（ready 放行完整字幕 / empty 走无字幕拦截）。
+// 其余状态各有归属不重起一轮：loading 交给等待闸、ready 有字幕体、empty 走
+// 无字幕拦截、error 由用户「刷新抓取」重试（不改其现状）。非 BV 视频页不抓
+// （对话在非视频页仍可用，起跑只会换来一条「无法抓取字幕」的失败状态行）。
+// 返回 false 只在总结链装载失败（抓取没能起跑）时，调用方按上下文读取失败拦截。
+async function startSubtitleFetchIfNeeded(): Promise<boolean> {
+  if (!extractBvid(location.href)) {
+    return true;
+  }
+  const snapshot = chatSessionState.liveContextData || chatSessionState.contextData;
+  const body = Array.isArray(snapshot?.subtitleBody) ? snapshot.subtitleBody : [];
+  if (body.length > 0 || snapshot?.subtitleFetchState !== "idle") {
+    return true;
+  }
+  try {
+    // 与 reader/lifecycle 同一次序：先确保总结链装载（refreshClip 注册进
+    // reader-bus seam），再发刷新请求。refreshClip 的同步前缀即写 loading
+    //（首个 await 之前），因此 wait() 不会抢在起跑前放行。
+    await ensureSummarizeChain();
+    requestSubtitleRefresh().catch(() => {});
+  } catch (error) {
+    logWarn("[BOC] subtitle fetch start failed", { error });
+    return false;
+  }
+  return true;
+}
+
 // 【整段迁移自 sidepanel.ts】发送前确保当前上下文就绪（pinned 对话补水 / 普通
-// 对话读当前页；抓取或音频转写进行中时先等待，避免空字幕上下文直接发给模型）。
+// 对话读当前页；抓取或音频转写进行中时先等待，避免空字幕上下文直接发给模型；
+// 还没起跑时主动起跑，见 startSubtitleFetchIfNeeded）。
 // 最终快照若是「无字幕收尾」（empty 且字幕体为空）则拦截发送：返回
 // NO_SUBTITLE_SEND_BLOCKED 类型化信号让 sendMessage 提前返回（不追加用户消息、
 // 不落 chatHistory、不发起 port），并按 noSubtitleReason 显示对应 notice。
@@ -1139,6 +1180,12 @@ async function ensureCurrentContextForSend(): Promise<boolean | string> {
   // resolveNoTabPlan 语义不同：这里即使静默加载也会重置视图），保持原状。
   const ok = await loadContextState({ forceRefresh: false, silent: true });
   if (!ok || !chatSessionState.contextData) {
+    resetConversationView(CONTEXT_READ_FAILED_MESSAGE);
+    return false;
+  }
+  // 抓取还没起跑（idle）时主动起跑，再进等待闸——否则等待闸见不到 loading，
+  // 空字幕上下文会被直接放行。
+  if (!(await startSubtitleFetchIfNeeded())) {
     resetConversationView(CONTEXT_READ_FAILED_MESSAGE);
     return false;
   }
