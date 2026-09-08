@@ -183,6 +183,11 @@ function bindSubtitleStatusBus(): void {
   unsubscribeStatusBus = subscribeSubtitleStatusPhase((phase) => {
     if (phase === "asr-transcribing") {
       chatSessionState.asrTranscribingActive = true;
+      // 转写相位开始：清掉等待闸此前落下的「正在抓取字幕…」消息区通知。那条
+      // 通知描述的是抓取阶段，与转写状态行同屏即为自相矛盾的两条提示（用户
+      // 报障：一闪两条重复且不正确的提示）；等待期间的正确提示由下一轮轮询
+      // 把状态行切到合并句，消息区不再需要通知。
+      removeConversationContextNotice();
     } else if (phase === "asr-done" || phase === "asr-failed") {
       chatSessionState.asrTranscribingActive = false;
       subtitleWaiter.kick();

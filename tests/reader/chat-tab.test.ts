@@ -310,6 +310,39 @@ describe("subtitle-wait kick 总线接线", () => {
     await activation;
   });
 
+  it("抓取等待中转入转写相位：消息区抓取通知立即清理，不闪两条同屏提示", async () => {
+    // 抓取中（loading + 空字幕体）等待闸落一条「正在抓取字幕…」消息区通知；
+    // 随后无字幕出口进入转写相位——若不清掉那条抓取通知，它会与转写状态行
+    // 同屏显示（用户报障：一闪两条重复且不正确的提示），直到下一轮 4s 轮询。
+    state.clip.title = "测试视频";
+    state.clip.bvid = "BV1test000000";
+    state.clip.cid = "101";
+    state.clip.subtitleFetchState = "loading";
+    state.clip.subtitleBody = [];
+    explainIntent.setPendingExplainIntent({ from: 10, content: "抓取中转写句", createdAt: Date.now() });
+
+    const chat = await lazyChat.ensureReaderChatTab();
+    const activation = chat.ensureChatTabActivated();
+
+    const messages = document.getElementById(ids.readingChatMessages) as HTMLElement;
+    const asrNotice = document.getElementById(ids.readingChatAsrNotice) as HTMLElement;
+    await waitFor(() => Boolean(messages.querySelector(".chat-context-notice")));
+    expect(messages.querySelector(".chat-context-notice")?.textContent).toContain("正在抓取字幕");
+    expect(asrNotice.hidden).toBe(true);
+
+    // 转写相位广播（同步分发）：抓取通知立即消失，只留转写状态行
+    statusBus.publishSubtitleStatusPhase("asr-transcribing");
+    expect(messages.querySelector(".chat-context-notice")).toBeNull();
+    expect(asrNotice.hidden).toBe(false);
+
+    // 收尾：转写完成 → kick 补轮放行
+    state.clip.subtitleFetchState = "ready";
+    state.clip.subtitleBody = [{ from: 0, to: 10, content: "大家好" }];
+    statusBus.publishSubtitleStatusPhase("asr-done");
+    await waitFor(() => ports.length === 1);
+    await activation;
+  });
+
   it("有字幕视频抓取中等待：消息区显示抓取文案，不误报音频转写", async () => {
     // 抓取中：subtitleFetchState loading + 字幕体为空，相位 idle（非转写）
     state.clip.title = "测试视频";
