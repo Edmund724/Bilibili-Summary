@@ -169,6 +169,64 @@ describe("播放同步与高亮", () => {
     expect(rectSpy).toHaveBeenCalledTimes(2);
   });
 
+  it("P3-1 字幕 tab 隐藏：tick 跳过高亮/滚动段，状态栏与跟随态照常收敛", () => {
+    state.reader.readingViewOpen = true;
+    shell.renderReadingView();
+    playerHost.bindReadingViewVideo(video);
+    uiRenderer.setReaderDigestTab("overview");
+
+    video.currentTime = 12;
+    sync.syncReadingViewPlayback(); // 预热 video 元素缓存（其探测会读 rect）
+    const rectSpy = vi.spyOn(Element.prototype, "getBoundingClientRect");
+    sync.syncReadingViewPlayback();
+
+    // 高亮/滚动整段跳过：零布局读取、无 is-active、索引状态不推进
+    expect(rectSpy).not.toHaveBeenCalled();
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
+    expect(readingView.querySelector(".boc-reading-item.is-active")).toBe(null);
+    expect(state.reader.readingActiveSubtitleIndex).toBe(-1);
+
+    // 状态栏（面板 header，三 tab 常显）与跟随态属性（header 标注消费）照常收敛
+    const status = document.getElementById(ids.readingStatus) as HTMLElement;
+    expect(status.textContent).toBe("当前进度 0:12");
+    expect(readingView.getAttribute("data-boc-reader-follow")).toBe("auto");
+  });
+
+  it("P3-1 切回字幕 tab：下一拍补上高亮与索引（跳过的段自然收敛）", () => {
+    state.reader.readingViewOpen = true;
+    shell.renderReadingView();
+    playerHost.bindReadingViewVideo(video);
+    uiRenderer.setReaderDigestTab("overview");
+
+    video.currentTime = 12;
+    sync.syncReadingViewPlayback();
+    expect(state.reader.readingActiveSubtitleIndex).toBe(-1);
+
+    uiRenderer.setReaderDigestTab("subtitle");
+    sync.syncReadingViewPlayback();
+
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
+    const activeSubtitle = readingView.querySelector(".boc-reading-item.is-active") as HTMLElement;
+    expect(activeSubtitle.dataset.index).toBe("1");
+    expect(state.reader.readingActiveSubtitleIndex).toBe(1);
+  });
+
+  it("P3-1 设置抽屉展开（三 tab body 被 CSS 压掉）：同样跳过滚动/高亮段", () => {
+    state.reader.readingViewOpen = true;
+    shell.renderReadingView();
+    playerHost.bindReadingViewVideo(video);
+    state.reader.setSettingsExpanded(true);
+
+    video.currentTime = 12;
+    sync.syncReadingViewPlayback();
+
+    const readingView = document.getElementById(ids.readingView) as HTMLElement;
+    expect(readingView.querySelector(".boc-reading-item.is-active")).toBe(null);
+    expect(state.reader.readingActiveSubtitleIndex).toBe(-1);
+    // 状态栏仍收敛（抽屉展开不改变 header 状态行的可见性）
+    expect((document.getElementById(ids.readingStatus) as HTMLElement).textContent).toBe("当前进度 0:12");
+  });
+
   it("播放稳态仅 interval 单路驱动：timeupdate 派发不触发同步（P3 单路化锁）", async () => {
     state.reader.readingViewOpen = true;
     shell.renderReadingView();
