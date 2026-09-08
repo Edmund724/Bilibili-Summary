@@ -7,9 +7,9 @@
 // (a) listbox 键盘语义：trigger Enter 展开 → ↓ 漫游 → Enter 选中——原生
 //   select.value 写回且派生一次 bubbling change（收集链零改的根基），
 //   aria-expanded / aria-selected / 焦点归位同步断言；
-// (b) 段落位置校验失败的错误态归位（Q22 甲）：input-error 与 focus 落在
+// (b) 段落位置校验失败的错误态归位（Q22 甲）：aria-invalid 与 focus 落在
 //   .custom-select-trigger（原生 select 已被壳 clip 隐藏），修正输入后清错
-//   连带摘类。
+//   连带摘属性（M9：错误态载体 input-error 类 → aria-invalid 属性）。
 //
 // (b) 的前置态在真实链路上不可达：collectNoteSectionRows 与
 // validateNotePlaceholderSections 双重归一化后 position 恒为合法位，
@@ -110,7 +110,7 @@ describe("custom-select 键盘与错误态归位（settings-ui-coherence/04）",
     expect(options[0].getAttribute("aria-selected")).toBe("false");
   });
 
-  it("(b) 段落位置校验失败：input-error 与 focus 落在 trigger，修正后清错摘类", async () => {
+  it("(b) 段落位置校验失败：aria-invalid 与 focus 落在 trigger，修正后清错摘属性", async () => {
     const sent = installMessageBus();
     vi.doMock("../../extension/core/validators.js", async (importOriginal) => {
       const actual = await importOriginal();
@@ -135,18 +135,18 @@ describe("custom-select 键盘与错误态归位（settings-ui-coherence/04）",
 
     fireClick(host.querySelector("#bocSettingsSaveBtn"));
 
-    expect(trigger.classList.contains("input-error")).toBe(true);
+    expect(trigger.getAttribute("aria-invalid")).toBe("true");
     expect(document.activeElement).toBe(trigger);
-    expect(row.querySelector(".note-section-title").classList.contains("input-error")).toBe(false);
+    expect(row.querySelector(".note-section-title").getAttribute("aria-invalid")).toBeNull();
     const errorNode = row.querySelector(".note-section-error");
     expect(errorNode.hidden).toBe(false);
     expect(errorNode.textContent).toBe("请选择有效的位置");
     expect(sent.some((message) => message.type === "save-settings")).toBe(false);
 
-    // 修正输入即清错：组件写回值 + bubbling change → 行监听清错连带摘 trigger 类
+    // 修正输入即清错：组件写回值 + bubbling change → 行监听清错连带摘 trigger 属性
     select.value = "before_chapters";
     select.dispatchEvent(new Event("change", { bubbles: true }));
-    expect(trigger.classList.contains("input-error")).toBe(false);
+    expect(trigger.getAttribute("aria-invalid")).toBeNull();
     expect(errorNode.hidden).toBe(true);
     expect(errorNode.textContent).toBe("");
   });

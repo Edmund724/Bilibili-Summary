@@ -379,11 +379,11 @@ function buildDialogHtml(options: ProviderEditorOpenOptions): string {
         </div>
         <div class="provider-editor-field">
           <label class="provider-editor-label">API 地址</label>
-          <input class="provider-editor-baseurl" type="text" placeholder="baseUrl（如 https://api.openai.com/v1）" value="${escapeHtml(baseUrl)}" />
+          <input class="provider-editor-baseurl" type="text" required pattern="https?://.+" placeholder="baseUrl（如 https://api.openai.com/v1）" value="${escapeHtml(baseUrl)}" />
         </div>
         <div class="provider-editor-field">
           <label class="provider-editor-label">API Key</label>
-          <input class="provider-editor-apikey" type="password" placeholder="${escapeHtml(apiKeyPlaceholder(options.kind, preset, hasSavedKey))}" autocomplete="off" />
+          <input class="provider-editor-apikey" type="password" placeholder="${escapeHtml(apiKeyPlaceholder(options.kind, preset, hasSavedKey))}" autocomplete="off" ${!hasSavedKey && preset?.requiresKey !== false ? "required" : ""} />
         </div>
         <div class="provider-editor-field">
           <label class="provider-editor-label">模型</label>
@@ -495,6 +495,17 @@ function wireDialog(options: ProviderEditorOpenOptions): void {
   const baseUrlInput = dialog.querySelector<HTMLInputElement>(".provider-editor-baseurl");
   const apikeyInput = dialog.querySelector<HTMLInputElement>(".provider-editor-apikey");
 
+  // 原生约束（reader-settings.css 的 :user-invalid/:user-valid 校验态消费）：
+  // 模型名字段由 model-picker 模板生成（构建器契约不含属性注入），在此补
+  // required；Key 必填随预设 requiresKey 与已存 Key 态挂摘（与占位符同口径）。
+  dialog.querySelector<HTMLInputElement>(".provider-editor-model")?.setAttribute("required", "");
+  const syncApiKeyRequired = (preset: ProviderRowPreset | null): void => {
+    if (apikeyInput) {
+      apikeyInput.required = preset?.requiresKey !== false && !state.hasSavedKey;
+    }
+  };
+  syncApiKeyRequired(resolvePreset(options.presets, presetSelect?.value || "", options.kind));
+
   // 预设切换：baseUrl 未改过（空或仍是上一预设默认值）才跟随（平铺行同款规则）。
   // AI 名称留过实值（≠当前预设名）视为用户自定义，切预设不覆盖；否则跟随新
   // 预设名（仅占位符与空值）。ASR 名称/模型无条件跟随、Key 清空（平铺行同款）。
@@ -522,6 +533,8 @@ function wireDialog(options: ProviderEditorOpenOptions): void {
         apikeyInput.placeholder = apiKeyPlaceholder("ai", next, state.hasSavedKey);
       }
     }
+    // Key 必填随预设挂摘（requiresKey 与已存 Key 态同占位符口径）
+    syncApiKeyRequired(next);
     clearStatus();
     presetSelect.dataset.previousPresetId = next.id;
   });
@@ -532,15 +545,38 @@ function wireDialog(options: ProviderEditorOpenOptions): void {
     }
   }
 
-  // 输入即清错误态（修正输入即清错，与 tags 输入监听同款语义）
+  // 输入即清错误状态行（修正输入即清错）；字段级校验态由 :user-invalid CSS
+  // 随原生约束自动摘除，无需 JS 介入
   [nameInput, baseUrlInput, apikeyInput].forEach((input) => {
     input?.addEventListener("input", () => {
       if (statusIsError()) {
         clearStatus();
       }
-      input.classList.remove("input-error");
     });
   });
+
+  // 可达性桥（accessible-error-announcement）：:user-invalid（视觉态）与
+  // aria-invalid（程序态）同拍——浏览器判定进入/退出 :user-invalid 的时刻
+  //（blur 提交值 / input 修正值）同步属性，AT 与视觉在同一时刻拿到「无效」。
+  // blur 不冒泡走 capture；jsdom 无 :user-invalid 判定（matches 恒 false），
+  // 正向路径无法在测试网仿真，浏览器（Chrome 119+，Baseline 2023-11）按标准工作。
+  const syncAriaInvalid = (event: Event): void => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || !target.matches("input, textarea, select")) {
+      return;
+    }
+    try {
+      if (target.matches(":user-invalid")) {
+        target.setAttribute("aria-invalid", "true");
+      } else {
+        target.removeAttribute("aria-invalid");
+      }
+    } catch {
+      // 老内核不识别 :user-invalid（matches 抛 SyntaxError）：属性面保持不动
+    }
+  };
+  dialog.addEventListener("blur", syncAriaInvalid, true);
+  dialog.addEventListener("input", syncAriaInvalid);
 
   wireModelPicker(dialog as unknown as ProviderRowElement, {
     inputClass: "provider-editor-model",
