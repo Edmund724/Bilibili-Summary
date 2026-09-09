@@ -79,14 +79,18 @@ export function bindSettingsWatcher() {
       const next = (await loadReaderSettingsThroughSeam()) as Settings;
       state.setSettings(next);
       // 候选03：阅读视图未打开时跳过呈现层应用；进入阅读模式时 enterReaderMode
-      // 内部会 hydrate/apply，保证最终状态正确。视图开着则经惰性装载后应用。
+      // 内部会 hydrate/apply，保证最终状态正确。视图开着则经惰性装载后应用
+      //（fire-and-forget：不阻塞下方 requestPlayerAiSync，与迁移前启动链后
+      // 同步触发 sync 的时序一致）。
       if (isReaderViewOpen()) {
-        try {
-          await hydrateReaderStateFromSettings(next);
-          await applyReadingViewPresentation();
-        } catch (error) {
-          logWarn("[BOC] failed to apply reader presentation after storage change", error);
-        }
+        void (async () => {
+          try {
+            await hydrateReaderStateFromSettings(next);
+            await applyReadingViewPresentation();
+          } catch (error) {
+            logWarn("[BOC] failed to apply reader presentation after storage change", error);
+          }
+        })();
       }
       requestPlayerAiSync();
     } catch (error) {
