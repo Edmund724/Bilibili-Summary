@@ -1,4 +1,5 @@
 import { DEFAULT_SETTINGS, type Settings } from "./defaults.js";
+import { logWarnAlways } from "../shared/logging.js";
 
 /**
  * State namespace objects.
@@ -45,7 +46,11 @@ export type ChapterItem = {
 // issue 07 removed the now-dead fields. The remaining fields are settings/shared
 // flags plus a few cross-module bookkeeping fields: readingVideoEl (video-probe
 // reads, fetcher writes null, reader-impl writes the element when binding/
-// unbinding), readingDocumentClickBound (ui-renderer sets).
+// unbinding), readingDocumentClickBound (ui-renderer sets), readingShellState
+// (阅读壳生命周期状态机，唯一写手 transitionReaderShell).
+
+// 阅读壳生命周期四态。合法迁移集见 transitionReaderShell 处的注释。
+export type ReaderShellState = "closed" | "entering" | "open" | "exiting";
 
 type ReaderBusinessState = {
   readingViewOpen: boolean;
@@ -58,6 +63,9 @@ type ReaderBusinessState = {
 };
 
 type ReaderInternalState = {
+  // 阅读壳生命周期状态机（closed/entering/open/exiting），唯一写手是下方
+  // transitionReaderShell；readingViewOpen 是它的派生投影。
+  readingShellState: ReaderShellState;
   readingVideoEl: HTMLVideoElement | null;
   readingDocumentClickBound: boolean;
 };
@@ -76,7 +84,12 @@ export type ReaderState = Readonly<ReaderBusinessState> & ReaderInternalState & 
 type ReaderStateWritable = ReaderBusinessState & ReaderInternalState & ReaderSetters;
 
 const localReaderState: ReaderStateWritable = {
-  readingViewOpen: false,
+  readingShellState: "closed",
+  // readingViewOpen 是阅读壳状态机的派生投影（readingShellState === "open"）：
+  // 全部读取点零改动。setter 保留直写兼容（测试脚手架/历史直写点经它对齐
+  // 状态机，绕过迁移校验）——生产写入点一律走 transitionReaderShell。
+  get readingViewOpen() { return this.readingShellState === "open"; },
+  set readingViewOpen(value: boolean) { this.readingShellState = value ? "open" : "closed"; },
   readingTheme: "light",
   readingSettingsExpanded: false,
   readingActiveSubtitleIndex: -1,
@@ -326,3 +339,47 @@ const stateBundle: StateBundle = ((globalThis as unknown as Record<string, State
 export const state: State = stateBundle.state;
 export const clipState = stateBundle.clipState;
 export const uiState = stateBundle.uiState;
+
+// ===== 阅读壳生命周期状态机 =====
+//
+// 四态单源（ReaderShellState）+ 唯一写手 transitionReaderShell；派生布尔
+// readingViewOpen（state === "open"）让既有读取点零改动。生产写入点一律走
+// 迁移函数校验 from→to 合法性；非法迁移拒绝并经 logWarnAlways 直出（调试门
+// 缺省关，异常路径不能静默）。
+//
+// 合法迁移集（含回退边——按 restore 自愈「先 close 再 enter」与直开路径的
+// 现状定，保持既有行为全部合法）：
+//   closed → entering   进入事务开始（reader/shell.ts 两个进入入口）
+//   entering → open     enterReaderMode 打开视图
+//   entering → closed   进入失败回退 / entering 中 restore 自愈先收敛
+//   closed → open       直开兜底（entry/content.ts 直达路径直调 enterReaderMode）
+//   open → exiting      退出事务开始（exitReaderShell 入队后）
+//   open → closed       closeReadingView 兜底直关（不经退出事务的调用）
+//   exiting → closed    退出事务内 closeReadingView 收尾
+//   exiting → open      退出失败回退（视图仍在，不能卡在 exiting）
+// 同态迁移（from === to）视为幂等 no-op，不记日志。desync（壳失整）不进状态机
+// ——isReaderShellIntact 谓词 + digest-button 自查维持现状。
+
+const READER_SHELL_TRANSITIONS: Record<ReaderShellState, readonly ReaderShellState[]> = {
+  closed: ["entering", "open"],
+  entering: ["open", "closed"],
+  open: ["exiting", "closed"],
+  exiting: ["closed", "open"]
+};
+
+export function getReaderShellState(): ReaderShellState {
+  return state.reader.readingShellState;
+}
+
+export function transitionReaderShell(to: ReaderShellState): boolean {
+  const from = state.reader.readingShellState;
+  if (from === to) {
+    return true;
+  }
+  if (!READER_SHELL_TRANSITIONS[from].includes(to)) {
+    logWarnAlways(`[BOC] 非法阅读壳状态迁移：${from} → ${to}，已拒绝`);
+    return false;
+  }
+  state.reader.readingShellState = to;
+  return true;
+}

@@ -13,7 +13,7 @@
 //
 // B 形态（右栏 Digest 面板）：进入链只开壳、渲染并 openDigestHost（播放器
 // 不动），close 拆 digest-host 并清理会话态；reader-bus reset 通知只停同步。
-import { state } from "../core/state.js";
+import { state, transitionReaderShell } from "../core/state.js";
 import { getReaderElement } from "../shared/dom-utils.js";
 import { sleep } from "../shared/utils.js";
 // 候选02：updateReaderPreferences/renderReaderPanels 自 presentation.js 移回
@@ -271,7 +271,8 @@ function renderReadingSubtitleSelect() {
 }
 export async function enterReaderMode() {
   const readingView = getReaderElement(ids.readingView);
-  state.reader.setViewOpen(true);
+  // 视图打开走状态机迁移（entering→open；直开路径 closed→open）
+  transitionReaderShell("open");
   document.body.setAttribute("data-boc-reading-active", "1");
   hydrateReaderStateFromSettings(state.settings);
   applyReadingViewPresentation();
@@ -326,7 +327,9 @@ export function waitForVideoMetadata(timeoutMs = 5000): Promise<void> {
 // 启动收敛到 subtitle-ready 通知路径（handleReaderPresenterNotification）。
 
 export function closeReadingView() {
-  state.reader.setViewOpen(false);
+  // 视图关闭走状态机迁移（exiting→closed 常规收尾；open→closed 兜底直关；
+  // entering→closed entering 中 restore 自愈先收敛；closed 幂等 no-op）
+  transitionReaderShell("closed");
   state.reader.setViewReady(false);
   state.reader.setSettingsExpanded(false);
   state.reader.setNextScrollBehavior("smooth");

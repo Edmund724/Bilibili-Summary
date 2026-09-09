@@ -38,8 +38,9 @@ import { ensureUiReady } from "../ui/lazy-ui.js";
 import { loadPlayerAi, isPlayerAiLoaded } from "../ai/lazy-player-ai.js";
 import { ensureReaderDomain } from "./lazy-reader.js";
 import { ensureReaderStyles, removeReaderStyles } from "../shared/style-injector.js";
-import { logWarn } from "../shared/logging.js";
+import { logWarn, logWarnAlways } from "../shared/logging.js";
 import { READER_CLOSED_EVENT } from "../shared/self-heal.js";
+import { getReaderShellState, transitionReaderShell } from "../core/state.js";
 import { ids, isReaderViewOpen } from "./state.js";
 
 export type ReaderShellIntent = "open" | "restore" | "chat";
@@ -101,13 +102,14 @@ interface ReaderEntrySequenceOptions {
   beforeEntry?: () => Promise<void>;
 }
 
-// ===== 进入事务单飞队列 =====
+// ===== 进入/退出事务单飞队列 =====
 //
 // 为什么要排队：进入链的 enterReaderMode 发 reset-tabs（重置回「字幕」tab），
 // chat 档在进入事务内激活对话 tab（set-tab:chat）——不排队的话，后到事务会
 // 盖掉先到事务的 tab 写手（工单：AI 键偶发进的是字幕 tab）。事务在本模块
 // 收口成单飞队列：后到事务等先到事务收敛（含失败）后再起跑，chat 档的对话
-// 激活因此在进入事务收敛后落地（race 防护语义所在）。
+// 激活因此在进入事务收敛后落地（race 防护语义所在）。退出事务同队列：进入
+// 中收到 close 顺延执行，enter/exiting 不交错。
 let readerEntryChain: Promise<void> = Promise.resolve();
 
 function runReaderEntryExclusive(run: () => Promise<void>): Promise<void> {
@@ -115,6 +117,27 @@ function runReaderEntryExclusive(run: () => Promise<void>): Promise<void> {
   const next = readerEntryChain.then(run, run);
   readerEntryChain = next.catch(() => {});
   return next;
+}
+
+// 进入事务骨架（消息意图三档与 URL 跳转入口共用）：事务体内先把 closed 抬进
+// entering，失败回退 closed——状态机不能卡在 entering。open 态重入（聚焦/chat
+// 档视图已开）不重复抬态，失败时维持 open 原状。
+function runReaderShellEnterTransaction(
+  run: () => Promise<void>,
+  onEnterFailed: (error: unknown) => void
+): Promise<void> {
+  return runReaderEntryExclusive(async () => {
+    if (getReaderShellState() === "closed") {
+      transitionReaderShell("entering");
+    }
+    await run();
+  }).catch((error) => {
+    if (getReaderShellState() === "entering") {
+      transitionReaderShell("closed");
+      logWarnAlways("[BOC] reading shell enter transaction failed, state rolled back to closed", error);
+    }
+    onEnterFailed(error);
+  });
 }
 
 async function runReaderEntrySequence(options: ReaderEntrySequenceOptions): Promise<void> {
@@ -189,7 +212,7 @@ export function enterReaderShell(options: EnterReaderShellOptions): Promise<void
       .then((playerAi) => playerAi.removePlayerAiQuickActionButton())
       .catch(() => {});
   }
-  return runReaderEntryExclusive(async () => {
+  return runReaderShellEnterTransaction(async () => {
     await runReaderEntrySequence({
       readerUrl,
       beforeEntry: intent === "restore" ? restoreSelfHealBeforeEntry : undefined
@@ -205,11 +228,7 @@ export function enterReaderShell(options: EnterReaderShellOptions): Promise<void
         await chat.ensureChatTabActivated({ consumeIntent: false });
       }
     }
-  }).catch((error) => {
-    // 壳构建等前序步骤失败：进入链整体中止（restore/chat 与收口前的
-    // 兜底口径一致；open 档收口前为未处理拒绝，现收敛为记日志，debug 无感）。
-    onFailed(error);
-  });
+  }, onFailed);
 }
 
 export interface EnterReaderShellOnUrlNavigationOptions {
@@ -228,46 +247,64 @@ export interface EnterReaderShellOnUrlNavigationOptions {
 export function enterReaderShellOnUrlNavigation(
   options: EnterReaderShellOnUrlNavigationOptions
 ): Promise<void> {
-  return runReaderEntryExclusive(async () => {
-    if (options.announce) {
-      // 播报失败不阻断进入（与收口前 Promise.all 的吞错口径一致）
-      await Promise.resolve(options.announce()).catch(() => {});
-    }
-    await runReaderEntrySequence({ readerUrl: options.readerUrl });
-  }).catch((error) => {
+  const onEnterFailed = (error: unknown): void => {
     if (options.onEnterFailed) {
       options.onEnterFailed(error);
     } else {
       logWarn("[BOC] reading view start failed", error);
     }
-  });
+  };
+  return runReaderShellEnterTransaction(async () => {
+    if (options.announce) {
+      // 播报失败不阻断进入（与收口前 Promise.all 的吞错口径一致）
+      await Promise.resolve(options.announce()).catch(() => {});
+    }
+    await runReaderEntrySequence({ readerUrl: options.readerUrl });
+  }, onEnterFailed);
 }
 
 // 退出事务（逆事务）：URL 收敛 → closeReadingView → 摘阅读表。吸收收口前的
 // 两处手抄——reader-close 消息处理器与 Digest 面板关闭按钮链（两者语义相同：
 // 先收敛地址栏再关视图；关闭按钮不回包、消息路径按结果回包，差异只在失败
-// 口径，由调用方在返回的 promise 上自行接）。
-export async function exitReaderShell(): Promise<void> {
-  // URL 改写保持同步语义（与收口前一致地先收敛地址栏）；非阅读模式 URL 不改
-  // 写（页内跳转后关闭按钮可能落在普通地址上）。改写失败向上抛：消息路径据
-  // 此按错误回包，且不会继续执行关闭（与收口前 try/catch 短路一致）。
-  if (isReaderMode()) {
-    replaceReaderModeUrl(stripReaderModeUrl(location.href));
-  }
-  // closeReadingView 属 reader 重域，经 ensure 装载后执行（视图开着 ⇒ 域几乎
-  // 必然已装载，此处只是兜底直开路径）。
-  const reader = await ensureReaderDomain();
-  reader.closeReadingView();
-  // S3：关闭后移除阅读表——门控样式随属性清除（closeReadingView 按
-  // presentation-fields 的 clearOnClose 清单翻回）已停止生效，摘表进一步释放
-  // 级联；下次进入重挂（link 数据在浏览器缓存，二进宫无闪变）。
-  removeReaderStyles();
-  // 退出完成通知（arch-slim-2/09 自愈收口）：digest-button 的自查 interval 在
-  // 阅读壳打开且完好期间降频暂停，靠本事件恢复常速并立即补回按钮。事件名
-  // 单源 shared/self-heal.js（READER_CLOSED_EVENT）；有意走 window
-  // CustomEvent 而非静态 import 边——digest-button 不 import 本模块的派发点，
-  // 两侧只共享事件名字符串。只在本事务收敛后派发：退出失败（URL 改写抛错 /
-  // closeReadingView 抛错）不走这里，失同步场景仍由 digest-button 的自查
-  // reader-restore 链兜底。
-  window.dispatchEvent(new CustomEvent(READER_CLOSED_EVENT));
+// 口径，由调用方在返回的 promise 上自行接）。与进入事务同队列串行：entering
+// 中收到 close 时排在进入事务之后顺延执行。
+export function exitReaderShell(): Promise<void> {
+  return runReaderEntryExclusive(async () => {
+    // 视图未开（state closed，如一次失败的进入事务之后点关闭）不做状态迁移，
+    // 但保留 URL 收敛/摘表/事件——直达进入失败后的「关闭」仍要清掉 boc_reader
+    // 地址与残留样式，否则 digest-button 的 URL 自查会反复重触发进入。
+    if (getReaderShellState() !== "closed") {
+      transitionReaderShell("exiting");
+    }
+    // URL 改写保持同步语义（与收口前一致地先收敛地址栏）；非阅读模式 URL 不改
+    // 写（页内跳转后关闭按钮可能落在普通地址上）。改写失败向上抛：消息路径据
+    // 此按错误回包，且不会继续执行关闭（与收口前 try/catch 短路一致）。
+    if (isReaderMode()) {
+      replaceReaderModeUrl(stripReaderModeUrl(location.href));
+    }
+    // closeReadingView 属 reader 重域，经 ensure 装载后执行（视图开着 ⇒ 域几乎
+    // 必然已装载，此处只是兜底直开路径）。
+    const reader = await ensureReaderDomain();
+    reader.closeReadingView();
+    // S3：关闭后移除阅读表——门控样式随属性清除（closeReadingView 按
+    // presentation-fields 的 clearOnClose 清单翻回）已停止生效，摘表进一步释放
+    // 级联；下次进入重挂（link 数据在浏览器缓存，二进宫无闪变）。
+    removeReaderStyles();
+    // 退出完成通知（arch-slim-2/09 自愈收口）：digest-button 的自查 interval 在
+    // 阅读壳打开且完好期间降频暂停，靠本事件恢复常速并立即补回按钮。事件名
+    // 单源 shared/self-heal.js（READER_CLOSED_EVENT）；有意走 window
+    // CustomEvent 而非静态 import 边——digest-button 不 import 本模块的派发点，
+    // 两侧只共享事件名字符串。只在本事务收敛后派发：退出失败（URL 改写抛错 /
+    // closeReadingView 抛错）不走这里，失同步场景仍由 digest-button 的自查
+    // reader-restore 链兜底。
+    window.dispatchEvent(new CustomEvent(READER_CLOSED_EVENT));
+  }).catch((error) => {
+    // 退出事务失败回退：exiting 回 open（视图仍在开着），不能卡在 exiting。
+    // 失败继续向上抛——消息路径按结果回包、关闭按钮链自行接（与收口前一致）。
+    if (getReaderShellState() === "exiting") {
+      transitionReaderShell("open");
+      logWarnAlways("[BOC] reading shell exit transaction failed, state rolled back to open", error);
+    }
+    throw error;
+  });
 }

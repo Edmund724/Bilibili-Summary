@@ -69,7 +69,16 @@ setters, and do **not** add copies of them to the setter table:
 ```
 readingVideoEl
 readingDocumentClickBound
+readingShellState
 ```
+
+`readingShellState` is the shell-lifecycle state machine field (`closed | entering | open | exiting`,
+single source in `core/state.ts`). Its only writer is the exported `transitionReaderShell(to)`, which
+validates the from→to edge (rejections are logged unconditionally via `logWarnAlways`) and keeps
+`readingViewOpen` as its derived boolean projection (`state === "open"`). Production write points
+(`reader/shell.ts` enter/exit transactions, `lifecycle.enterReaderMode` / `closeReadingView`) must go
+through `transitionReaderShell`, never through `setViewOpen` — that setter (and the
+`readingViewOpen` accessor itself) exists as an unvalidated force-set for test scaffolding only.
 
 ## Context attribution (runtime volatility)
 

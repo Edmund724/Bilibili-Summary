@@ -58,3 +58,14 @@ export function logError(...args: unknown[]): void {
     console.error(...args);
   }
 }
+
+// 不经调试门的直出日志（console.warn/error）：用于非法状态迁移拒绝、迁移/事务
+// 失败等必须留痕的异常路径——门控日志在这些路径上会因门缺省关而静默。遵守本
+// 模块同样的纯叶子纪律（不 import core/state、不碰 chrome.*），不新增共享槽。
+export function logWarnAlways(...args: unknown[]): void {
+  console.warn(...args);
+}
+
+export function logErrorAlways(...args: unknown[]): void {
+  console.error(...args);
+}
