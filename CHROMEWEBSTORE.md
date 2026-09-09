@@ -1,6 +1,6 @@
 # Chrome Web Store Listing — Bilibili-Summary｜一键总结B站视频
 
-> Last Updated: 2026-09-09
+> Last Updated: 2026-09-10
 >
 > Status: Draft. Do not submit until tickets #01 through #06 are complete, the real Chrome checks pass, and the 2.1.0 release archive is rebuilt.
 
@@ -12,7 +12,7 @@
 
 **Detailed Description**:
 
-Bilibili-Summary 在 B 站视频页右侧打开 Digest 阅读面板，让你一边看视频，一边读取逐句字幕、章节和 AI 摘要。点击视频播放器下方的 Digest 即可开始阅读。
+Bilibili-Summary 在 B 站视频页右侧打开 Digest 阅读面板，让你一边看视频，一边读取逐句字幕、章节和 AI 摘要。点击视频播放器下方的 Digest 按钮，或点击浏览器工具栏上的扩展图标——两个入口完全等价，打开的是同一个页面内阅读面板。设置、字幕、概览、AI 对话和笔记都在这个面板内。
 
 你可以按时间跳转字幕，搜索当前句，复制或下载 Markdown、SRT 和 TXT；也可以保存带时间戳的笔记。概览会整理章节、重点引用和完整笔记。AI 对话能围绕当前视频追问，并使用你配置的模型；选中字幕后，可以继续请求讲解、翻译或润色。
 
@@ -49,15 +49,16 @@ Refresh the screenshots after the toolbar entry and compatibility fixes are comp
 
 | Permission | Type | Justification |
 |---|---|---|
-| `storage` | permissions | Save API keys, notes, conversations, subtitles, summaries, settings, and cache entries. |
-| `unlimitedStorage` | permissions | Keep the user-specified local subtitle and summary cache from failing when Chrome evicts data under the normal storage quota. |
+| `storage` | permissions | Save API keys, notes, conversations, subtitles, summaries, settings, and cache entries locally. |
+| `unlimitedStorage` | permissions | The subtitle, segment-summary, and overview caches keep the 3 most recent videos per cache family with no byte limit; this permission declares that those local caches are exempt from Chrome's normal storage quota so saved transcripts and summaries are not evicted. |
 | `scripting` | permissions | Run the reading interface and player controls on supported Bilibili video pages. |
 | `tabs` | permissions | Identify the active Bilibili tab, keep the reading interface attached to the correct video, synchronize playback state, and pass that tab to the audio pipeline. |
 | `offscreen` | permissions | Decode audio and process AI or ASR streams in a background document while the user continues browsing the video page. |
-| `declarativeNetRequest` | permissions | Add short-lived request headers for Bilibili audio during an active speech-recognition task, then remove those rules when the task finishes. |
+| `declarativeNetRequest` | permissions | Add short-lived session rules that set the Referer/Origin headers for requests to Bilibili's audio CDN while an active speech-recognition task is running, then remove those rules when the task finishes. |
 | `https://www.bilibili.com/*` | host_permissions | Read supported video and watch-later pages so the extension can add the Digest button and reading interface. |
 | `https://api.bilibili.com/*` | host_permissions | Fetch video metadata and subtitle data while the user is reading or summarizing a Bilibili video. |
-| `https://*.hdslb.com/*` | host_permissions | Fetch subtitle assets and Bilibili-hosted audio for the speech-recognition fallback. |
+| `https://*.hdslb.com/*` | host_permissions | Fetch subtitle files (subtitle-body JSON) hosted on Bilibili's CDN. |
+| `https://*.bilivideo.com/*` | host_permissions | Download the audio track from Bilibili's CDN only when the speech-recognition fallback is enabled and the current video has no subtitle track. |
 | `http://*/*`, `https://*/*` | optional_host_permissions | Connect to an AI or speech-recognition endpoint that the user explicitly adds, including a local Whisper service. Chrome may request this access when the user saves a matching provider. |
 
 ## Privacy & Data Use
@@ -118,8 +119,8 @@ The policy and the store disclosure must be checked together before submission. 
 
 Before submission:
 
-- Complete and verify tickets #01 through #04. The current source is not ready for store submission.
-- Update the support screenshots after the toolbar entry is implemented.
+- Implementation tickets #01 through #05 are merged; ticket #06 (chrome-runtime-acceptance) must pass before submission.
+- Update the support screenshots to show the current in-page Digest panel with both entry points (page Digest button and toolbar icon).
 - Confirm that the extension name and Bilibili references comply with the Chrome Web Store trademark policy.
 - Fill in the publisher name and a monitored contact email.
 - Verify that the GitHub-hosted privacy policy URL is public and matches the completed code.

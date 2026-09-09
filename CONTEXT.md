@@ -54,7 +54,7 @@ _Avoid_: 宿主、播放器宿主（那是 video-probe 的概念）
 
 **阅读壳**:
 Digest 面板进入与退出阅读形态的唯一事务。按意图三档（open 进入 / restore 恢复 / chat 进对话）执行「先挂阅读样式表、再翻 body/html 属性」的无闪变时序，含摘除播放器快捷按钮、suppress 抑制窗口与 restore 档的 shell 完好性自查；退出为逆事务。生命周期由四态状态机收口（closed/entering/open/exiting，单源 `core/state.ts` 的 `transitionReaderShell`，`readingViewOpen` 是其派生投影）：进入与退出事务同队列串行（entering 中收到 close 顺延），失败回退合法边（entering→closed / exiting→open）。全部入口（按钮/编排触发、恢复、进对话）与关闭出口都必须经此收口，禁止手抄序列。
-代码名：`enterReaderShell` / `exitReaderShell`（intent 三档）/ `reader/shell.ts`；承载消息 `reader-enter` / `reader-restore` / `reader-close`
+代码名：`enterReaderShell` / `exitReaderShell`（intent 三档）/ `reader/shell.ts`；承载消息 `reader-enter` / `reader-restore` / `reader-close`——页面内 Digest 按钮与工具栏图标点击共用同一 `reader-enter` 事务，无 popup / Side Panel 入口。
 _Avoid_: popup- 词根消息名、进入阅读模式手抄序列
 
 ### 总结流程

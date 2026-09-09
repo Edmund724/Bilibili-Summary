@@ -130,8 +130,8 @@ API Key 保存在本机的 Chrome 扩展本地存储中，非敏感设置经 Chr
 ## 使用方式
 
 1. 打开一个带字幕的 B 站视频页面。
-2. 点击视频下方的 Digest 按钮，打开页面内右侧阅读面板。
-3. 阅读带时间戳的字幕。
+2. 点击视频播放器下方的 **Digest 按钮**，或点击浏览器**工具栏上的扩展图标**——两个入口完全等价，都打开同一个页面内右侧的 Digest 阅读面板。
+3. 阅读带时间戳的字幕；字幕、概览、AI 对话、设置和保存的笔记都位于这个页面内 Digest 面板的标签页中，不需要离开视频页。
 4. 切换到 **AI 标签页**，查看 AI 生成的视频摘要，或围绕字幕内容多轮对话。
 5. 选中字幕，获取 AI 内容讲解或保存带时间戳的笔记。
 6. 保存的笔记之后可以在 Digest 阅读面板中查看。
@@ -149,12 +149,15 @@ Firefox、Safari、移动浏览器和其他 Chromium 浏览器没有测试过。
 
 ### Chrome 权限说明
 
-- `storage` 与 `unlimitedStorage`：保存设置、API Key、笔记、对话、字幕、概览和本地缓存；只有非敏感设置通过 Chrome 账号同步。
-- `scripting` 与 `tabs`：在用户当前打开的 B 站视频页运行阅读功能，并在视频、Digest 面板和播放器之间同步状态。
+- `storage` 与 `unlimitedStorage`：保存设置、API Key、笔记、对话、字幕、概览和本地缓存；只有非敏感设置通过 Chrome 账号同步。字幕 / 小结 / 概览等缓存族各自只保留最近 3 个视频、不设字节上限，`unlimitedStorage` 即为此声明，避免缓存被 Chrome 常规配额清理。
+- `scripting` 与 `tabs`：在用户当前打开的 B 站视频页注入页面内 Digest 面板，并在视频、面板和播放器之间同步状态。
 - `offscreen`：在后台文档中解码无字幕视频的音频并处理 AI / ASR 流，不用于读取其他网页。
-- `declarativeNetRequest`：仅在语音识别任务进行时，为 B 站音频请求补齐防盗链所需的 Referer / Origin，任务结束即清除规则。
-- B 站域名权限：从 `www.bilibili.com`、`api.bilibili.com` 和 `*.hdslb.com` 获取视频、字幕及音频数据。
-- 可选的全域名权限：只在你保存自定义 AI 或语音识别地址时申请，用于连接你指定的服务，删除对应平台后回收。
+- `declarativeNetRequest`：仅在语音识别任务进行时，为发往 `*.bilivideo.com` 音频 CDN 的请求注入会话级 Referer / Origin 头以通过防盗链校验（域名精确匹配，规则只存在内存中），任务结束即清除规则。
+- `https://www.bilibili.com/*`：在视频页与稍后再看列表页注入 Digest 按钮和阅读面板。
+- `https://api.bilibili.com/*`：获取视频元数据、分 P 信息、字幕轨列表与字幕正文、热门评论。
+- `https://*.hdslb.com/*`：获取托管在 B 站 CDN 上的字幕文件（字幕正文的 JSON 数据）。
+- `https://*.bilivideo.com/*`：仅语音识别回退时，从 B 站音频 CDN 下载无字幕视频的音轨。
+- 可选的全域权限（`http://*/*`、`https://*/*`）：只在你添加自定义 AI 或语音识别平台地址时申请，用于连接你指定的端点（含本机自部署服务），删除对应平台后回收。
 
 扩展不会读取一般浏览历史，也不会把数据交给本项目开发者。实际数据流向见 [PRIVACY.md](PRIVACY.md)。
 
