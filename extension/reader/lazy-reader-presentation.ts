@@ -21,14 +21,17 @@ interface PresentationDomain {
 
 const loader = createLazyLoader<PresentationDomain>(() => import("./presentation.js"));
 
-export function hydrateReaderStateFromSettings(settings?: Partial<Settings>): Promise<void> {
-  return loader.load().then((mod) => mod.hydrateReaderStateFromSettings(settings));
+export async function hydrateReaderStateFromSettings(settings?: Partial<Settings>): Promise<void> {
+  const mod = await loader.load();
+  mod.hydrateReaderStateFromSettings(settings);
 }
 
-export function applyReadingViewPresentation(): Promise<void> {
-  return loader.load().then((mod) => mod.applyReadingViewPresentation());
+export async function applyReadingViewPresentation(): Promise<void> {
+  const mod = await loader.load();
+  mod.applyReadingViewPresentation();
 }
 
-export function renderReadingStatus(text: string | number | null | undefined): Promise<void> {
-  return loader.load().then((mod) => mod.renderReadingStatus(text));
+export async function renderReadingStatus(text: string | number | null | undefined): Promise<void> {
+  const mod = await loader.load();
+  mod.renderReadingStatus(text);
 }

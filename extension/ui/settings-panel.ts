@@ -304,7 +304,8 @@ export function renderReaderSettingsPanel(): void {
   }
   settingsHostRef = host;
   if (!host.dataset.bocSettingsRendered) {
-    void whenReaderSettingsStylesReady().then(() => {
+    void (async () => {
+      await whenReaderSettingsStylesReady();
       if (!host.isConnected || host.dataset.bocSettingsRendered) {
         return;
       }
@@ -313,7 +314,7 @@ export function renderReaderSettingsPanel(): void {
       bindSettingsEvents(host);
       host.dataset.bocSettingsRendered = "1";
       void loadSettings(collectElements(host));
-    });
+    })();
     return;
   }
   void loadSettings(collectElements(host));

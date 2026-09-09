@@ -19,6 +19,7 @@ interface UiDomain {
 const loader = createLazyLoader<UiDomain>(() => import("./ui-renderer.js"));
 
 // 按需确保 UI 壳存在。返回的 promise 在壳构建/复用完成后 resolve。
-export function ensureUiReady(options?: { forceRecreate?: boolean }): Promise<void> {
-  return loader.load().then((ui) => ui.ensureUiReady(options));
+export async function ensureUiReady(options?: { forceRecreate?: boolean }): Promise<void> {
+  const ui = await loader.load();
+  ui.ensureUiReady(options);
 }

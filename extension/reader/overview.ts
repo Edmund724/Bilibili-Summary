@@ -195,7 +195,15 @@ export function triggerReaderOverviewGeneration(
       overview.inflight = null;
     }
   };
-  run.then(cleanup, cleanup);
+  void (async () => {
+    try {
+      await run;
+    } catch {
+      // 拒绝在此收口（原 then(cleanup, cleanup) 不外抛），仅保证清理执行。
+    } finally {
+      cleanup();
+    }
+  })();
   return run;
 }
 

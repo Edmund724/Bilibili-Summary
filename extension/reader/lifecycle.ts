@@ -157,37 +157,37 @@ function hasSubtitleForCurrentVideo(): boolean {
   );
 }
 
-function maybeRefreshReaderSubtitleInBackground() {
+async function maybeRefreshReaderSubtitleInBackground() {
   if (hasSubtitleForCurrentVideo()) {
     return;
   }
-  waitForVideoMetadata().then(() => {
-    // 元数据等待（最长 5 秒）期间字幕可能已被别处落账（对话侧发送前的主动
-    // 抓取、上一轮抓取落定）——落账后再起一轮只是白刷一次（refreshClip 内部
-    // 固定 forceRefresh 走网络重取），期间状态行停在「正在获取可用字幕...」而
-    // 字幕 tab 里已经是本视频字幕（用户报障「有字幕却显示在抓取」）。已有则
-    // 不再触发，但照旧对账重渲——subtitle-ready 通知可能丢，列表需要按当前
-    // state 投影一次（本函数末尾那条 reconcile 的同一收尾）。
-    if (hasSubtitleForCurrentVideo()) {
-      reconcileReaderAfterSubtitleFetch();
-      return;
+  await waitForVideoMetadata();
+  // 元数据等待（最长 5 秒）期间字幕可能已被别处落账（对话侧发送前的主动
+  // 抓取、上一轮抓取落定）——落账后再起一轮只是白刷一次（refreshClip 内部
+  // 固定 forceRefresh 走网络重取），期间状态行停在「正在获取可用字幕...」而
+  // 字幕 tab 里已经是本视频字幕（用户报障「有字幕却显示在抓取」）。已有则
+  // 不再触发，但照旧对账重渲——subtitle-ready 通知可能丢，列表需要按当前
+  // state 投影一次（本函数末尾那条 reconcile 的同一收尾）。
+  if (hasSubtitleForCurrentVideo()) {
+    reconcileReaderAfterSubtitleFetch();
+    return;
+  }
+  // arch-slim-2/03：ensureSummarizeChain 触达自 reader-bus seam 移到本调用方
+  // （seam 恢复「只传话」）。装载失败保持原 seam 内的静默口径（仅 logWarn，
+  // 不进错误状态栏）；refresh 本身的失败仍走下方既有 catch。
+  try {
+    await ensureSummarizeChain();
+  } catch (error) {
+    logWarn("[BOC] subtitle refresh (summarize chain load) failed", { error });
+  }
+  try {
+    await requestSubtitleRefresh();
+  } catch (error) {
+    if (!isStaleRunError(error)) {
+      renderReadingStatus(`字幕加载失败：${getErrorMessage(error)}`);
     }
-    // arch-slim-2/03：ensureSummarizeChain 触达自 reader-bus seam 移到本调用方
-    // （seam 恢复「只传话」）。装载失败保持原 seam 内的静默口径（仅 logWarn，
-    // 不进错误状态栏）；refresh 本身的失败仍走下方既有 catch。
-    ensureSummarizeChain()
-      .catch((error) => {
-        logWarn("[BOC] subtitle refresh (summarize chain load) failed", { error });
-        return undefined;
-      })
-      .then(() => requestSubtitleRefresh())
-      .catch((error) => {
-        if (!isStaleRunError(error)) {
-          renderReadingStatus(`字幕加载失败：${getErrorMessage(error)}`);
-        }
-      })
-      .then(() => reconcileReaderAfterSubtitleFetch());
-  });
+  }
+  reconcileReaderAfterSubtitleFetch();
 }
 
 // 抓取落定后的对账收尾：subtitle-ready/rerender 通知存在丢失形态（发射门控、
@@ -367,10 +367,9 @@ export function closeReadingView() {
   // PR5：对话 tab 的断流收口（工单 08 决议：关闭即断流——resetStreamState 断
   // port、挂起的 subtitle-wait 失效、摘全局触发源；重开从会话历史恢复，由对话
   // tab 的激活路径负责）。未装载 = 对话功能从未启用，no-op（不触发懒加载）。
+  // 收口失败静默：不影响视图关闭本身。
   if (isReaderChatTabLoaded()) {
-    ensureReaderChatTab()
-      .then((chat) => chat.closeChatSession())
-      .catch(() => {});
+    void closeChatSessionQuietly();
   }
   // PR4：概览 tab 的会话态一并归位（状态机回 idle、产物引用丢弃；进行中的
   // 生成不取消——管线后台跑完落缓存，重开阅读模式读缓存命中）。
@@ -379,6 +378,17 @@ export function closeReadingView() {
   // B 形态：拆除右栏定位监听并清 CSS 变量/浮层属性（紧随其后的一轮 render
   // 不再把门控选择器唤醒，面板安全回落 display:none）。
   closeDigestHost();
+}
+
+// 对话 tab 会话关闭的静默收尾（closeReadingView 的 fire-and-forget 半边）：
+// 装载/关闭失败不外抛，与迁移前的 `.catch(() => {})` 口径一致。
+async function closeChatSessionQuietly(): Promise<void> {
+  try {
+    const chat = await ensureReaderChatTab();
+    await chat.closeChatSession();
+  } catch {
+    // 静默：收口失败不影响视图关闭。
+  }
 }
 
 export function renderReadingView() {
@@ -474,10 +484,11 @@ export function renderReaderPanels() {
   // digest-only-ui：设置抽屉展开时装载原 options 页的全部设置项（宿主容器在
   // ui-renderer 模板内；模板与数据装载在 settings-panel 内，展开即刷新）。
   if (!settingsPanel.hidden) {
-    void import("../ui/settings-panel.js").then(
-      (mod) => mod.renderReaderSettingsPanel(),
-      () => {}
-    );
+    void (async () => {
+      // 装载失败静默（与原 onRejected 口径一致）；渲染异常照旧上浮未处理拒绝。
+      const mod = await import("../ui/settings-panel.js").catch(() => null);
+      mod?.renderReaderSettingsPanel();
+    })();
   }
 }
 

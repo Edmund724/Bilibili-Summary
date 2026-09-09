@@ -72,21 +72,22 @@ async function loadAsrProviderList(): Promise<AsrProviderMeta[]> {
 // promise 缓存（shared/lazy-import.js 的 createLazyLoader，与
 // lazy-player-ai/lazy-reader/summarize-chain 加载器同款）保证单例（与原模块
 // 级单例语义一致）；加载失败清空缓存允许重试。
-const asrFallbackLoader = createLazyLoader(() =>
-  Promise.all([import("./pipeline.js"), import("./fallback.js")]).then(
-    ([{ runAsrPipeline }, { createAsrFallback }]) =>
-      createAsrFallback({
-        getSettings,
-        loadProviders: loadAsrProviderList,
-        setStatus,
-        setMessage,
-        acceptSubtitle,
-        commitNoSubtitle,
-        runAsrPipeline,
-        broadcastSubtitleStatus
-      })
-  )
-);
+const asrFallbackLoader = createLazyLoader(async () => {
+  const [{ runAsrPipeline }, { createAsrFallback }] = await Promise.all([
+    import("./pipeline.js"),
+    import("./fallback.js")
+  ]);
+  return createAsrFallback({
+    getSettings,
+    loadProviders: loadAsrProviderList,
+    setStatus,
+    setMessage,
+    acceptSubtitle,
+    commitNoSubtitle,
+    runAsrPipeline,
+    broadcastSubtitleStatus
+  });
+});
 
 // subtitle/fetcher.js（refreshClip 的无字幕出口与失败兜底）经此惰性获取回退
 // 单例。

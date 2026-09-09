@@ -83,18 +83,17 @@ export function bindSubtitleTabEvents(): void {
   // ===== 字幕轨切换 =====
   // loadSubtitle 属总结链；重渲/同步由 loadSubtitle 内字幕接受事务的
   // subtitle-ready 通知驱动（唯一 emit 点，见 commit.ts），此处补调即双渲染。
-  byId(ids.readingSubtitleSelect).addEventListener("change", (event) => {
+  byId(ids.readingSubtitleSelect).addEventListener("change", async (event) => {
     const selectTarget = event.target as HTMLSelectElement;
     const option = selectTarget.options[selectTarget.selectedIndex];
     const url = String(option?.value || "");
     if (!url) return;
-    ensureSummarizeChain()
-      .then((chain) =>
-        chain.loadSubtitle(url, String(option.dataset.lang || "unknown"), state.clip.fetchRunId, String(option.dataset.id || ""))
-      )
-      .catch((error) => {
-        logWarn("[BOC] failed to switch subtitle in reading view", error);
-      });
+    try {
+      const chain = await ensureSummarizeChain();
+      await chain.loadSubtitle(url, String(option.dataset.lang || "unknown"), state.clip.fetchRunId, String(option.dataset.id || ""));
+    } catch (error) {
+      logWarn("[BOC] failed to switch subtitle in reading view", error);
+    }
   });
 
   const readingSearchInput = byId(ids.readingSearchInput) as HTMLInputElement;
@@ -161,15 +160,21 @@ export function bindSubtitleTabEvents(): void {
   // ===== PR3 复制 / 导出（纯接线，逻辑在总结链 subtitle/ui.ts） =====
   // 复制 = 字幕纯文本（copySubtitleTranscript，buildTxt 管线，transcript 语义）；
   // 导出 = SRT/TXT（downloadSubtitle，按 downloadFormat 设置）。
-  byId(ids.readingCopySubtitleBtn).addEventListener("click", () => {
-    ensureSummarizeChain()
-      .then((chain) => chain.copySubtitleTranscript())
-      .catch((error) => logWarn("[BOC] copy subtitle transcript failed", error));
+  byId(ids.readingCopySubtitleBtn).addEventListener("click", async () => {
+    try {
+      const chain = await ensureSummarizeChain();
+      await chain.copySubtitleTranscript();
+    } catch (error) {
+      logWarn("[BOC] copy subtitle transcript failed", error);
+    }
   });
-  byId(ids.readingExportSubtitleBtn).addEventListener("click", () => {
-    ensureSummarizeChain()
-      .then((chain) => chain.downloadSubtitle())
-      .catch((error) => logWarn("[BOC] download subtitle failed", error));
+  byId(ids.readingExportSubtitleBtn).addEventListener("click", async () => {
+    try {
+      const chain = await ensureSummarizeChain();
+      await chain.downloadSubtitle();
+    } catch (error) {
+      logWarn("[BOC] download subtitle failed", error);
+    }
   });
 
   // ===== PR3 Follow playback 悬浮按钮 =====
