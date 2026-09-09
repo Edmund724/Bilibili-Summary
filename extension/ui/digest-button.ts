@@ -43,6 +43,9 @@ import { isReaderViewOpen } from "../reader/state.js";
 import { isReaderShellIntact } from "../reader/shell.js";
 // 自愈调度共享常量（arch-slim-2/09 单源）：自查节拍 + 视图关闭恢复事件名。
 import { READER_CLOSED_EVENT, SELF_HEAL_INTERVAL_MS } from "../shared/self-heal.js";
+// 锚点/耗时日志走 shared/logging 的 Always 直出口（工单 button-injection-
+// stability 决议：默认开启、不做持久化——调试门缺省关，不能走 logInfo）。
+import { logInfoAlways } from "../shared/logging.js";
 
 const DIGEST_BUTTON_ID = "boc-digest-button";
 const DIGEST_OVERLAY_ID = "boc-digest-overlay";
@@ -201,13 +204,15 @@ type AnchorPhase = "init" | "anchor" | "grace" | "fallback";
 let anchorPhase: AnchorPhase = "init";
 // 宽限剩余拍数：失配当拍进入 grace 并置满，其后每拍递减，耗尽才降④。
 let anchorGraceBeats = 0;
+// 「宽限期内暂不注入」只说一遍的标志（每次进入宽限时复位）。
+let anchorGraceWaitLogged = false;
 // 宽限拍数 2：命中过①的页面，失配后至多再等 2 个自查拍（800ms 节拍，约
 // 1.6s）让重渲染恢复，连失配当拍约 2.4s——挡掉 B 站工具栏重渲染间隙的闪漂，
 // 又不至让降级久等。
 const ANCHOR_GRACE_BEATS = 2;
 
 function logAnchor(message: string): void {
-  console.info(`[BOC] digest-button: ${message}`);
+  logInfoAlways(`[BOC] digest-button: ${message}`);
 }
 
 // 注入耗时日志（01 可观测）：首个按钮落到 DOM 的时刻，只记一次。
@@ -233,6 +238,7 @@ export function injectDigestButton(): void {
     }
     anchorPhase = "anchor";
     anchorGraceBeats = 0;
+    anchorGraceWaitLogged = false;
     // 幂等：已在①位（按钮后一个兄弟就是举报节点）即不动。
     if (existing?.isConnected && existing.nextElementSibling === complaint) {
       return;
@@ -255,6 +261,7 @@ export function injectDigestButton(): void {
   if (anchorPhase === "anchor") {
     anchorPhase = "grace";
     anchorGraceBeats = ANCHOR_GRACE_BEATS;
+    anchorGraceWaitLogged = false;
     logAnchor("锚点①失配（「稿件举报」节点消失），进入宽限等待重渲染恢复");
   }
   if (anchorPhase === "grace") {
@@ -263,10 +270,15 @@ export function injectDigestButton(): void {
       if (existing?.isConnected) {
         return;
       }
-      logAnchor("宽限期内暂不注入（等锚点①恢复，避免闪漂）");
+      // 「暂不注入」每次宽限只说一遍，避免宽限拍逐拍刷屏。
+      if (!anchorGraceWaitLogged) {
+        anchorGraceWaitLogged = true;
+        logAnchor("宽限期内暂不注入（等锚点①恢复，避免闪漂）");
+      }
       return;
     }
     anchorPhase = "fallback";
+    anchorGraceWaitLogged = false;
     logAnchor("宽限耗尽，降级播放器浮动层");
   }
 
@@ -314,7 +326,11 @@ const COMPLAINT_TEXT_SIGNAL = /稿件举报|投诉/;
 function findComplaintNode(): HTMLElement | null {
   let best: HTMLElement | null = null;
   let bestScore = 0;
-  const consider = (node: Element): void => {
+  // requireBoth：脱离工具栏宿主上下文的全局兜底要求类名+文本双信号确认——
+  // 单押类名（[class*='complaint']）比旧版 .video-complaint 全局查询更宽，
+  // 单押文本又易误命中页内无关「投诉」字样，双信号才够格当锚点。宿主范围内
+  // 保持单信号可当选（改版鲁棒是 02 加固的目的），双信号加权优先。
+  const consider = (node: Element, requireBoth = false): void => {
     if (bestScore >= 2 || !(node instanceof HTMLElement) || !node.parentElement) {
       return;
     }
@@ -330,7 +346,7 @@ function findComplaintNode(): HTMLElement | null {
       .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
       .join(" ");
     const textHit = COMPLAINT_TEXT_SIGNAL.test(text);
-    if (!classHit && !textHit) {
+    if ((!classHit && !textHit) || (requireBoth && !(classHit && textHit))) {
       return;
     }
     const score = (classHit ? 1 : 0) + (textHit ? 1 : 0);
@@ -340,10 +356,10 @@ function findComplaintNode(): HTMLElement | null {
     }
   };
   for (const host of document.querySelectorAll("#arc_toolbar_report, .video-toolbar-container")) {
-    host.querySelectorAll("*").forEach(consider);
+    host.querySelectorAll("*").forEach((node) => consider(node));
   }
   if (bestScore < 2) {
-    document.querySelectorAll("[class*='complaint']").forEach(consider);
+    document.querySelectorAll("[class*='complaint']").forEach((node) => consider(node, true));
   }
   return best;
 }

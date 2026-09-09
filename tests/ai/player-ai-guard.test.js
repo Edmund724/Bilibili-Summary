@@ -262,6 +262,7 @@ describe("player-ai 启停守卫", () => {
     // fake 时钟显式推进：跑掉 0ms sync 定时器，等价旧真实 10ms 等待但确定
     await vi.advanceTimersByTimeAsync(10);
     expect(document.getElementById("boc-player-ai-quick-action")).not.toBeNull();
+
     // 再次 sync（按钮已挂载路径）：不应重复绑游标监听
     schedulePlayerAiQuickActionSync(0);
     // fake 时钟显式推进：跑掉 0ms sync 定时器，等价旧真实 10ms 等待但确定

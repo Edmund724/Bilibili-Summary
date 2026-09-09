@@ -69,3 +69,10 @@ export function logWarnAlways(...args: unknown[]): void {
 export function logErrorAlways(...args: unknown[]): void {
   console.error(...args);
 }
+
+// 不经调试门的直出 info：用于工单决议「默认开启」的可观测项（如按钮注入
+// 失配/降级/耗时，button-injection-stability 决议 console 默认开启不做持久化）
+// ——它们不是异常路径，但同样要求门缺省关时不静默，故与 Always 系列同宿。
+export function logInfoAlways(...args: unknown[]): void {
+  console.info(...args);
+}

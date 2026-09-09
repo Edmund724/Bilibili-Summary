@@ -10,6 +10,9 @@ import { state } from "../core/state.js";
 // playerAi 状态微模块（随 ai 域内聚）：本模块独占读写，不再经 core/state。
 import { playerAiState } from "./player-ai-state.js";
 import { isVisibleReaderControl } from "../shared/dom-utils.js";
+// 耗时日志走 shared/logging 的 Always 直出口（工单 button-injection-stability
+// 决议：默认开启——调试门缺省关，不能走 logInfo）。
+import { logInfoAlways } from "../shared/logging.js";
 // S3 分层：播放器 AI 样式随本动态 chunk 挂载（节点创建前就绪，见文件尾注释）
 import { ensurePlayerAiStyles, removePlayerAiStyles } from "../shared/style-injector.js";
 
@@ -235,7 +238,7 @@ function syncPlayerAiQuickActionButton(): void {
   playerAiQuickActionRetryCount = 0;
   if (!mountTimingLogged) {
     mountTimingLogged = true;
-    console.info(
+    logInfoAlways(
       `[BOC] player-ai: AI 键已挂载，装载→挂载耗时 ${Date.now() - MODULE_BOOT_AT}ms`
     );
   }
