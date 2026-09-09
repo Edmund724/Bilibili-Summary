@@ -4,7 +4,7 @@ import {
 } from "../core/defaults.js";
 import { PRESETS, ASR_PROVIDER_PRESETS } from "../core/presets.js";
 import { normalizePlayerAiQuickPrompt } from "../core/validators.js";
-import { isSupportedBilibiliPage } from "../bilibili/video-id-shared.js";
+import { buildReaderModeUrl, isSupportedBilibiliPage } from "../bilibili/video-id-shared.js";
 import {
   EXPECTED_CONTENT_SCRIPT_VERSION,
   injectReaderContent,
@@ -365,6 +365,37 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     // ignore injection failure; user may need a hard refresh
   }
 });
+
+// ===== 工具栏 action 点击（工单 02-toolbar-icon-opens-digest）=====
+
+// chrome-types.d.ts 尚未声明 action 命名空间（本工单 scope 外），此处局部最小
+// 契约收窄；归并进统一声明后本 cast 可删（TowerFinding 已记录）。可选链守卫：
+// 既有测试环境的 chrome stub 可能缺 action 命名空间（生产 MV3 + manifest.action
+// 恒有），顶层注册不可因缺命名空间抛错。
+interface ActionOnClickedEvent {
+  addListener(listener: (tab: chrome.tabs.Tab) => void): void;
+}
+
+// 与页内 Digest 按钮同一条 reader-enter 事务：经 triggerReaderModeInTab 的
+// 重试/注入链发 reader-enter，content 侧落 entry/message-handler.ts →
+// ensureReaderShell 进入事务——不建 popup / Side Panel / 第二套打开流程。
+// 目标标签页只取 onClicked 事件自带的活动标签页：reader-enter 载荷没有 tabId
+// 字段，跨标签页消息无从伪造目标；非受支持的 B 站视频/稍后再看页直接忽略。
+// readerUrl 与页内按钮同源 buildReaderModeUrl（单源 bilibili/video-id-shared.ts，
+// SW 侧不 import 拖 core/state 的 bilibili/reader-url.ts）。监听器顶层同步注册
+//（MV3：SW 可被重启，事件监听器必须在首个事件前同步就位）。
+(chrome as unknown as { action?: { onClicked?: ActionOnClickedEvent } }).action?.onClicked?.addListener(
+  async (tab) => {
+    const tabId = tab.id ?? 0;
+    if (!tabId || !isSupportedBilibiliPage(tab.url)) {
+      return;
+    }
+    const triggered = await triggerReaderModeInTab(tabId, buildReaderModeUrl(tab.url || ""));
+    if (!triggered) {
+      logWarn("[BOC] toolbar action click: reader-enter 触发失败（重试耗尽）");
+    }
+  }
+);
 
 // ===== 入口监听 =====
 
