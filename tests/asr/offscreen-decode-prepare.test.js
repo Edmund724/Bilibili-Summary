@@ -26,7 +26,9 @@
 //   重复/未知 id 的 cleanup 幂等不抛；释放后 id 复用；加规则失败照错误路径
 //   上报且 id 归还；
 // - 冷启动对账：平台残留 32001 时新任务分配 32002 不撞车、旧任务 cleanup 只
-//   删自己的、无残留时首次分配仍是 32001。
+//   删自己的、无残留时首次分配仍是 32001；
+// - 创建失败不再吞掉（工单 03）：ok:false 带原始错误，「文档已存在」视同成功；
+// - cleanup 的标签页归属（工单 03）：ruleId 有主时只接受同一来源的清理请求。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
@@ -112,15 +114,129 @@ describe("handleAsrDecodePrepare 的 offscreen 文档守卫", () => {
     expect(sendResponse).toHaveBeenCalledWith({ ok: true, ruleId: 32001 });
   });
 
-  it("matchAll 异常按既有语义吞掉并返回 ok:true（不阻塞后续端口连接尝试）", async () => {
+  it("matchAll 异常降级为直接尝试创建：仍返回 ok:true（工单 03 前探测失败也不吞创建失败）", async () => {
     const { createDocument } = stubSwEnv({ matchAllError: new Error("boom") });
     bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
 
     const sendResponse = vi.fn();
     await bridge.handleAsrDecodePrepare({ taskType: "asr-decode-prepare" }, {}, sendResponse);
 
-    expect(createDocument).not.toHaveBeenCalled();
+    // 探测失败不再静默跳过创建：降级为直接 createDocument（already-exists
+    // 由创建路径兜底），文档就绪后才回 ok
+    expect(createDocument).toHaveBeenCalledTimes(1);
     expect(sendResponse).toHaveBeenCalledWith({ ok: true, ruleId: 32001 });
+  });
+
+  it("createDocument 真实失败不再吞掉：ok:false 带原始错误，ruleId 归还不泄漏", async () => {
+    const { createDocument } = stubSwEnv({
+      matchAllResult: [],
+      updateSessionRules: vi.fn(async () => {})
+    });
+    createDocument.mockRejectedValueOnce(new Error("offscreen reasons invalid"));
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
+
+    const sendResponse = vi.fn();
+    await bridge.handleAsrDecodePrepare({ taskType: "asr-decode-prepare" }, {}, sendResponse);
+
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "offscreen reasons invalid" });
+
+    // 失败任务不占用 id：重试成功拿到的是同一个首 id
+    const retried = [];
+    await bridge.handleAsrDecodePrepare({ taskType: "asr-decode-prepare" }, {}, (r) => retried.push(r));
+    expect(retried[0]).toEqual({ ok: true, ruleId: 32001 });
+  });
+
+  it.each([
+    // Chrome 真实文案（r1 审查核实，Stack Overflow / moderok.dev 均证实）
+    "Only a single offscreen document may be created.",
+    // 兼容的旧/变体文案（防未来 Chrome 改文案后正则被静默放宽）
+    "Single offscreen document already exists."
+  ])("createDocument 抛「文档已存在」（%s）视同成功", async (message) => {
+    const { createDocument } = stubSwEnv({
+      matchAllError: new Error("boom"),
+      updateSessionRules: vi.fn(async () => {})
+    });
+    createDocument.mockRejectedValueOnce(new Error(message));
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
+
+    const sendResponse = vi.fn();
+    await bridge.handleAsrDecodePrepare({ taskType: "asr-decode-prepare" }, {}, sendResponse);
+
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, ruleId: 32001 });
+  });
+
+  it("createDocument 抛无关错误（非已存在竞态）仍上抛为 ok:false", async () => {
+    const { createDocument } = stubSwEnv({
+      matchAllError: new Error("boom"),
+      updateSessionRules: vi.fn(async () => {})
+    });
+    createDocument.mockRejectedValueOnce(new Error("offscreen reasons invalid"));
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
+
+    const sendResponse = vi.fn();
+    await bridge.handleAsrDecodePrepare({ taskType: "asr-decode-prepare" }, {}, sendResponse);
+
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "offscreen reasons invalid" });
+  });
+});
+
+// cleanup 的标签页归属（工单 03）：ruleId 在本实例簿记中有主时，只接受同一
+// 来源（同标签页 / 同为 offscreen）的清理请求；簿记不在（SW 冷启动后上一
+// 实例的 ruleId）保持幂等放行。
+describe("cleanup 的标签页归属校验（跨标签页请求拒绝执行）", () => {
+  async function prepareFrom(sender) {
+    const responses = [];
+    await bridge.handleAsrDecodePrepare({ taskType: "asr-decode-prepare" }, sender, (r) => responses.push(r));
+    return responses[0];
+  }
+
+  async function cleanupFrom(sender, ruleId) {
+    const responses = [];
+    await bridge.handleAsrDecodeCleanup({ taskType: "asr-decode-cleanup", ruleId }, sender, (r) => responses.push(r));
+    return responses[0];
+  }
+
+  function freshBridge() {
+    const store = makeRuleStore();
+    stubSwEnv({
+      matchAllResult: existingDocClients,
+      updateSessionRules: store.updateSessionRules,
+      getSessionRules: store.getSessionRules
+    });
+    return store;
+  }
+
+  it("同标签页 cleanup 照常删除自己的规则", async () => {
+    const store = freshBridge();
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
+
+    const prepared = await prepareFrom({ tab: { id: 7 } });
+    await expect(cleanupFrom({ tab: { id: 7 } }, prepared.ruleId)).resolves.toEqual({ ok: true });
+    expect(store.rules.size).toBe(0);
+  });
+
+  it("跨标签页 cleanup 被拒绝：ok:false 且规则不被删、不影响池状态", async () => {
+    const store = freshBridge();
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
+
+    const prepared = await prepareFrom({ tab: { id: 7 } });
+    await expect(cleanupFrom({ tab: { id: 8 } }, prepared.ruleId)).resolves.toEqual({
+      ok: false,
+      error: "防盗链规则不属于当前来源"
+    });
+    // 规则仍在（副作用未执行），归属不受污染：tab 7 之后仍能正常清理
+    expect(store.rules.size).toBe(1);
+    await expect(cleanupFrom({ tab: { id: 7 } }, prepared.ruleId)).resolves.toEqual({ ok: true });
+    expect(store.rules.size).toBe(0);
+  });
+
+  it("offscreen 来源的 ruleId 不能被标签页 cleanup 冒领", async () => {
+    const store = freshBridge();
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
+
+    const prepared = await prepareFrom({ url: "chrome-extension://test/entry/offscreen.html" });
+    await expect(cleanupFrom({ tab: { id: 7 } }, prepared.ruleId)).resolves.toMatchObject({ ok: false });
+    expect(store.rules.size).toBe(1);
   });
 });
 

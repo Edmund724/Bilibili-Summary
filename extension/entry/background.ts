@@ -39,7 +39,7 @@ import { bgFetchJson, isBiliUrl } from "../bilibili/gateway-core.js";
 import { collectOrigins } from "../core/host-permissions.js";
 // PR5：对话 tab 的 offscreen 文档 ensure 通道（background 侧唯一合法创建点）
 import { ensureChatOffscreenDocument } from "../chat/offscreen-ensure.js";
-import { handleAsrDecodePrepare, handleAsrDecodeCleanup } from "../asr/offscreen-bridge.bg.js";
+import { handleAsrDecodePrepare, handleAsrDecodeCleanup, handleOffscreenRequestClose, isOffscreenDocumentSender } from "../asr/offscreen-bridge.bg.js";
 import { ASR_TASK_PREPARE, ASR_TASK_CLEANUP } from "../asr/protocol.js";
 import type {
   BackgroundMessage,
@@ -114,8 +114,9 @@ function handleRequestProviderOrigins(message: Msg<"request-provider-origins">, 
 // PR5：对话 tab（content script）发送前的 offscreen 文档自愈 ensure。chrome.offscreen
 // / chrome.runtime.getContexts 仅扩展上下文可用，content script 经此消息委托
 // background 幂等创建（sidepanel 扩展页内直调 ensureChatOffscreenDocument 的
-// 等价通道）。ensure 失败不阻断发送——connect 由连接结果兜底（与 sidepanel 的
-// connectPort 自愈设计一致）。
+// 等价通道）。ensure 失败不再吞掉（工单 03）：ensureChatOffscreenDocument 的
+// 原始错误经 withOkResponse 回 { ok:false, error }——调用方 catch 后仍由
+// connect 结果兜底（发送链不中断），但失败原因不再无声丢失。
 function handleEnsureOffscreenChat(_message: Msg<"ensure-offscreen-chat">, _sender: MessageSender, sendResponse: SendResponse): boolean {
   withOkResponse(
     (async () => ({ ok: true, ensured: await ensureChatOffscreenDocument() }))(),
@@ -168,7 +169,16 @@ async function triggerReaderChatInTab(
 // triggerReaderModeInTab 链（空 readerUrl = 已在阅读模式内，只聚焦），
 // 提示词组装后由 content 侧进入事务内的对话 seam runQuickActionPrompt 消费。
 function handlePlayerAiQuickAction(message: Msg<"player-ai-quick-action">, sender: MessageSender, sendResponse: SendResponse): boolean {
-  const tabId = Number(message.tabId || sender.tab?.id || 0) || 0;
+  const senderTabId = Number(sender.tab?.id) || 0;
+  const requestedTabId = Number(message.tabId) || 0;
+  // 标签页归属（工单 03）：带 sender.tab 的来源（content script）只能操作
+  // 自己所在的标签页——message.tabId 与 sender.tab.id 同时存在且不一致即
+  // 跨标签页伪造，拒绝且不执行任何副作用。
+  if (senderTabId && requestedTabId && requestedTabId !== senderTabId) {
+    sendResponse({ ok: false, error: "请求目标与发送者标签页不一致，已拒绝。" });
+    return false;
+  }
+  const tabId = senderTabId || requestedTabId;
   if (!tabId) {
     sendResponse({ ok: false, error: "找不到当前标签页。" });
     return false;
@@ -304,6 +314,26 @@ function handleOffloadTask(message: Msg<"offload-task">, _sender: MessageSender,
   return true;
 }
 
+// 工单 03：offscreen 文档自关闭的代执行（offscreen 无 chrome.offscreen）。
+// 发送者校验在执行器内（isOffscreenDocumentSender，与入口守卫共用判定）。
+function handleOffscreenRequestCloseMsg(_message: Msg<"offscreen-request-close">, sender: MessageSender, sendResponse: SendResponse): boolean {
+  void handleOffscreenRequestClose(_message, sender, sendResponse);
+  return true;
+}
+
+// 工单 03：offscreen 侧调试日志门的初始开关（offscreen 无 chrome.storage，
+// SW 是 storage 的独占读者；变更经下方 onChanged 监听广播）。
+function handleGetDebugLogGate(_message: Msg<"get-debug-log-gate">, _sender: MessageSender, sendResponse: SendResponse): boolean {
+  withOkResponse(
+    (async () => {
+      const data = await chrome.storage.sync.get("enableDebugLogs");
+      return { ok: true, enabled: Boolean((data as { enableDebugLogs?: unknown })?.enableDebugLogs) };
+    })(),
+    sendResponse
+  );
+  return true;
+}
+
 // 编译期穷尽路由表（arch-slim-2/02）：字面量表经 satisfies 对
 // { [K in BackgroundMessageType]: MessageHandler<Msg<K>> } 校验——
 // 消息名 typo / 漏注册 handler / 多注册未知名在 typecheck 即报错（此前 Map +
@@ -331,7 +361,9 @@ const messageHandlerTable = {
   "asr-providers-delete": asrProviderHandlers.remove,
   "get-asr-runtime-config": handleGetAsrRuntimeConfig,
   "segment-cache": handleSegmentCache,
-  "offload-task": handleOffloadTask
+  "offload-task": handleOffloadTask,
+  "offscreen-request-close": handleOffscreenRequestCloseMsg,
+  "get-debug-log-gate": handleGetDebugLogGate
 } satisfies { [K in BackgroundMessageType]: MessageHandler<Msg<K>> };
 
 const messageHandlers = new Map<BackgroundMessageType, BackgroundHandler>(
@@ -403,6 +435,44 @@ interface ActionOnClickedEvent {
 // 用户开的调试日志在 SW 静默）。
 registerDebugLogGate();
 
+// 调试日志门变更广播（工单 03）：offscreen 文档没有 chrome.storage，其调试
+// 门靠本广播保活（初始开关走 get-debug-log-gate 消息）。无接收方（offscreen
+// 未开、扩展页全关）时 sendMessage 会 reject——广播即止，不进 unhandled rejection。
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "sync" || !changes.enableDebugLogs) {
+    return;
+  }
+  void Promise.resolve(
+    chrome.runtime.sendMessage({
+      type: "debug-log-gate-changed",
+      enabled: Boolean(changes.enableDebugLogs.newValue)
+    })
+  ).catch(() => {});
+});
+
+// ===== 消息入口守卫（工单 03）：发送者来源 + 内部 schema =====
+
+// 内部消息 schema 的最小校验 + offscreen 专属消息族的来源校验（只拦形状
+// 明显非法/来源不合法的请求，业务归一仍归处理器）。offscreen 专属族：扩展级
+// 副作用能力只开放给 offscreen 文档本身（SW 代执行的另一面），判定与关闭
+// 执行器共用 isOffscreenDocumentSender（asr/offscreen-bridge.bg.ts）。
+function illegalMessageReason(message: BackgroundMessage, sender: MessageSender): string | null {
+  if (
+    (message.type === "segment-cache" || message.type === "offscreen-request-close")
+    && !isOffscreenDocumentSender(sender)
+  ) {
+    return "仅接受 offscreen 文档发送";
+  }
+  const badShape =
+    (message.type === "save-settings" && message.settings != null
+      && (typeof message.settings !== "object" || Array.isArray(message.settings)))
+    || ((message.type === "ai-providers-save" || message.type === "asr-providers-save")
+      && message.providers !== undefined && !Array.isArray(message.providers))
+    || (message.type === "player-ai-quick-action" && message.tabId !== undefined
+      && !Number.isFinite(message.tabId));
+  return badShape ? "消息载荷不合法" : null;
+}
+
 chrome.runtime.onMessage.addListener((rawMessage, rawSender, sendResponse: SendResponse) => {
   if (!rawMessage || typeof rawMessage !== "object") {
     return false;
@@ -412,6 +482,14 @@ chrome.runtime.onMessage.addListener((rawMessage, rawSender, sendResponse: SendR
   const sender = rawSender as MessageSender;
   const handler = messageHandlers.get(message.type);
   if (!handler) {
+    return false;
+  }
+
+  // 守卫在路由之后、处理器执行之前：非法来源/载荷在产生任何副作用前被拒绝，
+  // 并明确回 { ok:false }（不静默吞，也不让调用方空等）。
+  const illegalReason = illegalMessageReason(message, sender);
+  if (illegalReason) {
+    sendResponse({ ok: false, error: illegalReason });
     return false;
   }
 

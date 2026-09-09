@@ -23,8 +23,8 @@
 // 触发——触发装载的端口必已入集，故任一分支「装载中」期间其他任务的终态
 // 判定都会因 size>0 / currentChatCount>0 保留文档，不会被提前关闭。
 import { getErrorMessage } from "../shared/error-helpers.js";
-import { logInfo, logWarn, shouldDebugLog } from "../shared/logging.js";
-import { safePostMessage } from "../shared/messaging.js";
+import { logInfo, logWarn, registerDebugGate, shouldDebugLog } from "../shared/logging.js";
+import { safePostMessage, sendRuntimeMessage } from "../shared/messaging.js";
 import { shouldCloseAfterAsrTask } from "./offscreen-lifecycle.js";
 import { ASR_DECODE_PORT_NAME, ASR_DECODE_ACTION, ASR_MSG_ERROR } from "../asr/protocol.js";
 // 候选5：聊天字幕体单槽缓存（纯逻辑在 ./offscreen-subtitle-slot.js，可测）。
@@ -46,9 +46,35 @@ import type { ChatPortMessage } from "../chat/protocol.js";
 // 调试日志门三宿主接线（shared/logging 的 registerDebugGate 消费方）
 import { registerDebugLogGate } from "../shared/debug-log-gate.js";
 
-// 调试日志门：offscreen 自读 storage（此前门读 state.settings，本 context 恒
-// 取到缺省关，用户开的调试日志在这里静默）。
-registerDebugLogGate();
+// 调试日志门（工单 03）：offscreen 文档没有 chrome.storage（平台只开放
+// chrome.runtime），初始开关与变更感知都走 runtime 消息——SW 是 storage 的
+// 独占读者（get-debug-log-gate 回当前开关；sync.enableDebugLogs 变化时广播
+// debug-log-gate-changed）。消息失败/无接收方时门维持缺省关：调试日志是诊断
+// 辅助，接线本身绝不致命。
+let debugGateEnabled = false;
+registerDebugGate(() => debugGateEnabled);
+
+try {
+  chrome.runtime.onMessage.addListener((rawMessage: unknown) => {
+    if ((rawMessage as { type?: unknown } | null)?.type === "debug-log-gate-changed") {
+      debugGateEnabled = Boolean((rawMessage as { enabled?: unknown }).enabled);
+    }
+    return false;
+  });
+} catch {
+  // 无 onMessage 的极端 stub 环境：门维持缺省关
+}
+
+void (async () => {
+  try {
+    const resp = await sendRuntimeMessage({ type: "get-debug-log-gate" });
+    if (resp?.ok) {
+      debugGateEnabled = Boolean(resp.enabled);
+    }
+  } catch {
+    // SW 未就绪/读失败：维持缺省关，不抛未处理拒绝
+  }
+})();
 
 let activeAbortController: AbortController | null = null;
 let pendingCostGuard: { resolve: (value: boolean) => void } | null = null;
@@ -271,20 +297,25 @@ function maybeCloseSelfAfterAsr(port: chrome.runtime.Port) {
   if (activeAsrPorts.size > 0 || !shouldCloseAfterAsrTask(currentChatCount)) {
     return;
   }
+  // 自关闭经 runtime 消息委托 SW 执行（工单 03：offscreen 无 chrome.offscreen，
+  // chrome.offscreen.closeDocument 由 SW 代执行并明确回成功/失败）。
+  void requestSelfClose();
+}
+
+// SW 代执行的自关闭请求。成功关闭时本文档随之销毁、回包可能永远不到
+// （"message port closed" 类传输失败）——传输层失败不算关闭失败，静默即可；
+// SW 明确回 ok:false（非 offscreen 发送者被拒 / closeDocument 抛错）才记日志，
+// 与旧直调 closeDocument 的「异步失败仅记录」口径对齐。
+async function requestSelfClose(): Promise<void> {
   try {
-    const closing = chrome.offscreen.closeDocument();
-    // closeDocument 返回 Promise：异步失败（如文档已被并发关闭）同样仅记录
-    if (closing && typeof closing.catch === "function") {
-      closing.catch((error) => {
-        logWarn("[BOC] offscreen closeDocument after asr task failed", {
-          error: getErrorMessage(error)
-        });
+    const resp = await sendRuntimeMessage({ type: "offscreen-request-close" });
+    if (resp && !resp.ok) {
+      logWarn("[BOC] offscreen closeDocument after asr task failed", {
+        error: resp.error || "offscreen-request-close 被拒绝"
       });
     }
-  } catch (error) {
-    logWarn("[BOC] offscreen closeDocument after asr task failed", {
-      error: getErrorMessage(error)
-    });
+  } catch {
+    // 回包丢失（文档已在关闭中）/ 无接收方：静默
   }
 }
 
