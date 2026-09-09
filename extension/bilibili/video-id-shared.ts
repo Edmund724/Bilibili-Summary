@@ -100,6 +100,24 @@ export function cleanVideoUrl(href: string = location.href): string {
   }
 }
 
+// boc_reader=1 阅读模式 URL 的唯一拼法：cleanVideoUrl 清成规范视频 URL 再加
+// boc_reader=1 查询参数；非 B 站/非视频 URL 原样返回（cleanVideoUrl 语义），
+// URL 解析失败回落 cleanVideoUrl 的结果，绝不抛出。
+// 2026-09 工单 02-toolbar-icon-opens-digest：工具栏 action 点击（SW 侧）与页内
+// Digest 按钮共用本单源——原住 bilibili/reader-url.ts，因该文件拖 core/state
+// （content 侧状态单例）不能进 SW 图，而本函数是纯 URL 计算，故收编到本模块
+//（reader-url.ts 保留 re-export，页内消费方不动）。
+export function buildReaderModeUrl(rawUrl: string): string {
+  const base = cleanVideoUrl(rawUrl);
+  try {
+    const parsed = new URL(base);
+    parsed.searchParams.set("boc_reader", "1");
+    return parsed.toString();
+  } catch {
+    return base;
+  }
+}
+
 export function extractPageIndex(url: string): number {
   return extractPageIndexFromUrl(url);
 }
