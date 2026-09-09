@@ -101,3 +101,26 @@ export type AsrPortMessage =
 export const MAX_AUDIO_BYTES = 200 * 1024 * 1024;
 // offscreen 文档内的任务超时（解码与下载共用）
 export const ASR_DECODE_TIMEOUT_MS = 10 * 60 * 1000;
+
+// 累计下载量上限（工单 04）：GET 流式读的累计字节最大值（主备 URL 合计）。
+// HEAD 探大小只在 CDN 诚实返回 Content-Length 时预拒超长视频；头部撒谎或
+// 缺失时由本上限兜底——超限即中止下载（连接 cancel）、报可读错误。取值与
+// MAX_AUDIO_BYTES 同级（64kbps 音轨 ≈ 7 小时）。
+export const ASR_MAX_CUMULATIVE_DOWNLOAD_BYTES = MAX_AUDIO_BYTES;
+
+// 累计下载量超限的可读错误文案（entry/offscreen-asr.js streamAudioSegments
+// 计数超限后抛出，沿 port 错误消息直达页面 UI）。
+export const ASR_DOWNLOAD_LIMIT_MESSAGE = "音频下载量超出上限（>200MB），已停止下载" as const;
+
+// 待处理音频分片上限（工单 04）：转写引擎活队列（已接受未启动）的最大深度。
+// 每片 WAV（300s @16kHz/16bit/mono ≈ 9.6MB）在转写完成前常驻内存，排队越深
+// 内存峰值越高；取 2×ASR_CONCURRENCY（offscreen-constants 的并发 10）≈ 在途
+// 10 片 + 排队 20 片 < 300MB，offscreen 渲染进程的显式安全线。超限 push 返回
+// false，消费方（entry/offscreen-asr.js 的 onChunk）停止新增工作并报可读错误
+// ——静默丢弃会丢字幕，错误路径才能让用户重试。
+export const ASR_MAX_PENDING_CHUNKS = 20;
+
+// 待处理分片超限的可读错误文案（asr/stream-chunker 检测到 onChunk 拒绝后抛出，
+// 沿 port 错误消息直达页面 UI）。
+export const ASR_PENDING_CHUNKS_LIMIT_MESSAGE =
+  "待处理转写分片超出内存上限，已停止新增转写任务，请稍后重试或缩短视频" as const;

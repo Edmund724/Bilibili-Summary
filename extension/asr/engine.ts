@@ -31,6 +31,7 @@
 import { getErrorMessage, retryAsync } from "../shared/error-helpers.js";
 import { logWarn } from "../shared/logging.js";
 import { ASR_CONCURRENCY } from "../shared/offscreen-constants.js";
+import { ASR_MAX_PENDING_CHUNKS } from "./protocol.js";
 
 // 每片重试参数：与原 pipeline.js transcribeChunk 的 retryAsync(task, 2, 500) 一致
 export const DEFAULT_RETRIES = 2;
@@ -81,6 +82,10 @@ export interface TranscriptionEngineOptions {
   onChunkResult?: (chunk: TranscribeChunk, result: AsrTranscribeResult & { durationSec: number }) => void;
   onProgress?: (text: string) => void;
   concurrency?: number;
+  // 活队列（已接受未启动）的最大深度：排队片每片 WAV 常驻内存，深度上限即
+  // 内存上限（asr/protocol.js ASR_MAX_PENDING_CHUNKS）。超限 push 返回 false
+  // （不接受、不计数），消费方负责停止新增工作并报可读错误；<=0 表示不设上限。
+  maxPendingChunks?: number;
   retries?: number;
   retryDelayMs?: number;
 }
@@ -103,7 +108,8 @@ export interface TranscriptionEngineSummary {
 
 export interface TranscriptionEngine {
   // 活队列喂入：并发未满立即启动，否则排队；返回 false 表示拒绝
-  // （close() 已调用，或 isAborted() 已置真——断连后无需再喂）。
+  // （close() 已调用、isAborted() 已置真——断连后无需再喂，或排队深度已达
+  // maxPendingChunks 上限——消费方应停止新增工作并报可读错误）。
   push(chunk: TranscribeChunk): boolean;
   // 流结束标记：此后 push 一律拒绝；未中止时排队片与在途片继续消化，全部
   // 结束后 resolve 同一个 summary（重复 close 返回同一 promise）。
@@ -136,7 +142,8 @@ export async function transcribeChunk({
 //
 //   push(chunk) → boolean
 //     活队列喂入：并发未满立即启动，否则排队；返回 false 表示拒绝
-//     （close() 已调用，或 isAborted() 已置真——断连后无需再喂）。
+//     （close() 已调用、isAborted() 已置真，或排队深度已达 maxPendingChunks
+//     上限——消费方停止新增工作并报可读错误，工单 04）。
 //   close() → Promise<summary>
 //     流结束标记：此后 push 一律拒绝；未中止时排队片与在途片继续消化，全部
 //     结束后 resolve 同一个 summary（重复 close 返回同一 promise）：
@@ -156,6 +163,7 @@ export function createTranscriptionEngine({
   onChunkResult,
   onProgress,
   concurrency = ASR_CONCURRENCY,
+  maxPendingChunks = ASR_MAX_PENDING_CHUNKS,
   retries = DEFAULT_RETRIES,
   retryDelayMs = DEFAULT_RETRY_DELAY_MS
 }: TranscriptionEngineOptions = {} as TranscriptionEngineOptions): TranscriptionEngine {
@@ -164,6 +172,8 @@ export function createTranscriptionEngine({
   }
   const aborted: () => boolean = typeof isAborted === "function" ? isAborted : () => false;
   const limit = Number(concurrency) > 0 ? Math.floor(Number(concurrency)) : ASR_CONCURRENCY;
+  // 排队深度上限（<=0 不设上限）：push 时检查 queue.length，超限拒绝
+  const maxPending = Number(maxPendingChunks) > 0 ? Math.floor(Number(maxPendingChunks)) : Infinity;
 
   const queue: TranscribeChunk[] = [];
   const failures: TranscriptionEngineFailure[] = [];
@@ -248,6 +258,11 @@ export function createTranscriptionEngine({
 
   function push(chunk: TranscribeChunk): boolean {
     if (closed || aborted()) {
+      return false;
+    }
+    // 待处理分片上限：排队深度到顶即拒绝（不接受、不计数、不排队）——
+    // 返回 false 由消费方停止新增工作并报可读错误（工单 04）。
+    if (queue.length >= maxPending) {
       return false;
     }
     acceptedChunks += 1;

@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { streamAudioSegments } from "../../extension/entry/offscreen-asr.js";
 import { adtsFromFmp4, parseAudioSpecificConfig } from "../../extension/asr/adts.js";
+import { ASR_DOWNLOAD_LIMIT_MESSAGE, MAX_AUDIO_BYTES } from "../../extension/asr/protocol.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixture = new Uint8Array(
@@ -198,5 +199,50 @@ describe("streamAudioSegments", () => {
     const pcm = new Uint8Array(1000).fill(0x55);
     stubFetch({ getResponses: [() => okStreamResponse([pcm.subarray(0, 400), pcm.subarray(400)])] });
     await expect(collect(streamAudioSegments(["u"], () => false))).rejects.toThrow(/fMP4/);
+  });
+});
+
+// ===== 累计下载量上限（工单 04）=====
+// HEAD 探大小只挡「CDN 诚实返回 Content-Length」的超长视频；头部撒谎或缺失
+// 时 GET 流式读本身没有边界。累计计数跨主备 URL，超限即中止（reader cancel）
+// 并抛 ASR_DOWNLOAD_LIMIT_MESSAGE 可读错误——停止新增工作，不无限下载。
+// 上限用小注入值测试（生产默认 ASR_MAX_CUMULATIVE_DOWNLOAD_BYTES = 200MB，
+// 由 asr/protocol.js 单源）；注入面为第三参 options.downloadCapBytes。
+describe("累计下载量上限", () => {
+  function bigChunks(count, size = 1024 * 1024) {
+    return Array.from({ length: count }, () => new Uint8Array(size).fill(0x21));
+  }
+
+  it("GET 累计字节超上限：中止下载（cancel）、不再产段、抛可读错误", async () => {
+    const response = okStreamResponse(bigChunks(4)); // 4MB 流
+    stubFetch({ getResponses: [() => response] });
+
+    await expect(
+      collect(streamAudioSegments(["u"], () => false, { downloadCapBytes: 2 * 1024 * 1024 }))
+    ).rejects.toThrow(ASR_DOWNLOAD_LIMIT_MESSAGE);
+    // 连接被 cancel：不再拉取后续字节
+    expect(response._reader.cancel).toHaveBeenCalled();
+  });
+
+  it("上限跨主备 URL 累计：备用 URL 的字节不重置计数", async () => {
+    stubFetch({
+      getResponses: [
+        () => okStreamResponse(bigChunks(2)),
+        () => okStreamResponse(bigChunks(2))
+      ]
+    });
+
+    await expect(
+      collect(streamAudioSegments(["a", "b"], () => false, { downloadCapBytes: 3 * 1024 * 1024 }))
+    ).rejects.toThrow(ASR_DOWNLOAD_LIMIT_MESSAGE);
+  });
+
+  it("上限内的下载不受影响：正常产出段", async () => {
+    stubFetch({ getResponses: [() => okStreamResponse([fixture])] });
+
+    const items = await collect(
+      streamAudioSegments(["u"], () => false, { downloadCapBytes: MAX_AUDIO_BYTES })
+    );
+    expect(items.map((item) => item.segment)).toEqual(adtsFromFmp4(fixture, asc));
   });
 });

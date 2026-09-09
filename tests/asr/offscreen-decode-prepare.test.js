@@ -47,7 +47,7 @@ function makeRuleStore(initialRules = []) {
   return { rules, updateSessionRules, getSessionRules };
 }
 
-function stubSwEnv({ matchAllResult, matchAllError, updateSessionRules, getSessionRules } = {}) {
+function stubSwEnv({ matchAllResult, matchAllError, updateSessionRules, getSessionRules, tabsGet } = {}) {
   const createDocument = vi.fn(async () => ({}));
   const updateRules = updateSessionRules || vi.fn(async () => {});
   const getRules = getSessionRules || vi.fn(async () => []);
@@ -65,6 +65,9 @@ function stubSwEnv({ matchAllResult, matchAllError, updateSessionRules, getSessi
       local: { get: vi.fn(async () => ({})), set: vi.fn(async () => {}), remove: vi.fn(async () => {}) },
       onChanged: { addListener: vi.fn(), removeListener: vi.fn() }
     },
+    // tabs.get：默认按「标签页都活着」处理（回收为无操作）；死标签页场景由
+    // 用例注入 reject 的实现
+    tabs: { get: tabsGet || vi.fn(async () => ({ id: 1 })) },
     offscreen: { createDocument },
     declarativeNetRequest: { updateSessionRules: updateRules, getSessionRules: getRules }
   });
@@ -240,7 +243,9 @@ describe("cleanup 的标签页归属校验（跨标签页请求拒绝执行）",
   });
 });
 
-// 规则内容与旧固定 id 版本一致：只对 bilivideo 的扩展请求改 Referer/Origin
+// 规则内容（工单 04 收窄后）：requestDomains 精确匹配 ASR 音频 CDN 域
+//（bilivideo.com 及其子域），只对 offscreen 文档的 xmlhttprequest 音轨请求
+// 改写 Referer/Origin
 const EXPECTED_RULE_SHAPE = {
   priority: 1,
   action: {
@@ -250,7 +255,7 @@ const EXPECTED_RULE_SHAPE = {
       { header: "Origin", operation: "set", value: "https://www.bilibili.com" }
     ]
   },
-  condition: { urlFilter: "||bilivideo.com", resourceTypes: ["xmlhttprequest"] }
+  condition: { requestDomains: ["bilivideo.com"], resourceTypes: ["xmlhttprequest"] }
 };
 
 async function prepareOnce() {
@@ -386,12 +391,13 @@ describe("防盗链规则 id 按任务分配（多转写任务并发互不删除
 
 // 事故背景三的回归用例：重载本模块 = 冷启动一个新的 SW 实例（账本归零），
 // makeRuleStore 的初始规则 = 上一实例残留在平台的会话规则。
-describe("SW 冷启动对账（分配器账本以平台为事实源重建）", () => {
-  // 平台残留的上一实例规则，内容与新任务所加规则同形
-  function residueRule(id) {
-    return { id, ...EXPECTED_RULE_SHAPE };
-  }
+// 平台残留的上一实例规则，内容与新任务所加规则同形（冷启动对账与泄漏回收
+// 用例共用）
+function residueRule(id) {
+  return { id, ...EXPECTED_RULE_SHAPE };
+}
 
+describe("SW 冷启动对账（分配器账本以平台为事实源重建）", () => {
   async function coldStartBridge(initialRules = []) {
     const store = makeRuleStore(initialRules);
     stubSwEnv({
@@ -472,5 +478,123 @@ describe("SW 冷启动对账（分配器账本以平台为事实源重建）", (
     expect(next.ruleId).toBe(32001);
     const after = await prepareOnce();
     expect(after.ruleId).toBe(32003);
+  });
+});
+
+// 泄漏回收（工单 04）：cleanup 消息依赖页面侧活着——标签页直接关闭/崩溃时
+// cleanup 永远不会到达，规则残留到浏览器会话结束。兜底：每次 prepare 前把
+// 归属标签页已不存在的活跃规则回收（tabs.get 的「No tab with id」确定性错误
+// 才判死，其他异常按存活处理——宁可漏收不误收）。
+describe("prepare 前的死标签页残留回收（异常取消 / 后台终止路径）", () => {
+  async function freshBridge({ tabsGet, initialRules = [] } = {}) {
+    const store = makeRuleStore(initialRules);
+    stubSwEnv({
+      matchAllResult: existingDocClients,
+      updateSessionRules: store.updateSessionRules,
+      getSessionRules: store.getSessionRules,
+      tabsGet
+    });
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
+    return store;
+  }
+
+  async function prepareFrom(tabId) {
+    const responses = [];
+    await bridge.handleAsrDecodePrepare({ taskType: "asr-decode-prepare" }, { tab: { id: tabId } }, (r) => responses.push(r));
+    expect(responses[0].ok).toBe(true);
+    return responses[0];
+  }
+
+  it("标签页关闭后（tabs.get 报 No tab with id），其名下规则在下一次 prepare 前被回收且 id 复用", async () => {
+    // tab 7 已死、tab 9 活着
+    const tabsGet = vi.fn(async (tabId) => {
+      if (tabId === 7) throw new Error(`No tab with id: ${tabId}.`);
+      return { id: tabId };
+    });
+    const store = await freshBridge({ tabsGet });
+
+    const dead = await prepareFrom(7);
+    expect(tabsGet).not.toHaveBeenCalled(); // 首个任务前无残留可回收
+
+    // tab 9 的 prepare 先跑回收 pass：死标签页 tab 7 的规则在分配前被回收，
+    // 释放的 id 立即被 tab 9 的新规则复用（活跃集只剩 tab 9 一条）
+    const alive = await prepareFrom(9);
+    expect(tabsGet).toHaveBeenCalledWith(7);
+    expect(store.rules.size).toBe(1);
+    expect(alive.ruleId).toBe(dead.ruleId);
+
+    // 存活的 tab 9 规则不被后续回收误删，下一任务走未复用的计数器 id
+    const third = await prepareFrom(9);
+    expect(store.rules.has(alive.ruleId)).toBe(true);
+    expect(store.rules.size).toBe(2);
+    expect(third.ruleId).toBe(bridge.ASR_AUDIO_SESSION_RULE_ID_BASE + 1);
+  });
+
+  it("offscreen / 对账收编来源（无法核验）的规则不被误收；tabs.get 全线异常时保守保留", async () => {
+    // 对账收编上一实例残留 32001（owner "" 来源未知）+ 本实例 offscreen 来源新规则（owner "o"）
+    const store = await freshBridge({
+      initialRules: [residueRule(32001)],
+      tabsGet: vi.fn(async () => {
+        throw new Error("tabs API down");
+      })
+    });
+
+    const first = await prepareOnce();
+    expect(first.ruleId).toBe(32002);
+
+    // 触发一次回收 pass：无 "t" 来源可核验，已有规则全部保留
+    const fromTab = await prepareFrom(9);
+    expect(store.rules.has(32001)).toBe(true);
+    expect(store.rules.has(32002)).toBe(true);
+    expect(store.rules.has(fromTab.ruleId)).toBe(true);
+    expect(store.rules.size).toBe(3);
+  });
+
+  it("无活跃规则时回收为无操作（不额外查询 tabs）", async () => {
+    const tabsGet = vi.fn(async () => ({ id: 1 }));
+    await freshBridge({ tabsGet });
+
+    await prepareOnce();
+
+    expect(tabsGet).not.toHaveBeenCalled();
+  });
+});
+
+// 安装 / 更新路径的整池清理（工单 04，entry/background.ts 的 onInstalled 接线）：
+// 池区间内平台现存规则全部清掉 + 账本重置，区间外规则不碰。
+describe("reapAllSessionRules（安装/更新整池清理）", () => {
+  it("清空池区间内全部规则，区间外的动态规则不受影响", async () => {
+    const foreignRule = { id: 999, priority: 1, action: { type: "block" }, condition: {} };
+    const store = makeRuleStore([residueRule(32001), foreignRule]);
+    stubSwEnv({
+      matchAllResult: existingDocClients,
+      updateSessionRules: store.updateSessionRules,
+      getSessionRules: store.getSessionRules
+    });
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
+
+    await bridge.reapAllSessionRules();
+
+    expect(store.rules.has(32001)).toBe(false);
+    expect(store.rules.has(999)).toBe(true);
+  });
+
+  it("账本整体重置：清理后首个任务从池下界重新分配（对账缓存一并作废）", async () => {
+    const store = makeRuleStore([]);
+    stubSwEnv({
+      matchAllResult: existingDocClients,
+      updateSessionRules: store.updateSessionRules,
+      getSessionRules: store.getSessionRules
+    });
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
+
+    const first = await prepareOnce();
+    expect(first.ruleId).toBe(32001);
+    await bridge.reapAllSessionRules();
+    expect(store.rules.size).toBe(0);
+
+    const after = await prepareOnce();
+    expect(after.ruleId).toBe(32001);
+    expect(store.rules.size).toBe(1);
   });
 });

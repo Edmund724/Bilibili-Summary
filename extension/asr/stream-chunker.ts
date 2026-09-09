@@ -15,6 +15,7 @@
 
 import { encodeWav } from "./chunker.js";
 import type { WavChunk } from "./chunker.js";
+import { ASR_PENDING_CHUNKS_LIMIT_MESSAGE } from "./protocol.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { logWarn } from "../shared/logging.js";
 
@@ -24,8 +25,11 @@ export interface StreamWavChunksOptions {
   sampleRate?: number;
   // async (segment) => Float32Array（16k mono 采样）
   decodeSegment: (segment: unknown) => Promise<Float32Array>;
-  // async ({ index, startSec, durationSec, wavBlob }) => void
-  onChunk: (chunk: WavChunk) => void | Promise<void>;
+  // async ({ index, startSec, durationSec, wavBlob }) => boolean | void：
+  // 返回 false 表示下游拒绝（如转写引擎待处理分片达上限）——本模块立即
+  // 停止消费后续段并抛 ASR_PENDING_CHUNKS_LIMIT_MESSAGE 的可读错误（工单 04：
+  // 超限时停止新增工作，不静默丢片）。
+  onChunk: (chunk: WavChunk) => boolean | void | Promise<boolean | void>;
   // 单段解码失败的额外重试次数（0 = 失败即抛，默认）
   decodeRetries?: number;
   // true 时重试耗尽仍失败的段跳过并计数，继续后续段（Q8a 解码降级）
@@ -54,6 +58,8 @@ export interface StreamWavChunksResult {
 //                        （断连取消哨兵走快速通道，不被降级逻辑吞掉）
 // 完成时全静音（peak < 0.001 且时长 > 0）抛与 chunker.validateDecodedAudio
 // 同口径的错误；异常中途 onChunk 抛错则向上传播（调用方决定中止）。
+// onChunk 返回 false（下游拒绝，如待处理分片超限）则停止消费后续段并抛
+// ASR_PENDING_CHUNKS_LIMIT_MESSAGE（工单 04：超限即停，不静默丢片）。
 // 返回 { totalChunks, totalDurationSec, peak, skippedSegments }。
 export async function streamWavChunks(
   segments: Iterable<unknown> | AsyncIterable<unknown>,
@@ -77,15 +83,16 @@ export async function streamWavChunks(
   let peak = 0;
   let skippedSegments = 0;
 
-  const emitPart = async (part: Float32Array, durationSamples: number): Promise<void> => {
+  const emitPart = async (part: Float32Array, durationSamples: number): Promise<boolean> => {
     const index = emitted;
     emitted += 1;
-    await onChunk({
+    const accepted = await onChunk({
       index,
       startSec: chunkSamples > 0 ? (index * chunkSamples) / sampleRate : 0,
       durationSec: durationSamples / sampleRate,
       wavBlob: encodeWav(part, sampleRate)
     });
+    return accepted !== false;
   };
 
   // 从 parts 头部消费 need 个采样，拼成连续数组返回（消费掉的段视图置 null 释放）
@@ -163,17 +170,21 @@ export async function streamWavChunks(
     if (!(chunkSamples > 0)) {
       continue; // 不切：整段一片（内存随全长，调用方保证 chunkSeconds > 0 为主路径）
     }
-    // 满片即切：一次只处理一片，onChunk 完成后才继续，内存峰值 = 单片
+    // 满片即切：一次只处理一片，onChunk 完成后才继续，内存峰值 = 单片。
+    // onChunk 拒绝（下游待处理分片超限）→ 停止新增工作：抛可读错误向上传播，
+    // for-await 退出时下载生成器的 finally 会 cancel 连接（不再拉新字节）。
     while (partsLen >= chunkSamples) {
       const part = takeSamples(chunkSamples);
       partsLen -= chunkSamples;
-      await emitPart(part, chunkSamples);
+      if (!(await emitPart(part, chunkSamples))) {
+        throw new Error(ASR_PENDING_CHUNKS_LIMIT_MESSAGE);
+      }
     }
   }
 
   // 残余不足一片：作为最后一整片交出（与 decideChunks 最后一片短于标准片长一致）
-  if (partsLen > 0) {
-    await emitPart(takeSamples(partsLen), partsLen);
+  if (partsLen > 0 && !(await emitPart(takeSamples(partsLen), partsLen))) {
+    throw new Error(ASR_PENDING_CHUNKS_LIMIT_MESSAGE);
   }
 
   const totalDurationSec = totalLen / sampleRate;

@@ -1,16 +1,34 @@
 // ASR offscreen 通道的 background 侧执行器：offscreen 文档创建（prepare 时
-// 确保文档存在）、防盗链 dnr 规则 id 池簿记、prepare/cleanup 任务 handler，
-// 以及 offscreen 文档自关闭请求的代执行（工单 03：offscreen 无 chrome.offscreen，
-// 自关经 "offscreen-request-close" 消息委托本模块，发送者校验 + 明确回成功/
-// 失败）。仅在 background service worker 环境加载（entry/background.js 注册到
-// offload-task 消息路由），顶层不触碰 worker-only API——chrome.declarativeNetRequest /
-// chrome.offscreen 只在 handler 函数体内访问（保持既有习惯）。协议常量与
-// 契约注释唯一地址见 asr/protocol.js。
+// 确保文档存在）、防盗链 dnr 规则生命周期（id 池簿记、SW 冷启动对账、
+// prepare 前死标签页残留回收、安装/更新整池清理——工单 04）、prepare/cleanup
+// 任务 handler，以及 offscreen 文档自关闭请求的代执行（工单 03：offscreen 无
+// chrome.offscreen，自关经 "offscreen-request-close" 消息委托本模块，发送者
+// 校验 + 明确回成功/失败）。仅在 background service worker 环境加载
+// （entry/background.js 注册到 offload-task 消息路由），顶层不触碰
+// worker-only API——chrome.declarativeNetRequest / chrome.offscreen 只在
+// handler 函数体内访问（保持既有习惯）。协议常量与契约注释唯一地址见
+// asr/protocol.js。
 // chrome.declarativeNetRequest / chrome.offscreen.createDocument 的最小表面
 // 声明见本目录 chrome-asr-types.d.ts（共享 chrome-types.d.ts 未覆盖）。
 
 import { OFFSCREEN_URL, OFFSCREEN_CREATE_REASON } from "../shared/offscreen-constants.js";
 import type { MessageSender, SendResponse } from "../shared/messaging-protocol.js";
+
+// 防盗链规则的目标域与来源页（工单 04：域名唯一事实源，代码与文档注释、
+// manifest host_permissions、测试三处共用同一取值）：
+// - 目标 host：无字幕 ASR 的音轨请求全部落在 playurl（api.bilibili.com）返回
+//   的 data.dash.audio[].baseUrl/backupUrl 上，仓库内真实样本均为
+//   bilivideo.com 的子域（upx.bilivideo.com / upos-sz-mirror08.bilivideo.com，
+//   见 tests/asr/audio-source.test.js 与 eval/ 音频夹具）。规则条件用
+//   requestDomains 精确匹配该域及其子域（比 "||bilivideo.com" 的 urlFilter
+//   收窄：不会误命中 "bilivideo.com.evil.com" 这类拼接域）。
+// - 来源页：offscreen 文档（扩展自身 context）fetch 音轨；Referer/Origin 伪
+//   装成 B 站视频页以过 CDN 防盗链。规则 resourceTypes 仅 xmlhttprequest。
+// - 海外镜像域（如 upos-hz-mirrorakam.akamaized.net）在仓库代码链与夹具中
+//   零证据，不声明权限、不写规则（最窄原则）；若未来 playurl 返回该域导致
+//   403，属真实浏览器验收（工单 06）的观察项。
+export const ASR_AUDIO_CDN_DOMAIN = "bilivideo.com" as const;
+export const ASR_AUDIO_ORIGIN_PAGE = "https://www.bilibili.com" as const;
 
 // 防盗链会话规则 id 池下界：id 按任务独立分配（一个任务一条规则，多任务
 // 并发时规则并存、cleanup 只删自己的），自此单调递增；任务结束归还空闲池
@@ -99,6 +117,68 @@ async function reconcileSessionRuleIds(): Promise<void> {
   freeSessionRuleIds.length = 0;
 }
 
+// ===== 泄漏回收（工单 04：异常取消 / 后台终止路径的规则回收） =====
+
+// cleanup 消息依赖页面侧活着（port 断连后 finish 才发 cleanup）；页面标签页
+// 直接关闭 / 崩溃时 cleanup 永远不会到达，规则会泄漏到浏览器会话结束。兜底：
+// 每次 prepare 前把「归属标签页已不存在」的活跃规则回收掉（owner 键为
+// "t<tabId>" 的才可核验；offscreen / 对账收编的来源无法核验，保守保留）。
+// SW 被杀重启后残留规则已被对账收编进活跃集，同样受益于本回收。
+async function reapOrphanedSessionRules(): Promise<void> {
+  if (activeSessionRuleIds.size === 0) {
+    return;
+  }
+  const deadIds: number[] = [];
+  for (const [id, owner] of activeSessionRuleIds) {
+    if (!owner.startsWith("t")) {
+      continue;
+    }
+    if (!(await isTabAlive(Number(owner.slice(1)) || 0))) {
+      deadIds.push(id);
+    }
+  }
+  for (const id of deadIds) {
+    await removeDownloadRules(id);
+    releaseSessionRuleId(id);
+  }
+}
+
+// 标签页是否仍存活：只把 Chrome 对已关闭标签页的确定性错误
+//（"No tab with id: N."）判为死亡；API 缺失（测试 stub / 非扩展环境）或其他
+// 异常一律按存活处理——回收是防泄漏兜底，宁可漏收也不可误收正被依赖的规则。
+async function isTabAlive(tabId: number): Promise<boolean> {
+  if (!(tabId > 0)) {
+    return false;
+  }
+  try {
+    await chrome.tabs.get(tabId);
+    return true;
+  } catch (error) {
+    const message = String((error as { message?: string } | null)?.message || error);
+    return !/no tab with id/i.test(message);
+  }
+}
+
+// 安装 / 更新路径的整池清理（entry/background.ts 的 onInstalled 接线，逻辑
+// 实现收在本模块）：把池区间内平台上现存的全部会话规则清掉，并重置账本——
+// 之后首次 prepare 经 ensureSessionRuleIdsReconciled 以平台事实源重建。
+// 会话规则跨浏览器重启与扩展更新由平台自动清空，本函数是防御性兜底（行为
+// 随 Chrome 版本有差异的路径不依赖平台语义）；删除不存在的 id 由 Chrome 忽略。
+export async function reapAllSessionRules(): Promise<void> {
+  const rules = await chrome.declarativeNetRequest.getSessionRules();
+  const removeRuleIds = rules
+    .map((rule) => Number(rule?.id) || 0)
+    .filter((id) => id >= ASR_AUDIO_SESSION_RULE_ID_BASE && id <= ASR_AUDIO_SESSION_RULE_ID_MAX);
+  if (removeRuleIds.length > 0) {
+    await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds });
+  }
+  // 账本整体重置（对账缓存一并作废，下次 prepare 重新按平台对账）
+  nextSessionRuleId = ASR_AUDIO_SESSION_RULE_ID_BASE;
+  activeSessionRuleIds.clear();
+  freeSessionRuleIds.length = 0;
+  sessionRuleIdsReconcilePromise = null;
+}
+
 // 任务准备：创建（或复用）offscreen 文档 + 分配一个独立 id 并按它加防盗链
 // 下载规则。页面侧连 "asr-decode" 端口前调用，保证文档与规则就绪；ruleId
 // 随响应带回，页面侧 cleanup 时原样带回，只删自己这条。
@@ -108,6 +188,9 @@ export async function handleAsrDecodePrepare(message: unknown, sender: MessageSe
     // 首次分配前对账一次（实例内幂等缓存），避免与上一 SW 实例残留的会话
     // 规则撞 id；对账失败照下方 catch 的既有错误路径上报。
     await ensureSessionRuleIdsReconciled();
+    // 泄漏兜底：回收归属标签页已关闭的残留规则（cleanup 消息随页面死亡
+    // 丢失的异常取消 / 后台终止路径，见 reapOrphanedSessionRules 注释）。
+    await reapOrphanedSessionRules();
     ruleId = allocateSessionRuleId(taskOwnerKey(sender));
     await ensureAsrOffscreenDocument();
     await addDownloadRules(ruleId);
@@ -125,7 +208,11 @@ export async function handleAsrDecodePrepare(message: unknown, sender: MessageSe
 // 任务收尾：删掉本次解码任务自己的防盗链规则（成功失败都要调，页面侧用
 // try/finally 或 .finally 兜底）。只删消息携带的 ruleId，不影响并发任务
 // 的规则；删除不存在的 id 由 Chrome 忽略，重复/未知 id 的 cleanup 幂等不抛。
-// 会话规则随浏览器重启自动清空，无需持久化。
+// 持久化决策（工单 04）：规则配置不写入 storage——会话规则的平台副本
+// （getSessionRules）就是可恢复事实源，SW 重启后 prepare 首次分配前按其对账
+// 重建账本（ensureSessionRuleIdsReconciled），storage 副本只会引入与平台的
+// 一致性负担；页面侧 cleanup 丢失（标签页关闭/崩溃）的泄漏由 prepare 前的
+// 死标签页回收兜底（reapOrphanedSessionRules）。
 // 标签页归属校验（工单 03）：ruleId 在本实例簿记中有主时，只接受同一来源的
 // cleanup——跨标签页/跨上下文的删除请求回 { ok:false } 且不删规则。簿记不在
 // （SW 冷启动后上一实例的 ruleId：账本对账只收活跃集、无法区分原属）时保持
@@ -231,6 +318,9 @@ const OFFSCREEN_ALREADY_EXISTS_RE = /already exist|single offscreen/i;
 // 为单个解码任务添加 Referer/Origin 会话规则（offscreen 文档 fetch 音轨时
 // 绕防盗链；规则内容与旧固定 id 版本一致，仅 id 按任务独立）。保留先删后加
 // 的幂等：同 id 已有规则时覆盖写为新内容，而非因 id 已存在而报错。
+// 作用范围（工单 04 收窄）：requestDomains 精确匹配 ASR 音频 CDN 域
+// （ASR_AUDIO_CDN_DOMAIN 及其子域）+ 仅 xmlhttprequest——规则只改写 offscreen
+// 文档对 playurl 返回音轨地址的 fetch 的 Referer/Origin，不触碰浏览器其他流量。
 export async function addDownloadRules(ruleId: number): Promise<void> {
   const id = Number(ruleId) || 0;
   if (id <= 0) {
@@ -245,12 +335,12 @@ export async function addDownloadRules(ruleId: number): Promise<void> {
         action: {
           type: "modifyHeaders",
           requestHeaders: [
-            { header: "Referer", operation: "set", value: "https://www.bilibili.com" },
-            { header: "Origin", operation: "set", value: "https://www.bilibili.com" }
+            { header: "Referer", operation: "set", value: ASR_AUDIO_ORIGIN_PAGE },
+            { header: "Origin", operation: "set", value: ASR_AUDIO_ORIGIN_PAGE }
           ]
         },
         condition: {
-          urlFilter: "||bilivideo.com",
+          requestDomains: [ASR_AUDIO_CDN_DOMAIN],
           resourceTypes: ["xmlhttprequest"]
         }
       }

@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { streamWavChunks } from "../../extension/asr/stream-chunker.js";
 import { buildWavChunks, makeDecodedBuffer } from "../../extension/asr/chunker.js";
+import { ASR_PENDING_CHUNKS_LIMIT_MESSAGE } from "../../extension/asr/protocol.js";
 
 const RATE = 16000;
 const FILL = 0.25;
@@ -277,5 +278,59 @@ describe("段级解码降级（Q8a）", () => {
     ).rejects.toBe(abortSentinel);
     // 段 1 首次抛哨兵即中止：未重试
     expect(decoder.calls.get(1)).toBe(1);
+  });
+});
+
+// ===== onChunk 拒绝（工单 04：待处理分片超限时停止新增工作）=====
+// onChunk 返回 false = 下游拒绝（转写引擎活队列达 maxPendingChunks 上限）：
+// 立即停止消费后续段并抛可读错误，不静默丢片。
+describe("onChunk 拒绝（下游待处理分片超限）", () => {
+  it("首个 onChunk 返回 false：抛 ASR_PENDING_CHUNKS_LIMIT_MESSAGE，后续段不再消费", async () => {
+    const segments = tagSegments(makeSegments(600, 200)); // 3 段
+    const decoder = makeFailingDecoder({ failAt: [] });
+    const seen = [];
+
+    await expect(
+      streamWavChunks(segments, {
+        chunkSeconds: 300, // 每段 200s，两段拼满 300s 即产出第一片
+        decodeSegment: decoder.decodeSegment,
+        onChunk: async (chunk) => {
+          seen.push(chunk.index);
+          return false;
+        },
+        decodeRetries: 1,
+        skipFailedSegments: true
+      })
+    ).rejects.toThrow(ASR_PENDING_CHUNKS_LIMIT_MESSAGE);
+
+    // 只有第一片交出过，段 2 不再解码
+    expect(seen).toEqual([0]);
+    expect(decoder.calls.has(2)).toBe(false);
+  });
+
+  it("残余不足一片的最后一整片被拒绝时同样停止并抛错", async () => {
+    const segments = tagSegments(makeSegments(200, 200)); // 单段 200s
+    await expect(
+      streamWavChunks(segments, {
+        chunkSeconds: 300, // 永远拼不满：唯一一片走残余分支
+        decodeSegment: (seg) => Promise.resolve(seg),
+        onChunk: async () => false
+      })
+    ).rejects.toThrow(ASR_PENDING_CHUNKS_LIMIT_MESSAGE);
+  });
+
+  it("onChunk 返回 true / undefined（既有消费方语义）不受影响：正常产出", async () => {
+    const segments = makeSegments(300, 100);
+    const out = [];
+    const meta = await streamWavChunks(segments, {
+      chunkSeconds: 300,
+      decodeSegment: (seg) => Promise.resolve(seg),
+      onChunk: async (chunk) => {
+        out.push(chunk);
+        return true;
+      }
+    });
+    expect(meta.totalChunks).toBe(1);
+    expect(out).toHaveLength(1);
   });
 });
