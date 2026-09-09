@@ -139,11 +139,17 @@ function handleReaderShellEnter(
 // player-ai 悬浮按钮语义反转的消费端（工单 08 决议 2）：阅读模式外/内点击
 // 统一 = 聚焦对话 tab + 自动发送快捷提示词。进入阅读模式的编排已由
 // background（triggerReaderModeInTab）完成，此处只消费。
+// 视图未开时 background 在 reader-enter「即答」后立刻直发本消息——进入事务
+// （enterReaderMode 的 reset-tabs）与对话激活并发竞速，reset-tabs 后落会把
+// 对话 tab 盖回字幕 tab（工单：AI 键偶发进的是字幕 tab）。故先等 shell 进入
+// 事务收敛（shell 已由 reader-enter 装载，ensure 为缓存命中）再激活对话 tab。
 function handlePlayerAiQuickActionChat(message: Msg<"player-ai-quick-action-chat">, sendResponse: SendResponse): boolean {
   const prompt = String(message.prompt || "").trim() || DEFAULT_PLAYER_AI_QUICK_PROMPT;
   (async () => {
     try {
       await ensureUiReady();
+      const shell = await ensureReaderShell();
+      await shell.whenReaderEntrySettled();
       const chat = await ensureReaderChatTab();
       await chat.runQuickActionPrompt(prompt);
     } catch (error) {

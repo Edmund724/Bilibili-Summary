@@ -101,6 +101,31 @@ interface ReaderEntrySequenceOptions {
   beforeEntry?: () => Promise<void>;
 }
 
+// ===== 进入事务单飞队列 =====
+//
+// 为什么要排队：background 的进入/对话编排（triggerReaderChatInTab）在
+// reader-enter 处理器「即答」后立刻直发 player-ai-quick-action-chat /
+// reader-enter-chat，两条链在 content 侧并发——链 A 的 enterReaderMode 发
+// reset-tabs（回默认「字幕」tab），链 B 的对话 seam 发 set-tab:chat，谁后落
+// 谁赢。对话激活先落、reset-tabs 后落时，用户要去的 AI 对话 tab 被盖回字幕
+// tab（偶发：胜负由两侧动态 chunk 装载快慢决定）。事务在本模块收口成单飞
+// 队列：后到事务等先到事务收敛（含失败）后再起跑；对话 seam 消费端经
+// whenReaderEntrySettled 等在飞事务落地后再激活对话 tab。
+let readerEntryChain: Promise<void> = Promise.resolve();
+
+function runReaderEntryExclusive(run: () => Promise<void>): Promise<void> {
+  // 前序事务失败不阻断后序（各事务的失败口径在各自 catch 收口，不上抛）
+  const next = readerEntryChain.then(run, run);
+  readerEntryChain = next.catch(() => {});
+  return next;
+}
+
+// 在飞/排队中的进入事务收敛后兑现（无在飞事务则立即兑现）。对话 seam 等
+// 消费方在触碰面板 tab 状态前等待它，避免与进入事务的 reset-tabs 竞态。
+export function whenReaderEntrySettled(): Promise<void> {
+  return readerEntryChain;
+}
+
 async function runReaderEntrySequence(options: ReaderEntrySequenceOptions): Promise<void> {
   // 候选03：先确保 UI 壳存在，再设置阅读模式属性并进入重域。ensureUiReady
   // 经 ui/lazy-ui 惰性构建 UI 壳，与后续 reader 操作串成同一 promise 链，
@@ -161,18 +186,19 @@ export function enterReaderShell(options: EnterReaderShellOptions): Promise<void
 
   // 前奏一（八步第 1 步）：抑制 player-ai 快捷按钮 2.5s（等阅读模式 URL 翻转
   // 与重域装载完成，防止过渡期重复触发）。restore 档同样抑制（与收口前一致）。
+  // 前奏在排队外同步执行：抑制窗口按点击时刻起算，不随后到事务延后。
   suppressUntil(Date.now() + 2500);
 
-  return (async () => {
-    // 前奏二（八步第 2 步）：摘播放器快捷按钮。restore 档不摘（失同步自愈与
-    // 用户点击无关）。原为同步 remove；懒加载后「未加载 ⇒ 无按钮」可直接跳过，
-    // 已加载时经 promise 移除（延后一个 tick，视觉无差异）。失败静默：移除
-    // 按钮失败不应阻断阅读模式打开，且 suppressedUntil 已保证按钮短期不再弹出。
-    if (intent !== "restore" && isPlayerAiLoaded()) {
-      void loadPlayerAi()
-        .then((playerAi) => playerAi.removePlayerAiQuickActionButton())
-        .catch(() => {});
-    }
+  // 前奏二（八步第 2 步）：摘播放器快捷按钮。restore 档不摘（失同步自愈与
+  // 用户点击无关）。原为同步 remove；懒加载后「未加载 ⇒ 无按钮」可直接跳过，
+  // 已加载时经 promise 移除（延后一个 tick，视觉无差异）。失败静默：移除
+  // 按钮失败不应阻断阅读模式打开，且 suppressedUntil 已保证按钮短期不再弹出。
+  if (intent !== "restore" && isPlayerAiLoaded()) {
+    void loadPlayerAi()
+      .then((playerAi) => playerAi.removePlayerAiQuickActionButton())
+      .catch(() => {});
+  }
+  return runReaderEntryExclusive(async () => {
     await runReaderEntrySequence({
       readerUrl,
       beforeEntry: intent === "restore" ? restoreSelfHealBeforeEntry : undefined
@@ -188,7 +214,7 @@ export function enterReaderShell(options: EnterReaderShellOptions): Promise<void
         await chat.ensureChatTabActivated({ consumeIntent: false });
       }
     }
-  })().catch((error) => {
+  }).catch((error) => {
     // 壳构建等前序步骤失败：进入链整体中止（restore/focus-chat 与收口前的
     // 兜底口径一致；open 档收口前为未处理拒绝，现收敛为记日志，debug 无感）。
     onFailed(error);
@@ -211,13 +237,13 @@ export interface EnterReaderShellOnUrlNavigationOptions {
 export function enterReaderShellOnUrlNavigation(
   options: EnterReaderShellOnUrlNavigationOptions
 ): Promise<void> {
-  return (async () => {
+  return runReaderEntryExclusive(async () => {
     if (options.announce) {
       // 播报失败不阻断进入（与收口前 Promise.all 的吞错口径一致）
       await Promise.resolve(options.announce()).catch(() => {});
     }
     await runReaderEntrySequence({ readerUrl: options.readerUrl });
-  })().catch((error) => {
+  }).catch((error) => {
     if (options.onEnterFailed) {
       options.onEnterFailed(error);
     } else {
