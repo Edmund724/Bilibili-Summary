@@ -224,16 +224,19 @@ describe("累计下载量上限", () => {
     expect(response._reader.cancel).toHaveBeenCalled();
   });
 
-  it("上限跨主备 URL 累计：备用 URL 的字节不重置计数", async () => {
+  it("主 URL 失败换备用后计数继续：备用 URL 超限同样中止", async () => {
+    // 注：成功的 URL 会直接结束生成器（不再尝试备用），因此跨 URL 的字节
+    // 累计实际只在「前序 URL 失败/空体换址」后继续；计数器在 URL 循环外持有
+    //（不按 URL 重置），该行为由本用例锁定。
     stubFetch({
       getResponses: [
-        () => okStreamResponse(bigChunks(2)),
-        () => okStreamResponse(bigChunks(2))
+        () => ({ ok: false }),
+        () => okStreamResponse(bigChunks(3))
       ]
     });
 
     await expect(
-      collect(streamAudioSegments(["a", "b"], () => false, { downloadCapBytes: 3 * 1024 * 1024 }))
+      collect(streamAudioSegments(["a", "b"], () => false, { downloadCapBytes: 2.5 * 1024 * 1024 }))
     ).rejects.toThrow(ASR_DOWNLOAD_LIMIT_MESSAGE);
   });
 

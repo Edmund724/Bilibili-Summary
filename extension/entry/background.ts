@@ -39,7 +39,7 @@ import { bgFetchJson, isBiliUrl } from "../bilibili/gateway-core.js";
 import { collectOrigins } from "../core/host-permissions.js";
 // PR5：对话 tab 的 offscreen 文档 ensure 通道（background 侧唯一合法创建点）
 import { ensureChatOffscreenDocument } from "../chat/offscreen-ensure.js";
-import { handleAsrDecodePrepare, handleAsrDecodeCleanup, handleOffscreenRequestClose, isOffscreenDocumentSender } from "../asr/offscreen-bridge.bg.js";
+import { handleAsrDecodePrepare, handleAsrDecodeCleanup, handleOffscreenRequestClose, isOffscreenDocumentSender, reapAllSessionRules } from "../asr/offscreen-bridge.bg.js";
 import { ASR_TASK_PREPARE, ASR_TASK_CLEANUP } from "../asr/protocol.js";
 import type {
   BackgroundMessage,
@@ -374,6 +374,15 @@ const messageHandlers = new Map<BackgroundMessageType, BackgroundHandler>(
 //（arch-slim-3/04 收编，本文件经 import 消费）。
 
 chrome.runtime.onInstalled.addListener(async () => {
+  // ASR 防盗链会话规则整池清理（工单 04，逻辑在 asr/offscreen-bridge.bg.ts）：
+  // 安装/更新后把池区间内平台现存规则清掉并重置账本，防旧规则泄漏（会话规则
+  // 跨浏览器重启由平台自动清空，本清理是对扩展 reload/update 行为差异的兜底）。
+  try {
+    await reapAllSessionRules();
+  } catch (error) {
+    // 清理失败只记日志：残留在下次 prepare 的对账/回收仍会被收编
+    logWarn("[BOC] asr session rule reap on install/update failed", error);
+  }
   try {
     await initializeSettingsStorage();
   } catch (error) {
@@ -400,13 +409,10 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 // ===== 工具栏 action 点击（工单 02-toolbar-icon-opens-digest）=====
 
-// chrome-types.d.ts 尚未声明 action 命名空间（本工单 scope 外），此处局部最小
-// 契约收窄；归并进统一声明后本 cast 可删（TowerFinding 已记录）。可选链守卫：
-// 既有测试环境的 chrome stub 可能缺 action 命名空间（生产 MV3 + manifest.action
-// 恒有），顶层注册不可因缺命名空间抛错。
-interface ActionOnClickedEvent {
-  addListener(listener: (tab: chrome.tabs.Tab) => void): void;
-}
+// chrome.action 命名空间声明已归并 chrome-types.d.ts（工单 04），原局部
+// ActionOnClickedEvent 契约与 cast 删除。可选链守卫：既有测试环境的 chrome
+// stub 可能缺 action 命名空间（生产 MV3 + manifest.action 恒有），顶层注册
+// 不可因缺命名空间抛错。
 
 // 与页内 Digest 按钮同一条 reader-enter 事务：经 triggerReaderModeInTab 的
 // 重试/注入链发 reader-enter，content 侧落 entry/message-handler.ts →
@@ -416,7 +422,7 @@ interface ActionOnClickedEvent {
 // readerUrl 与页内按钮同源 buildReaderModeUrl（单源 bilibili/video-id-shared.ts，
 // SW 侧不 import 拖 core/state 的 bilibili/reader-url.ts）。监听器顶层同步注册
 //（MV3：SW 可被重启，事件监听器必须在首个事件前同步就位）。
-(chrome as unknown as { action?: { onClicked?: ActionOnClickedEvent } }).action?.onClicked?.addListener(
+chrome.action?.onClicked?.addListener(
   async (tab) => {
     const tabId = tab.id ?? 0;
     if (!tabId || !isSupportedBilibiliPage(tab.url)) {

@@ -14,6 +14,8 @@
 import {
   MAX_AUDIO_BYTES,
   ASR_DECODE_TIMEOUT_MS,
+  ASR_MAX_CUMULATIVE_DOWNLOAD_BYTES,
+  ASR_DOWNLOAD_LIMIT_MESSAGE,
   ASR_MSG_PROGRESS,
   ASR_MSG_CHUNK_RESULT,
   ASR_MSG_DONE,
@@ -197,6 +199,9 @@ export function createAsrDecodeHandler({ onTaskTerminal }: CreateAsrDecodeHandle
       // 判一次，ADTS 段完成即产出——峰值内存 O(下载缓冲窗口 + 单段 + 单片），
       // 音轨长度与内存解耦。主备 URL 轮换、HEAD 探大小、abort 检查与错误文案
       // 语义与原 fetchAudioBytes（整段 arrayBuffer 常驻 ≤200MB）逐行对应。
+      // 累计下载量上限（工单 04）：HEAD 探大小只挡 CDN 诚实返回 Content-Length
+      // 的超长视频，GET 流式读由 downloadCapBytes（asr/protocol.js 单源常量）
+      // 兜底——跨主备 URL 累计，超限即 cancel 连接、报可读错误。
       const source = streamAudioSegments([audioUrl, ...(task?.backupUrls || [])], () => aborted);
       const first = await source.next();
       if (first.done) {
@@ -240,7 +245,10 @@ export function createAsrDecodeHandler({ onTaskTerminal }: CreateAsrDecodeHandle
           },
           onChunk: (chunk) => {
             stop();
-            engine.push(chunk);
+            // 待处理分片上限（工单 04）：push 拒绝（排队深度达 maxPendingChunks）
+            // 返回 false，stream-chunker 据此停止新增工作并抛可读错误——
+            // 静默丢弃会丢字幕，错误路径让用户重试。
+            return engine.push(chunk);
           },
           decodeRetries: 1,
           skipFailedSegments: true,
@@ -293,7 +301,9 @@ interface StreamAudioYield {
   segment?: Uint8Array;
 }
 
-// 流式下载音频并产出 ADTS 段（导出仅供测试；fetch/probeSize 为全局注入面）。
+// 流式下载音频并产出 ADTS 段（导出仅供测试；fetch/probeSize 为全局注入面，
+// 第三参 options.downloadCapBytes 为累计下载量上限的注入面，默认
+// ASR_MAX_CUMULATIVE_DOWNLOAD_BYTES）。
 // 替代原 fetchAudioBytes 的「整段 response.arrayBuffer() 常驻」：GET 后用
 // response.body.getReader() 增量读，每个 chunk 先喂 fMP4 头部判定所需的缓冲
 // （收满 HEAD_PROBE_LIMIT 或流结束时判一次，结果缓存），判为 fMP4 则把攒下
@@ -304,14 +314,19 @@ interface StreamAudioYield {
 // GET 非 ok 或空体换下一个地址；全部失败抛「音频下载失败」。判为 fMP4 但整流
 // 后无音帧：抛「无法从 fMP4 提取音帧」；非 fMP4：抛「音频解码失败：仅支持
 // fMP4 音轨」（B 站 fnval=16 音轨均为 fMP4，理论不会走到，历史的全量解码
-// 兜底已删）。
+// 兜底已删）。累计字节跨主备 URL 合计，超 downloadCapBytes 即 cancel 连接并抛
+// ASR_DOWNLOAD_LIMIT_MESSAGE（工单 04）。
 export async function* streamAudioSegments(
   urls: string[],
-  isAborted: () => boolean
+  isAborted: () => boolean,
+  { downloadCapBytes = ASR_MAX_CUMULATIVE_DOWNLOAD_BYTES }: { downloadCapBytes?: number } = {}
 ): AsyncGenerator<StreamAudioYield, void, unknown> {
   // 头部判定缓冲上限：4MB，与 isFragmentedMp4 自身的扫描上限（1 << 22）一致
   const HEAD_PROBE_LIMIT = 1 << 22;
   let headDone = false;
+  // 累计下载量（工单 04）：跨主备 URL 合计，超过 downloadCapBytes 即中止
+  let totalBytes = 0;
+  const overDownloadCap = (): boolean => totalBytes > downloadCapBytes;
   for (const url of urls) {
     if (isAborted()) return;
     if (!headDone) {
@@ -329,6 +344,10 @@ export async function* streamAudioSegments(
       const raw = new Uint8Array(await response.arrayBuffer());
       if (raw.length === 0) {
         continue;
+      }
+      totalBytes += raw.length;
+      if (overDownloadCap()) {
+        throw new Error(ASR_DOWNLOAD_LIMIT_MESSAGE);
       }
       if (isFragmentedMp4(raw)) {
         const extractor = createAdtsExtractor(parseAudioSpecificConfig(raw) || {});
@@ -369,6 +388,12 @@ export async function* streamAudioSegments(
         const { done, value } = await reader.read();
         if (done) break;
         if (!(value && value.length > 0)) continue;
+        // 累计下载量超限（工单 04）：停止新增下载，抛可读错误——finally 里
+        // cancel 连接，不再拉取后续字节
+        totalBytes += value.length;
+        if (overDownloadCap()) {
+          throw new Error(ASR_DOWNLOAD_LIMIT_MESSAGE);
+        }
         if (!decided) {
           head = head ? concatBytes(head, value) : value;
           if (head.length >= HEAD_PROBE_LIMIT) decide();
