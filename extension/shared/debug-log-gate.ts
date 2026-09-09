@@ -17,11 +17,15 @@ export function registerDebugLogGate(): void {
   }
   let enabled = false;
   registerDebugGate(() => enabled);
-  chrome.storage.sync.get("enableDebugLogs").then((data) => {
-    enabled = Boolean((data as { enableDebugLogs?: unknown })?.enableDebugLogs);
-  }).catch(() => {
-    // 读失败维持缺省关：调试日志是诊断辅助，不该为它抛未处理拒绝。
-  });
+  const loadInitialDebugGate = async () => {
+    try {
+      const data = await chrome.storage.sync.get("enableDebugLogs");
+      enabled = Boolean((data as { enableDebugLogs?: unknown })?.enableDebugLogs);
+    } catch {
+      // 读失败维持缺省关：调试日志是诊断辅助，不该为它抛未处理拒绝。
+    }
+  };
+  void loadInitialDebugGate();
   // 键过滤收口 shared/watch-storage-keys seam（R3）：只认 sync 区 enableDebugLogs。
   watchStorageKeys((changes) => {
     enabled = Boolean(changes.enableDebugLogs.newValue);

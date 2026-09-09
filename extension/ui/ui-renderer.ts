@@ -184,9 +184,14 @@ export function resetReaderDigestTabs(): void {
 // 与 explain-card「去对话追问」走默认 true；chat-tab 快捷动作经 set-tab:chat
 // 命令传 false（与快捷发送互不踩踏，不消费待解释意图）。
 export function activateReaderChatTab({ consumeIntent = true }: { consumeIntent?: boolean } = {}): void {
-  ensureReaderChatTab()
-    .then((chat) => chat.ensureChatTabActivated({ consumeIntent }))
-    .catch((error) => logWarn("[BOC] chat tab activate failed", error));
+  void (async () => {
+    try {
+      const chat = await ensureReaderChatTab();
+      await chat.ensureChatTabActivated({ consumeIntent });
+    } catch (error) {
+      logWarn("[BOC] chat tab activate failed", error);
+    }
+  })();
 }
 
 // digest-only-ui：打开侧边栏设置抽屉（展开 + 渲染）。原「打开设置页」入口

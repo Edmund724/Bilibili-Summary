@@ -12,11 +12,12 @@ export const EXPECTED_CONTENT_SCRIPT_VERSION = chrome.runtime.getManifest().vers
 
 // 版本探针单发：读页面里 content 主包置的版本哨兵，空串 = 未读到；API 抛错
 // 交给编排层吞掉重试，单发自身不 try/catch。
-function probeContentScriptVersionOnce(tabId: number) {
-  return chrome.scripting.executeScript({
+async function probeContentScriptVersionOnce(tabId: number) {
+  const probe = await chrome.scripting.executeScript({
     target: { tabId },
     func: () => (globalThis as Record<string, unknown>).__BOC_CONTENT_SCRIPT_LOADED__ || ""
-  }).then((probe) => String(probe?.[0]?.result || ""));
+  });
+  return String(probe?.[0]?.result || "");
 }
 
 async function injectReaderAssets(tabId: number) {

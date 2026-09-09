@@ -26,8 +26,9 @@ type ReaderDomain = typeof import("../reader/index.js");
 type UiReaderDomain = Awaited<ReturnType<typeof ensureReaderDomain>> & ReaderDomain;
 const loadReaderDomain = ensureReaderDomain as () => Promise<UiReaderDomain>;
 
-export function whenReaderReady(fn: (reader: UiReaderDomain) => unknown): Promise<unknown> {
-  return loadReaderDomain().then(fn);
+export async function whenReaderReady(fn: (reader: UiReaderDomain) => unknown): Promise<unknown> {
+  const reader = await loadReaderDomain();
+  return fn(reader);
 }
 
 export function withReader(label: string | null, fn: (reader: UiReaderDomain) => unknown): void {

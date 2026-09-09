@@ -43,13 +43,15 @@ import type { Settings } from "../core/defaults.js";
 // 只在手动调用全局函数时才动态装载。未装载即调用会先拉起 reader 域——这是
 // 显式的调试动作，装载成本可接受；装载失败按 null 快照落地并记日志。
 export function installReaderDebugHelpers() {
-  const snapshotReader = (label = "manual") =>
-    ensureReaderDomain()
-      .then((reader) => ((reader as unknown) as typeof DebugSnapshotModule).createReaderDebugSnapshot(label))
-      .catch((error) => {
-        logWarn("[BOC] reader debug snapshot failed (reader domain load failed)", error);
-        return null;
-      });
+  const snapshotReader = async (label = "manual") => {
+    try {
+      const reader = await ensureReaderDomain();
+      return ((reader as unknown) as typeof DebugSnapshotModule).createReaderDebugSnapshot(label);
+    } catch (error) {
+      logWarn("[BOC] reader debug snapshot failed (reader domain load failed)", error);
+      return null;
+    }
+  };
   globalThis.__BOC_READER_DEBUG_SNAPSHOT__ = snapshotReader;
   globalThis.__BOC_DEBUG__ = {
     ...(globalThis.__BOC_DEBUG__ || {}),
@@ -72,24 +74,27 @@ export function bindSettingsWatcher() {
   // 候选06：键清单表驱动（READER_SETTINGS_WATCH_KEYS = 全部 storageKey ∪
   // legacyStorageKey），不再手抄；区/键过滤经 shared/watch-storage-keys seam
   //（R3 收口，sync+local 两区同一键清单）。
-  watchStorageKeys((changes) => {
-    loadReaderSettingsThroughSeam()
-      .then((settings) => {
-        const next = settings as Settings;
-        state.setSettings(next);
-        // 候选03：阅读视图未打开时跳过呈现层应用；进入阅读模式时 enterReaderMode
-        // 内部会 hydrate/apply，保证最终状态正确。视图开着则经惰性装载后应用。
-        if (isReaderViewOpen()) {
-          hydrateReaderStateFromSettings(next)
-            .then(() => applyReadingViewPresentation())
-            .catch((error) => {
-              logWarn("[BOC] failed to apply reader presentation after storage change", error);
-            });
-        }
-        requestPlayerAiSync();
-      })
-      .catch((error) => {
-        logWarn("[BOC] failed to refresh settings after storage change", error);
-      });
+  watchStorageKeys(async (changes) => {
+    try {
+      const next = (await loadReaderSettingsThroughSeam()) as Settings;
+      state.setSettings(next);
+      // 候选03：阅读视图未打开时跳过呈现层应用；进入阅读模式时 enterReaderMode
+      // 内部会 hydrate/apply，保证最终状态正确。视图开着则经惰性装载后应用
+      //（fire-and-forget：不阻塞下方 requestPlayerAiSync，与迁移前启动链后
+      // 同步触发 sync 的时序一致）。
+      if (isReaderViewOpen()) {
+        void (async () => {
+          try {
+            await hydrateReaderStateFromSettings(next);
+            await applyReadingViewPresentation();
+          } catch (error) {
+            logWarn("[BOC] failed to apply reader presentation after storage change", error);
+          }
+        })();
+      }
+      requestPlayerAiSync();
+    } catch (error) {
+      logWarn("[BOC] failed to refresh settings after storage change", error);
+    }
   }, { sync: READER_SETTINGS_WATCH_KEYS, local: READER_SETTINGS_WATCH_KEYS });
 }

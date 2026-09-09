@@ -162,16 +162,16 @@ async function summarizeSegment({
   // fire-and-forget 不阻塞模型调用（追问用的按需缓存，缺段时追问路径回落完整
   // Map-Reduce）；淘汰后重试仍失败 → 上浮一次（编排层去重），不中断本段小结。
   if (budgetScale === 1) {
-    segmentCache
-      .saveRaw({ context, segmentIndex: segment.index, budgetScale, segments: segment.items || [] })
-      .then((savedRaw) => {
+    void (async () => {
+      try {
+        const savedRaw = await segmentCache.saveRaw({ context, segmentIndex: segment.index, budgetScale, segments: segment.items || [] });
         if (savedRaw && savedRaw.ok === false && typeof notifyCacheWriteError === "function") {
           notifyCacheWriteError();
         }
-      })
-      .catch(() => {
+      } catch {
         notifyCacheWriteError();
-      });
+      }
+    })();
   }
 
   if (signal?.aborted) {

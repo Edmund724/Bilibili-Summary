@@ -113,8 +113,13 @@ interface ReaderEntrySequenceOptions {
 let readerEntryChain: Promise<void> = Promise.resolve();
 
 function runReaderEntryExclusive(run: () => Promise<void>): Promise<void> {
-  // 前序事务失败不阻断后序（各事务的失败口径在各自 catch 收口，不上抛）
-  const next = readerEntryChain.then(run, run);
+  // 前序事务失败不阻断后序（各事务的失败口径在各自 catch 收口，不上抛）。
+  // settled 先于任何 await 同步捕获链头，后到事务不会等错前序。
+  const settled = readerEntryChain.catch(() => {});
+  const next = (async () => {
+    await settled;
+    await run();
+  })();
   readerEntryChain = next.catch(() => {});
   return next;
 }
@@ -178,6 +183,16 @@ async function restoreSelfHealBeforeEntry(): Promise<void> {
   }
 }
 
+// 前奏二的静默实现（fire-and-forget）：装载与摘按钮失败都不外抛。
+async function removePlayerAiQuickButtonQuietly(): Promise<void> {
+  try {
+    const playerAi = await loadPlayerAi();
+    await playerAi.removePlayerAiQuickActionButton();
+  } catch {
+    // 静默：摘按钮失败不阻断阅读模式打开。
+  }
+}
+
 // 进入事务（三档意图）。返回的 promise 在事务收敛后 resolve（含失败——失败
 // 已按档位口径记日志，不再向上抛，调用方的响应时序不受影响）；消息处理器
 // 即答语义与收口前一致（sendResponse 不等待事务完成）。
@@ -208,9 +223,7 @@ export function enterReaderShell(options: EnterReaderShellOptions): Promise<void
   // 已加载时经 promise 移除（延后一个 tick，视觉无差异）。失败静默：移除
   // 按钮失败不应阻断阅读模式打开，且 suppressedUntil 已保证按钮短期不再弹出。
   if (intent !== "restore" && isPlayerAiLoaded()) {
-    void loadPlayerAi()
-      .then((playerAi) => playerAi.removePlayerAiQuickActionButton())
-      .catch(() => {});
+    void removePlayerAiQuickButtonQuietly();
   }
   return runReaderShellEnterTransaction(async () => {
     await runReaderEntrySequence({

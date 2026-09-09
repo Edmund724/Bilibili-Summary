@@ -21,7 +21,7 @@
 //
 // 消费约定：链内函数（refreshClip/loadSubtitle/resetClipState/buildClipSnapshotPayload/
 // onSubtitleChange/copyMarkdown/downloadSubtitle）不静态 import fetcher/ui，
-// 一律 `ensureSummarizeChain().then((chain) => chain.xxx())`；promise 缓存天然
+// 一律 `const chain = await ensureSummarizeChain()` 后调 `chain.xxx()`；promise 缓存天然
 // 去重并发调用。reader 侧的 requestSubtitleRefresh（reader-bus seam）只转发：
 // 调用方（reader/lifecycle.js）先 ensure 本链再调 seam，链装载成功路径上的
 // initSummarizeChain 会把 refreshClip 注册进 seam，闭环成立（arch-slim-2/03
