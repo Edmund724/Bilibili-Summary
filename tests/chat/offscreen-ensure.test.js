@@ -2,7 +2,8 @@
 // - getContexts 查到已有 OFFSCREEN_DOCUMENT → 不重复创建
 // - 查无文档 → 以 init 的原参数（url/reasons/justification）createDocument
 // - getContexts 不可用/抛错（Chrome <116 降级）→ 仍尝试创建
-// - createDocument 失败（含“文档已存在”）→ 不上抛、返回 false，由 connect 兜底
+// - createDocument 抛「文档已存在」（降级路径的并发创建竞态）→ 视同成功
+// - createDocument 真实失败（工单 03）→ 原始错误上抛，不再吞掉
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetModuleState } from "../setup.js";
@@ -62,8 +63,13 @@ describe("ensureChatOffscreenDocument", () => {
     expect(createDocument).toHaveBeenCalledTimes(1);
   });
 
-  it("createDocument 失败 → 不上抛、返回 false（connect 兜底，不阻断发送）", async () => {
-    stubChrome({ contexts: [], createError: new Error("Duplicate offscreen document") });
-    await expect(ensureChatOffscreenDocument()).resolves.toBe(false);
+  it("createDocument 抛「文档已存在」（降级路径的并发创建竞态）→ 视同成功", async () => {
+    stubChrome({ contextsError: new TypeError("getContexts is not a function"), createError: new Error("Single offscreen document already exists.") });
+    await expect(ensureChatOffscreenDocument()).resolves.toBe(true);
+  });
+
+  it("createDocument 真实失败 → 原始错误上抛，不再吞掉（工单 03）", async () => {
+    stubChrome({ contexts: [], createError: new Error("offscreen.createDocument: reason not allowed") });
+    await expect(ensureChatOffscreenDocument()).rejects.toThrow("offscreen.createDocument: reason not allowed");
   });
 });

@@ -306,6 +306,24 @@ export type OffloadTaskResponse = {
   error?: string;
 };
 
+// 工单 03：offscreen 文档自关闭的 SW 代执行（offscreen 无 chrome.offscreen，
+// 自关请求经 runtime 消息委托 SW）。仅接受 offscreen 文档本身的请求（SW 侧
+// 校验 sender.url / sender.tab）。
+export type OffscreenRequestCloseMessage = { type: "offscreen-request-close" };
+// 响应锚点：asr/offscreen-bridge.bg.ts handleOffscreenRequestClose——关闭成功
+// { ok: true }；拒绝（非 offscreen 发送者）或 closeDocument 抛错 { ok:false, error }。
+export type OffscreenRequestCloseResponse = { ok: boolean; error?: string };
+
+// 工单 03：offscreen 侧调试日志门（offscreen 无 chrome.storage，初始开关经
+// runtime 消息向 SW 读一次；变更由 SW 广播 DebugLogGateChangedBroadcast）。
+export type GetDebugLogGateMessage = { type: "get-debug-log-gate" };
+// 响应锚点：entry/background.ts handleGetDebugLogGate。
+export type GetDebugLogGateResponse = {
+  ok: boolean;
+  enabled?: boolean;
+  error?: string;
+};
+
 export type BackgroundMessage =
   | GetSettingsMessage
   | SaveSettingsMessage
@@ -326,7 +344,9 @@ export type BackgroundMessage =
   | AsrProvidersDeleteMessage
   | GetAsrRuntimeConfigMessage
   | SegmentCacheMessage
-  | OffloadTaskMessage;
+  | OffloadTaskMessage
+  | OffscreenRequestCloseMessage
+  | GetDebugLogGateMessage;
 
 export type BackgroundMessageType = BackgroundMessage["type"];
 
@@ -335,7 +355,19 @@ export type BackgroundMessageType = BackgroundMessage["type"];
 export type OffscreenRuntimeRequest =
   | ResolveAiProviderMessage
   | GetAsrRuntimeConfigMessage
-  | SegmentCacheMessage;
+  | SegmentCacheMessage
+  | OffscreenRequestCloseMessage
+  | GetDebugLogGateMessage;
+
+// ===== SW 广播（非请求响应式）=====
+
+// 调试日志门变更广播（工单 03）：storage 是 SW 的独占读者，sync.enableDebugLogs
+// 变化时 SW 广播给全部扩展上下文（offscreen 文档据它翻转本地门）。无请求方、
+// 无回包，不在 BackgroundMessage 联合内。
+export type DebugLogGateChangedBroadcast = {
+  type: "debug-log-gate-changed";
+  enabled: boolean;
+};
 
 // ===== offscreen document 接收的 port 消息 =====
 
@@ -406,6 +438,8 @@ export type ResponseOf<M> = M extends ReaderEnterMessage ? ReaderEnterResponse
   : M extends GetAsrRuntimeConfigMessage ? GetAsrRuntimeConfigResponse
   : M extends SegmentCacheMessage ? SegmentCacheResponse
   : M extends OffloadTaskMessage ? OffloadTaskResponse
+  : M extends OffscreenRequestCloseMessage ? OffscreenRequestCloseResponse
+  : M extends GetDebugLogGateMessage ? GetDebugLogGateResponse
   : never;
 
 export type MessageSender = {

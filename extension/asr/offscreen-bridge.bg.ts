@@ -1,6 +1,8 @@
 // ASR offscreen 通道的 background 侧执行器：offscreen 文档创建（prepare 时
-// 确保文档存在）、防盗链 dnr 规则 id 池簿记、prepare/cleanup 任务 handler。
-// 仅在 background service worker 环境加载（entry/background.js 注册到
+// 确保文档存在）、防盗链 dnr 规则 id 池簿记、prepare/cleanup 任务 handler，
+// 以及 offscreen 文档自关闭请求的代执行（工单 03：offscreen 无 chrome.offscreen，
+// 自关经 "offscreen-request-close" 消息委托本模块，发送者校验 + 明确回成功/
+// 失败）。仅在 background service worker 环境加载（entry/background.js 注册到
 // offload-task 消息路由），顶层不触碰 worker-only API——chrome.declarativeNetRequest /
 // chrome.offscreen 只在 handler 函数体内访问（保持既有习惯）。协议常量与
 // 契约注释唯一地址见 asr/protocol.js。
@@ -20,11 +22,14 @@ const ASR_AUDIO_SESSION_RULE_ID_MAX: number = 32100;
 // cleanup 归还。单调计数器 + 空闲池复用，防止长会话 id 无限增长；活跃集
 // 记账保证重复/未知 id 的 cleanup 幂等忽略、不污染池状态。账本随 SW 实例
 // 生灭而会话规则生命周期更长，冷启动后首次分配前按平台对账重建（见下）。
+// Map 值 = 任务来源（taskOwnerKey，工单 03 的标签页归属簿记）：cleanup 只
+// 接受同一来源的清理请求；对账收编的上一实例残留 id 值为 ""（来源未知），
+// cleanup 保持幂等放行。
 let nextSessionRuleId: number = ASR_AUDIO_SESSION_RULE_ID_BASE;
-const activeSessionRuleIds = new Set<number>();
+const activeSessionRuleIds = new Map<number, string>();
 const freeSessionRuleIds: number[] = [];
 
-function allocateSessionRuleId(): number {
+function allocateSessionRuleId(owner: string): number {
   let ruleId = freeSessionRuleIds.pop();
   if (ruleId === undefined) {
     if (nextSessionRuleId > ASR_AUDIO_SESSION_RULE_ID_MAX) {
@@ -32,7 +37,7 @@ function allocateSessionRuleId(): number {
     }
     ruleId = nextSessionRuleId++;
   }
-  activeSessionRuleIds.add(ruleId);
+  activeSessionRuleIds.set(ruleId, owner);
   return ruleId;
 }
 
@@ -82,9 +87,9 @@ async function reconcileSessionRuleIds(): Promise<void> {
   let maxSessionRuleId = ASR_AUDIO_SESSION_RULE_ID_BASE - 1;
   for (const rule of rules) {
     const id = Number(rule?.id) || 0;
-    // 只收本池区间内的 id，区间外规则不误入账本
+    // 只收本池区间内的 id，区间外规则不误入账本；来源未知（""）→ cleanup 放行
     if (id >= ASR_AUDIO_SESSION_RULE_ID_BASE && id <= ASR_AUDIO_SESSION_RULE_ID_MAX) {
-      activeSessionRuleIds.add(id);
+      activeSessionRuleIds.set(id, "");
       if (id > maxSessionRuleId) {
         maxSessionRuleId = id;
       }
@@ -103,7 +108,7 @@ export async function handleAsrDecodePrepare(message: unknown, sender: MessageSe
     // 首次分配前对账一次（实例内幂等缓存），避免与上一 SW 实例残留的会话
     // 规则撞 id；对账失败照下方 catch 的既有错误路径上报。
     await ensureSessionRuleIdsReconciled();
-    ruleId = allocateSessionRuleId();
+    ruleId = allocateSessionRuleId(taskOwnerKey(sender));
     await ensureAsrOffscreenDocument();
     await addDownloadRules(ruleId);
     sendResponse({ ok: true, ruleId });
@@ -121,10 +126,22 @@ export async function handleAsrDecodePrepare(message: unknown, sender: MessageSe
 // try/finally 或 .finally 兜底）。只删消息携带的 ruleId，不影响并发任务
 // 的规则；删除不存在的 id 由 Chrome 忽略，重复/未知 id 的 cleanup 幂等不抛。
 // 会话规则随浏览器重启自动清空，无需持久化。
+// 标签页归属校验（工单 03）：ruleId 在本实例簿记中有主时，只接受同一来源的
+// cleanup——跨标签页/跨上下文的删除请求回 { ok:false } 且不删规则。簿记不在
+// （SW 冷启动后上一实例的 ruleId：账本对账只收活跃集、无法区分原属）时保持
+// 幂等放行，与冷启动对账语义一致。
 export async function handleAsrDecodeCleanup(message: unknown, sender: MessageSender, sendResponse: SendResponse): Promise<void> {
   try {
     const ruleId = Number((message as { ruleId?: number } | null)?.ruleId) || 0;
     if (ruleId > 0) {
+      // 标签页归属（工单 03）：ruleId 在本实例簿记中有主时只接受同一来源的
+      // cleanup——跨标签页/跨上下文的删除请求回 { ok:false } 且不删规则。
+      // 簿记为 ""（SW 冷启动对账收编的上一实例残留 id）时幂等放行。
+      const owner = activeSessionRuleIds.get(ruleId);
+      if (owner && owner !== taskOwnerKey(sender)) {
+        sendResponse({ ok: false, error: "防盗链规则不属于当前来源" });
+        return;
+      }
       await removeDownloadRules(ruleId);
       releaseSessionRuleId(ruleId);
     }
@@ -134,33 +151,78 @@ export async function handleAsrDecodeCleanup(message: unknown, sender: MessageSe
   }
 }
 
+// ===== offscreen 文档自关闭的 SW 代执行（工单 03） =====
+
+// offscreen 文档没有 chrome.offscreen（平台只开放 chrome.runtime），任务终态
+// 后的自关闭经 "offscreen-request-close" 消息委托本执行器：校验发送者确为
+// offscreen 文档（sender.url 精确等于文档 URL 且无 sender.tab），执行
+// chrome.offscreen.closeDocument 并明确回成功/失败。
+export async function handleOffscreenRequestClose(_message: unknown, sender: MessageSender, sendResponse: SendResponse): Promise<void> {
+  if (!isOffscreenDocumentSender(sender)) {
+    sendResponse({ ok: false, error: "仅接受 offscreen 文档发送" });
+    return;
+  }
+  try {
+    await chrome.offscreen.closeDocument();
+    sendResponse({ ok: true });
+  } catch (error) {
+    sendResponse({ ok: false, error: String((error as { message?: string })?.message || error) });
+  }
+}
+
+// 发送者是否为 offscreen 文档本身（入口守卫与关闭执行器共用同一判定）。
+export function isOffscreenDocumentSender(sender: MessageSender): boolean {
+  return !sender?.tab && sender?.url === chrome.runtime.getURL(OFFSCREEN_URL);
+}
+
+// 任务来源键：有 sender.tab 的来源（content script）按标签页记账（"t<id>"），
+// 无 tab（offscreen 文档 / 未知上下文）统一记 "o"。
+function taskOwnerKey(sender: MessageSender): string {
+  const tabId = sender?.tab?.id;
+  return tabId != null ? "t" + String(tabId) : "o";
+}
+
 // 有活跃文档就复用，没有则创建一个（offscreen 文档常驻 sidepanel 创建的
-// "offscreen-chat" 实例，新端口与之并存互不干扰）。
-async function ensureAsrOffscreenDocument(): Promise<boolean> {
+// "offscreen-chat" 实例，新端口与之并存互不干扰）。创建失败不再吞掉（工单
+// 03）：matchAll 探测失败降级为直接尝试创建；createDocument 的原始错误向上
+// 抛，沿 prepare 的 catch 回 { ok:false, error } 进入页面侧可读错误处理——
+// 只有「文档已存在」（探测降级路径下的并发创建竞态）视同成功。
+async function ensureAsrOffscreenDocument(): Promise<void> {
+  let hasDoc = false;
   try {
     // 注意：SW 标准全局是 self.clients（ServiceWorkerGlobalScope.clients），
-    // 没有 chrome.clients 这个命名空间。曾误用 chrome.clients 导致 TypeError
-    // 被外层 catch 吞掉、无文档时从不创建 offscreen 文档，页面侧 asr-decode
-    // 端口因找不到接收端 ~2ms 断连（「音频解码中断：后台连接已断开」）。
+    // 没有 chrome.clients 这个命名空间。
     const clients = await (self as unknown as ServiceWorkerScopeLike).clients.matchAll({ includeUncontrolled: true });
-    const hasDoc = clients.some((client) => client.url?.includes(OFFSCREEN_URL));
-    if (!hasDoc) {
-      await chrome.offscreen.createDocument({
-        url: chrome.runtime.getURL(OFFSCREEN_URL),
-        // 不用 AUDIO_PLAYBACK：Chrome 对无真实播放的 AUDIO_PLAYBACK 文档
-        // 30 秒强制关闭（长视频解码 >30s 会「音频解码中断」）；本文档实际
-        // 是解码 + 转写（WAV Blob 仅在本 context 内经 FormData 上传），
-        // BLOBS 不受该限制。取值统一收拢在 shared/offscreen-constants.js
-        //（与 sidepanel 聊天自愈的创建方共用同一 reason）。
-        reasons: [OFFSCREEN_CREATE_REASON],
-        justification: "Download, decode, slice and transcribe video audio for ASR subtitles."
-      });
-    }
+    hasDoc = clients.some((client) => client.url?.includes(OFFSCREEN_URL));
   } catch {
-    // 已有文档或创建失败：直接尝试连接，由连接结果兜底
+    // 探测失败不阻塞创建尝试：createDocument 的 already-exists 兜底
+    hasDoc = false;
   }
-  return true;
+  if (hasDoc) {
+    return;
+  }
+  try {
+    await chrome.offscreen.createDocument({
+      url: chrome.runtime.getURL(OFFSCREEN_URL),
+      // 不用 AUDIO_PLAYBACK：Chrome 对无真实播放的 AUDIO_PLAYBACK 文档
+      // 30 秒强制关闭（长视频解码 >30s 会「音频解码中断」）；本文档实际
+      // 是解码 + 转写（WAV Blob 仅在本 context 内经 FormData 上传），
+      // BLOBS 不受该限制。取值统一收拢在 shared/offscreen-constants.js
+      //（与 sidepanel 聊天自愈的创建方共用同一 reason）。
+      reasons: [OFFSCREEN_CREATE_REASON],
+      justification: "Download, decode, slice and transcribe video audio for ASR subtitles."
+    });
+  } catch (error) {
+    if (OFFSCREEN_ALREADY_EXISTS_RE.test(String((error as { message?: string })?.message || error))) {
+      return;
+    }
+    throw error;
+  }
 }
+
+// Chrome createDocument 的「offscreen 文档已存在」错误文本（探测降级路径下
+// 的并发创建竞态用）：只认 already exist，不放宽到任意错误。
+const OFFSCREEN_ALREADY_EXISTS_RE = /already exist/i;
 
 // ===== 防盗链下载规则（dnr 为 MV3 专属 API，仅 background 可用） =====
 

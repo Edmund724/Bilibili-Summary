@@ -99,7 +99,11 @@ const copyDirs = ["icons", "entry/chunks"];
 // 2026-09：shared/logging 的调试门改为跨实例共享槽（挂 globalThis，修「用户
 // 开了调试日志、懒加载区却永远静默」），SW 包 35830 → 35877 B，原上限 35 KB
 // 只剩 10 B 余量，随之抬到 36 KB。
-const BACKGROUND_JS_MAX_KB = 36;
+// 2026-09（工单 03 offscreen-runtime-bridge）：offscreen 自关闭代执行器、
+// SW 消息入口守卫（来源/schema/标签页归属）、调试门消息通道与 ASR ruleId
+// 归属簿记为 SW 侧净增代码（ADR-0003 禁动态 import、无 splitting，无法拆出
+// background.js），36 → 38 KB。
+const BACKGROUND_JS_MAX_KB = 38;
 
 // 版本一致性守卫（与 build-content.js 同源逻辑提前到这里没必要——
 // build-content.js 子进程内已做 manifest vs core/version.js 的守卫并会
