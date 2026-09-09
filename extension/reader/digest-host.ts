@@ -138,6 +138,21 @@ export function closeDigestHost(): void {
 // ===== 重算机制 =====
 
 function bindDigestHostListeners(): void {
+  // ResizeObserver 回调只排 rAF，由下一帧统一读 rect、写变量；当前锚点是
+  // open 的首拍在 bind 之前选出的，实例化后补上对它的观察。不支持 observer
+  // 时保留 2s 自查兜底。
+  if (typeof ResizeObserver !== "undefined") {
+    const observer = new ResizeObserver(() => {
+      if (resizeObserver !== observer) {
+        return;
+      }
+      scheduleDigestLayout();
+    });
+    resizeObserver = observer;
+    if (observedAnchor) {
+      resizeObserver.observe(observedAnchor);
+    }
+  }
   // 事件监听走零参入口 requestDigestLayout：Event 实参由它丢弃，且具名函数
   // 保证 add/remove 拿到同一引用（箭头每次新建，remove 永不命中、监听泄漏）。
   window.addEventListener("resize", requestDigestLayout);

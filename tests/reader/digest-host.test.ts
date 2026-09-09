@@ -90,8 +90,51 @@ async function loadModules() {
   digestHost = await import("../../extension/reader/digest-host.js");
 }
 
+class TestResizeObserver {
+  static instances: TestResizeObserver[] = [];
+
+  readonly callback: ResizeObserverCallback;
+  observed: Element[] = [];
+  readonly observeCalls: Element[] = [];
+  readonly unobserveCalls: Element[] = [];
+  disconnected = false;
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+    TestResizeObserver.instances.push(this);
+  }
+
+  observe(target: Element): void {
+    if (!this.observed.includes(target)) {
+      this.observed.push(target);
+    }
+    this.observeCalls.push(target);
+  }
+
+  unobserve(target: Element): void {
+    this.unobserveCalls.push(target);
+    this.observed = this.observed.filter((observed) => observed !== target);
+  }
+
+  disconnect(): void {
+    this.disconnected = true;
+    this.observed = [];
+  }
+
+  emit(): void {
+    this.callback([], {} as ResizeObserver);
+  }
+}
+
+function installTestResizeObserver(): typeof TestResizeObserver {
+  TestResizeObserver.instances = [];
+  vi.stubGlobal("ResizeObserver", TestResizeObserver);
+  return TestResizeObserver;
+}
+
 beforeEach(() => {
   resetModuleState();
+  installTestResizeObserver();
   document.body.innerHTML = "";
   window.innerWidth = 1920;
   // 定位写组的目标元素（真实页面由 ui-renderer 挂在 body 下）。
@@ -116,6 +159,7 @@ afterEach(async () => {
   document.body.innerHTML = "";
   window.innerWidth = 1024;
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("digest-host 锚点命中", () => {
@@ -338,6 +382,80 @@ describe("digest-host 重算时机", () => {
     expect(vars(readingView()).top).toBe("20px");
     // 合帧期内未再排新帧。
     expect(rafSpy).toHaveBeenCalledTimes(1);
+    vi.restoreAllMocks();
+  });
+
+  it("ResizeObserver 观察当前锚点并在下一动画帧贴合尺寸变化", async () => {
+    await loadModules();
+    const anchor = mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
+    digestHost.openDigestHost();
+
+    const observer = TestResizeObserver.instances[0];
+    expect(observer).toBeTruthy();
+    expect(observer.observeCalls).toEqual([anchor]);
+
+    anchor.getBoundingClientRect = () => makeRect(1520, 20, 320, 1800) as DOMRect;
+    const rafSpy = vi.spyOn(window, "requestAnimationFrame");
+    observer.emit();
+    observer.emit();
+    // observer 回调只合帧排一次 rAF；下一帧读取宽高都已变化后的 rect 才写变量。
+    expect(rafSpy).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(vars(readingView()).top).toBe("20px");
+    vi.restoreAllMocks();
+  });
+
+  it("ResizeObserver 观察的锚点随 2s 自查切换而迁移", async () => {
+    vi.useFakeTimers();
+    await loadModules();
+    const old = mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
+    digestHost.openDigestHost();
+    const observer = TestResizeObserver.instances[0];
+
+    old.remove();
+    const next = mountAnchor(".right-container", makeRect(1500, 100, 360, 1800));
+    runRafSynchronously();
+    vi.advanceTimersByTime(2000);
+
+    expect(observer.unobserveCalls).toContain(old);
+    expect(observer.observeCalls).toContain(next);
+    expect(observer.observed).toEqual([next]);
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("关闭 Digest host 时解除 ResizeObserver 并取消待执行重排", async () => {
+    await loadModules();
+    mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
+    digestHost.openDigestHost();
+    const observer = TestResizeObserver.instances[0];
+    const rafSpy = vi.spyOn(window, "requestAnimationFrame");
+
+    observer.emit();
+    expect(rafSpy).toHaveBeenCalledTimes(1);
+    digestHost.closeDigestHost();
+    expect(observer.disconnected).toBe(true);
+    observer.emit();
+
+    expect(rafSpy).toHaveBeenCalledTimes(1);
+    vi.restoreAllMocks();
+  });
+
+  it("没有 ResizeObserver 时 2s 自查仍会重锚", async () => {
+    vi.useFakeTimers();
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(globalThis, "ResizeObserver");
+    await loadModules();
+    const anchor = mountAnchor(".right-container-inner", makeRect(1520, 80, 360, 2000));
+    digestHost.openDigestHost();
+    expect(TestResizeObserver.instances).toEqual([]);
+
+    anchor.getBoundingClientRect = () => makeRect(1520, 20, 360, 2000) as DOMRect;
+    runRafSynchronously();
+    vi.advanceTimersByTime(2000);
+
+    expect(vars(readingView()).top).toBe("20px");
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
