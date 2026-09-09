@@ -37,6 +37,7 @@ export interface BackgroundContentOrchestrator {
   triggerReaderModeInTab: (
     tabId: number,
     readerUrl?: string,
+    chat?: { prompt?: string },
     retries?: number,
     delayMs?: number
   ) => Promise<boolean>;
@@ -139,6 +140,7 @@ export function createBackgroundContentOrchestrator(deps: BackgroundContentOrche
   async function triggerReaderModeInTab(
     tabId: number,
     readerUrl = "",
+    chat?: { prompt?: string },
     retries = triggerRetries,
     delayMs = triggerRetryDelayMs
   ): Promise<boolean> {
@@ -148,10 +150,14 @@ export function createBackgroundContentOrchestrator(deps: BackgroundContentOrche
       }
 
       try {
-        const response = await sendMessageToTab(tabId, {
+        const payload: { type: "reader-enter"; readerUrl: string; chat?: { prompt?: string } } = {
           type: "reader-enter",
           readerUrl
-        });
+        };
+        if (chat) {
+          payload.chat = chat;
+        }
+        const response = await sendMessageToTab(tabId, payload);
         if (response?.ok) {
           return true;
         }

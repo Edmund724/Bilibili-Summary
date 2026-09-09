@@ -11,7 +11,6 @@ import {
   probeContentScriptVersion,
   triggerReaderModeInTab
 } from "../core/content-orchestration-wiring.js";
-import { sendMessageToTab } from "../shared/tab-utils.js";
 import { getMergedSettings, normalizeSettings, saveSettings } from "../core/settings-store.js";
 // 安装/更新一次性设置迁移（2026-09 AI 键默认开：存量显式 false 清位）
 import { applyPlayerAiQuickActionDefaultOnMigration } from "./settings-migration.js";
@@ -126,21 +125,16 @@ function handleEnsureOffscreenChat(_message: Msg<"ensure-offscreen-chat">, _send
 }
 
 // 「进/聚焦阅读模式 + 定位对话 tab + 自动发送快捷提示词」的统一编排
-//（arch-slim-3/04，原 handlePlayerAiQuickAction / handleReaderEnterChat 两份
-// 逐行同构手抄的收口）：两侧差异收成参数——快捷动作门开关、readerUrl 校验档
-//（quick-action 固定空串 = 已在阅读模式内只聚焦）、转发消息名。触发失败的可读
-// 文案两处历史措辞不同，按转发消息名取原文案，不静默改文案。
-const readerTriggerFailedText = {
-  "player-ai-quick-action-chat": "阅读模式触发失败，请刷新浏览器网页重试",
-  "reader-enter-chat": "阅读视图触发失败，请刷新浏览器网页重试"
-} as const;
+//（arch-slim-3/04 收口）：单条带 chat 负载的 reader-enter 命令直达 content 侧
+//（进入事务内激活对话 tab），不再即答后二次直发——双消息直发的进入/对话竞态
+// 在消息序上收口。触发失败回可读文案。
+const readerTriggerFailedText = "阅读模式触发失败，请刷新浏览器网页重试";
 
 async function triggerReaderChatInTab(
   tabId: number,
   options: {
     requireQuickActionEnabled: boolean;
     readerUrl: string;
-    forwardType: keyof typeof readerTriggerFailedText;
   }
 ): Promise<{ ok: true }> {
   const settings = await getMergedSettings();
@@ -161,20 +155,18 @@ async function triggerReaderChatInTab(
       throw new Error((error as Error).message || "阅读视图地址无效");
     }
   }
-  const triggered = await triggerReaderModeInTab(tabId, url);
+  const triggered = await triggerReaderModeInTab(tabId, url, { prompt });
   if (!triggered) {
-    throw new Error(readerTriggerFailedText[options.forwardType]);
+    throw new Error(readerTriggerFailedText);
   }
-  await sendMessageToTab(tabId, { type: options.forwardType, prompt });
   return { ok: true };
 }
 
-// player-ai 悬浮按钮语义反转（工单 08 决议 2）：不再打开 AI 侧边栏 + 写
-// storage 信箱（boc_player_ai_quick_action_v1 已退役），改为「进入/聚焦阅读
-// 模式 + 定位对话 tab + 自动发送快捷提示词」——triggerReaderModeInTab 复用
-// reader-enter 链（空 readerUrl = 已在阅读模式内，只聚焦），
-// 提示词组装后经 player-ai-quick-action-chat 直发 content script，由 reader
-// 侧对话 seam runQuickActionPrompt 消费。
+// player-ai 悬浮按钮语义反转（工单 08 决议 2）：不再打开 AI 侧边栏/写 storage
+// 信箱（boc_player_ai_quick_action_v1 已退役），改为「进入/聚焦阅读模式 +
+// 定位对话 tab + 自动发送快捷提示词」——单条带 chat 负载的 reader-enter 走
+// triggerReaderModeInTab 链（空 readerUrl = 已在阅读模式内，只聚焦），
+// 提示词组装后由 content 侧进入事务内的对话 seam runQuickActionPrompt 消费。
 function handlePlayerAiQuickAction(message: Msg<"player-ai-quick-action">, sender: MessageSender, sendResponse: SendResponse): boolean {
   const tabId = Number(message.tabId || sender.tab?.id || 0) || 0;
   if (!tabId) {
@@ -185,31 +177,7 @@ function handlePlayerAiQuickAction(message: Msg<"player-ai-quick-action">, sende
   withOkResponse(
     triggerReaderChatInTab(tabId, {
       requireQuickActionEnabled: true,
-      readerUrl: "",
-      forwardType: "player-ai-quick-action-chat"
-    }),
-    sendResponse,
-    (error) => (error as Error).message || "打开 AI 对话失败"
-  );
-  return true;
-}
-
-// AI 对话入口改道（PR5c）：先经 reader-enter 链打开/进入阅读
-// 模式，再把「激活对话 tab + 发送快捷提示词」的意图直发 content script——
-// 消费端在 entry/message-handler.ts（enter-shell focus-chat 档 +
-// runQuickActionPrompt）。
-function handleReaderEnterChat(message: Msg<"reader-enter-chat">, _sender: MessageSender, sendResponse: SendResponse): boolean {
-  const tabId = Number(_sender.tab?.id || 0) || 0;
-  if (!tabId) {
-    sendResponse({ ok: false, error: "找不到当前标签页。" });
-    return false;
-  }
-
-  withOkResponse(
-    triggerReaderChatInTab(tabId, {
-      requireQuickActionEnabled: false,
-      readerUrl: String(message.readerUrl || "").trim(),
-      forwardType: "reader-enter-chat"
+      readerUrl: ""
     }),
     sendResponse,
     (error) => (error as Error).message || "打开 AI 对话失败"
@@ -349,7 +317,6 @@ const messageHandlerTable = {
   "request-provider-origins": handleRequestProviderOrigins,
   "ensure-offscreen-chat": handleEnsureOffscreenChat,
   "player-ai-quick-action": handlePlayerAiQuickAction,
-  "reader-enter-chat": handleReaderEnterChat,
   "fetch-json": handleFetchJson,
   "ai-providers-list": aiProviderHandlers.list,
   "ai-presets-list": handleAiPresetsList,

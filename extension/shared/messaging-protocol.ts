@@ -20,11 +20,15 @@ import type { AsrProvider } from "../asr/asr-provider-store.js";
 export type ReaderEnterMessage = {
   type: "reader-enter";
   readerUrl?: string;
+  // 快捷对话负载（可省）：带 chat = 进入阅读模式并在进入事务内激活对话 tab，
+  // prompt 非空时自动发送快捷提示词（消费端 entry/message-handler.ts →
+  // reader/shell.ts chat 档）。
+  chat?: { prompt?: string };
 };
 
-// 响应锚点：entry/message-handler.ts reader-enter 处理器——shell 装载完成即答
-// { ok: true }（进入事务不等待完成；shell 装载失败回 { ok: false, error }，
-// arch-slim-2/09 shell 静态边改动态）。
+// 响应锚点：entry/message-handler.ts reader-enter 处理器——命令已受理入队即答
+// { ok: true }，不代表进入完成；shell 装载失败回 { ok: false, error }
+//（arch-slim-2/09 shell 静态边改动态）。
 export type ReaderEnterResponse = { ok: boolean };
 
 // 退出阅读模式（SW 侧 triggerReaderModeCloseInTab 的重试发送；面板关闭按钮走
@@ -50,22 +54,6 @@ export type ReaderRestoreMessage = {
 // 响应锚点：entry/message-handler.ts reader-restore 处理器——同 reader-enter 的
 // 即答语义，恒 { ok: true }。
 export type ReaderRestoreResponse = { ok: boolean };
-
-// 打开/进入阅读模式并激活「AI 对话」tab：readerUrl 语义同
-// reader-enter（空串 = 已在阅读模式内，只定位/聚焦）；prompt
-// 语义同 player-ai-quick-action（空串 = 只激活对话 tab，不发送）。
-// 消费端（entry/message-handler.ts）先处理打开/进入，再经 reader/lazy-chat-tab
-// 的 ensureChatTabActivated + runQuickActionPrompt 消费。
-export type ReaderEnterChatMessage = {
-  type: "reader-enter-chat";
-  readerUrl?: string;
-  prompt?: string;
-};
-
-// 响应锚点：双通道同型——background 的 handleReaderEnterChat 可能回
-// { ok: false, error: "找不到当前标签页。" }（entry/background.ts），content 侧
-// 处理器（entry/message-handler.ts）恒 { ok: true }（即答语义同 reader-enter）。
-export type ReaderEnterChatResponse = { ok: boolean; error?: string };
 
 export type ReaderGetHotCommentsMessage = {
   type: "reader-get-hot-comments";
@@ -95,13 +83,9 @@ export type ReaderSeekVideoTimeResponse = {
 export type ContentScriptMessage =
   | ReaderEnterMessage
   | ReaderCloseMessage
-  | ReaderEnterChatMessage
   | ReaderRestoreMessage
   | ReaderGetHotCommentsMessage
-  | ReaderSeekVideoTimeMessage
-  // background → content 直发：player-ai 悬浮按钮语义反转后的快捷动作消费
-  //（进入/聚焦阅读模式的编排已由 background 完成，content 只消费 prompt）。
-  | PlayerAiQuickActionChatMessage;
+  | ReaderSeekVideoTimeMessage;
 
 export type ContentScriptMessageType = ContentScriptMessage["type"];
 
@@ -148,18 +132,6 @@ export type PlayerAiQuickActionMessage = {
 // 响应锚点：entry/background.ts handlePlayerAiQuickAction——失败带可读 error
 //（找不到标签页 / 按钮未开启 / 触发失败）。
 export type PlayerAiQuickActionResponse = { ok: boolean; error?: string };
-// player-ai 悬浮按钮语义反转后的消息（工单 08 决议 2）：background 不再打开
-// 侧边栏/写 storage 信箱，改为「进入/聚焦阅读模式 + 定位 AI 对话 tab + 自动
-// 发送快捷提示词」。prompt 由 background 组装，content 侧经 runQuickActionPrompt
-// 消费。
-export type PlayerAiQuickActionChatMessage = {
-  type: "player-ai-quick-action-chat";
-  prompt?: string;
-};
-
-// 响应锚点：entry/message-handler.ts player-ai-quick-action-chat 处理器——即答
-// 语义恒 { ok: true }（prompt 消费失败只 logWarn，不经响应）。
-export type PlayerAiQuickActionChatResponse = { ok: boolean };
 export type FetchJsonMessage = { type: "fetch-json"; url?: string };
 // 响应锚点：entry/background.ts handleFetchJson——data 为目标 JSON 原文（具体
 // 形状由调用方的泛型参数收口），失败带可读 error（含 "Invalid JSON response"）。
@@ -340,7 +312,6 @@ export type BackgroundMessage =
   | RequestProviderOriginsMessage
   | EnsureOffscreenChatMessage
   | PlayerAiQuickActionMessage
-  | ReaderEnterChatMessage
   | FetchJsonMessage
   | AiProvidersListMessage
   | AiPresetsListMessage
@@ -412,11 +383,9 @@ export type SendResponse = (response?: MessageResponse) => void;
 // 的类型级穷尽断言会在 tsc 门禁报错，不会静默退化为 unknown。
 export type ResponseOf<M> = M extends ReaderEnterMessage ? ReaderEnterResponse
   : M extends ReaderCloseMessage ? ReaderCloseResponse
-  : M extends ReaderEnterChatMessage ? ReaderEnterChatResponse
   : M extends ReaderRestoreMessage ? ReaderRestoreResponse
   : M extends ReaderGetHotCommentsMessage ? ReaderGetHotCommentsResponse
   : M extends ReaderSeekVideoTimeMessage ? ReaderSeekVideoTimeResponse
-  : M extends PlayerAiQuickActionChatMessage ? PlayerAiQuickActionChatResponse
   : M extends GetSettingsMessage ? GetSettingsResponse
   : M extends SaveSettingsMessage ? SaveSettingsResponse
   : M extends RequestProviderOriginsMessage ? RequestProviderOriginsResponse

@@ -1,18 +1,18 @@
-// PR5c：AI 对话入口 / player-ai 悬浮按钮的 content 侧消费端回归测试。
+// reader-enter 的 chat 负载（快捷对话单命令）在 dispatchContentScriptMessage
+// 的 content 侧回归测试。
 //
-// 锁定两条新消息在 dispatchContentScriptMessage 的最终形态：
-// - reader-enter-chat：reader 未开 ⇒ 先 enterReaderMode，再激活对话
-//   tab；带 prompt 走 runQuickActionPrompt（快捷动作），不带 prompt 只
-//   ensureChatTabActivated（定位/聚焦）。consumeIntent 均为 false。
-// - player-ai-quick-action-chat：prompt 空 → 落 DEFAULT_PLAYER_AI_QUICK_PROMPT，
-//   经对话 seam 自动发送。
+// 锁定新形状：background 只发一条带 chat 负载的 reader-enter——
+// - 无 chat 负载：open 意图，零对话激活；
+// - chat.prompt 非空：进入阅读模式后走 runQuickActionPrompt（快捷动作自动发送）；
+// - chat 无 prompt：只 ensureChatTabActivated（定位/聚焦）。consumeIntent 均为 false。
+// （player-ai-quick-action-chat / reader-enter-chat 两个退役消息不再有处理器。）
 //
 // 写法与 message-handler-seek.test.js 同款：重依赖全部 vi.mock，state 走真实
 // 模块，单纪元；对话 seam 经 reader/lazy-chat-tab mock（组合根本体由
 // tests/reader/chat-tab.test.ts 覆盖）。
 // （arch-slim-2/09：message-handler 自 core/ 归位 entry/，shell 静态边改动态
-// ——reader-enter/reader-enter-chat 的回包时点从同步即答平移为 shell 装载完成
-// 后（事务仍不等待完成），相关断言改 waitFor。）
+// ——reader-enter 的回包时点从同步即答平移为 shell 装载完成后（事务仍不等待
+// 完成），相关断言改 waitFor。）
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -65,7 +65,6 @@ vi.mock("../../extension/bilibili/gateway.js", () => ({
 import { bindRuntimeEvents } from "../../extension/entry/message-handler.js";
 import { ensureReaderDomain } from "../../extension/reader/lazy-reader.js";
 import { isReaderViewOpen } from "../../extension/reader/state.js";
-import { DEFAULT_PLAYER_AI_QUICK_PROMPT } from "../../extension/core/defaults.js";
 
 const onMessageListeners = [];
 vi.stubGlobal("chrome", {
@@ -95,15 +94,16 @@ beforeEach(() => {
   ensureReaderChatTabMock.mockResolvedValue(makeChatStub());
 });
 
-describe("reader-enter-chat：打开阅读模式并激活对话 tab", () => {
+describe("reader-enter + chat 负载：打开阅读模式并激活对话 tab（单命令）", () => {
   it("reader 未开：先 enterReaderMode，再带 prompt 走 runQuickActionPrompt", async () => {
     const chat = makeChatStub();
     ensureReaderChatTabMock.mockResolvedValue(chat);
-    ensureReaderDomain.mockResolvedValue({ enterReaderMode: vi.fn(async () => {}) });
+    const enterReaderMode = vi.fn(async () => {});
+    ensureReaderDomain.mockResolvedValue({ enterReaderMode });
 
     const sendResponse = vi.fn();
     const keepOpen = messageListener(
-      { type: "reader-enter-chat", readerUrl: "https://www.bilibili.com/video/BV1/?boc_reader=1", prompt: "总结" },
+      { type: "reader-enter", readerUrl: "https://www.bilibili.com/video/BV1/?boc_reader=1", chat: { prompt: "总结" } },
       {},
       sendResponse
     );
@@ -123,7 +123,7 @@ describe("reader-enter-chat：打开阅读模式并激活对话 tab", () => {
     isReaderViewOpen.mockReturnValue(true);
 
     const sendResponse = vi.fn();
-    messageListener({ type: "reader-enter-chat" }, {}, sendResponse);
+    messageListener({ type: "reader-enter", chat: {} }, {}, sendResponse);
 
     await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
     await vi.waitFor(() => expect(chat.ensureChatTabActivated).toHaveBeenCalledTimes(1));
@@ -131,13 +131,44 @@ describe("reader-enter-chat：打开阅读模式并激活对话 tab", () => {
     expect(ensureReaderDomain).not.toHaveBeenCalled();
     expect(chat.runQuickActionPrompt).not.toHaveBeenCalled();
   });
+
+  it("无 chat 负载：纯 open 意图，零对话激活", async () => {
+    const enterReaderMode = vi.fn(async () => {});
+    ensureReaderDomain.mockResolvedValue({ enterReaderMode });
+
+    const sendResponse = vi.fn();
+    messageListener({ type: "reader-enter", readerUrl: "https://www.bilibili.com/video/BV1/?boc_reader=1" }, {}, sendResponse);
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+    await vi.waitFor(() => expect(enterReaderMode).toHaveBeenCalledTimes(1));
+    expect(ensureReaderChatTabMock).not.toHaveBeenCalled();
+  });
+
+  it("即答语义：命令已受理入队即回 ok，不等进入事务完成", async () => {
+    let releaseEnter = () => {};
+    const enterGate = new Promise((resolve) => {
+      releaseEnter = resolve;
+    });
+    ensureReaderDomain.mockResolvedValue({
+      enterReaderMode: vi.fn(async () => {
+        await enterGate;
+      })
+    });
+
+    const sendResponse = vi.fn();
+    messageListener({ type: "reader-enter", readerUrl: "", chat: { prompt: "总结" } }, {}, sendResponse);
+
+    // 进入事务（enterReaderMode）被 gate 卡住，回包已先行发出
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith({ ok: true }));
+    releaseEnter();
+  });
 });
 
 describe("空 readerUrl 兜底：视图未开时用当前地址构造阅读 URL", () => {
-  // PR5c 回归：background 的 player-ai/reading-chat 链在「未在阅读模式」时也
-  // 传空 readerUrl（原语义假设空串 = 已在阅读模式内只聚焦）。若 content 侧
-  // 跳过 URL 改写 + 阅读表 + data-boc-reader-mode 门控，enterReaderMode 会
-  // 落在无样式的半进入态（布局微变但阅读模式不出现）。
+  // PR5c 回归：background 的 player-ai 链在「未在阅读模式」时也传空 readerUrl
+  //（原语义假设空串 = 已在阅读模式内只聚焦）。若 content 侧跳过 URL 改写 +
+  // 阅读表 + data-boc-reader-mode 门控，enterReaderMode 会落在无样式的半进入态
+  //（布局微变但阅读模式不出现）。
   afterEach(() => {
     document.documentElement.removeAttribute("data-boc-reader-mode");
     document.body.removeAttribute("data-boc-reader-mode");
@@ -174,7 +205,7 @@ describe("空 readerUrl 兜底：视图未开时用当前地址构造阅读 URL"
     expect(ensureReaderDomain).not.toHaveBeenCalled();
   });
 
-  it("reader-enter-chat：空 readerUrl 且视图未开 → 兜底改写后 enterReaderMode + runQuickActionPrompt", async () => {
+  it("reader-enter + chat：空 readerUrl 且视图未开 → 兜底改写后 enterReaderMode + runQuickActionPrompt", async () => {
     const { setLocationUrl, NORMAL_PAGE_URL } = await import("../setup.js");
     setLocationUrl(NORMAL_PAGE_URL);
     const { replaceReaderModeUrl } = await import("../../extension/bilibili/reader-url.js");
@@ -182,32 +213,10 @@ describe("空 readerUrl 兜底：视图未开时用当前地址构造阅读 URL"
     ensureReaderChatTabMock.mockResolvedValue(chat);
     ensureReaderDomain.mockResolvedValue({ enterReaderMode: vi.fn(async () => {}) });
 
-    messageListener({ type: "reader-enter-chat", readerUrl: "", prompt: "总结" }, {}, vi.fn());
+    messageListener({ type: "reader-enter", readerUrl: "", chat: { prompt: "总结" } }, {}, vi.fn());
 
     await vi.waitFor(() => expect(chat.runQuickActionPrompt).toHaveBeenCalledWith("总结"));
     expect(replaceReaderModeUrl).toHaveBeenCalledWith("https://www.bilibili.com/video/BV1test000000/?boc_reader=1");
     expect(document.documentElement.getAttribute("data-boc-reader-mode")).toBe("1");
-  });
-});
-
-describe("player-ai-quick-action-chat：悬浮按钮快捷动作消费", () => {
-  it("带 prompt：直接走 runQuickActionPrompt（自动发送）", async () => {
-    const chat = makeChatStub();
-    ensureReaderChatTabMock.mockResolvedValue(chat);
-
-    const sendResponse = vi.fn();
-    messageListener({ type: "player-ai-quick-action-chat", prompt: "整理内容" }, {}, sendResponse);
-
-    expect(sendResponse).toHaveBeenCalledWith({ ok: true });
-    await vi.waitFor(() => expect(chat.runQuickActionPrompt).toHaveBeenCalledWith("整理内容"));
-  });
-
-  it("prompt 缺省：回落 DEFAULT_PLAYER_AI_QUICK_PROMPT", async () => {
-    const chat = makeChatStub();
-    ensureReaderChatTabMock.mockResolvedValue(chat);
-
-    messageListener({ type: "player-ai-quick-action-chat" }, {}, vi.fn());
-
-    await vi.waitFor(() => expect(chat.runQuickActionPrompt).toHaveBeenCalledWith(DEFAULT_PLAYER_AI_QUICK_PROMPT));
   });
 });

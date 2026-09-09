@@ -284,14 +284,14 @@ describe("enterReaderShell：restore 档（失同步自愈，壳级接口测试�
   });
 });
 
-describe("enterReaderShell：focus-chat 档（进对话）", () => {
+describe("enterReaderShell：chat 档（进对话）", () => {
   it("视图未开 → 先 enterReaderMode，再激活对话 tab 并自动发送 prompt", async () => {
     const reader = makeReaderStub();
     const chat = makeChatStub();
     ensureReaderDomain.mockResolvedValue(reader);
     ensureReaderChatTab.mockResolvedValue(chat);
 
-    await enterReaderShell({ readerUrl: READER_MODE_URL, intent: "focus-chat", prompt: "总结" });
+    await enterReaderShell({ readerUrl: READER_MODE_URL, intent: "chat", prompt: "总结" });
 
     expect(reader.enterReaderMode).toHaveBeenCalledTimes(1);
     expect(chat.runQuickActionPrompt).toHaveBeenCalledWith("总结");
@@ -306,7 +306,7 @@ describe("enterReaderShell：focus-chat 档（进对话）", () => {
     ensureReaderDomain.mockResolvedValue(reader);
     ensureReaderChatTab.mockResolvedValue(chat);
 
-    await enterReaderShell({ readerUrl: "", intent: "focus-chat" });
+    await enterReaderShell({ readerUrl: "", intent: "chat" });
 
     expect(reader.enterReaderMode).not.toHaveBeenCalled();
     expect(replaceReaderModeUrl).not.toHaveBeenCalled();

@@ -46,7 +46,7 @@ export const DEFAULT_AI_SYSTEM_PROMPT = [
 ].join("\n");
 
 // PR5c：player-ai 的 storage 信箱（boc_player_ai_quick_action_v1）已随 AI
-// 侧边栏摘除退役——快捷动作改走消息直发（player-ai-quick-action-chat），
+// 侧边栏摘除退役——快捷动作改走消息直发（reader-enter 的 chat 负载），
 // 信箱键不再读写；存量键留存在用户 storage 中，无害。
 
 export interface FixedFrontmatterProperty {

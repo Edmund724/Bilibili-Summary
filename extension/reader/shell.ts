@@ -2,7 +2,7 @@
 // 工单 .scratch/tickets/arch-slim/issues/02-reader-shell.md）。
 //
 // 进入与退出 Digest 面板阅读形态各只剩一条路：enterReaderShell（按意图三档
-// open 进入 / restore 恢复 / focus-chat 进对话）与 exitReaderShell（逆事务）。
+// open 进入 / restore 恢复 / chat 进对话）与 exitReaderShell（逆事务）。
 // 八步无闪变时序（suppressUntil → 摘播放器快捷按钮 → resolveReaderEntryUrl →
 // ensureUiReady → replaceReaderModeUrl → ensureReaderStyles → 翻 body/html
 // 门控属性 → enterReaderMode）与 restore 档 shell 完好性自查只存在于本文件，
@@ -15,8 +15,8 @@
 // 常驻图。依赖方向：shell → lazy-*（动态边）+ 各常驻叶子，无环。
 //
 // 三个消费面：
-//   - entry/message-handler.ts：reader-enter / reader-restore / reader-enter-chat
-//     / reader-close 四个消息分支退化成一两行委托（经 reader/lazy-shell.js）；
+//   - entry/message-handler.ts：reader-enter / reader-restore / reader-close
+//     三个消息分支退化成一两行委托（经 reader/lazy-shell.js）；
 //   - ui/ui-renderer.ts：Digest 面板关闭按钮的关闭链退化为 exitReaderShell 委托；
 //   - ui/digest-button.ts：定时自查的失同步判定改用 isReaderShellIntact
 //    （原本地手抄的同一判定收口为唯一实现）。
@@ -42,12 +42,12 @@ import { logWarn } from "../shared/logging.js";
 import { READER_CLOSED_EVENT } from "../shared/self-heal.js";
 import { ids, isReaderViewOpen } from "./state.js";
 
-export type ReaderShellIntent = "open" | "restore" | "focus-chat";
+export type ReaderShellIntent = "open" | "restore" | "chat";
 
 export interface EnterReaderShellOptions {
   readerUrl: string;
   intent: ReaderShellIntent;
-  /** focus-chat 档专用：非空 = 激活对话 tab 后自动发送快捷提示词；空 = 只定位/聚焦 */
+  /** chat 档专用：非空 = 激活对话 tab 后自动发送快捷提示词；空 = 只定位/聚焦 */
   prompt?: string;
 }
 
@@ -103,14 +103,11 @@ interface ReaderEntrySequenceOptions {
 
 // ===== 进入事务单飞队列 =====
 //
-// 为什么要排队：background 的进入/对话编排（triggerReaderChatInTab）在
-// reader-enter 处理器「即答」后立刻直发 player-ai-quick-action-chat /
-// reader-enter-chat，两条链在 content 侧并发——链 A 的 enterReaderMode 发
-// reset-tabs（回默认「字幕」tab），链 B 的对话 seam 发 set-tab:chat，谁后落
-// 谁赢。对话激活先落、reset-tabs 后落时，用户要去的 AI 对话 tab 被盖回字幕
-// tab（偶发：胜负由两侧动态 chunk 装载快慢决定）。事务在本模块收口成单飞
-// 队列：后到事务等先到事务收敛（含失败）后再起跑；对话 seam 消费端经
-// whenReaderEntrySettled 等在飞事务落地后再激活对话 tab。
+// 为什么要排队：进入链的 enterReaderMode 发 reset-tabs（重置回「字幕」tab），
+// chat 档在进入事务内激活对话 tab（set-tab:chat）——不排队的话，后到事务会
+// 盖掉先到事务的 tab 写手（工单：AI 键偶发进的是字幕 tab）。事务在本模块
+// 收口成单飞队列：后到事务等先到事务收敛（含失败）后再起跑，chat 档的对话
+// 激活因此在进入事务收敛后落地（race 防护语义所在）。
 let readerEntryChain: Promise<void> = Promise.resolve();
 
 function runReaderEntryExclusive(run: () => Promise<void>): Promise<void> {
@@ -118,12 +115,6 @@ function runReaderEntryExclusive(run: () => Promise<void>): Promise<void> {
   const next = readerEntryChain.then(run, run);
   readerEntryChain = next.catch(() => {});
   return next;
-}
-
-// 在飞/排队中的进入事务收敛后兑现（无在飞事务则立即兑现）。对话 seam 等
-// 消费方在触碰面板 tab 状态前等待它，避免与进入事务的 reset-tabs 竞态。
-export function whenReaderEntrySettled(): Promise<void> {
-  return readerEntryChain;
 }
 
 async function runReaderEntrySequence(options: ReaderEntrySequenceOptions): Promise<void> {
@@ -203,10 +194,10 @@ export function enterReaderShell(options: EnterReaderShellOptions): Promise<void
       readerUrl,
       beforeEntry: intent === "restore" ? restoreSelfHealBeforeEntry : undefined
     });
-    if (intent === "focus-chat") {
-      // PR5c：先确保 reader shell（进入链已完成），再激活对话 tab 并（带
-      // prompt 时）自动发送快捷提示词。快捷动作路径传 consumeIntent:false
-      // （与快捷发送互不踩踏）；无 prompt 则只定位/聚焦对话 tab。
+    if (intent === "chat") {
+      // 进入事务收敛后激活对话 tab 并（带 prompt 时）自动发送快捷提示词。
+      // 快捷动作路径传 consumeIntent:false（与快捷发送互不踩踏）；无 prompt
+      // 则只定位/聚焦对话 tab。
       const chat = await ensureReaderChatTab();
       if (prompt) {
         await chat.runQuickActionPrompt(prompt);
@@ -215,7 +206,7 @@ export function enterReaderShell(options: EnterReaderShellOptions): Promise<void
       }
     }
   }).catch((error) => {
-    // 壳构建等前序步骤失败：进入链整体中止（restore/focus-chat 与收口前的
+    // 壳构建等前序步骤失败：进入链整体中止（restore/chat 与收口前的
     // 兜底口径一致；open 档收口前为未处理拒绝，现收敛为记日志，debug 无感）。
     onFailed(error);
   });

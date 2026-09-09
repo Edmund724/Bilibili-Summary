@@ -35,7 +35,6 @@ interface ReaderShellDomain {
   enterReaderShell(options: EnterReaderShellOptions): Promise<void>;
   enterReaderShellOnUrlNavigation(options: EnterReaderShellOnUrlNavigationOptions): Promise<void>;
   exitReaderShell(): Promise<void>;
-  whenReaderEntrySettled(): Promise<void>;
 }
 
 const loader = createLazyLoader<ReaderShellDomain>(() => import("./shell.js"));

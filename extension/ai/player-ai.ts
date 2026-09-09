@@ -414,7 +414,7 @@ async function handlePlayerAiQuickActionClick(event: MouseEvent): Promise<void> 
     }
     // 工单 08 决议 2（语义反转）：按钮常驻。阅读模式外点击 = background 触发
     // 进入阅读模式；阅读模式内点击 = 直接定位对话 tab。两条路径都由 background
-    // 以 player-ai-quick-action-chat 直发快捷提示词，content 侧经对话 seam
+    // 以单条带 chat 负载的 reader-enter 携快捷提示词，content 侧经对话 seam
     // （runQuickActionPrompt）消费：定位对话 tab + 新会话 + 填提示词 + 自动发送。
     // 响应形状由消息类型经 ResponseOf 推断（arch-slim-2/02）；resp?. 保留对
     // 「无监听器时回包为 undefined」的运行时防御。

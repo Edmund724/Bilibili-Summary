@@ -53,8 +53,8 @@ Digest 面板贴栏定位的参考节点，按优先级串行试探的右栏候�
 _Avoid_: 宿主、播放器宿主（那是 video-probe 的概念）
 
 **阅读壳**:
-Digest 面板进入与退出阅读形态的唯一事务。按意图三档（open 进入 / restore 恢复 / focus-chat 进对话）执行「先挂阅读样式表、再翻 body/html 属性」的无闪变时序，含摘除播放器快捷按钮、suppress 抑制窗口与 restore 档的 shell 完好性自查；退出为逆事务。全部入口（按钮/编排触发、恢复、进对话）与关闭出口都必须经此收口，禁止手抄序列。
-代码名：`enterReaderShell` / `exitReaderShell`（intent 三档）/ `reader/shell.ts`；承载消息 `reader-enter` / `reader-restore` / `reader-enter-chat` / `reader-close`
+Digest 面板进入与退出阅读形态的唯一事务。按意图三档（open 进入 / restore 恢复 / chat 进对话）执行「先挂阅读样式表、再翻 body/html 属性」的无闪变时序，含摘除播放器快捷按钮、suppress 抑制窗口与 restore 档的 shell 完好性自查；退出为逆事务。全部入口（按钮/编排触发、恢复、进对话）与关闭出口都必须经此收口，禁止手抄序列。
+代码名：`enterReaderShell` / `exitReaderShell`（intent 三档）/ `reader/shell.ts`；承载消息 `reader-enter` / `reader-restore` / `reader-close`
 _Avoid_: popup- 词根消息名、进入阅读模式手抄序列
 
 ### 总结流程

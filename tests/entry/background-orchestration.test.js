@@ -254,6 +254,19 @@ describe("triggerReaderModeInTab", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("带 chat 负载：单条 reader-enter 透传 chat（进入事务内激活对话 tab）", async () => {
+    const { orch, deps } = makeHarness();
+
+    await expect(orch.triggerReaderModeInTab(TAB_ID, READER_URL, { prompt: "总结" })).resolves.toBe(true);
+
+    expect(deps.sendMessageToTab).toHaveBeenCalledTimes(1);
+    expect(deps.sendMessageToTab).toHaveBeenCalledWith(TAB_ID, {
+      type: "reader-enter",
+      readerUrl: READER_URL,
+      chat: { prompt: "总结" }
+    });
+  });
+
   it("Receiving end 错误 → 兜底 ensureReaderContentReady → 下一轮成功", async () => {
     const { orch, deps } = makeSpyDelayHarness();
     deps.sendMessageToTab

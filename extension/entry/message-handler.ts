@@ -1,10 +1,8 @@
 // content 侧消息分发 + URL 变化编排的组合根（arch-slim-2/09 自 core/ 归位
 // entry/：消息分发与页内编排是 entry 层知识，core/ 回归纯共享底座）。
 import { state, uiState, clipState } from "../core/state.js";
-import { DEFAULT_PLAYER_AI_QUICK_PROMPT } from "../core/defaults.js";
 
 import { startUrlWatcher, BOC_URL_CHANGE_EVENT } from "../core/url-watcher.js";
-import { ensureReaderChatTab } from "../reader/lazy-chat-tab.js";
 import {
   getErrorMessage,
   isStaleRunError
@@ -59,9 +57,6 @@ import type {
   ContentScriptMessageType,
   SendResponse
 } from "../shared/messaging-protocol.js";
-// ReaderShellIntent 经 lazy-shell 装载边 type-only 透出（零运行时边）：shell
-// 本体的静态调用方闭包由 shell-sequence 守卫锁定，本组合根只触达 lazy-shell。
-import type { ReaderShellIntent } from "../reader/lazy-shell.js";
 // 页内分发原语（arch-slim-2/09，与 sendRuntimeMessage 同址 shared/messaging.js）：
 // ui/digest-button.ts 等页内触发源经它进同一条处理器路径，本组合根在
 // bindRuntimeEvents 时把分发主体注册进去。
@@ -100,63 +95,35 @@ type ContentScriptHandler<K extends ContentScriptMessageType> = (
   sendResponse: SendResponse
 ) => boolean;
 
-// 进阅读壳（工单 arch-slim/02）：三个 reading-view 消息只做意图路由，八步无
-// 闪变时序与 restore 失同步自愈都在 reader/shell.ts 唯一实现；消息名 → intent
-// 的映射单源在下方意图表。arch-slim-2/09：shell 改经 lazy-shell 动态装载后，
-// 回包时点从「同步即答」平移为「shell 模块装载完成后、进入事务发起前即答」
-//——发响应仍不等待事务完成（即答语义保持）；装载失败才有 ok:false 分支
-//（本地 chunk 装载 ~10ms，被消息往返掩盖）。
-type ReaderShellEntryType = "reader-enter" | "reader-restore" | "reader-enter-chat";
-
-const readerShellIntentByType: Record<ReaderShellEntryType, ReaderShellIntent> = {
-  "reader-enter": "open",
-  "reader-restore": "restore",
-  "reader-enter-chat": "focus-chat"
-};
+// 进阅读壳（工单 arch-slim/02）：reading-view 消息只做意图路由，八步无闪变
+// 时序与 restore 失同步自愈都在 reader/shell.ts 唯一实现；意图从消息负载推导
+//——reader-restore → restore；reader-enter 无 chat 负载 → open，带 chat 负载
+// → chat（进入事务内激活对话 tab，prompt 非空时自动发送快捷提示词）。
+// arch-slim-2/09：shell 改经 lazy-shell 动态装载后，回包时点从「同步即答」
+// 平移为「shell 模块装载完成后、进入事务发起前即答」——即答语义写死为
+// 「命令已受理入队，不代表进入完成」：发响应不等待事务完成；装载失败才有
+// ok:false 分支（本地 chunk 装载 ~10ms，被消息往返掩盖）。
+type ReaderShellEntryType = "reader-enter" | "reader-restore";
 
 function handleReaderShellEnter(
   message: Msg<ReaderShellEntryType>,
   sendResponse: SendResponse
 ): boolean {
-  const intent = readerShellIntentByType[message.type];
   (async () => {
     try {
       const shell = await ensureReaderShell();
-      if (message.type === "reader-enter-chat") {
-        shell.enterReaderShell({ readerUrl: String(message.readerUrl || ""), intent, prompt: message.prompt ?? "" });
-      } else {
-        shell.enterReaderShell({ readerUrl: String(message.readerUrl || ""), intent });
-      }
+      const chat = message.type === "reader-enter" ? message.chat : undefined;
+      shell.enterReaderShell({
+        readerUrl: String(message.readerUrl || ""),
+        intent: message.type === "reader-restore" ? "restore" : chat ? "chat" : "open",
+        prompt: chat?.prompt
+      });
       sendResponse({ ok: true });
     } catch (error) {
       logWarn("[BOC] reading shell load failed", error);
       sendResponse({ ok: false, error: getErrorMessage(error) });
     }
   })();
-  return true;
-}
-
-// player-ai 悬浮按钮语义反转的消费端（工单 08 决议 2）：阅读模式外/内点击
-// 统一 = 聚焦对话 tab + 自动发送快捷提示词。进入阅读模式的编排已由
-// background（triggerReaderModeInTab）完成，此处只消费。
-// 视图未开时 background 在 reader-enter「即答」后立刻直发本消息——进入事务
-// （enterReaderMode 的 reset-tabs）与对话激活并发竞速，reset-tabs 后落会把
-// 对话 tab 盖回字幕 tab（工单：AI 键偶发进的是字幕 tab）。故先等 shell 进入
-// 事务收敛（shell 已由 reader-enter 装载，ensure 为缓存命中）再激活对话 tab。
-function handlePlayerAiQuickActionChat(message: Msg<"player-ai-quick-action-chat">, sendResponse: SendResponse): boolean {
-  const prompt = String(message.prompt || "").trim() || DEFAULT_PLAYER_AI_QUICK_PROMPT;
-  (async () => {
-    try {
-      await ensureUiReady();
-      const shell = await ensureReaderShell();
-      await shell.whenReaderEntrySettled();
-      const chat = await ensureReaderChatTab();
-      await chat.runQuickActionPrompt(prompt);
-    } catch (error) {
-      logWarn("[BOC] player-ai quick action chat failed", error);
-    }
-  })();
-  sendResponse({ ok: true });
   return true;
 }
 
@@ -245,8 +212,6 @@ function handleReaderSeekVideoTime(message: Msg<"reader-seek-video-time">, sendR
 const contentMessageHandlerTable = {
   "reader-enter": handleReaderShellEnter,
   "reader-restore": handleReaderShellEnter,
-  "reader-enter-chat": handleReaderShellEnter,
-  "player-ai-quick-action-chat": handlePlayerAiQuickActionChat,
   "reader-close": handleReaderClose,
   "reader-get-hot-comments": handleReaderGetHotComments,
   "reader-seek-video-time": handleReaderSeekVideoTime
