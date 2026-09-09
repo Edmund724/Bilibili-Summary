@@ -220,9 +220,11 @@ async function ensureAsrOffscreenDocument(): Promise<void> {
   }
 }
 
-// Chrome createDocument 的「offscreen 文档已存在」错误文本（探测降级路径下
-// 的并发创建竞态用）：只认 already exist，不放宽到任意错误。
-const OFFSCREEN_ALREADY_EXISTS_RE = /already exist/i;
+// Chrome createDocument 的「offscreen 文档已存在」错误判定（探测降级路径下
+// 的并发创建竞态用）：真实文案是 "Only a single offscreen document may be
+// created."（r1 审查核实，不含 "already exist"）；正则同时兼容 "already
+// exist" 变体与 "single offscreen"，不放宽到任意错误。
+const OFFSCREEN_ALREADY_EXISTS_RE = /already exist|single offscreen/i;
 
 // ===== 防盗链下载规则（dnr 为 MV3 专属 API，仅 background 可用） =====
 

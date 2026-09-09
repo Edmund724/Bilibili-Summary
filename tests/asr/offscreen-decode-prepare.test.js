@@ -146,18 +146,37 @@ describe("handleAsrDecodePrepare 的 offscreen 文档守卫", () => {
     expect(retried[0]).toEqual({ ok: true, ruleId: 32001 });
   });
 
-  it("createDocument 抛「文档已存在」（探测降级路径的并发创建竞态）视同成功", async () => {
+  it.each([
+    // Chrome 真实文案（r1 审查核实，Stack Overflow / moderok.dev 均证实）
+    "Only a single offscreen document may be created.",
+    // 兼容的旧/变体文案（防未来 Chrome 改文案后正则被静默放宽）
+    "Single offscreen document already exists."
+  ])("createDocument 抛「文档已存在」（%s）视同成功", async (message) => {
     const { createDocument } = stubSwEnv({
       matchAllError: new Error("boom"),
       updateSessionRules: vi.fn(async () => {})
     });
-    createDocument.mockRejectedValueOnce(new Error("Single offscreen document already exists."));
+    createDocument.mockRejectedValueOnce(new Error(message));
     bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
 
     const sendResponse = vi.fn();
     await bridge.handleAsrDecodePrepare({ taskType: "asr-decode-prepare" }, {}, sendResponse);
 
     expect(sendResponse).toHaveBeenCalledWith({ ok: true, ruleId: 32001 });
+  });
+
+  it("createDocument 抛无关错误（非已存在竞态）仍上抛为 ok:false", async () => {
+    const { createDocument } = stubSwEnv({
+      matchAllError: new Error("boom"),
+      updateSessionRules: vi.fn(async () => {})
+    });
+    createDocument.mockRejectedValueOnce(new Error("offscreen reasons invalid"));
+    bridge = await import("../../extension/asr/offscreen-bridge.bg.js");
+
+    const sendResponse = vi.fn();
+    await bridge.handleAsrDecodePrepare({ taskType: "asr-decode-prepare" }, {}, sendResponse);
+
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "offscreen reasons invalid" });
   });
 });
 

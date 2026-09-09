@@ -63,8 +63,13 @@ describe("ensureChatOffscreenDocument", () => {
     expect(createDocument).toHaveBeenCalledTimes(1);
   });
 
-  it("createDocument 抛「文档已存在」（降级路径的并发创建竞态）→ 视同成功", async () => {
-    stubChrome({ contextsError: new TypeError("getContexts is not a function"), createError: new Error("Single offscreen document already exists.") });
+  it.each([
+    // Chrome 真实文案（r1 审查核实）
+    "Only a single offscreen document may be created.",
+    // 兼容的旧/变体文案
+    "Single offscreen document already exists."
+  ])("createDocument 抛「文档已存在」（%s）→ 视同成功", async (message) => {
+    stubChrome({ contextsError: new TypeError("getContexts is not a function"), createError: new Error(message) });
     await expect(ensureChatOffscreenDocument()).resolves.toBe(true);
   });
 

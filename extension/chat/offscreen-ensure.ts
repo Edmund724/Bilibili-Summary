@@ -20,9 +20,11 @@ import { logWarn } from "../shared/logging.js";
 import { getErrorMessage } from "../shared/error-helpers.js";
 import { OFFSCREEN_URL, OFFSCREEN_CREATE_REASON } from "../shared/offscreen-constants.js";
 
-// Chrome createDocument 的「offscreen 文档已存在」错误文本（与 asr/
-// offscreen-bridge.bg.ts 的降级兜底同口径）。
-const OFFSCREEN_ALREADY_EXISTS_RE = /already exist/i;
+// Chrome createDocument 的「offscreen 文档已存在」错误判定（与 asr/
+// offscreen-bridge.bg.ts 同口径，r1 审查核实）：真实文案是 "Only a single
+// offscreen document may be created."；正则同时兼容 "already exist" 变体，
+// 不放宽到任意错误。
+const OFFSCREEN_ALREADY_EXISTS_RE = /already exist|single offscreen/i;
 
 export async function ensureChatOffscreenDocument(): Promise<boolean> {
   const url = chrome.runtime.getURL(OFFSCREEN_URL);
