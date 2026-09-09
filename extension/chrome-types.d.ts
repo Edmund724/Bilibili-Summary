@@ -75,6 +75,17 @@ declare namespace chrome {
     const onInstalled: OnInstalled;
   }
 
+  namespace action {
+    // 工具栏 action（manifest.action，无 default_popup）：点击事件在
+    // entry/background.ts 顶层同步注册（MV3：SW 重启后监听器须在首个事件前
+    // 就位）。本仓库只用 onClicked，不扩展未使用的表面。
+    interface OnClickedEvent {
+      addListener(listener: (tab: tabs.Tab) => void): void;
+    }
+
+    const onClicked: OnClickedEvent;
+  }
+
   namespace tabs {
     interface Tab {
       id?: number;
@@ -183,6 +194,11 @@ declare namespace chrome {
 
     interface RuleCondition {
       urlFilter?: string;
+      // 域名匹配（Chrome 101+，最低支持版本 120 已覆盖）：与 urlFilter 的
+      // "||domain" 不同，requestDomains 只精确匹配域名本身及其子域，不会
+      // 误命中 "bilivideo.com.evil.com" 这类拼接域——防盗链规则的目标 host
+      // 收窄用（asr/offscreen-bridge.bg.ts addDownloadRules）。
+      requestDomains?: string[];
       resourceTypes: string[];
     }
 

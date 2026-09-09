@@ -472,3 +472,60 @@ describe("HTTP 状态码重试判定（isRetryableNetworkError 按状态收紧�
     expect(errorHelpers.isRetryableNetworkError({ message: "响应体不是合法 JSON", status: -1 })).toBe(false);
   });
 });
+
+// ===== maxPendingChunks（工单 04：待处理音频分片上限）=====
+// 活队列（已接受未启动）深度达上限时 push 拒绝返回 false：不接受、不计数，
+// 消费方（entry/offscreen-asr.js 的 onChunk）据 false 停止新增工作并报可读
+// 错误。上限只按排队计，在途片不占排队额度。
+describe("maxPendingChunks（待处理分片上限）", () => {
+  function blockedTranscribe() {
+    const deferred = makeDeferred();
+    const transcribe = vi.fn(() => deferred.promise);
+    return { transcribe, release: () => deferred.resolve({ text: "完成" }) };
+  }
+
+  it("排队深度达上限：push 返回 false，超限片不被接受、不进调度、不计数", async () => {
+    const { transcribe, release } = blockedTranscribe();
+    const engine = createTranscriptionEngine({ transcribe, concurrency: 1, maxPendingChunks: 2 });
+
+    expect(engine.push(makeChunk(0))).toBe(true); // 立即在途
+    expect(engine.push(makeChunk(1))).toBe(true); // 排队 1
+    expect(engine.push(makeChunk(2))).toBe(true); // 排队 2（达上限）
+    expect(engine.push(makeChunk(3))).toBe(false); // 超限拒绝
+    expect(engine.push(makeChunk(4))).toBe(false);
+
+    release(); // 放行阻塞的 transcribe：3 片全部消化
+    const summary = await engine.close();
+
+    expect(summary.acceptedChunks).toBe(3); // 被拒绝的片不计数
+    expect(summary.completedChunks).toBe(3);
+    expect(transcribe).toHaveBeenCalledTimes(3); // chunk 3/4 从未调度
+  });
+
+  it("上限只按排队深度计：在途片完成腾出额度后 push 恢复接受", async () => {
+    const { transcribe, release } = blockedTranscribe();
+    const engine = createTranscriptionEngine({ transcribe, concurrency: 1, maxPendingChunks: 1 });
+
+    expect(engine.push(makeChunk(0))).toBe(true); // 在途
+    expect(engine.push(makeChunk(1))).toBe(true); // 排队 1（达上限）
+    expect(engine.push(makeChunk(2))).toBe(false);
+
+    release(); // 片 0 完成 → 排队片 1 进入在途，排队清空
+    await vi.waitFor(() => expect(transcribe).toHaveBeenCalledTimes(2));
+
+    // 未 close（close 后 push 一律拒绝）：额度按排队深度恢复
+    expect(engine.push(makeChunk(2))).toBe(true);
+  });
+
+  it("maxPendingChunks <=0 表示不设上限（默认走 ASR_MAX_PENDING_CHUNKS 常量）", async () => {
+    const { transcribe, release } = blockedTranscribe();
+    const engine = createTranscriptionEngine({ transcribe, concurrency: 1, maxPendingChunks: 0 });
+
+    for (let i = 0; i < 30; i += 1) {
+      expect(engine.push(makeChunk(i))).toBe(true);
+    }
+    release();
+    const summary = await engine.close();
+    expect(summary.acceptedChunks).toBe(30);
+  });
+});
