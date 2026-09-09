@@ -165,6 +165,9 @@ function syncDigestButton(): void {
   // 覆盖，不能只看 /video/ pathname（否则按钮在装载后一个自查周期就被摘掉）。
   if (!isSupportedVideoPage()) {
     brokenTicks = 0;
+    // 锚点阶段一并复位：非视频页无①可言，回视频页按首载口径重新寻锚。
+    anchorPhase = "init";
+    anchorGraceBeats = 0;
     setTickInterval(REINJECT_INTERVAL_MS);
     removeDigestButton();
     return;
@@ -211,14 +214,93 @@ function syncDigestButton(): void {
 }
 
 // ===== 注入 =====
+//
+// 锚点层级（工单 button-injection-stability/02 收拢）：只剩两级——
+//   ①「稿件举报」节点左侧（多信号判定，见 findComplaintNode）；
+//   ④播放器浮动层（位置自控、语义安全的兜底位）。
+// 旧②（.video-toolbar-right 尾部）与③（旧版 .video-toolbar-left-main）退役：
+// ②正是「漂到视频下方最右」的事故现场——①失配静默落到②尾部即用户看到的
+// 漂移，宁可落④也不收留。失配/宽限/降级全程 console 日志（工单决议：默认
+// 开启辅助定位，不做持久化/上报）。
+
+// 锚点①的锚定阶段：init=尚未命中过（首载/新开页）；anchor=①在位；grace=①
+// 短暂失配宽限中；fallback=已降级④。
+type AnchorPhase = "init" | "anchor" | "grace" | "fallback";
+let anchorPhase: AnchorPhase = "init";
+// 宽限剩余拍数：失配当拍进入 grace 并置满，其后每拍递减，耗尽才降④。
+let anchorGraceBeats = 0;
+// 宽限拍数 2：命中过①的页面，失配后至多再等 2 个自查拍（800ms 节拍，约
+// 1.6s）让重渲染恢复，连失配当拍约 2.4s——挡掉 B 站工具栏重渲染间隙的闪漂，
+// 又不至让降级久等。
+const ANCHOR_GRACE_BEATS = 2;
+
+function logAnchor(message: string): void {
+  console.info(`[BOC] digest-button: ${message}`);
+}
 
 export function injectDigestButton(): void {
-  // 幂等：命中且仍在文档即返回（B 站重渲染会换掉节点，isConnected 兜住）。
   const existing = document.getElementById(DIGEST_BUTTON_ID);
-  if (existing?.isConnected) {
+  const complaint = findComplaintNode();
+
+  if (complaint && complaint.parentElement) {
+    if (anchorPhase !== "anchor") {
+      logAnchor(
+        anchorPhase === "fallback"
+          ? "锚点①恢复，从浮动层升回「稿件举报」左侧"
+          : "锚点①命中"
+      );
+    }
+    anchorPhase = "anchor";
+    anchorGraceBeats = 0;
+    // 幂等：已在①位（按钮后一个兄弟就是举报节点）即不动。
+    if (existing?.isConnected && existing.nextElementSibling === complaint) {
+      return;
+    }
+    const button = existing?.isConnected ? existing : createDigestButton();
+    styleDigestButton(button, { floating: false });
+    complaint.parentElement.insertBefore(button, complaint);
+    // 从④升回时把空了的浮动层一并收走（④只服务本按钮，不残留空壳）。
+    const overlay = document.getElementById(DIGEST_OVERLAY_ID);
+    if (overlay && !overlay.firstElementChild) {
+      overlay.remove();
+    }
     return;
   }
 
+  // ①失配：命中过（anchor）先宽限等重渲染恢复；未命中过（init）与已降级
+  //（fallback）直达④。宽限期内已挂载的按钮不动——重渲染若只换掉举报节点
+  // 而按钮还在，原地保留；按钮也没了就暂不注入，等①回来原地归位。
+  if (anchorPhase === "anchor") {
+    anchorPhase = "grace";
+    anchorGraceBeats = ANCHOR_GRACE_BEATS;
+    logAnchor("锚点①失配（「稿件举报」节点消失），进入宽限等待重渲染恢复");
+  }
+  if (anchorPhase === "grace") {
+    if (anchorGraceBeats > 0) {
+      anchorGraceBeats -= 1;
+      if (existing?.isConnected) {
+        return;
+      }
+      logAnchor("宽限期内暂不注入（等锚点①恢复，避免闪漂）");
+      return;
+    }
+    anchorPhase = "fallback";
+    logAnchor("宽限耗尽，降级播放器浮动层");
+  }
+
+  const overlay = ensureDigestOverlay();
+  if (!overlay) {
+    return;
+  }
+  if (existing?.isConnected && existing.parentElement === overlay) {
+    return;
+  }
+  const button = existing?.isConnected ? existing : createDigestButton();
+  styleDigestButton(button, { floating: true });
+  overlay.appendChild(button);
+}
+
+function createDigestButton(): HTMLButtonElement {
   const button = document.createElement("button");
   button.id = DIGEST_BUTTON_ID;
   button.type = "button";
@@ -227,38 +309,7 @@ export function injectDigestButton(): void {
   button.setAttribute("aria-label", "用 AI 总结这期视频");
   button.setAttribute("data-boc-extension-node", "digest-button");
   button.addEventListener("click", handleDigestButtonClick);
-
-  // 锚点 1（新版播放页实测）：插到「稿件举报」左侧。类名单押不可靠，命中后
-  // 用文本聚合兜底判定（player-ai.ts 字幕控件同款思路）。
-  const complaint = findComplaintNode();
-  if (complaint && complaint.parentElement) {
-    styleDigestButton(button, { floating: false });
-    complaint.parentElement.insertBefore(button, complaint);
-    return;
-  }
-
-  // 锚点 2：右侧块尾部。
-  const toolbarRight = document.querySelector(".video-toolbar-right");
-  if (toolbarRight instanceof HTMLElement) {
-    styleDigestButton(button, { floating: false });
-    toolbarRight.appendChild(button);
-    return;
-  }
-
-  // 锚点 3：旧版播放页兜底。
-  const toolbarLeftMain = document.querySelector("#arc_toolbar_report .video-toolbar-left-main");
-  if (toolbarLeftMain instanceof HTMLElement) {
-    styleDigestButton(button, { floating: false });
-    toolbarLeftMain.appendChild(button);
-    return;
-  }
-
-  // 三个锚点全落空：播放器浮动降级。
-  const overlay = ensureDigestOverlay();
-  if (overlay) {
-    styleDigestButton(button, { floating: true });
-    overlay.appendChild(button);
-  }
+  return button;
 }
 
 export function removeDigestButton(): void {
@@ -266,16 +317,27 @@ export function removeDigestButton(): void {
   document.getElementById(DIGEST_OVERLAY_ID)?.remove();
 }
 
-// 「稿件举报」判定不靠类名单押：aria-label/title/data-text/textContent 聚合后
-// 匹配，类名变更时文本兜底。#arc_toolbar_report 宿主在稍后再看等列表播放页
-// 不存在，落空时退到全局类名查询（文本判定兜底）。
+// 「稿件举报」多信号判定（02 加固；kimi-webbridge 2026-09-09 实地：现行 DOM
+// 为 .video-complaint.video-toolbar-right-item.toolbar-right-complaint，
+// aria/title/data-text 全空、文本「稿件举报」是主要语义信号——单押类名或
+// 单押文本都会在 B 站改版时整体失配）。类名信号（*complaint*）与语义信号
+//（aria-label/title/data-text/textContent 聚合命中「稿件举报|投诉」）任一
+// 命中即候选，双信号命中的优先。搜索范围：新版播放页宿主 #arc_toolbar_report
+// 与列表页形态 .video-toolbar-container（稍后再看等列表播放页无前者）内的
+// 全体元素，落空退全局类名查询。
+const COMPLAINT_CLASS_SIGNAL = /complaint/i;
+const COMPLAINT_TEXT_SIGNAL = /稿件举报|投诉/;
+
 function findComplaintNode(): HTMLElement | null {
-  const scoped = document.querySelectorAll("#arc_toolbar_report .video-complaint");
-  const candidates = scoped.length > 0 ? scoped : document.querySelectorAll(".video-complaint");
-  for (const node of candidates) {
-    if (!(node instanceof HTMLElement) || !node.parentElement) {
-      continue;
+  let best: HTMLElement | null = null;
+  let bestScore = 0;
+  const consider = (node: Element): void => {
+    if (bestScore >= 2 || !(node instanceof HTMLElement) || !node.parentElement) {
+      return;
     }
+    const classHit = COMPLAINT_CLASS_SIGNAL.test(
+      typeof node.className === "string" ? node.className : ""
+    );
     const text = [
       node.getAttribute("aria-label"),
       node.getAttribute("title"),
@@ -284,11 +346,23 @@ function findComplaintNode(): HTMLElement | null {
     ]
       .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
       .join(" ");
-    if (/稿件举报|投诉/.test(text)) {
-      return node;
+    const textHit = COMPLAINT_TEXT_SIGNAL.test(text);
+    if (!classHit && !textHit) {
+      return;
     }
+    const score = (classHit ? 1 : 0) + (textHit ? 1 : 0);
+    if (score > bestScore) {
+      best = node;
+      bestScore = score;
+    }
+  };
+  for (const host of document.querySelectorAll("#arc_toolbar_report, .video-toolbar-container")) {
+    host.querySelectorAll("*").forEach(consider);
   }
-  return null;
+  if (bestScore < 2) {
+    document.querySelectorAll("[class*='complaint']").forEach(consider);
+  }
+  return best;
 }
 
 function styleDigestButton(button: HTMLElement, { floating }: { floating: boolean }): void {
