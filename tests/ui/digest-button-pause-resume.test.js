@@ -40,11 +40,8 @@ async function loadModule() {
   return lazy.loadDigestButton();
 }
 
-// 模块求值即启动生命周期：settle 链（readyState complete → video 已挂 →
-// 1200ms 余量）跑完后执行首轮注入，再挂常速自查 interval。
-async function runSettleChain() {
-  await vi.advanceTimersByTimeAsync(1300);
-}
+// 模块求值即启动生命周期（01 快路径）：装载即执行首轮注入，再挂常速自查
+// interval。
 
 function makeToolbarHtml() {
   return `
@@ -73,12 +70,11 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-// 健康态起手：settle 链跑完 → 按钮注入 + 常速 interval。
+// 健康态起手：装载即注入（01 快路径）→ 按钮在场 + 常速 interval。
 async function startHealthy() {
   document.body.innerHTML = `${makeToolbarHtml()}<video src="blob:test"></video>`;
   const setIntervalSpy = vi.spyOn(window, "setInterval");
   await loadModule();
-  await runSettleChain();
   expect(document.getElementById("boc-digest-button")).not.toBeNull();
   setIntervalSpy.mockClear();
   return setIntervalSpy;

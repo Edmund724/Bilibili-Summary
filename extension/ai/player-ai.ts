@@ -30,6 +30,11 @@ ensurePlayerAiStyles();
 
 let playerAiQuickActionRetryCount = 0;
 
+// 注入耗时观测（工单 button-injection-stability/01 可观测，默认开启）：模块
+// 求值到 AI 键首次挂载的耗时，只记一次。
+const MODULE_BOOT_AT = Date.now();
+let mountTimingLogged = false;
+
 // layout 监听与游标监听的引用缓存：removeEventListener 必须用绑定时的同一
 // 引用才能摘除，stop 生命周期与游标监听的防泄漏清理都依赖这里保存的引用。
 let playerAiQuickActionLayoutHandler: (() => void) | null = null;
@@ -93,7 +98,7 @@ export function startPlayerAiQuickActionObserver(): void {
 
   // 优先观察播放器容器；容器不存在时退回观察 body 的 childList+subtree
   //（B 站播放器常挂进嵌套容器，不带 subtree 发现不了深层挂载，只能等
-  // retry 退避兜底，最坏拖到 2.5s 步长）。发现播放器后断开 body 观察并
+  // retry 退避兜底，最坏 1s 步长）。发现播放器后断开 body 观察并
   // 切换到容器，subtree 全观察的开销只存在于启动窗口。
   const playerContainer = document.querySelector(PLAYER_CONTAINER_SELECTOR);
   if (playerContainer) {
@@ -170,7 +175,10 @@ export function schedulePlayerAiQuickActionSync(delayMs = 120): void {
 }
 
 function schedulePlayerAiQuickActionRetry(): void {
-  const delay = Math.min(260 * (playerAiQuickActionRetryCount + 1), 2500);
+  // 退避节奏加密（工单 button-injection-stability/01）：首拍 100ms、步进
+  // +100ms、封顶 1s（原 260ms 起步 / 2.5s 封顶——视频已出而字幕控件未渲染时
+  // 按钮最坏以 2.5s 步长干等）。字幕控件门语义不变，只加密重试节拍。
+  const delay = Math.min(100 * (playerAiQuickActionRetryCount + 1), 1000);
   playerAiQuickActionRetryCount += 1;
   schedulePlayerAiQuickActionSync(delay);
 }
@@ -225,6 +233,12 @@ function syncPlayerAiQuickActionButton(): void {
   bindPlayerAiQuickActionCursorSync(wrap);
   syncPlayerAiQuickActionVisuals(button);
   playerAiQuickActionRetryCount = 0;
+  if (!mountTimingLogged) {
+    mountTimingLogged = true;
+    console.info(
+      `[BOC] player-ai: AI 键已挂载，装载→挂载耗时 ${Date.now() - MODULE_BOOT_AT}ms`
+    );
+  }
 }
 
 export function removePlayerAiQuickActionButton(): void {

@@ -126,6 +126,12 @@ async function loadContentScript(settings) {
     const { loadPlayerAi } = await import("../../extension/ai/lazy-player-ai.js");
     await loadPlayerAi();
   }
+  // digest 按钮模块无条件常驻（工单 button-injection-stability/01 快路径：
+  // init() 直接触发装载），同样预热到位。模块求值即寻锚注入——往
+  // .bpx-player-container 插浮动层会触发 AI 容器观察器回 scheduleSync；不预热
+  // 的话该插入的微任务时序可能落到用例中途，冲掉用例手排的 sync 定时器。
+  const { loadDigestButton } = await import("../../extension/ui/lazy-digest-button.js");
+  await loadDigestButton();
   await flushMicrotasks();
   await getPlayerAiState();
   return (await import("../../extension/core/state.js")).state;
@@ -256,7 +262,6 @@ describe("player-ai 启停守卫", () => {
     // fake 时钟显式推进：跑掉 0ms sync 定时器，等价旧真实 10ms 等待但确定
     await vi.advanceTimersByTimeAsync(10);
     expect(document.getElementById("boc-player-ai-quick-action")).not.toBeNull();
-
     // 再次 sync（按钮已挂载路径）：不应重复绑游标监听
     schedulePlayerAiQuickActionSync(0);
     // fake 时钟显式推进：跑掉 0ms sync 定时器，等价旧真实 10ms 等待但确定
@@ -364,5 +369,48 @@ describe("player-ai 启停守卫", () => {
     expect(playerAiState.playerAiQuickActionObserver).not.toBeNull();
     expect(playerAiState.playerAiQuickActionLayoutBound).toBe(true);
     expect(windowAddSpy.mock.calls.filter(([type]) => type === "resize").length).toBe(2);
+  });
+});
+
+describe("player-ai 重试退避节奏与注入耗时观测（工单 button-injection-stability/01）", () => {
+  it("退避加密：首拍 100ms、步进 +100ms、封顶 1s（原 260ms 起步 / 2.5s 封顶）", async () => {
+    // 字幕控件门语义保留：只有容器、无字幕控件 → 挂载失败走 retry。
+    document.body.innerHTML = `<div class="bpx-player-container"></div>`;
+    await loadContentScript({ enablePlayerAiQuickAction: true });
+    const { schedulePlayerAiQuickActionSync } = await import("../../extension/ai/player-ai.js");
+
+    const setTimeoutSpy = vi.spyOn(window, "setTimeout");
+    schedulePlayerAiQuickActionSync(0);
+    await vi.advanceTimersByTimeAsync(1);
+
+    // 每轮读取最新一个 setTimeout 延迟（= 当前 retry 退避拍），推到拍点触发
+    // 下一轮。中途无其他定时器来源（按钮未挂载，游标/显隐定时器不存在）。
+    const delays = [];
+    for (let i = 0; i < 12; i += 1) {
+      const [, ms] = setTimeoutSpy.mock.calls.at(-1);
+      delays.push(ms);
+      await vi.advanceTimersByTimeAsync(ms);
+    }
+    expect(delays[0]).toBe(100);
+    for (let i = 1; i <= 8; i += 1) {
+      expect(delays[i]).toBe(delays[i - 1] + 100);
+    }
+    // 封顶 1s 并维持，不再增长
+    expect(delays.slice(9)).toEqual([1000, 1000, 1000]);
+  });
+
+  it("首次挂载打注入耗时日志（默认开启）", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    makePlayerDom();
+    await loadContentScript({ enablePlayerAiQuickAction: true });
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(120);
+
+    expect(document.getElementById("boc-player-ai-quick-action")).not.toBeNull();
+    const timingLog = infoSpy.mock.calls.find((args) => {
+      const line = args.join(" ");
+      return line.includes("player-ai") && line.includes("装载→挂载耗时");
+    });
+    expect(timingLog).toBeDefined();
   });
 });

@@ -1,7 +1,9 @@
 // Digest 工具栏按钮注入/降级/自查契约（工单 button-injection-stability/02
-// 锚点层级收拢后）。
+// 锚点层级收拢 + 01 快路径后）。
 //
 // 用例走真实模块（不 mock digest-button 的任何依赖），完整锁验收项：
+// - 快路径（01）：模块求值即寻锚注入，不等 window.load / video 轮询 / settle
+//   余量；首次挂载打注入耗时日志；
 // - 锚点层级收拢：只剩两级——①「稿件举报」左侧（多信号判定：类名 + 语义文本，
 //   双信号优先）→ ④播放器浮动降级；②（.video-toolbar-right 尾部）与③（旧版
 //   .video-toolbar-left-main）已退役，①落空时它们在场也不得收留按钮；
@@ -11,8 +13,8 @@
 // - 幂等（重复注入不重复插按钮）；
 // - 非 /video/ 页自查主动移除按钮、回到 /video/ 页补回。
 //
-// 定时器全文件 fake：模块生命周期含 1200ms settle 与 800ms 自查 interval，
-// 真实时钟下用例间残留 interval 会在下一用例的时间窗开火（与
+// 定时器全文件 fake：模块生命周期含 800ms 自查 interval，真实时钟下用例间
+// 残留 interval 会在下一用例的时间窗开火（与
 // player-ai-guard.test.js 同一环境问题），fake 后未触发的回调随 afterEach 的
 // useRealTimers 一并丢弃。点击消息路径断言拆到 digest-button-click.test.js
 // （那边要 vi.mock 重依赖，独立模块纪元避免污染本文件的真实模块用例）。
@@ -57,11 +59,36 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-// 模块求值即启动生命周期：settle 链（readyState complete → video 已挂 →
-// 1200ms 余量）跑完后执行首轮注入，再挂 800ms 自查 interval。
-async function runSettleChain() {
-  await vi.advanceTimersByTimeAsync(1300);
-}
+// 模块求值即启动生命周期（01 快路径）：装载即首轮注入并挂 800ms 自查
+// interval，无需推进 settle 定时器。
+
+describe("digest-button 快路径（01）", () => {
+  it("装载即注入：不等 settle 链，模块求值后按钮已在锚点①位", async () => {
+    document.body.innerHTML = `${makeToolbarHtml()}<video src="blob:test"></video>`;
+    const complaint = document.querySelector(".video-complaint");
+
+    await loadModule();
+
+    // 不推进任何定时器：settle 链（window.load + video 轮询 + 1200ms 余量）
+    // 若还在，按钮此刻必然缺席
+    const button = document.getElementById("boc-digest-button");
+    expect(button).not.toBeNull();
+    expect(button.nextElementSibling).toBe(complaint);
+  });
+
+  it("首次挂载打注入耗时日志（默认开启）", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    document.body.innerHTML = `${makeToolbarHtml()}<video src="blob:test"></video>`;
+
+    await loadModule();
+    expect(document.getElementById("boc-digest-button")).not.toBeNull();
+
+    const timingLog = infoSpy.mock.calls.find((args) =>
+      args.join(" ").includes("装载→挂载耗时")
+    );
+    expect(timingLog).toBeDefined();
+  });
+});
 
 describe("digest-button 注入锚点层级（02 收拢：①→④）", () => {
   it("锚点①：命中「稿件举报」时按钮落在其左侧", async () => {
@@ -69,7 +96,6 @@ describe("digest-button 注入锚点层级（02 收拢：①→④）", () => {
     const complaint = document.querySelector(".video-complaint");
 
     await loadModule();
-    await runSettleChain();
 
     const button = document.getElementById("boc-digest-button");
     expect(button).not.toBeNull();
@@ -93,7 +119,6 @@ describe("digest-button 注入锚点层级（02 收拢：①→④）", () => {
     const complaint = document.querySelector(".video-complaint");
 
     await loadModule();
-    await runSettleChain();
 
     const button = document.getElementById("boc-digest-button");
     expect(button).not.toBeNull();
@@ -113,7 +138,6 @@ describe("digest-button 注入锚点层级（02 收拢：①→④）", () => {
     const complaint = document.querySelector('[aria-label="稿件举报"]');
 
     await loadModule();
-    await runSettleChain();
 
     const button = document.getElementById("boc-digest-button");
     expect(button).not.toBeNull();
@@ -134,7 +158,6 @@ describe("digest-button 注入锚点层级（02 收拢：①→④）", () => {
     const complaint = document.querySelector(".video-complaint");
 
     await loadModule();
-    await runSettleChain();
 
     const button = document.getElementById("boc-digest-button");
     expect(button).not.toBeNull();
@@ -150,7 +173,6 @@ describe("digest-button 注入锚点层级（02 收拢：①→④）", () => {
     const leftMain = document.querySelector(".video-toolbar-left-main");
 
     await loadModule();
-    await runSettleChain();
 
     const button = document.getElementById("boc-digest-button");
     expect(button).not.toBeNull();
@@ -173,7 +195,6 @@ describe("digest-button 注入锚点层级（02 收拢：①→④）", () => {
       .appendChild(Object.assign(document.createElement("video"), { src: "blob:test" }));
 
     await loadModule();
-    await runSettleChain();
 
     const overlay = document.getElementById("boc-digest-overlay");
     expect(overlay).not.toBeNull();
@@ -184,7 +205,6 @@ describe("digest-button 注入锚点层级（02 收拢：①→④）", () => {
     document.body.innerHTML = "<video></video>";
 
     await loadModule();
-    await runSettleChain();
 
     expect(document.getElementById("boc-digest-button")).toBeNull();
     expect(document.getElementById("boc-digest-overlay")).toBeNull();
@@ -197,7 +217,7 @@ describe("digest-button 失配宽限与升降级（02）", () => {
     document.body.innerHTML = `${makeToolbarHtml()}${makePlayerHtml()}<video src="blob:test"></video>`;
 
     await loadModule();
-    await runSettleChain();
+
     const right = document.querySelector(".video-toolbar-right");
     let button = document.getElementById("boc-digest-button");
     expect(button.parentElement).toBe(right);
@@ -227,7 +247,6 @@ describe("digest-button 失配宽限与升降级（02）", () => {
     document.body.innerHTML = `${makeToolbarHtml()}<video src="blob:test"></video>`;
 
     await loadModule();
-    await runSettleChain();
 
     // 重渲染：举报节点短暂消失一拍后回来（Vue 重渲染换新节点）
     document.getElementById("boc-digest-button").remove();
@@ -252,7 +271,7 @@ describe("digest-button 失配宽限与升降级（02）", () => {
     document.body.innerHTML = `${makeToolbarHtml({ withComplaint: false })}${makePlayerHtml()}<video src="blob:test"></video>`;
 
     await loadModule();
-    await runSettleChain();
+
     // 首载①未就绪 → 已在④
     let button = document.getElementById("boc-digest-button");
     expect(document.getElementById("boc-digest-overlay").contains(button)).toBe(true);
@@ -278,11 +297,9 @@ describe("digest-button 幂等与自查", () => {
     const complaint = document.querySelector(".video-complaint");
 
     const { injectDigestButton } = await loadModule();
-    await runSettleChain();
 
     injectDigestButton();
     injectDigestButton();
-    await runSettleChain();
 
     expect(document.querySelectorAll("#boc-digest-button").length).toBe(1);
     expect(complaint.previousElementSibling.id).toBe("boc-digest-button");
@@ -292,7 +309,7 @@ describe("digest-button 幂等与自查", () => {
     document.body.innerHTML = `${makeToolbarHtml()}<video src="blob:test"></video>`;
 
     await loadModule();
-    await runSettleChain();
+
     expect(document.getElementById("boc-digest-button")).not.toBeNull();
 
     // SPA 换到非 /video/ 页：下一个自查周期摘除按钮
@@ -315,7 +332,7 @@ describe("digest-button 幂等与自查", () => {
     setLocationUrl("https://www.bilibili.com/list/watchlater?bvid=BV1test000000");
 
     await loadModule();
-    await runSettleChain();
+
     expect(document.getElementById("boc-digest-button")).not.toBeNull();
 
     await vi.advanceTimersByTimeAsync(801);

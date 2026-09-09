@@ -8,7 +8,7 @@
 // 重依赖按 message-handler-seek.test.js 同款 vi.mock；独立文件 = 独立模块
 // 纪元，避免 mock 污染 digest-button.test.js 的真实模块用例。真实时钟驱动：
 // mock 的 ensureUiReady 同步 resolve，微任务穿透后 replaceReaderModeUrl 收到
-// readerUrl；settle 链的 1200ms 余量直接真实等待（仅一次，可用例内接受）。
+// readerUrl（01 快路径后装载即注入，无 settle 等待）。
 //
 // arch-slim-2/09：分发主体住 entry/message-handler.ts，于 bindRuntimeEvents 时
 // 注册进 shared 原语槽——本文件按生产时序先 bindRuntimeEvents()（注册），点击
@@ -80,8 +80,7 @@ describe("digest-button 点击行为", () => {
     document.body.innerHTML = `${makeToolbarHtml()}<video src="blob:test"></video>`;
 
     await loadModule();
-    // settle 链跑完（video 已挂 → 1200ms 余量 → 首轮注入）
-    await new Promise((resolve) => setTimeout(resolve, 1300));
+    // 01 快路径：装载即注入，settle 链已退役
     const button = document.getElementById("boc-digest-button");
     expect(button).not.toBeNull();
 

@@ -2,18 +2,17 @@
 // 工单 .scratch/tickets/digest-reader/issues/04-digest-button-anchor.md）。
 //
 // 装载模式仿 ai/player-ai.ts 的惰性域模块：经 ui/lazy-digest-button.ts 动态
-// import（arch-slim-2/09 加载器归位 ui/），content.ts 的 getSettings().then
-// 两个分支（非阅读模式分支 + 阅读模式直达分支）都触发装载；模块求值即自管
-// 「等 hydration 稳定 → 自查注入/摘除 → setInterval 定时自查 + visibilitychange
-// 即时自查」生命周期，无设置项、常驻。
+// import（arch-slim-2/09 加载器归位 ui/），content.ts init() 触发装载（01 快
+// 路径：不等 getSettings 水合，本模块无设置项、常驻，无需 SW 往返先行）；模块
+// 求值即自管「寻锚注入/摘除 → setInterval 定时自查 + visibilitychange 即时
+// 自查」生命周期。
 // 阅读直达分支也装载的原因：直达路径上按钮模块同时承担视图失同步自愈（见
 // syncDigestButton）——视图关闭后把按钮补回来、视图壳被页面重渲染摘走或进入
 // 链半途失败时自动恢复，这些失同步在直达路径同样可能发生。
 //
 // 与 player-ai 的有意差异：工具栏按钮场景用定时自查而非 MutationObserver——
 // 观察 body 时弹幕每飘一条都是变更事件，白烧 CPU 且防抖等不到空档；定时器
-// 顺带覆盖 SPA 换页（不触发事件）。纪律与水合等待均照搬参考仓库
-// .scratch/bilibili-digest/content.js（工单调查报告 §二）。
+// 顺带覆盖 SPA 换页（不触发事件）。
 //
 // 点击行为：不发 background 消息。直接构造 reader-enter 消息交给
 // content 侧处理器（entry/message-handler.ts 已实现的阅读模式进入路径，
@@ -48,12 +47,6 @@ import { READER_CLOSED_EVENT, SELF_HEAL_INTERVAL_MS } from "../shared/self-heal.
 const DIGEST_BUTTON_ID = "boc-digest-button";
 const DIGEST_OVERLAY_ID = "boc-digest-overlay";
 
-// hydration 稳定前不碰 DOM：SSR + Vue hydration 期间向 Vue 管的容器插节点会被
-// 判定两端不一致、整树推倒重渲染（表现为视频加载两遍）。没有公开的「hydration
-// 完成」信号，用三条件近似：window.load 已发生 + <video> 已挂上 + 余量。
-const SETTLE_DELAY_MS = 1200;
-const PLAYER_POLL_MS = 200;
-const PLAYER_WAIT_TIMEOUT_MS = 15000;
 // 定时自查间隔：B 站重渲染 / SPA 换页把节点带走后靠它补回（注入幂等）。
 // 单源 shared/self-heal.js（digest-host 的面板重锚节拍独立，不复用本常量）。
 const REINJECT_INTERVAL_MS = SELF_HEAL_INTERVAL_MS;
@@ -75,29 +68,35 @@ const BUTTON_BASE_STYLE =
   "display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border:none;" +
   "border-radius:6px;cursor:pointer;font-size:14px;line-height:1.4;color:#fff;white-space:nowrap;";
 
-// ===== 模块求值即启动生命周期（content.ts 只在非阅读模式分支装载本模块） =====
+// ===== 模块求值即启动生命周期（content.ts init() 直接触发装载） =====
+//
+// 01 快路径：装载即寻锚，不等 window.load / <video> 轮询 / settle 余量。此前
+// 等 hydration 稳定是怕 SSR + Vue 水合期间向 Vue 管的容器插节点触发整树重渲染
+//（表现为视频加载两遍）；评审决议（工单 button-injection-stability/01）接受
+// 快路径与水合窗口的竞争——锚点未就绪时注入自然失败，偶发被水合推倒的按钮由
+// 800ms 自查立即补回，代价是最坏闪一次，收益是按钮与视频同步出现。
 
-void waitForHydrationSettled().then(() => {
-  syncDigestButton();
-  setTickInterval(REINJECT_INTERVAL_MS);
-  // 切回标签页立即自查一轮：hidden 期间定时器被 Chrome 强力节流（5 分钟后
-  // 至多 1 次/分钟），靠它恢复会让「切走再切回」场景的白屏时间拉长到下一个
-  // 节流 tick；visibilitychange 回来的第一次自查与定时器共用 brokenTicks
-  // 连击确认，不会抢先误恢复。（若视图仍开着且完好，本轮自查会重新降频——
-  // 暂停态对可见性变化是幂等的。）
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) {
-      setTickInterval(REINJECT_INTERVAL_MS);
-      syncDigestButton();
-    }
-  });
-  // 阅读壳退出（exitReaderShell 完成退出事务后派发，事件名单源
-  // shared/self-heal.js）：恢复常速自查 + 立即自查一轮补按钮——这是「视图
-  // 关闭后补回按钮」的主恢复触发点（暂停期兜底 tick 只是丢事件时的兜底）。
-  window.addEventListener(READER_CLOSED_EVENT, () => {
+// 注入耗时观测（01 可观测，默认开启）：模块求值到首个按钮挂载的耗时。
+const MODULE_BOOT_AT = Date.now();
+let mountTimingLogged = false;
+
+// 切回标签页立即自查一轮：hidden 期间定时器被 Chrome 强力节流（5 分钟后
+// 至多 1 次/分钟），靠它恢复会让「切走再切回」场景的白屏时间拉长到下一个
+// 节流 tick；visibilitychange 回来的第一次自查与定时器共用 brokenTicks
+// 连击确认，不会抢先误恢复。（若视图仍开着且完好，本轮自查会重新降频——
+// 暂停态对可见性变化是幂等的。）
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
     setTickInterval(REINJECT_INTERVAL_MS);
     syncDigestButton();
-  });
+  }
+});
+// 阅读壳退出（exitReaderShell 完成退出事务后派发，事件名单源
+// shared/self-heal.js）：恢复常速自查 + 立即自查一轮补按钮——这是「视图
+// 关闭后补回按钮」的主恢复触发点（暂停期兜底 tick 只是丢事件时的兜底）。
+window.addEventListener(READER_CLOSED_EVENT, () => {
+  setTickInterval(REINJECT_INTERVAL_MS);
+  syncDigestButton();
 });
 
 // ===== 自查节拍（arch-slim-2/09 暂停/恢复收口） =====
@@ -118,33 +117,6 @@ function setTickInterval(ms: number): void {
   }
   tickTimer = window.setInterval(syncDigestButton, ms);
   tickIntervalMs = ms;
-}
-
-// 水合等待链：等不到 <video>（特殊页面形态）也别一直等，超时后照常尝试注入。
-async function waitForHydrationSettled(): Promise<void> {
-  await whenWindowLoaded();
-  await whenVideoMounted();
-  await delay(SETTLE_DELAY_MS);
-}
-
-function whenWindowLoaded(): Promise<void> {
-  if (document.readyState === "complete") {
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => {
-    window.addEventListener("load", () => resolve(), { once: true });
-  });
-}
-
-async function whenVideoMounted(): Promise<void> {
-  const deadline = Date.now() + PLAYER_WAIT_TIMEOUT_MS;
-  while (!document.querySelector("video") && Date.now() < deadline) {
-    await delay(PLAYER_POLL_MS);
-  }
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 // ===== 定时自查：补按钮 / 摘按钮 / 视图失同步自愈 =====
@@ -238,6 +210,15 @@ function logAnchor(message: string): void {
   console.info(`[BOC] digest-button: ${message}`);
 }
 
+// 注入耗时日志（01 可观测）：首个按钮落到 DOM 的时刻，只记一次。
+function logMountTiming(target: string): void {
+  if (mountTimingLogged) {
+    return;
+  }
+  mountTimingLogged = true;
+  logAnchor(`按钮已挂载（${target}），装载→挂载耗时 ${Date.now() - MODULE_BOOT_AT}ms`);
+}
+
 export function injectDigestButton(): void {
   const existing = document.getElementById(DIGEST_BUTTON_ID);
   const complaint = findComplaintNode();
@@ -259,6 +240,7 @@ export function injectDigestButton(): void {
     const button = existing?.isConnected ? existing : createDigestButton();
     styleDigestButton(button, { floating: false });
     complaint.parentElement.insertBefore(button, complaint);
+    logMountTiming("锚点①「稿件举报」左侧");
     // 从④升回时把空了的浮动层一并收走（④只服务本按钮，不残留空壳）。
     const overlay = document.getElementById(DIGEST_OVERLAY_ID);
     if (overlay && !overlay.firstElementChild) {
@@ -298,6 +280,7 @@ export function injectDigestButton(): void {
   const button = existing?.isConnected ? existing : createDigestButton();
   styleDigestButton(button, { floating: true });
   overlay.appendChild(button);
+  logMountTiming("④播放器浮动层");
 }
 
 function createDigestButton(): HTMLButtonElement {
@@ -423,3 +406,11 @@ function handleDigestButtonClick(event: MouseEvent): void {
     () => {}
   );
 }
+
+// ===== 启动（模块求值末尾） =====
+//
+// 01 快路径：装载即首轮注入 + 常速自查节拍。必须置于求值末尾——上面的自查
+// 状态（brokenTicks 等）与锚点阶段声明得先就位，同步首轮注入才能跑。
+
+syncDigestButton();
+setTickInterval(REINJECT_INTERVAL_MS);
