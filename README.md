@@ -2,7 +2,7 @@
 
 > 本项目基于 [haixiong1997/Bilibili-Obsidian-Clipper](https://github.com/haixiong1997/Bilibili-Obsidian-Clipper) 二次修改，沿用原仓库的 MIT License。UI 设计参考了 [YouTube Digest](https://github.com/zarazhangrui/youtube-digest)。
 
-一个开源的浏览器扩展，在 B 站视频页侧边栏提供字幕阅读、AI 总结、内容讲解和时间戳笔记，不用离开视频页面。
+一个开源的浏览器扩展，在 B 站视频页右侧的 Digest 阅读面板中提供字幕阅读、AI 总结、内容讲解和时间戳笔记，不用离开视频页面。
 
 API Key 需要自己准备，但不用花钱：下文推荐的硅基流动和 ModelScope 都提供免费额度，日常使用基本够用。项目本身不送 Key，也不经手中转你的请求。
 
@@ -38,7 +38,7 @@ API Key 需要自己准备，但不用花钱：下文推荐的硅基流动和 Mo
 
 ## 安装方式
 
-> 仅支持 Chrome / Edge 等 Chromium 浏览器，不支持 Firefox。核心功能依赖 offscreen 等 Chrome 专属 API。
+> 仅发布 Chrome / Chromium 版本，要求 Chrome 120 或更高版本，不支持 Firefox。核心功能依赖 offscreen 等 Chrome 专属 API。
 
 ### 方式一：下载打包版本（推荐）
 
@@ -130,15 +130,15 @@ API Key 保存在本机的 Chrome 扩展本地存储中，非敏感设置经 Chr
 ## 使用方式
 
 1. 打开一个带字幕的 B 站视频页面。
-2. 点击视频下方的 Digest 按钮，打开侧边栏。
+2. 点击视频下方的 Digest 按钮，打开页面内右侧阅读面板。
 3. 阅读带时间戳的字幕。
 4. 切换到 **AI 标签页**，查看 AI 生成的视频摘要，或围绕字幕内容多轮对话。
 5. 选中字幕，获取 AI 内容讲解或保存带时间戳的笔记。
-6. 保存的笔记之后可以在侧边栏中查看。
+6. 保存的笔记之后可以在 Digest 阅读面板中查看。
 
 ## 当前支持范围
 
-- Chrome 116 或更高版本。
+- Chrome 120 或更高版本。
 - B 站视频页（`bilibili.com/video`）以及稍后再看等列表播放页。
 - B 站原生字幕，优先请求中文字幕，也可能显示其他可用的原生语言。
 - AI 总结、选中文本讲解、翻译和自动润色笔记。
@@ -146,6 +146,17 @@ API Key 保存在本机的 Chrome 扩展本地存储中，非敏感设置经 Chr
 - 无字幕视频的语音识别回退（硅基流动 / 本地 Whisper）。
 
 Firefox、Safari、移动浏览器和其他 Chromium 浏览器没有测试过。
+
+### Chrome 权限说明
+
+- `storage` 与 `unlimitedStorage`：保存设置、API Key、笔记、对话、字幕、概览和本地缓存；只有非敏感设置通过 Chrome 账号同步。
+- `scripting` 与 `tabs`：在用户当前打开的 B 站视频页运行阅读功能，并在视频、Digest 面板和播放器之间同步状态。
+- `offscreen`：在后台文档中解码无字幕视频的音频并处理 AI / ASR 流，不用于读取其他网页。
+- `declarativeNetRequest`：仅在语音识别任务进行时，为 B 站音频请求补齐防盗链所需的 Referer / Origin，任务结束即清除规则。
+- B 站域名权限：从 `www.bilibili.com`、`api.bilibili.com` 和 `*.hdslb.com` 获取视频、字幕及音频数据。
+- 可选的全域名权限：只在你保存自定义 AI 或语音识别地址时申请，用于连接你指定的服务，删除对应平台后回收。
+
+扩展不会读取一般浏览历史，也不会把数据交给本项目开发者。实际数据流向见 [PRIVACY.md](PRIVACY.md)。
 
 ## 免费额度与成本
 
@@ -161,7 +172,7 @@ Bilibili Summary 不收款，也不转售 API 服务。建议为账号设置消�
 
 ## AI 配置与平台支持
 
-首次使用 AI 功能前，需要配置 AI 模型平台。设置入口在阅读面板（Digest）右上角的齿轮按钮，点击打开「设置」抽屉即可看到全部设置项（原独立设置页已并入侧边栏）：
+首次使用 AI 功能前，需要配置 AI 模型平台。设置入口在阅读面板（Digest）右上角的齿轮按钮，点击打开「设置」抽屉即可看到全部设置项：
 
 1. 打开阅读面板，点击右上角齿轮（设置）
 2. 在「AI 模型平台」区域点击「+ 添加平台」
@@ -237,7 +248,7 @@ Bilibili Summary 没有账号系统、广告、分析统计或行为追踪。硅
 
 ### 为什么只支持 Chrome / Edge，不支持 Firefox？
 
-音频解码和转写等核心功能依赖 offscreen 等 Chrome 专属 API，Firefox 下无法工作，因此只发布 Chrome 变体（Chrome / Edge 等 Chromium 浏览器均可使用）。
+音频解码和转写等核心功能依赖 offscreen 等 Chrome 专属 API，Firefox 下无法工作，因此只发布 Chrome / Chromium 版本，最低版本为 Chrome 120。
 
 ### ModelScope 提示积分不足怎么办？
 
@@ -286,7 +297,7 @@ extension/
 
 - 调整 AI 总结的提示词和输出格式
 - 新增自定义总结命令或快捷方式
-- 修改视频总结的触发方式（自动总结 / 播放器按钮 / 侧边栏手动触发）
+- 修改视频总结的触发方式（自动总结 / 播放器按钮 / Digest 面板手动触发）
 - 增加更多翻译语言或自定义总结模板
 - 增加生词本功能，保存单词、原句、解释和视频时间戳
 - 把笔记和生词导出到 Markdown、CSV、Anki 或其他学习工具

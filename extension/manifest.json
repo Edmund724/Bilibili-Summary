@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "Bilibili-Summary｜一键总结B站视频",
   "version": "2.1.0",
+  "minimum_chrome_version": "120",
   "description": "在 B 站视频页抓取字幕，预览后复制或下载。",
   "permissions": [
     "storage",
