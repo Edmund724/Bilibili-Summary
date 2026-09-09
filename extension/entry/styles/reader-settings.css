@@ -151,7 +151,7 @@
 }
 
 /* 焦点态全表唯一一份：outline 关掉默认环，accent 描边 + 2px soft 光环。
- * 带前置与裸类混排合法，各选择器独立计优先级；新控件焦点态并入本组。 */
+ * 所有控件都收在阅读视图作用域内，新控件焦点态并入本组。 */
 #boc-reading-view .boc-reading-settings-host .boc-set-input:focus,
 #boc-reading-view .boc-reading-settings-host .boc-set-select:focus,
 #boc-reading-view .boc-reading-settings-host .boc-set-textarea:focus,
@@ -163,7 +163,7 @@
 #boc-reading-view .provider-editor-dialog input[type="text"]:focus,
 #boc-reading-view .provider-editor-dialog input[type="password"]:focus,
 #boc-reading-view .provider-editor-dialog select:focus,
-.custom-select-trigger:focus {
+#boc-reading-view .custom-select-trigger:focus {
   outline: none;
   border-color: var(--boc-reader-accent, #fb7299);
   box-shadow: 0 0 0 2px var(--boc-reader-accent-soft, #fce0ea);
@@ -174,7 +174,7 @@
  * 条件规则（空行跳过的条件必填等）原生约束表达不了，由 settings-panel
  * applyValidationError 落属性、options-rows 行监听修正即摘。焦点态仍由上方
  * 单源叠加光环。 */
-.custom-select-trigger[aria-invalid="true"] {
+#boc-reading-view .custom-select-trigger[aria-invalid="true"] {
   border-color: var(--boc-reader-accent, #fb7299);
 }
 
@@ -468,7 +468,7 @@
 /* 弹层卡片全表唯一一份（Q18：模型选择弹层与自定义下拉同源）。 */
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-menu,
 #boc-reading-view .provider-editor-host .ai-provider-model-dropdown,
-.custom-select-dropdown {
+#boc-reading-view .custom-select-dropdown {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
@@ -492,7 +492,7 @@
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-option,
 #boc-reading-view .provider-editor-host .ai-provider-model-option,
 #boc-reading-view .provider-editor-host .ai-provider-model-message,
-.custom-select-option {
+#boc-reading-view .custom-select-option {
   width: 100%;
   min-height: 30px;
   border: 0;
@@ -512,18 +512,18 @@
 
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-option:active,
 #boc-reading-view .provider-editor-host .ai-provider-model-option:active,
-.custom-select-option:active {
+#boc-reading-view .custom-select-option:active {
   transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-option:hover,
 #boc-reading-view .provider-editor-host .ai-provider-model-option:hover,
-.custom-select-option:hover {
+#boc-reading-view .custom-select-option:hover {
   background: var(--boc-reader-surface-2, #f0e9df);
 }
 
 #boc-reading-view .provider-editor-host .ai-provider-model-option[data-selected="true"],
-.custom-select-option[data-selected="true"] {
+#boc-reading-view .custom-select-option[data-selected="true"] {
   background: var(--boc-reader-accent-soft, #fce0ea);
   color: var(--boc-reader-accent, #fb7299);
 }
@@ -785,23 +785,22 @@
 }
 
 /* 面板外部的 global document click 委托会关闭 type picker 菜单/模型下拉；
- * 弹出层需要盖过相邻卡片，堆叠上下文内 z-index 已够，此处补一个兜底。
- * .custom-select-dropdown 为文档级裸类（无宿主前置），同属弹层族一并兜底。 */
+ * 弹出层需要盖过相邻卡片，堆叠上下文内 z-index 已够，此处补一个兜底。 */
 #boc-reading-view .boc-reading-settings-host .fixed-property-type-menu[hidden],
 #boc-reading-view .provider-editor-host .ai-provider-model-dropdown[hidden],
-.custom-select-dropdown[hidden] {
+#boc-reading-view .custom-select-dropdown[hidden] {
   display: none;
 }
 
 /* 自定义下拉通用样式（下载格式 / Modal 预设 / 段落位置） */
-.custom-select-wrapper {
+#boc-reading-view .custom-select-wrapper {
   position: relative;
   display: flex;
   align-items: center;
   min-width: 0;
 }
 
-.custom-select-trigger {
+#boc-reading-view .custom-select-trigger {
   width: 100%;
   height: 32px;
   display: inline-flex;
@@ -819,29 +818,28 @@
   transition: transform 100ms ease-out;
 }
 
-.custom-select-trigger:active {
+#boc-reading-view .custom-select-trigger:active {
   transform: scale(var(--boc-reader-press-scale, 1));
 }
 
 /* 箭头取类型选择器那套观感：8px 见方、faint 色、1px 描边——本 SVG 是 24 视框，
  * stroke-width 换算成 3 才与 12 视框的 1.5 等宽。SVG 上的 stroke-width 是演示
  * 属性，CSS 规则可直接覆盖。 */
-.custom-select-arrow {
+#boc-reading-view .custom-select-arrow {
   display: inline-flex;
   flex: 0 0 auto;
   color: var(--boc-reader-faint, #a39a8d);
 }
 
-.custom-select-arrow svg {
+#boc-reading-view .custom-select-arrow svg {
   width: 8px;
   height: 8px;
   stroke-width: 3;
 }
 
-/* 隐藏 select（custom-select 接管后）：基础态裸类会被 #… .boc-set-select 与
- * #… .provider-editor-dialog select 高优先级规则压掉尺寸/描边，宿主前置两条
- * 把被压属性逐条覆盖回——隐藏不依赖 clip 兜底。 */
-.custom-select-hidden {
+/* 隐藏 select（custom-select 接管后）：会被设置宿主与 Modal 的高优先级规则
+ * 压掉尺寸/描边，后两条再补回被压属性——隐藏不依赖 clip 兜底。 */
+#boc-reading-view .custom-select-hidden {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -1161,8 +1159,8 @@
   #boc-reading-view .boc-reading-settings-host .fixed-property-type-button:active,
   #boc-reading-view .boc-reading-settings-host .fixed-property-type-option:active,
   #boc-reading-view .provider-editor-host .ai-provider-model-option:active,
-  .custom-select-option:active,
-  .custom-select-trigger:active,
+  #boc-reading-view .custom-select-option:active,
+  #boc-reading-view .custom-select-trigger:active,
   #boc-reading-view .provider-editor-host .ai-provider-model-toggle:active,
   #boc-reading-view .boc-reading-settings-host .provider-row-remove:active,
   #boc-reading-view .boc-reading-settings-host .add-property-btn:active,

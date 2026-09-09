@@ -35,6 +35,22 @@ describe("设置分区 CSS 拆分（arch-slim-4/04）", () => {
     expect(text.includes("boc-reading-settings-panel")).toBe(true);
   });
 
+  it("自定义下拉样式只在阅读视图内匹配", () => {
+    const selectorLines = read(SETTINGS_CSS)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(
+        (line) =>
+          line.includes(".custom-select-") && /[{,]\s*$/.test(line),
+      );
+    const unscopedSelectors = selectorLines.filter(
+      (line) => !line.startsWith("#boc-reading-view "),
+    );
+
+    expect(selectorLines.length).toBeGreaterThan(0);
+    expect(unscopedSelectors).toEqual([]);
+  });
+
   it("壳静态模板的 settings-group 留守 reader.css（不随分区搬走）", () => {
     expect(read(READER_CSS).includes("boc-reading-settings-group")).toBe(true);
   });
