@@ -21,12 +21,14 @@ let state: TestState;
 let reader: typeof import("../../extension/reader/index.js");
 let ids: typeof import("../../extension/reader/state.js").ids;
 let uiRenderer: typeof import("../../extension/ui/ui-renderer.js");
+let getReaderActiveDigestTab: typeof import("../../extension/reader/state.js").getReaderActiveDigestTab;
 
 async function loadModules() {
   setLocationUrl(READER_MODE_URL);
   state = (await import("../../extension/core/state.js")).state as TestState;
   reader = await import("../../extension/reader/index.js");
   ids = (await import("../../extension/reader/state.js")).ids;
+  getReaderActiveDigestTab = (await import("../../extension/reader/state.js")).getReaderActiveDigestTab;
   uiRenderer = await import("../../extension/ui/ui-renderer.js");
 }
 
@@ -144,12 +146,15 @@ describe("统一 Digest 面板三标签", () => {
     // 先手动切到概览（模拟上一次会话的停留状态）
     uiRenderer.setReaderDigestTab("overview");
     expectTabActive("Overview", true);
+    expect(getReaderActiveDigestTab()).toBe("overview");
 
     await reader.enterReaderMode();
     expect(state.reader.readingViewOpen).toBe(true);
     expectTabActive("Subtitle", true);
     expectTabActive("Overview", false);
     expectTabActive("Chat", false);
+    // 状态位与 DOM 三通道同源（single source of truth，见 reader/state.js）
+    expect(getReaderActiveDigestTab()).toBe("subtitle");
 
     // 字幕列表在打开后正常渲染进字幕 tab
     const subtitleList = document.getElementById(ids.readingSubtitleList) as HTMLElement;
@@ -168,5 +173,7 @@ describe("统一 Digest 面板三标签", () => {
 
     expectTabActive("Overview", true);
     expectTabActive("Subtitle", false);
+    // 重渲不重置：状态位同样保持用户所在标签
+    expect(getReaderActiveDigestTab()).toBe("overview");
   });
 });

@@ -111,6 +111,29 @@ export function isReaderViewOpen() {
   return state.reader.readingViewOpen;
 }
 
+// ===== digest-tab-state：Digest 面板三标签的 single source of truth =====
+//
+// 当前激活标签的唯一状态位（DOM is-active/aria-selected/hidden 三通道只是本
+// 状态的投影，写手是 ui/ui-renderer.js 的 setReaderDigestTab）。此前 tab 状态
+// 只存在于 DOM，两个并发写手（shell 进入事务的 reset-tabs 与对话 seam 的
+// set-tab:chat）竞态时无从判定与排查——收口成可读状态位后，断言、日志与
+// 未来消费方都有单源可依。
+//
+// 放本叶子而非 core/state：与 scroll-state 同型的瞬态 UI 状态（不持久化、
+// 不进 settings 水合），模块级变量随 resetModules 时代自然重置。
+
+export type ReaderDigestTab = "subtitle" | "overview" | "chat";
+
+let readingActiveDigestTab: ReaderDigestTab = "subtitle";
+
+export function getReaderActiveDigestTab(): ReaderDigestTab {
+  return readingActiveDigestTab;
+}
+
+export function setReaderActiveDigestTab(tab: ReaderDigestTab) {
+  readingActiveDigestTab = tab;
+}
+
 // ===== scroll-state.js：阅读视图滚动状态共享叶子 =====
 //
 // 这是 SYNC（./sync.js）与 LAYOUT（./video-bind.js + ./digest-host.js）的共享

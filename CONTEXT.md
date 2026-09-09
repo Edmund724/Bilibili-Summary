@@ -42,10 +42,10 @@ _Avoid_: 落账、提交、写入字幕、手抄接受序列、reset 内递增 f
 _Avoid_: 长记忆、向量库
 
 **Digest 面板**:
-阅读模式的唯一呈现形态：右栏固定定位面板，三标签（字幕 / 概览 / AI 对话）。不接管页面、不搬播放器；贴栏 rect 由锚点链决定，失败逐级降级（贴播放器 → 居中浮层）。ADR-0006。
-代码名：`#boc-reading-view` / `#boc-reading-digest-panel` / `reader/digest-host.ts` / `--boc-digest-*` / `data-boc-digest-float`
+阅读模式的唯一呈现形态：右栏固定定位面板，三标签（字幕 / 概览 / AI 对话）。不接管页面、不搬播放器；贴栏 rect 由锚点链决定，失败逐级降级（贴播放器 → 居中浮层）。ADR-0006。当前激活标签的唯一状态位在 `reader/state.ts`（DOM 三通道只是投影，写手单点 `setReaderDigestTab`）。
+代码名：`#boc-reading-view` / `#boc-reading-digest-panel` / `reader/digest-host.ts` / `--boc-digest-*` / `data-boc-digest-float` / `readingActiveDigestTab` / `setReaderDigestTab`
 口语同义词：侧边栏（用户行文用词，指同一面板）
-_Avoid_: 阅读视图整页接管、播放器槽、rail/stage、剪枝
+_Avoid_: 阅读视图整页接管、播放器槽、rail/stage、剪枝、反解 DOM class 取当前标签
 
 **右栏锚点**:
 Digest 面板贴栏定位的参考节点，按优先级串行试探的右栏候选链（新版 `.right-container-inner` 起，旧版 `#reco_list` 止），有效判据 = 存在 + 宽度 ≥ 280 + 未滚出视口。唯一随 B 站改版会坏的面板依赖；坏的表现是降级跑位，不是功能失效。

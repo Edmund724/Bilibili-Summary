@@ -60,6 +60,7 @@ type Modules = {
   ensureReaderChatTab: typeof import("../../extension/reader/lazy-chat-tab.js").ensureReaderChatTab;
   ensureUiReady: typeof import("../../extension/ui/lazy-ui.js").ensureUiReady;
   requestUiCommand: typeof import("../../extension/reader/reader-bus.js").requestUiCommand;
+  getReaderActiveDigestTab: typeof import("../../extension/reader/state.js").getReaderActiveDigestTab;
   state: typeof import("../../extension/core/state.js").state;
   ids: typeof import("../../extension/reader/state.js").ids;
   uiRenderer: typeof import("../../extension/ui/ui-renderer.js");
@@ -103,6 +104,7 @@ beforeEach(async () => {
     requestUiCommand: readerBus.requestUiCommand,
     state: coreState.state,
     ids: readerState.ids,
+    getReaderActiveDigestTab: readerState.getReaderActiveDigestTab,
     uiRenderer
   };
 
@@ -167,6 +169,7 @@ describe("AI 键（player-ai-quick-action）进对话 tab 的消息序竞态", (
     await vi.waitFor(() => expectTabActive("Chat", true));
     expectTabActive("Chat", true);
     expectTabActive("Subtitle", false);
+    expect(m.getReaderActiveDigestTab()).toBe("chat");
   });
 
   it("对照（赢序）：enterReaderMode 先收敛、对话激活后落 ⇒ 停在对话 tab（绿灯）", async () => {
@@ -189,5 +192,6 @@ describe("AI 键（player-ai-quick-action）进对话 tab 的消息序竞态", (
 
     expectTabActive("Chat", true);
     expectTabActive("Subtitle", false);
+    expect(m.getReaderActiveDigestTab()).toBe("chat");
   });
 });

@@ -14,7 +14,8 @@ import { dispatchChatTabOutsideClick } from "../reader/chat-tab-bridge.js";
 //（./reader/state.js，含 ids/view-state/scroll-state）、轻状态栏写入器
 //（../shared/ui-status.js）、reader 域懒加载转发助手（./reader-gate.js，动态边
 // 在 reader/lazy-reader 内部）。
-import { classes, ids, isReaderViewOpen } from "../reader/state.js";
+import { classes, getReaderActiveDigestTab, ids, isReaderViewOpen, setReaderActiveDigestTab } from "../reader/state.js";
+import type { ReaderDigestTab } from "../reader/state.js";
 // 日志直接取自 shared/logging.js（不再经 reader/index.js 转发）
 import { logWarn } from "../shared/logging.js";
 // 阅读壳（工单 arch-slim/02）：关闭按钮的关闭链退化为退出事务委托
@@ -131,7 +132,9 @@ export function buildUiHtml(): string {
 // active 态约定：tab 按钮 .is-active + aria-selected，tab body .is-active 且
 // 去 hidden（CSS 双通道：.boc-reading-tab-body:not(.is-active) 与 [hidden]
 // 都收敛为 display:none，防 UA 样式被作者 display 覆盖）。
-export type ReaderDigestTab = "subtitle" | "overview" | "chat";
+// 当前激活标签的类型单源在 reader/state.js（状态位同居本叶子，ui 壳与测试
+// 经本 re-export 取用，import 路径不变）。
+export type { ReaderDigestTab } from "../reader/state.js";
 
 const DIGEST_TAB_DEFS: Array<{ name: ReaderDigestTab; buttonId: string; bodyId: string }> = [
   { name: "subtitle", buttonId: ids.readingTabSubtitle, bodyId: ids.readingTabBodySubtitle },
@@ -140,6 +143,10 @@ const DIGEST_TAB_DEFS: Array<{ name: ReaderDigestTab; buttonId: string; bodyId: 
 ];
 
 export function setReaderDigestTab(tab: ReaderDigestTab): void {
+  // 状态位先落（single source of truth，见 reader/state.js digest-tab-state 节），
+  // DOM 三通道只是投影。用例：竞态排查断言（reader-state.ts），未来消费方不再
+  // 反解 DOM。
+  setReaderActiveDigestTab(tab);
   // 对话分区表按需装载（arch-slim-4/07）：切到对话 tab 的三个入口（tab 点击 /
   // 解释卡「去对话追问」/ player-ai 快捷动作）都先经本函数，同步挂载保证首开
   // 即在场；ensure 内部 mounted Map 去重，重入零成本。
